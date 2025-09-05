@@ -1,0 +1,35 @@
+name: extract_from_tbl
+description: Extract mitochondrial features from FASTA + GenBank .tbl (CDS always; optional tRNA/rRNA + concatenated genes when enabled)
+keywords: [mitochondria, genbank, tbl, biopython]
+modules:
+- python
+input:
+- meta:
+type: map
+description: Sample metadata map
+- fasta:
+type: file
+description: Genome FASTA containing [organism=...] in header
+- tbl:
+type: file
+description: GenBank .tbl feature table (simple coordinates)
+output:
+- cds_dir:
+type: directory
+description: Directory with per-CDS FASTAs
+- cds_fastas:
+type: file
+description: Per-CDS FASTAs (*.fa)
+pattern: cds/*.fa
+- genes_dir:
+type: directory
+description: Directory with per-feature FASTAs and concatenated multi-FASTA (only if tbl_include_rna)
+optional: true
+- genes_fastas:
+type: file
+description: Gene FASTAs (*.fa) inc. <assembly>.genes.fa (only if tbl_include_rna)
+pattern: genes/*.fa
+optional: true
+authors:
+- "T"
+- "ChatGPT"

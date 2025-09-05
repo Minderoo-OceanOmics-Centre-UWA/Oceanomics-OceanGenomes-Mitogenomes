@@ -1,0 +1,40 @@
+name: CREATE_SAMPLESHEET
+description: Create a samplesheet from directory/glob patterns with OG sample naming conventions and sequencing type detection
+keywords:
+  - samplesheet
+  - metadata
+  - file organization
+  - OG samples
+  - sequencing type
+  - hic
+  - hifi
+  - illumina
+tools:
+  - python:
+      description: Python scripting language
+      homepage: https://www.python.org/
+      documentation: https://docs.python.org/3/
+      version: "3.9"
+
+input:
+  - input_path:
+      type: string
+      description: Directory path or glob pattern to search for files
+      pattern: "*.{fastq,fastq.gz,fq,fq.gz}"
+  - output_name:
+      type: string
+      description: Name for the output samplesheet file
+      pattern: "*.{csv,tsv}"
+
+output:
+  - samplesheet:
+      type: file
+      description: Generated samplesheet in CSV format with sequencing type information
+      pattern: "*.csv"
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+
+authors:
+  - "Tyler Peirce"

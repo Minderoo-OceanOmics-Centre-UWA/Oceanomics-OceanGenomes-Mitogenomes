@@ -1,0 +1,52 @@
+name: "process_genbank_files"
+description: Process and clean GenBank submission files (FASTA, GFF, TBL, GB) with proper headers and feature names
+keywords:
+  - genbank
+  - fasta
+  - gff
+  - tbl
+  - gb
+  - mitochondrial
+  - genome
+  - annotation
+tools:
+  - "python":
+      description: "Python programming language"
+      homepage: "https://www.python.org/"
+      documentation: "https://docs.python.org/"
+
+input:
+  - meta:
+      type: map
+      description: |
+        Groovy Map containing sample information including:
+        - id: Sample identifier
+        - og_id: Original sample ID (isolate)
+        - seqid: Sequence ID
+        - species: Species name
+        - assembly: Assembly identifier
+        e.g. [ id:'sample1', og_id:'OG123', seqid:'seq1', species:'Homo sapiens', assembly:'assembly1' ]
+  - input_files:
+      type: file
+      description: Input files to be processed (.fa, .fasta, .gff, .tbl, .gb)
+      pattern: "*.{fa,fasta,gff,tbl,gb}"
+
+output:
+  - meta:
+      type: map
+      description: |
+        Groovy Map containing sample information
+        e.g. [ id:'sample1', og_id:'OG123', seqid:'seq1', species:'Homo sapiens', assembly:'assembly1' ]
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+  - processed_files:
+      type: file
+      description: Processed and cleaned GenBank submission files
+      pattern: "processed/*"
+
+authors:
+  - "@your_username"
+maintainers:
+  - "@your_username"

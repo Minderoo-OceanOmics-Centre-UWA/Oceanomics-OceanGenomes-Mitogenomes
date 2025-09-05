@@ -9,25 +9,42 @@
         "properties": {
             "sample": {
                 "type": "string",
-                "pattern": "^\\S+$",
-                "errorMessage": "Sample name must be provided and cannot contain spaces",
-                "meta": ["id"]
+                "pattern": "^OG\\d+[A-Za-z]?(-\\d+)?(?:_HIC[A-Za-z]*\\d*)?$",
+                "errorMessage": "Sample name must start with 'OG' followed by numbers, optionally followed by a letter and/or dash-number (e.g., OG820M-1, OG785, OG764)",
+                "meta": ["id"],
+                "description": "Sample identifier starting with OG followed by numbers"
             },
             "fastq_1": {
                 "type": "string",
                 "format": "file-path",
                 "exists": true,
-                "pattern": "^([\\S\\s]*\\/)?[^\\s\\/]+\\.f(ast)?q\\.gz$",
-                "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+                "pattern": "\\.(fastq|fq)(\\.gz)?$",
+                "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'",
+                "description": "Full path to FastQ file for Illumina short reads 1. File has to be gzipped and have the extension '.fq.gz' or '.fastq.gz'."
             },
             "fastq_2": {
+                "errorMessage": "FastQ file for reads 2 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'",
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "format": "file-path",
+                        "exists": true,
+                        "pattern": "\\.(fastq|fq)(\\.gz)?$"
+                    },
+                    {
+                        "type": "string",
+                        "maxLength": 0
+                    }
+                ],
+                "description": "Full path to FastQ file for Illumina short reads 2. File has to be gzipped and have the extension '.fq.gz' or '.fastq.gz'."
+            },
+            "sequencing_type": {
                 "type": "string",
-                "format": "file-path",
-                "exists": true,
-                "pattern": "^([\\S\\s]*\\/)?[^\\s\\/]+\\.f(ast)?q\\.gz$",
-                "errorMessage": "FastQ file for reads 2 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+                "enum": ["hic", "hifi", "ilmn"],
+                "errorMessage": "Sequencing type must be one of: hic, hifi, or ilmn",
+                "description": "Type of sequencing technology used: hic (Hi-C), hifi (PacBio HiFi), or ilmn (Illumina)"
             }
         },
-        "required": ["sample", "fastq_1"]
+        "required": ["sample", "fastq_1", "sequencing_type"]
     }
 }

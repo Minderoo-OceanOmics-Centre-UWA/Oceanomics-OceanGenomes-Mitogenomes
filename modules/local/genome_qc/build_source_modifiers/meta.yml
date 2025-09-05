@@ -1,0 +1,72 @@
+name: "build_source_modifiers"
+description: Build source modifier files for GenBank submission from PostgreSQL database metadata
+keywords:
+  - genbank
+  - metadata
+  - database
+  - coordinates
+  - source_modifiers
+tools:
+  - "python":
+      description: "Python programming language"
+      homepage: "https://www.python.org/"
+      documentation: "https://docs.python.org/"
+  - "pandas":
+      description: "Powerful data structures for data analysis, time series, and statistics"
+      homepage: "https://pandas.pydata.org/"
+      documentation: "https://pandas.pydata.org/docs/"
+  - "psycopg2":
+      description: "PostgreSQL database adapter for Python"
+      homepage: "https://psycopg.org/"
+      documentation: "https://psycopg.org/docs/"
+
+input:
+  - meta:
+      type: map
+      description: |
+        Groovy Map containing sample information
+        e.g. [ id:'test' ]
+  - validated_samples:
+      type: file
+      description: TSV file containing validated samples with og_id and tech columns
+      pattern: "*.{tsv,txt}"
+  - db_config:
+      type: map
+      description: |
+        Database configuration map containing:
+        - dbname: Database name
+        - user: Database user
+        - password: Database password
+        - host: Database host
+        - port: Database port
+  - genbank_root:
+      type: path
+      description: Root directory path where GenBank folders are stored
+
+output:
+  - meta:
+      type: map
+      description: |
+        Groovy Map containing sample information
+        e.g. [ id:'test' ]
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+  - bankit_metadata:
+      type: file
+      description: Raw metadata CSV file from database query
+      pattern: "*.csv"
+  - cleaned_metadata:
+      type: file
+      description: Metadata CSV file with cleaned and formatted lat/lon coordinates
+      pattern: "*.csv"
+  - src_files:
+      type: file
+      description: Source modifier files for GenBank submission (optional output)
+      pattern: "*.src"
+
+authors:
+  - "@your_username"
+maintainers:
+  - "@your_username"

@@ -15,21 +15,11 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-include { OCEANGENOMESMITOGENOMES  } from './workflows/oceangenomesmitogenomes'
+include { OCEANGENOMESMITOGENOMES } from './workflows/oceangenomesmitogenomes'
+include { PREPARE_SAMPLESHEET     } from './subworkflows/local/prepare_samplesheet'
 include { PIPELINE_INITIALISATION } from './subworkflows/local/utils_nfcore_oceangenomesmitogenomes_pipeline'
 include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_oceangenomesmitogenomes_pipeline'
 include { getGenomeAttribute      } from './subworkflows/local/utils_nfcore_oceangenomesmitogenomes_pipeline'
-
-/*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    GENOME PARAMETER VALUES
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-
-// TODO nf-core: Remove this line if you don't need a FASTA file
-//   This is an example of how to use getGenomeAttribute() to fetch parameters
-//   from igenomes.config using `--genome`
-params.fasta = getGenomeAttribute('fasta')
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -43,15 +33,21 @@ params.fasta = getGenomeAttribute('fasta')
 workflow NFCORE_OCEANGENOMESMITOGENOMES {
 
     take:
-    samplesheet // channel: samplesheet read in from --input
-
+    getorg_input    // tuple for getorganelle - tuple(meta, reads)
+    mitohifi_input // tuple for mitohifi - tuple(meta, reads)
+    
     main:
 
-    //
+    // 
     // WORKFLOW: Run pipeline
     //
     OCEANGENOMESMITOGENOMES (
-        samplesheet
+        getorg_input,    // tuple for getorganelle - tuple(meta, reads)
+        mitohifi_input, // tuple for mitohifi - tuple(meta, reads)
+        params.bs_config,
+        params.curated_blast_db,
+        params.sql_config,
+        params.organelle_type,
     )
     emit:
     multiqc_report = OCEANGENOMESMITOGENOMES.out.multiqc_report // channel: /path/to/multiqc_report.html
@@ -65,6 +61,13 @@ workflow NFCORE_OCEANGENOMESMITOGENOMES {
 workflow {
 
     main:
+    
+    PREPARE_SAMPLESHEET (
+        params.input,
+        params.input_dir,
+        params.samplesheet_prefix
+    )
+    
     //
     // SUBWORKFLOW: Run initialisation tasks
     //
@@ -74,14 +77,15 @@ workflow {
         params.monochrome_logs,
         args,
         params.outdir,
-        params.input
+        PREPARE_SAMPLESHEET.out.samplesheet
     )
 
     //
     // WORKFLOW: Run main workflow
     //
     NFCORE_OCEANGENOMESMITOGENOMES (
-        PIPELINE_INITIALISATION.out.samplesheet
+        PREPARE_SAMPLESHEET.out.getorg_input,
+        PREPARE_SAMPLESHEET.out.mitohifi_input
     )
     //
     // SUBWORKFLOW: Run completion tasks

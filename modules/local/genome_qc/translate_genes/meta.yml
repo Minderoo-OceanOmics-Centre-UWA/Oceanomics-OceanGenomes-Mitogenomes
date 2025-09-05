@@ -1,0 +1,23 @@
+name: translate_genes
+description: Translate nucleotide FASTAs to amino acids using NCBI translation table (default 2, vertebrate mitochondrial)
+keywords: [translation, protein, biopython]
+modules:
+- python
+input:
+- meta:
+type: map
+description: Sample metadata map
+- genes_path:
+type: file/directory
+description: Either a directory with *.fa files or a single multi-FASTA
+output:
+- proteins_dir:
+type: directory
+description: Directory with translated protein FASTAs
+- protein_fastas:
+type: file
+description: Output protein FASTAs (*.protein.fa)
+pattern: proteins/*.fa
+authors:
+- "T"
+- "ChatGPT"
