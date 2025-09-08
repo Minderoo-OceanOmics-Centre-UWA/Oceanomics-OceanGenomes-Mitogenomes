@@ -37,9 +37,9 @@ def main():
                             found_in_blast = parts[4].strip()
                             if found_in_blast.lower() == "yes":
                                 blast_found = True
-                                # Extract species name from LCA_result (column 2, index 1)
-                                if len(parts) >= 2:
-                                    species_name = parts[1].strip()
+                                # Extract species name from nom_species_id (column 3, index 1)
+                                if len(parts) >= 3:
+                                    species_name = parts[2].strip()
                                 break
     except Exception as e:
         print(f"Error reading blast table: {e}", file=sys.stderr)

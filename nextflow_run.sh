@@ -23,7 +23,8 @@ module load singularity/4.1.0-nompi
     --skip_mitogenome_annotation false \
     --skip_upload_results false \
     --samplesheet_prefix "samplesheet" \
-    --template_sbt "/home/tpeirce/template.sbt"
+    --template_sbt "/home/tpeirce/template.sbt" \
+    --translation_table "2"
     
     
    

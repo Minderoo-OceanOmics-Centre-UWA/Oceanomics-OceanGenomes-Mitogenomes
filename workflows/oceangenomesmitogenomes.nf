@@ -231,6 +231,7 @@ workflow OCEANGENOMESMITOGENOMES {
     //
 
     if (!params.skip_mitogenome_assembly) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_GETORG.out.multiqc_files)}
+    if (!params.skip_mitogenome_assembly) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_MITOHIFI.out.multiqc_files)}
     if (!params.skip_mitogenome_annotation) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ANNOTATION.out.multiqc_files)}
     if (!params.skip_upload_results) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS.out.multiqc_files)}
     if (!params.skip_upload_results) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)}

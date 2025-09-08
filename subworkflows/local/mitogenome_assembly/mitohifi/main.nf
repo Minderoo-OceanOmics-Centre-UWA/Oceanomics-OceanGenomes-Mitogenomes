@@ -101,7 +101,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     MITOHIFI_MITOHIFI (
         combined_with_mt_assembly_prefix,
         "r",
-        "2"  // mito_code - Organism genetic code following NCBI table (for mitogenome annotation) using 2. Vertebrate mitogenome
+        "2"  // could change to params.translation_table / mito_code - Organism genetic code following NCBI table (for mitogenome annotation) using 2. Vertebrate mitogenome
     )
 
     //

@@ -15,7 +15,7 @@ process MITOHIFI_MITOHIFI {
     tuple val(meta), path("${meta.mt_assembly_prefix}.fasta")                , emit: fasta
     tuple val(meta), path("${meta.mt_assembly_prefix}.contigs_stats.tsv")    , emit: stats
     tuple val(meta), path("${meta.mt_assembly_prefix}.gb")                   , emit: gb                         , optional: true
-    tuple val(meta), path("final_mitogenome.gff")           , emit: gff                        , optional: true
+    // tuple val(meta), path("final_mitogenome.gff")           , emit: gff                        , optional: true
     tuple val(meta), path("all_potential_contigs.fa")       , emit: all_potential_contigs      , optional: true
     tuple val(meta), path("contigs_annotations.png")        , emit: contigs_annotations        , optional: true
     tuple val(meta), path("contigs_circularization/")       , emit: contigs_circularization    , optional: true
@@ -29,7 +29,8 @@ process MITOHIFI_MITOHIFI {
     tuple val(meta), path("reads_mapping_and_assembly/")    , emit: reads_mapping_and_assembly , optional: true
     tuple val(meta), path("shared_genes.tsv")               , emit: shared_genes               , optional: true
     tuple val(meta), path("MitoReference")                  , emit: reference_files            , optional: true
-    tuple val(meta), path("${meta.mt_assembly_prefix}.hifiasm.log"), path("${meta.mt_assembly_prefix}.hifiasm.log"), emit: logs 
+    tuple val(meta), path("${meta.mt_assembly_prefix}.hifiasm.log"), emit: logs 
+    tuple val(meta), path("${meta.mt_assembly_prefix}.log"), emit: command_logs 
     path  "versions.yml"                                    , emit: versions
   
     when:
