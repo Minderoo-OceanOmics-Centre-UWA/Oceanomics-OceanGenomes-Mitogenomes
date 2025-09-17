@@ -1,0 +1,19 @@
+name: blast_blastn
+description: Run BLASTN against a curated database, filter results, and emit summaries for LCA/validation.
+keywords: [blast, blastn, alignment]
+tools:
+  - name: BLAST
+    homepage: https://blast.ncbi.nlm.nih.gov/Blast.cgi
+    licence: Public-Domain
+input:
+  - meta: { type: map, description: Sample metadata }
+  - fasta: { type: file, description: Input FASTA sequences }
+  - gene_type: { type: string, description: Target gene name (e.g., CO1, 12s, 16s) }
+  - annotation_name: { type: string, description: Annotation label }
+  - curated_blast_db: { type: string, description: Path to curated BLAST DB }
+  - taxdb: { type: directory, description: NCBI taxonomy database (taxdb) }
+output:
+  - filtered: { type: file, description: Filtered BLAST results TSV, pattern: "blast.*.filtered.tsv" }
+  - validation: { type: file, description: Filtered BLAST results TSV for validation, pattern: "blast.*.filtered.tsv" }
+  - summary: { type: file, description: Per-gene summary for MultiQC, pattern: "filtered_summary.*.txt" }
+

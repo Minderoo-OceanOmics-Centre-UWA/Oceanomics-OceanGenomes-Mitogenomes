@@ -1,0 +1,21 @@
+name: EMMA
+description: Annotate mitochondrial genomes with EMMA and extract gene and protein sequences.
+keywords: [emma, annotation, mitochondria, julia]
+tools:
+  - name: EMMA
+    homepage: https://github.com/TylerSimon/EMMA
+    licence: MIT
+  - name: julia
+    homepage: https://julialang.org/
+    licence: MIT
+input:
+  - meta: { type: map, description: Sample metadata }
+  - fasta: { type: file, description: Assembled mitochondrial genome FASTA }
+output:
+  - co1_sequences: { type: files, description: CO1 CDS FASTA files, pattern: "emma/cds/*CO1*.fa" }
+  - s12_sequences: { type: files, description: 12S rRNA FASTA files, pattern: "emma/cds/*RNR1*.fa" }
+  - s16_sequences: { type: files, description: 16S rRNA FASTA files, pattern: "emma/cds/*RNR2*.fa" }
+  - results: { type: files, description: EMMA outputs, pattern: "emma/*" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

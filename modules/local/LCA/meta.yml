@@ -1,0 +1,21 @@
+name: LCA
+description: Compute lowest common ancestor (LCA) assignments from filtered BLAST results using TaxonKit.
+keywords: [lca, taxonomy, blast, taxonkit]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
+  - name: TaxonKit
+    homepage: https://bioinf.shenwei.me/taxonkit/
+    licence: MIT
+input:
+  - meta: { type: map, description: Sample metadata }
+  - blast_filtered: { type: file, description: Filtered BLAST TSV, pattern: "blast.*.*.filtered.tsv" }
+  - gene_type: { type: string, description: Gene identifier (e.g., CO1, RNR1, RNR2) }
+  - annotation_name: { type: string, description: Annotation label used in output filename }
+  - taxdump: { type: directory, description: TaxonKit/NCBI taxdump database directory }
+output:
+  - lca_table: { type: file, description: LCA summary table, pattern: "lca.*.*.tsv" }
+  - versions: { type: file, description: Software versions, pattern: "versions_LCA.yml" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]

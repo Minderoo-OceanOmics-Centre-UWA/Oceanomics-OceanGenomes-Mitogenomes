@@ -4,35 +4,301 @@
     "repos": {
         "https://github.com/nf-core/modules.git": {
             "modules": {
+                "local": {
+                    "EMMA": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "LCA": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "create_samplesheet": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "download_blast_db": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "download_taxonkit_db": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "evaluate_qc_conditions": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "genome_qc/build_source_modifiers": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "genome_qc/diagnostics": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "genome_qc/extract_genes/gb": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "genome_qc/extract_genes/gff": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "genome_qc/format_files": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "genome_qc/gen_files_table2asn": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "genome_qc/grouper": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "genome_qc/submitter": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "genome_qc/translate_genes": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "hic_date_query": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "multiqc/qc_summary": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "sanitise_fasta": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "species_query": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "species_validation": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "upload_results/emma": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "upload_results/lca": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "upload_results/mtdna": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    }
+                },
                 "nf-core": {
+                    "blast/blastn": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "cat/fastq": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
                     "fastqc": {
                         "branch": "master",
                         "git_sha": "41dfa3f7c0ffabb96a6a813fe321c6d1cc5b6e46",
-                        "installed_by": ["modules"]
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "getorganelle/config": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "getorganelle/fromreads": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "mitohifi/findmitoreference": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "mitohifi/mitohifi": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "modules"
+                        ]
                     },
                     "multiqc": {
                         "branch": "master",
                         "git_sha": "41dfa3f7c0ffabb96a6a813fe321c6d1cc5b6e46",
-                        "installed_by": ["modules"]
+                        "installed_by": [
+                            "modules"
+                        ]
                     }
                 }
             },
             "subworkflows": {
+                "local": {
+                    "mitogenome_annotation_lca": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "mitogenome_assembly/getorganelle": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "mitogenome_assembly/mitohifi": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "mitogenome_qc": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "prepare_samplesheet": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "upload_results_mito": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "utils_nfcore_oceangenomesmitogenomes_pipeline": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    }
+                },
                 "nf-core": {
                     "utils_nextflow_pipeline": {
                         "branch": "master",
                         "git_sha": "c2b22d85f30a706a3073387f30380704fcae013b",
-                        "installed_by": ["subworkflows"]
+                        "installed_by": [
+                            "subworkflows"
+                        ]
                     },
                     "utils_nfcore_pipeline": {
                         "branch": "master",
                         "git_sha": "51ae5406a030d4da1e49e4dab49756844fdd6c7a",
-                        "installed_by": ["subworkflows"]
+                        "installed_by": [
+                            "subworkflows"
+                        ]
                     },
                     "utils_nfschema_plugin": {
                         "branch": "master",
                         "git_sha": "2fd2cd6d0e7b273747f32e465fdc6bcc3ae0814e",
-                        "installed_by": ["subworkflows"]
+                        "installed_by": [
+                            "subworkflows"
+                        ]
                     }
                 }
             }

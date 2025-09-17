@@ -1,0 +1,20 @@
+name: push_mtdna_annotation_results
+description: Compute annotation statistics and push EMMA annotation results to the SQL database.
+keywords: [upload, annotation, emma, postgres]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
+  - name: psycopg2
+    homepage: https://www.psycopg.org/
+    licence: LGPL-3.0
+input:
+  - meta: { type: map, description: Sample metadata }
+  - annotations: { type: files, description: EMMA outputs (glob) }
+  - config: { type: file, description: PostgreSQL INI config file with [postgres] section }
+output:
+  - upload: { type: files, description: Upload status/log, pattern: "*.annotation.upload.txt" }
+  - stats: { type: file, description: Annotation statistics CSV, pattern: "*.annotation_stats.csv" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

@@ -47,8 +47,7 @@ process GETORGANELLE_FROMREADS {
     """
 
     stub:
-    def args = task.ext.args ?: ''
-    def base_prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
+    def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
     """
     mkdir -p mtdna
        

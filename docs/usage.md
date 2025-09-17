@@ -1,214 +1,197 @@
 # nf-core/oceangenomesmitogenomes: Usage
 
-## :warning: Please read this documentation on the nf-core website: [https://nf-co.re/oceangenomesmitogenomes/usage](https://nf-co.re/oceangenomesmitogenomes/usage)
+The nf-core/oceangenomesmitogenomes workflow assembles, annotates, validates, and packages
+mitochondrial genomes from PacBio HiFi, Illumina, and Hi-C sequencing runs. This page describes
+pipeline-specific input requirements and the parameters you must provide to execute a full run on
+OceanOmics data holdings.
 
-> _Documentation of pipeline parameters is generated automatically from the pipeline schema and can no longer be found in markdown files._
+> For general guidance on Nextflow execution, configuration profiles, and infrastructure tuning,
+> refer to the nf-core documentation: <https://nf-co.re/docs/usage>
 
-## Introduction
-
-<!-- TODO nf-core: Add documentation about anything specific to running your pipeline. For general topics, please point to (and add to) the main nf-core website. -->
-
-## Samplesheet input
-
-You will need to create a samplesheet with information about the samples you would like to analyse before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row as shown in the examples below.
+## Quick start
 
 ```bash
---input '[path to samplesheet file]'
+nextflow run nf-core/oceangenomesmitogenomes \
+  -profile singularity \            # or docker / conda / podman / …
+  --input oceanomics_samples.csv \   # or --input_dir "/data/OG*/**/*.fastq.gz"
+  --outdir results \
+  --organelle_type animal_mt \
+  --curated_blast_db /path/to/OceanGenomes.CuratedNT.fasta \
+  --sql_config /path/to/postgres.cfg \
+  --blast_db_dir /scratch/databases/blast \
+  --taxonkit_db_dir /scratch/databases/taxonkit \
+  --template_sbt /path/to/template.sbt
 ```
 
-### Multiple runs of the same sample
+Nextflow ≥ 24.10.x is required. Always combine the pipeline with an execution profile (`-profile`)
+that matches your container/conda environment.
 
-The `sample` identifiers have to be the same when you have re-sequenced the same sample more than once e.g. to increase sequencing depth. The pipeline will concatenate the raw reads before performing any downstream analysis. Below is an example for the same sample sequenced across 3 lanes:
+## Essential parameters
 
-```csv title="samplesheet.csv"
-sample,fastq_1,fastq_2
-CONTROL_REP1,AEG588A1_S1_L002_R1_001.fastq.gz,AEG588A1_S1_L002_R2_001.fastq.gz
-CONTROL_REP1,AEG588A1_S1_L003_R1_001.fastq.gz,AEG588A1_S1_L003_R2_001.fastq.gz
-CONTROL_REP1,AEG588A1_S1_L004_R1_001.fastq.gz,AEG588A1_S1_L004_R2_001.fastq.gz
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `--input` | ✔ (or `--input_dir`) | Path to a CSV samplesheet that matches `assets/schema_input.json`. |
+| `--input_dir` | ✔ (or `--input`) | Glob pointing at FASTQ files when you want the pipeline to build the samplesheet automatically. |
+| `--outdir` | ✔ | Destination for all published results. |
+| `--organelle_type` | ✔ | Organelle label passed to GetOrganelle (e.g. `animal_mt`). |
+| `--curated_blast_db` | ✔ | NCBI-format BLAST database used for species validation. Provide an absolute path. |
+| `--sql_config` | ✔* | INI file with `[postgres] dbname,user,password,host,port`. Required whenever Hi-C samples or species validation/database upload steps run. |
+| `--blast_db_dir` | ✔ | Directory used to cache the downloaded `taxdb.*` files; re-use between runs to avoid repeated downloads. |
+| `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
+| `--template_sbt` | ✔ | Submission template passed to `table2asn` when packaging GenBank artefacts. |
+| `--samplesheet_prefix` | Optional | Prefix for the auto-generated samplesheet when using `--input_dir`. Defaults to `samplesheet`. |
+| `--translation_table` | Optional | Override the mitochondrial translation table (defaults to vertebrate code `2`). |
+
+`--sql_config` can be omitted only when **all** modules that touch the OceanOmics PostgreSQL
+instance are skipped (for example, by running `-stub-run` or disabling validation/upload stages).
+Otherwise, the pipeline will raise an error early on.
+
+## Samplesheet requirements (`--input`)
+
+A valid CSV must match the schema in `assets/schema_input.json`:
+
+- Required columns: `sample`, `fastq_1`, `sequencing_type`. `fastq_2` is optional.
+- `sample` must follow the OceanGenomes convention (`OG` followed by digits, optional suffixes such
+  as `OG820M-1`). The schema enforces this naming pattern.
+- `sequencing_type` must be one of `ilmn`, `hifi`, or `hic`. This value controls which assembly
+  subworkflow (GetOrganelle vs. MitoHiFi) is invoked and how metadata is derived.
+- When a sample has multiple libraries (e.g. several Illumina lanes), repeat the row with the same
+  `sample` and `sequencing_type`. The pipeline concatenates the reads before downstream processing.
+
+Example:
+
+```csv title="oceanomics_samples.csv"
+sample,fastq_1,fastq_2,sequencing_type
+OG764.ilmn.240716,/data/OG764/OG764.ilmn.240716.R1.fastq.gz,/data/OG764/OG764.ilmn.240716.R2.fastq.gz,ilmn
+OG764.ilmn.240716,/data/OG764/OG764.ilmn.240717.R1.fastq.gz,/data/OG764/OG764.ilmn.240717.R2.fastq.gz,ilmn
+OG765.hic,/data/OG765/OG765_HICL_S1_R1.fastq.gz,/data/OG765/OG765_HICL_S1_R2.fastq.gz,hic
+OG765.hifi,/pacbio/OG765_m84012_250101_s1.hifi_reads.fastq.gz,,hifi
 ```
 
-### Full samplesheet
+To keep the schema strict while preserving the original identifiers, the pipeline stores the
+provided ID alongside a cleaned `meta.id`. Do not insert whitespace in any field.
 
-The pipeline will auto-detect whether a sample is single- or paired-end using the information provided in the samplesheet. The samplesheet can have as many columns as you desire, however, there is a strict requirement for the first 3 columns to match those defined in the table below.
+An example sheet lives at `assets/samplesheet.csv`.
 
-A final samplesheet file consisting of both single- and paired-end data may look something like the one below. This is for 6 samples, where `TREATMENT_REP3` has been sequenced twice.
+## Directory mode (`--input_dir`)
 
-```csv title="samplesheet.csv"
-sample,fastq_1,fastq_2
-CONTROL_REP1,AEG588A1_S1_L002_R1_001.fastq.gz,AEG588A1_S1_L002_R2_001.fastq.gz
-CONTROL_REP2,AEG588A2_S2_L002_R1_001.fastq.gz,AEG588A2_S2_L002_R2_001.fastq.gz
-CONTROL_REP3,AEG588A3_S3_L002_R1_001.fastq.gz,AEG588A3_S3_L002_R2_001.fastq.gz
-TREATMENT_REP1,AEG588A4_S4_L003_R1_001.fastq.gz,
-TREATMENT_REP2,AEG588A5_S5_L003_R1_001.fastq.gz,
-TREATMENT_REP3,AEG588A6_S6_L003_R1_001.fastq.gz,
-TREATMENT_REP3,AEG588A6_S6_L004_R1_001.fastq.gz,
-```
+Set `--input_dir "/path/to/OG*/**/*.fastq.gz"` to let the `CREATE_SAMPLESHEET` module generate the
+CSV for you. File names are parsed to determine sample identity, read pairing, sequencing mode, and
+collection dates:
 
-| Column    | Description                                                                                                                                                                            |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sample`  | Custom sample name. This entry will be identical for multiple sequencing libraries/runs from the same sample. Spaces in sample names are automatically converted to underscores (`_`). |
-| `fastq_1` | Full path to FastQ file for Illumina short reads 1. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz".                                                             |
-| `fastq_2` | Full path to FastQ file for Illumina short reads 2. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz".                                                             |
+- Illumina: expects `<OGID>.ilmn.<YYMMDD>.R[12].fastq.gz` style names.
+- PacBio HiFi: detects tokens such as `hifi_reads`, `hifi.reads`, or `.hifi` and records the date
+  from the third underscore-delimited field.
+- Hi-C: detects `HICL`/`HIC` in the file name and queries the sequencing date from the SQL database
+  via `HIC_DATE_QUERY`.
 
-An [example samplesheet](../assets/samplesheet.csv) has been provided with the pipeline.
+Use `--samplesheet_prefix` to control the generated filename (defaults to `samplesheet.csv`). The
+file is written to the working directory and validated against the same schema as manual inputs.
 
-## Running the pipeline
+## External resource files
 
-The typical command for running the pipeline is as follows:
+The pipeline orchestrates several helper modules that all require absolute file paths:
 
-```bash
-nextflow run nf-core/oceangenomesmitogenomes --input ./samplesheet.csv --outdir ./results --genome GRCh37 -profile docker
-```
+- **PostgreSQL configuration (`--sql_config`)** – INI file with credentials used by
+  `SPECIES_QUERY`, `HIC_DATE_QUERY`, and the upload modules. Example:
+  ```ini
+  [postgres]
+  dbname = oceanomics
+  user = analyst
+  password = ******
+  host = db.internal
+  port = 5432
+  ```
+- **Curated BLAST database (`--curated_blast_db`)** – Provide the `*.fasta` (or BLAST database
+  prefix) curated for OceanGenomes validations. Ensure `blastn` can resolve the files.
+- **Taxonomy caches (`--blast_db_dir`, `--taxonkit_db_dir`)** – Large downloads (`taxdb.*`, NCBI
+  `taxdump.tar.gz`) are stored under these directories using `storeDir`. Point them to a shared or
+  persistent filesystem to avoid repeated downloads.
+- **Submission template (`--template_sbt`)** – The `.sbt` template used by `table2asn` when
+  packaging GenBank submission bundles.
 
-This will launch the pipeline with the `docker` configuration profile. See below for more information about profiles.
+Optional helpers include `--binddir` (Singularity bind mount root), `--tempdir` (work directory for
+large temporary files), and `--refresh-modules` (force module cache refresh when running on the
+OceanOmics infrastructure scripts).
 
-Note that the pipeline will create the following files in your working directory:
+## Skipping stages and reusing results
 
-```bash
-work                # Directory containing the nextflow working files
-<OUTDIR>            # Finished results in specified location (defined with --outdir)
-.nextflow_log       # Log file from Nextflow
-# Other nextflow hidden files, eg. history of pipeline runs and old logs.
-```
+The main workflow supports coarse-grained skipping and reuse of pre-computed artefacts:
 
-If you wish to repeatedly use the same parameters for multiple runs, rather than specifying each flag in the command, you can specify these in a params file.
+- `--skip_mitogenome_assembly` – bypass both GetOrganelle and MitoHiFi. Combine with
+  `--precomputed_mitogenome_assembly_fasta` and
+  `--precomputed_mitogenome_assembly_log` to supply existing assemblies/logs.
+- `--skip_mitogenome_annotation` – skip EMMA / BLAST / LCA; optional inputs
+  `--precomputed_mitogenome_annotation_results`, `--precomputed_mitogenome_blast_results`, and
+  `--precomputed_mitogenome_lca_results` allow you to feed downstream modules.
+- `--skip_upload_results` – disable SQL upload modules and QC gating. Use when working offline or on
+  staging environments without database access.
 
-Pipeline settings can be provided in a `yaml` or `json` file via `-params-file <file>`.
+Refer to `nextflow_schema.json` for the complete list of `skip_*` and `precomputed_*` parameters.
 
-> [!WARNING]
-> Do not use `-c <file>` to specify parameters as this will result in errors. Custom config files specified with `-c` must only be used for [tuning process resource specifications](https://nf-co.re/docs/usage/configuration#tuning-workflow-resources), other infrastructural tweaks (such as output directories), or module arguments (args).
+## Running with parameter files
 
-The above pipeline run specified with a params file in yaml format:
-
-```bash
-nextflow run nf-core/oceangenomesmitogenomes -profile docker -params-file params.yaml
-```
-
-with:
+Store frequently reused settings in a YAML/JSON file and pass it with `-params-file`:
 
 ```yaml title="params.yaml"
-input: './samplesheet.csv'
-outdir: './results/'
-genome: 'GRCh37'
-<...>
+input: oceanomics_samples.csv
+outdir: results
+organelle_type: animal_mt
+curated_blast_db: /databases/OceanGenomes.CuratedNT.fasta
+sql_config: ~/.config/oceanomics/postgres.cfg
+blast_db_dir: /scratch/shared/blast
+taxonkit_db_dir: /scratch/shared/taxdump
+template_sbt: ~/templates/oceanomics_submission.sbt
+samplesheet_prefix: og_samples
+translation_table: 2
 ```
-
-You can also generate such `YAML`/`JSON` files via [nf-core/launch](https://nf-co.re/launch).
-
-### Updating the pipeline
-
-When you run the above command, Nextflow automatically pulls the pipeline code from GitHub and stores it as a cached version. When running the pipeline after this, it will always use the cached version if available - even if the pipeline has been updated since. To make sure that you're running the latest version of the pipeline, make sure that you regularly update the cached version of the pipeline:
 
 ```bash
-nextflow pull nf-core/oceangenomesmitogenomes
+nextflow run nf-core/oceangenomesmitogenomes -profile singularity -params-file params.yaml
 ```
 
-### Reproducibility
+Avoid using `-c` for parameter injection – reserve it for infrastructure or resource overrides.
 
-It is a good idea to specify the pipeline version when running the pipeline on your data. This ensures that a specific version of the pipeline code and software are used when you run your pipeline. If you keep using the same tag, you'll be running the same version of the pipeline, even if there have been changes to the code since.
+## Execution profiles and `-resume`
 
-First, go to the [nf-core/oceangenomesmitogenomes releases page](https://github.com/nf-core/oceangenomesmitogenomes/releases) and find the latest pipeline version - numeric only (eg. `1.3.1`). Then specify this when running the pipeline with `-r` (one hyphen) - eg. `-r 1.3.1`. Of course, you can switch to another version by changing the number after the `-r` flag.
+All standard nf-core profiles are available (`docker`, `singularity`, `podman`, `conda`, `apptainer`,
+`charliecloud`, `shifter`, `wave`). Pick the one that matches your environment; profiles can be
+stacked (`-profile test,docker`).
 
-This version number will be logged in reports when you run the pipeline, so that you'll know what you used when you look back in the future. For example, at the bottom of the MultiQC reports.
-
-To further assist in reproducibility, you can use share and reuse [parameter files](#running-the-pipeline) to repeat pipeline runs with the same settings without having to write out a command with every single parameter.
-
-> [!TIP]
-> If you wish to share such profile (such as upload as supplementary material for academic publications), make sure to NOT include cluster specific paths to files, nor institutional specific profiles.
-
-## Core Nextflow arguments
-
-> [!NOTE]
-> These options are part of Nextflow and use a _single_ hyphen (pipeline parameters use a double-hyphen)
-
-### `-profile`
-
-Use this parameter to choose a configuration profile. Profiles can give configuration presets for different compute environments.
-
-Several generic profiles are bundled with the pipeline which instruct the pipeline to use software packaged using different methods (Docker, Singularity, Podman, Shifter, Charliecloud, Apptainer, Conda) - see below.
-
-> [!IMPORTANT]
-> We highly recommend the use of Docker or Singularity containers for full pipeline reproducibility, however when this is not possible, Conda is also supported.
-
-The pipeline also dynamically loads configurations from [https://github.com/nf-core/configs](https://github.com/nf-core/configs) when it runs, making multiple config profiles for various institutional clusters available at run time. For more information and to check if your system is supported, please see the [nf-core/configs documentation](https://github.com/nf-core/configs#documentation).
-
-Note that multiple profiles can be loaded, for example: `-profile test,docker` - the order of arguments is important!
-They are loaded in sequence, so later profiles can overwrite earlier profiles.
-
-If `-profile` is not specified, the pipeline will run locally and expect all software to be installed and available on the `PATH`. This is _not_ recommended, since it can lead to different results on different machines dependent on the computer environment.
-
-- `test`
-  - A profile with a complete configuration for automated testing
-  - Includes links to test data so needs no other parameters
-- `docker`
-  - A generic configuration profile to be used with [Docker](https://docker.com/)
-- `singularity`
-  - A generic configuration profile to be used with [Singularity](https://sylabs.io/docs/)
-- `podman`
-  - A generic configuration profile to be used with [Podman](https://podman.io/)
-- `shifter`
-  - A generic configuration profile to be used with [Shifter](https://nersc.gitlab.io/development/shifter/how-to-use/)
-- `charliecloud`
-  - A generic configuration profile to be used with [Charliecloud](https://hpc.github.io/charliecloud/)
-- `apptainer`
-  - A generic configuration profile to be used with [Apptainer](https://apptainer.org/)
-- `wave`
-  - A generic configuration profile to enable [Wave](https://seqera.io/wave/) containers. Use together with one of the above (requires Nextflow ` 24.03.0-edge` or later).
-- `conda`
-  - A generic configuration profile to be used with [Conda](https://conda.io/docs/). Please only use Conda as a last resort i.e. when it's not possible to run the pipeline with Docker, Singularity, Podman, Shifter, Charliecloud, or Apptainer.
-
-### `-resume`
-
-Specify this when restarting a pipeline. Nextflow will use cached results from any pipeline steps where the inputs are the same, continuing from where it got to previously. For input to be considered the same, not only the names must be identical but the files' contents as well. For more info about this parameter, see [this blog post](https://www.nextflow.io/blog/2019/demystifying-nextflow-resume.html).
-
-You can also supply a run name to resume a specific run: `-resume [run-name]`. Use the `nextflow log` command to show previous run names.
-
-### `-c`
-
-Specify the path to a specific config file (this is a core Nextflow command). See the [nf-core website documentation](https://nf-co.re/usage/configuration) for more information.
+Use `-resume` to restart a run from cached results. Nextflow will only reuse tasks whose inputs are
+unchanged (including the SQL config, database paths, and FASTQ contents). Provide a run name
+(`-resume <run-name>`) to target a specific execution recorded in `nextflow log`.
 
 ## Custom configuration
 
-### Resource requests
+Resource requests follow the standard nf-core pattern (labels such as `process_low`, `process_high`
+configured in `conf/base.config`). Customise them in a local config or via the nf-core/configs
+repository if your institution requires bespoke defaults. To replace container images or inject
+additional tool arguments, follow the guidance in the nf-core documentation:
 
-Whilst the default requirements set within the pipeline will hopefully work for most people and with most input data, you may find that you want to customise the compute resources that the pipeline requests. Each step in the pipeline has a default set of requirements for number of CPUs, memory and time. For most of the pipeline steps, if the job exits with any of the error codes specified [here](https://github.com/nf-core/rnaseq/blob/4c27ef5610c87db00c3c5a3eed10b1d161abf575/conf/base.config#L18) it will automatically be resubmitted with higher resources request (2 x original, then 3 x original). If it still fails after the third attempt then the pipeline execution is stopped.
+- [Tuning workflow resources](https://nf-co.re/docs/usage/configuration#tuning-workflow-resources)
+- [Updating tool versions / containers](https://nf-co.re/docs/usage/configuration#updating-tool-versions)
+- [Customising tool arguments](https://nf-co.re/docs/usage/configuration#customising-tool-arguments)
 
-To change the resource requests, please see the [max resources](https://nf-co.re/docs/usage/configuration#max-resources) and [tuning workflow resources](https://nf-co.re/docs/usage/configuration#tuning-workflow-resources) section of the nf-core website.
+## Stub runs and testing
 
-### Custom Containers
-
-In some cases, you may wish to change the container or conda environment used by a pipeline steps for a particular tool. By default, nf-core pipelines use containers and software from the [biocontainers](https://biocontainers.pro/) or [bioconda](https://bioconda.github.io/) projects. However, in some cases the pipeline specified version maybe out of date.
-
-To use a different container from the default container or conda environment specified in a pipeline, please see the [updating tool versions](https://nf-co.re/docs/usage/configuration#updating-tool-versions) section of the nf-core website.
-
-### Custom Tool Arguments
-
-A pipeline might not always support every possible argument or option of a particular tool used in pipeline. Fortunately, nf-core pipelines provide some freedom to users to insert additional parameters that the pipeline does not include by default.
-
-To learn how to provide additional arguments to a particular tool of the pipeline, please see the [customising tool arguments](https://nf-co.re/docs/usage/configuration#customising-tool-arguments) section of the nf-core website.
-
-### nf-core/configs
-
-In most cases, you will only need to create a custom config as a one-off but if you and others within your organisation are likely to be running nf-core pipelines regularly and need to use the same settings regularly it may be a good idea to request that your custom config file is uploaded to the `nf-core/configs` git repository. Before you do this please can you test that the config file works with your pipeline of choice using the `-c` parameter. You can then create a pull request to the `nf-core/configs` repository with the addition of your config file, associated documentation file (see examples in [`nf-core/configs/docs`](https://github.com/nf-core/configs/tree/master/docs)), and amending [`nfcore_custom.config`](https://github.com/nf-core/configs/blob/master/nfcore_custom.config) to include your custom profile.
-
-See the main [Nextflow documentation](https://www.nextflow.io/docs/latest/config.html) for more information about creating your own configuration files.
-
-If you have any questions or issues please send us a message on [Slack](https://nf-co.re/join/slack) on the [`#configs` channel](https://nfcore.slack.com/channels/configs).
-
-## Running in the background
-
-Nextflow handles job submissions and supervises the running jobs. The Nextflow process must run until the pipeline is finished.
-
-The Nextflow `-bg` flag launches Nextflow in the background, detached from your terminal so that the workflow does not stop if you log out of your session. The logs are saved to a file.
-
-Alternatively, you can use `screen` / `tmux` or similar tool to create a detached session which you can log back into at a later time.
-Some HPC setups also allow you to run nextflow within a cluster job submitted your job scheduler (from where it submits more jobs).
-
-## Nextflow memory requirements
-
-In some cases, the Nextflow Java virtual machines can start to request a large amount of memory.
-We recommend adding the following line to your environment to limit this (typically in `~/.bashrc` or `~./bash_profile`):
+Every process ships with a `stub` section so you can validate wiring and configuration quickly:
 
 ```bash
-NXF_OPTS='-Xms1g -Xmx4g'
+nextflow run nf-core/oceangenomesmitogenomes \
+  -profile test,singularity \
+  --input assets/samplesheet.csv \
+  --curated_blast_db test_data/blast_db \
+  --sql_config test_data/sql_config.txt \
+  --template_sbt test_data/template.sbt \
+  --outdir stub_results \
+  -stub-run
 ```
+
+Stub runs generate placeholder files, which is useful for confirming connectivity (e.g. the SQL
+config path) without launching long compute jobs.
+
+## Output summary
+
+See `docs/output.md` for a detailed, stage-by-stage description of result files, including MultiQC
+sections, SQL upload logs, and the GenBank submission bundle layout.

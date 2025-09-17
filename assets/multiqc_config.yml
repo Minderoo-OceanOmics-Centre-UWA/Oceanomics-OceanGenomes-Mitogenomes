@@ -13,3 +13,96 @@ report_section_order:
 export_plots: true
 
 disable_version_detection: true
+
+# Render pipeline-specific results lacking native MultiQC modules (v1.30 schema)
+custom_data:
+  qc_summary:
+    section_name: "QC Summary"
+    description: "Per-sample QC summary (sample, species, proceed_qc, annotation_passed, missing_genes)."
+    plot_type: table
+    data_format: tsv
+    filename_glob: "*.qc_summary.tsv"
+    headers:
+      sample: "Sample"
+      species: "Species"
+      proceed_qc: "Proceed QC"
+      annotation_passed: "Annotation Passed"
+      missing_genes: "Missing Genes"
+
+  mitohifi_stats:
+    section_name: "MitoHiFi Contig Stats"
+    description: "Per-sample contig statistics from MitoHiFi."
+    plot_type: table
+    data_format: tsv
+    filename_glob: "*.contigs_stats.tsv"
+
+  species_validation_summary:
+    section_name: "Species Validation (LCA Summary)"
+    description: "Per-sample LCA summary generated during species validation."
+    plot_type: table
+    data_format: tsv
+    filename_glob: "lca_results.*.tsv"
+
+  annotation_stats:
+    section_name: "EMMA Annotation Stats"
+    description: "Summary statistics for annotations."
+    plot_type: table
+    data_format: csv
+    filename_glob: "*.annotation_stats.csv"
+
+custom_content:
+  - id: table2asn_validation
+    section_name: "Table2ASN Validation"
+    description: "Validation output from NCBI table2asn (per-sample .val files)."
+    format: raw
+    file_glob: "*.val"
+
+  - id: qc_decision
+    section_name: "QC Decision"
+    description: "QC proceed flags per sample."
+    format: raw
+    file_glob: "proceed_qc.txt"
+  - id: mitohifi_stats
+    section_name: "MitoHiFi Contig Stats"
+    description: "Per-sample contig statistics from MitoHiFi."
+    plot_type: table
+    file_format: tsv
+    files:
+      - "*.contigs_stats.tsv"
+
+  - id: table2asn_validation
+    section_name: "Table2ASN Validation"
+    description: "Validation output from NCBI table2asn (per-sample .val files)."
+    plot_type: raw
+    files:
+      - "*.val"
+
+  - id: species_validation_summary
+    section_name: "Species Validation (LCA Summary)"
+    description: "Per-sample LCA summary generated during species validation."
+    plot_type: table
+    file_format: tsv
+    files:
+      - "lca_results.*.tsv"
+
+  - id: annotation_stats
+    section_name: "EMMA Annotation Stats"
+    description: "Summary statistics for annotations."
+    plot_type: table
+    file_format: csv
+    files:
+      - "*.annotation_stats.csv"
+
+  - id: qc_decision
+    section_name: "QC Decision"
+    description: "QC proceed flags per sample."
+    plot_type: raw
+    files:
+      - "proceed_qc.txt"
+  - id: qc_summary
+    section_name: "QC Summary"
+    description: "Per-sample QC summary (sample, species, proceed flag)."
+    plot_type: table
+    file_format: tsv
+    files:
+      - "*.qc_summary.tsv"

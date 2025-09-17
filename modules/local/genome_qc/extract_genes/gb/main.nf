@@ -35,4 +35,17 @@ process EXTRACT_GENES_GB {
         python: \$(python --version | sed 's/Python //')
     END_VERSIONS
     """
+
+    stub:
+    """
+    asm=${meta.mt_assembly_prefix ?: (meta.sample_id ?: "stub")}
+    mkdir -p cds genes
+    : > cds/\${asm}.fa
+    # genes output is optional; create directory to satisfy path output
+    : > genes/\${asm}.fa
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: "stub"
+    END_VERSIONS
+    """
 }

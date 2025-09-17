@@ -94,20 +94,6 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_versions = ch_versions.mix(GETORGANELLE_FROMREADS.out.versions.first())
     ch_versions = ch_versions.mix(CAT_FASTQ.out.versions.first())
 
-
-    //
-    // Collate and save software versions
-    //
-
-    softwareVersionsToYAML(ch_versions)
-        .collectFile(
-            storeDir: "${params.outdir}/pipeline_info",
-            name: 'nf_core_'  +  'oceangenomes_draftgenomes_software_'  + 'mqc_'  + 'versions.yml',
-            sort: true,
-            newLine: true
-        ).set { ch_collated_versions }
-
-
     //
     // Emit outputs
     //
@@ -116,5 +102,5 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     assembly_fasta  = GETORGANELLE_FROMREADS.out.fasta
     assembly_log    = GETORGANELLE_FROMREADS.out.log
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
-    versions        = ch_collated_versions              // channel: [ path(versions.yml) ]
+    versions        = ch_versions              // channel: [ path(versions.yml) ]
 }

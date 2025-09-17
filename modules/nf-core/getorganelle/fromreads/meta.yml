@@ -1,0 +1,16 @@
+name: getorganelle_fromreads
+description: Assemble organelle genomes from reads using GetOrganelle.
+keywords: [getorganelle, assembly, organelle]
+tools:
+  - name: getorganelle
+    homepage: https://github.com/Kinggerm/GetOrganelle
+    licence: GPL-3.0
+input:
+  - meta: { type: map, description: Sample metadata (expects mt_assembly_prefix) }
+  - fastp: { type: files, description: Input reads }
+  - organelle_type: { type: string, description: Target organelle }
+  - db: { type: directory, description: GetOrganelle configuration directory }
+output:
+  - fasta: { type: file, description: Assembled organelle FASTA, pattern: "mtdna/*.fasta" }
+  - log: { type: file, description: Assembly log file, pattern: "mtdna/*.log.txt" }
+  - etc: { type: files, description: Additional outputs, pattern: "mtdna/*" }

@@ -5,4 +5,13 @@ process DIAGNOSTICS {
         'docker://tylerpeirce/psycopg2:0.1' :
         'tylerpeirce/psycopg2:0.1' }"
 
+    script:
+    """
+    echo "Diagnostics placeholder for ${task.process}"
+    """
+
+    stub:
+    """
+    echo "Diagnostics stub for ${task.process}"
+    """
 }

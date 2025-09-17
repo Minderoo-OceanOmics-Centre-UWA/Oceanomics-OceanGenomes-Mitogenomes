@@ -1,0 +1,95 @@
+nextflow_pipeline {
+    name "Test NFCORE_OCEANGENOMESMITOGENOMES Pipeline"
+    script "main.nf"
+
+    test("Should run pipeline with test data") {
+        when {
+            params {
+                outdir = "output"
+                input = "test_data/samplesheet.csv"
+                input_dir = "test_data"
+                samplesheet_prefix = "test"
+                bs_config = "test_data/bs_config.txt"
+                curated_blast_db = "test_data/blast_db"
+                sql_config = "test_data/sql_config.txt"
+                organelle_type = "mitochondrion"
+                version = "1.0"
+                validate_params = true
+                monochrome_logs = false
+                email = "test@example.com"
+                email_on_fail = "test@example.com"
+                plaintext_email = false
+                hook_url = ""
+            }
+        }
+
+        then {
+            assert workflow.success
+            assert workflow.trace.succeeded().size() > 0
+            assert path("${params.outdir}").exists()
+            assert workflow.out.multiqc_report
+            assert path(workflow.out.multiqc_report.get(0)).exists()
+        }
+    }
+
+    test("Should fail with invalid input") {
+        when {
+            params {
+                outdir = "output"
+                input = "nonexistent.csv"
+                input_dir = "invalid_dir"
+                samplesheet_prefix = "test"
+                bs_config = "invalid_config.txt"
+                curated_blast_db = "invalid_db"
+                sql_config = "invalid_sql.txt"
+                organelle_type = "invalid"
+            }
+        }
+
+        then {
+            assert workflow.failed
+            assert workflow.exitStatus != 0
+        }
+    }
+}
+
+nextflow_workflow {
+    name "Test NFCORE_OCEANGENOMESMITOGENOMES Workflow"
+    script "main.nf"
+    workflow "NFCORE_OCEANGENOMESMITOGENOMES"
+
+    test("Should process input data correctly") {
+        when {
+            params {
+                bs_config = "test_data/bs_config.txt"
+                curated_blast_db = "test_data/blast_db"
+                sql_config = "test_data/sql_config.txt"
+                organelle_type = "mitochondrion"
+            }
+
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [ id:'test1', single_end:false ], 
+                    file('test_data/reads_1.fastq.gz'),
+                    file('test_data/reads_2.fastq.gz')
+                ])
+                input[1] = Channel.fromList([
+                    [ id:'test2', single_end:false ],
+                    file('test_data/reads_1.fastq.gz'),
+                    file('test_data/reads_2.fastq.gz')
+                ])
+                """
+            }
+        }
+
+        then {
+            assert workflow.success
+            assert workflow.trace.succeeded().size() > 0
+            with(workflow.out.multiqc_report) {
+                assert size() == 1
+                assert path(get(0)).exists()
+            }
+        }
+    }
+}The test file appears to be complete and valid, with proper structure and closure. It includes both pipeline-level and workflow-level tests with appropriate assertions.

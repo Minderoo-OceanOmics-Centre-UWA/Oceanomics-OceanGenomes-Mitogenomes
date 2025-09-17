@@ -67,6 +67,6 @@ output:
       pattern: "*.src"
 
 authors:
-  - "@your_username"
+  - "Tyler Peirce"
 maintainers:
-  - "@your_username"
+  - "Tyler Peirce"

@@ -114,7 +114,7 @@ workflow PREPARE_SAMPLESHEET {
     }
 
     // DEBUG
-    samplesheet_ch.view { meta, reads -> "Sample: ${meta.id}, Type: ${meta.sequencing_type}, Meta: ${meta}" }
+    samplesheet_ch.view { meta, _reads -> "Sample: ${meta.id}, Type: ${meta.sequencing_type}, Meta: ${meta}" }
     
     // Branch by sequencing type
     samplesheet_ch.branch { meta, reads ->
@@ -176,7 +176,7 @@ workflow PREPARE_SAMPLESHEET {
 
     // Query database to get hic sample sequencing date
     ch_query_meta = branched_samples.hic
-        .map { meta, reads -> 
+        .map { meta, _reads -> 
             [meta.id, meta] 
         }
     

@@ -33,16 +33,16 @@ workflow MITOGENOME_QC {
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
 
-// ***the mitogenome_qcv isnt being passed into format files correctly
+
     //
     // MODULE: Format files to align better with GenBank requirements and generate the cmt file
     //
-mitogenome_qc.view { "Input to FORMAT_FILES: $it" }
+    mitogenome_qc.view { "Input to FORMAT_FILES: $it" }
 
     FORMAT_FILES (
         mitogenome_qc     // tuple val(meta), val(species_name), val(proceed_qc true/false), path(input_dir) - input dir is the annotation outputs directory
     )
-// output is tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), emit: processed_files
+    // output is tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), emit: processed_files
     ch_versions = ch_versions.mix(FORMAT_FILES.out.versions.first())
 
 
@@ -88,6 +88,7 @@ mitogenome_qc.view { "Input to FORMAT_FILES: $it" }
     )
     ch_versions = ch_versions.mix(TRANSLATE_GENES.out.versions.first())
     // ch_multiqc_files = ch_multiqc_files.mix(TRANSLATE_GENES.out.proteins_dir)
+    
     //
     // MODULE: Generate files and run table2asn
     //
@@ -98,7 +99,9 @@ mitogenome_qc.view { "Input to FORMAT_FILES: $it" }
         params.template_sbt // sbt template generated from genbank, specific for OceanOmics
     )
     ch_versions = ch_versions.mix(GEN_FILES_TABLE2ASN.out.versions.first())
-    // ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.val_file)
+    // Feed table2asn validation output into MultiQC inputs (text summary)
+    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.val_file.collect { it[1] })
+    
     //
     // MODULE: Interperate the translation diagnostics from table2asn output
     //
@@ -143,23 +146,10 @@ mitogenome_qc.view { "Input to FORMAT_FILES: $it" }
 
 
     //
-    // Collate and save software versions
-    //
-
-    softwareVersionsToYAML(ch_versions)
-        .collectFile(
-            storeDir: "${params.outdir}/pipeline_info",
-            name: 'nf_core_'  +  'oceangenomes_draftgenomes_software_'  + 'mqc_'  + 'versions.yml',
-            sort: true,
-            newLine: true
-        ).set { ch_collated_versions }
-
-
-    //
     // Emit outputs
     //
 
     emit:
     multiqc_files           = ch_multiqc_files             // channel: [ path(multiqc_files) ]
-    versions                = ch_collated_versions              // channel: [ path(versions.yml) ]
+    versions                = ch_versions              // channel: [ path(versions.yml) ]
 }

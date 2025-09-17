@@ -1,35 +1,19 @@
-name: extract_from_tbl
-description: Extract mitochondrial features from FASTA + GenBank .tbl (CDS always; optional tRNA/rRNA + concatenated genes when enabled)
-keywords: [mitochondria, genbank, tbl, biopython]
-modules:
-- python
+name: extract_genes_gb
+description: Extract coding sequences (CDS) and optionally genes from TBL/GB annotation and FASTA.
+keywords: [genbank, tbl, gb, cds]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
 input:
-- meta:
-type: map
-description: Sample metadata map
-- fasta:
-type: file
-description: Genome FASTA containing [organism=...] in header
-- tbl:
-type: file
-description: GenBank .tbl feature table (simple coordinates)
+  - meta: { type: map, description: Sample metadata }
+  - fasta: { type: file, description: Assembled mitochondrial genome FASTA }
+  - tbl: { type: file, description: TBL annotation file }
 output:
-- cds_dir:
-type: directory
-description: Directory with per-CDS FASTAs
-- cds_fastas:
-type: file
-description: Per-CDS FASTAs (*.fa)
-pattern: cds/*.fa
-- genes_dir:
-type: directory
-description: Directory with per-feature FASTAs and concatenated multi-FASTA (only if tbl_include_rna)
-optional: true
-- genes_fastas:
-type: file
-description: Gene FASTAs (*.fa) inc. <assembly>.genes.fa (only if tbl_include_rna)
-pattern: genes/*.fa
-optional: true
-authors:
-- "T"
-- "ChatGPT"
+  - cds_dir: { type: directory, description: Extracted CDS directory, pattern: "cds" }
+  - cds_fastas: { type: files, description: Individual CDS FASTA files, pattern: "cds/*.fa" }
+  - genes_dir: { type: directory, description: Optional genes directory, pattern: "genes" }
+  - genes_fastas: { type: files, description: Optional gene FASTA files, pattern: "genes/*.fa" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

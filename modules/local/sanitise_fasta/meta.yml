@@ -1,0 +1,13 @@
+name: sanitise_fasta
+description: Sanitise mitochondrial FASTA prior to annotation; concatenate multi-contigs and assign a unique _concat header, or pass through single contig unchanged.
+keywords: [fasta, sanitise, concatenate, mitogenome]
+tools: []
+input:
+  - meta: { type: map, description: Sample metadata (expects mt_assembly_prefix or id) }
+  - fasta: { type: file, description: Assembly FASTA, pattern: "*.{fa,fasta,fna}" }
+output:
+  - meta: { type: map, description: Unchanged metadata }
+  - sanitised_fasta: { type: file, description: "Sanitised FASTA; if concatenated, named <mt_assembly_prefix>_concat.fasta; else original filename", pattern: "*.{fa,fasta,fna}" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

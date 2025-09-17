@@ -45,4 +45,16 @@ process GEN_FILES_TABLE2ASN {
         python: \$(python --version | sed 's/Python //')
     END_VERSIONS
     """
+    
+    stub:
+    """
+    prefix=${meta.mt_assembly_prefix ?: (meta.id ?: "stub")}
+    : > \${prefix}.sqn
+    : > \${prefix}.val
+    : > \${prefix}.gbf
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        table2asn: "stub"
+    END_VERSIONS
+    """
 }

@@ -16,6 +16,9 @@ include { MITOGENOME_ASSEMBLY_MITOHIFI     } from '../subworkflows/local/mitogen
 include { MITOGENOME_ANNOTATION     } from '../subworkflows/local/mitogenome_annotation_lca'
 include { UPLOAD_RESULTS            } from '../subworkflows/local/upload_results_mito'
 include { MITOGENOME_QC             } from '../subworkflows/local/mitogenome_qc'
+include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
+
+// Using local module SANITISE_FASTA (see modules/local/sanitise_fasta)
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -28,7 +31,6 @@ workflow OCEANGENOMESMITOGENOMES {
     take:
     getorg_input    // tuple for getorganelle - tuple(meta, reads)
     mitohifi_input // tuple for mitohifi - tuple(meta, reads)
-    bs_config // params.bs_config
     curated_blast_db // params.curated_blast_db
     sql_config // params.sql_config
     organelle_type // params.organelle_type "animal_mt"
@@ -121,7 +123,7 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_hifi_assembly_log = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_log
     } else if (params.precomputed_mitogenome_assembly_results) {
         // Use precomputed results if analysis is skipped
-        ch_mitogenome_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta, checkIfExists: true)
+        ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta, checkIfExists: true)
         .map { file ->
             // Extract sample_id from the filename (without extension)
             def filename = file.baseName  // Gets filename without .fasta extension
@@ -166,14 +168,19 @@ workflow OCEANGENOMESMITOGENOMES {
 
     ch_annotation_input = ch_mitogenome_hifi_assembly_fasta.mix(ch_mitogenome_getorg_assembly_fasta)
 
+    // Sanitise FASTA before annotation to avoid duplicate IDs / multi-contig issues
+    SANITISE_FASTA(
+        ch_annotation_input
+    )
+    ch_annotation_input_sanitised = SANITISE_FASTA.out
+
     //
     // SUBWORKFLOW: MITOGENOME_ANNOTATION
     //
     if (!params.skip_mitogenome_annotation) {
         MITOGENOME_ANNOTATION (
-            ch_annotation_input,
-            curated_blast_db,
-            sql_config // params.sql_config
+            ch_annotation_input_sanitised,
+            curated_blast_db
         )
         ch_mitogenome_annotation_results = MITOGENOME_ANNOTATION.out.annotation_results
         ch_mitogenome_blast_results = MITOGENOME_ANNOTATION.out.blast_filtered_results
@@ -237,14 +244,24 @@ workflow OCEANGENOMESMITOGENOMES {
     if (!params.skip_upload_results) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)}
 
     // 
-    // Collect all versions
+    // Collect all versions from subworkflows
     //
 
-    ch_collated_versions = Channel.empty()
-    if (!params.skip_mitogenome_assembly) {ch_collated_versions = ch_collated_versions.mix(MITOGENOME_ASSEMBLY_GETORG.out.versions, MITOGENOME_ASSEMBLY_MITOHIFI.out.versions)}
-    if (!params.skip_mitogenome_annotation) {ch_collated_versions = ch_collated_versions.mix(MITOGENOME_ANNOTATION.out.versions)}
-    if (!params.skip_upload_results) {ch_collated_versions = ch_collated_versions.mix(UPLOAD_RESULTS.out.versions)}
-    if (!params.skip_upload_results) {ch_collated_versions = ch_collated_versions.mix(MITOGENOME_QC.out.versions)}
+    if (!params.skip_mitogenome_assembly) {
+        ch_versions = ch_versions.mix(
+            MITOGENOME_ASSEMBLY_GETORG.out.versions,
+            MITOGENOME_ASSEMBLY_MITOHIFI.out.versions
+        )
+    }
+    if (!params.skip_mitogenome_annotation) {
+        ch_versions = ch_versions.mix(MITOGENOME_ANNOTATION.out.versions)
+    }
+    // Upload + QC subworkflows provide versions; guard independently
+    if (!params.skip_upload_results) {
+        ch_versions = ch_versions.mix(UPLOAD_RESULTS.out.versions)
+    }
+    // Run of MITOGENOME_QC depends on upstream evaluation; include if present
+    ch_versions = ch_versions.mix(MITOGENOME_QC.out.versions)
 
 
 

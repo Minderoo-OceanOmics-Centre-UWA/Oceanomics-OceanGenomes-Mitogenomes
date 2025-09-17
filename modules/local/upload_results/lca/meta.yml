@@ -1,0 +1,20 @@
+name: push_lca_blast_results
+description: Push LCA and filtered BLAST combined results to the SQL database.
+keywords: [upload, lca, blast, postgres]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
+  - name: psycopg2
+    homepage: https://www.psycopg.org/
+    licence: LGPL-3.0
+input:
+  - meta: { type: map, description: Sample metadata }
+  - lca_results: { type: file, description: LCA combined TSV }
+  - blast_results: { type: file, description: BLAST combined TSV }
+  - config: { type: file, description: PostgreSQL INI config file with [postgres] section }
+output:
+  - upload: { type: file, description: Upload status/log, pattern: "*.lca_blast.upload.txt" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

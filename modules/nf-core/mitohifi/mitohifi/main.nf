@@ -77,6 +77,7 @@ process MITOHIFI_MITOHIFI {
     """
 
     stub:
+    def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
     """
     # Create all expected output files for testing
     touch ${prefix}.fasta

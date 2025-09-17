@@ -71,7 +71,6 @@ process EMMA {
         """
 
  stub:
-    def args   = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
     
         """

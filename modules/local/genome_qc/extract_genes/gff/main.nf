@@ -28,4 +28,10 @@ process EXTRACT_GENES_GFF {
         python: \$(python --version | sed 's/Python //')
     END_VERSIONS
     """
+
+    stub:
+    """
+    mkdir -p genes
+    : > versions.yml
+    """
 }

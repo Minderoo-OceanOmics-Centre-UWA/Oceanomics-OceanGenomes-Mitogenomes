@@ -10,6 +10,7 @@ include { SPECIES_VALIDATION            } from '../../../modules/local/species_v
 include { PUSH_MTDNA_ANNOTATION_RESULTS } from '../../../modules/local/upload_results/emma'
 include { PUSH_LCA_BLAST_RESULTS        } from '../../../modules/local/upload_results/lca'
 include { EVALUATE_QC_CONDITIONS        } from '../../../modules/local/evaluate_qc_conditions'
+include { QC_SUMMARY                    } from '../../../modules/local/multiqc/qc_summary'
 
 // Helper functions
 include { softwareVersionsToYAML        } from '../../nf-core/utils_nfcore_pipeline'
@@ -152,11 +153,27 @@ workflow UPLOAD_RESULTS {
     
     
     //
+    // Build a per-sample QC summary TSV for MultiQC
+    qc_summary_input = EVALUATE_QC_CONDITIONS.out.evaluation
+        .join(PUSH_MTDNA_ANNOTATION_RESULTS.out.stats, by: 0)
+        .map { meta, species_file, proceed_file, annotation_csv -> [ meta, species_file, proceed_file, annotation_csv ] }
+    QC_SUMMARY (
+        qc_summary_input // tuple val(meta), path(species_name.txt), path(proceed_qc.txt), path(annotation_stats.csv)
+    )
+
+    
+    //
     // Subworkflow finishing steps.
     //
 
     // Collect MultiQC files
-    // Need to update this section to include everything
+    //  - Species validation outputs (per-sample TSVs)
+    //  - Annotation statistics CSVs
+    //  - QC evaluation flags (for quick visibility in report) and summary table
+    ch_multiqc_files = ch_multiqc_files.mix(SPECIES_VALIDATION.out.summary.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.stats.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(EVALUATE_QC_CONDITIONS.out.evaluation.map { meta, species_file, proceed_file -> proceed_file })
+    ch_multiqc_files = ch_multiqc_files.mix(QC_SUMMARY.out.table.collect { it[1] })
     ch_versions = ch_versions.mix(PUSH_MTDNA_ASSM_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(SPECIES_VALIDATION.out.versions.first())
     ch_versions = ch_versions.mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.versions.first())
@@ -166,23 +183,11 @@ workflow UPLOAD_RESULTS {
 
 
     //
-    // Collate and save software versions
-    //
-
-    softwareVersionsToYAML(ch_versions)
-        .collectFile(
-            storeDir: "${params.outdir}/pipeline_info",
-            name: 'nf_core_'  +  'oceangenomes_draftgenomes_software_'  + 'mqc_'  + 'versions.yml',
-            sort: true,
-            newLine: true
-        ).set { ch_collated_versions }
-
-    //
     // Emit outputs
     //
 
     emit:
     qc_ready    = ch_qc_ready                   // channel: [ val(meta), val(species_name), val(proceed_qc true/false) ]
     multiqc_files = ch_multiqc_files            // channel: [ path(multiqc_files) ]
-    versions = ch_collated_versions             // channel: [ path(versions.yml) ]
+    versions = ch_versions             // channel: [ path(versions.yml) ]
 }

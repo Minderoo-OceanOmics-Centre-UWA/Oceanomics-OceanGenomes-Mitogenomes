@@ -1,7 +1,7 @@
 process DOWNLOAD_TAXONKIT_DB {
     tag "${db_name}"
     label 'process_low'
-    storeDir params.taxonkit_db_dir ?: "${launchDir}/"  // Cache the database
+    storeDir params.taxonkit_db_dir // Cache the database
     
     input:
     val db_name
@@ -10,22 +10,23 @@ process DOWNLOAD_TAXONKIT_DB {
     path("taxonkit_dbs"), emit: db_files
    
     script:
+    db_dir = params.taxonkit_db_dir 
     """
     mkdir -p taxonkit_dbs
 
     # Check if files already exist
-    if [ -f "${launchDir}/taxonkit_dbs/citations.dmp" ] \\
-    && [ -f "${launchDir}/taxonkit_dbs/delnodes.dmp" ] \\
-    && [ -f "${launchDir}/taxonkit_dbs/division.dmp" ] \\
-    && [ -f "${launchDir}/taxonkit_dbs/gencode.dmp" ] \\
-    && [ -f "${launchDir}/taxonkit_dbs/images.dmp" ] \\
-    && [ -f "${launchDir}/taxonkit_dbs/merged.dmp" ] \\
-    && [ -f "${launchDir}/taxonkit_dbs/names.dmp" ] \\
-    && [ -f "${launchDir}/taxonkit_dbs/nodes.dmp" ] \\
-    && [ -f "${launchDir}/taxonkit_dbs/gc.prt" ]; then
+    if [ -f "${db_dir}/taxonkit_dbs/citations.dmp" ] \\
+    && [ -f "${db_dir}/taxonkit_dbs/delnodes.dmp" ] \\
+    && [ -f "${db_dir}/taxonkit_dbs/division.dmp" ] \\
+    && [ -f "${db_dir}/taxonkit_dbs/gencode.dmp" ] \\
+    && [ -f "${db_dir}/taxonkit_dbs/images.dmp" ] \\
+    && [ -f "${db_dir}/taxonkit_dbs/merged.dmp" ] \\
+    && [ -f "${db_dir}/taxonkit_dbs/names.dmp" ] \\
+    && [ -f "${db_dir}/taxonkit_dbs/nodes.dmp" ] \\
+    && [ -f "${db_dir}/taxonkit_dbs/gc.prt" ]; then
         echo "Files already exist — linking to work dir"
         for f in citations.dmp delnodes.dmp division.dmp gencode.dmp images.dmp merged.dmp names.dmp nodes.dmp gc.prt; do
-            ln -s "${launchDir}/taxonkit_dbs/\$f" taxonkit_dbs/
+            ln -s "${db_dir}/taxonkit_dbs/\$f" taxonkit_dbs/
         done
     else
         echo "Downloading fresh taxonomy database..."
@@ -39,14 +40,16 @@ process DOWNLOAD_TAXONKIT_DB {
     
     stub:
     """
-    mkdir -p taxonkit_dbs/
-    touch taxonkit_dbs/citations.dmp \\
-        taxonkit_dbs/delnodes.dmp \\
-        taxonkit_dbs/division.dmp \\
-        taxonkit_dbs/gencode.dmp \\
-        taxonkit_dbs/images.dmp \\
-        taxonkit_dbs/merged.dmp \\
-        taxonkit_dbs/names.dmp \\
-        taxonkit_dbs/nodes.dmp gc.prt
+    mkdir -p ${params.taxonkit_db_dir}/taxonkit_db1s/
+
+    taxonkit_dir = ${params.taxonkit_db_dir}/taxonkit_db1s/
+    touch \$taxonkit_dir/citations.dmp \\
+        \$taxonkit_dir/delnodes.dmp \\
+        \$taxonkit_dir/division.dmp \\
+        \$taxonkit_dir/gencode.dmp \\
+        \$taxonkit_dir/images.dmp \\
+        \$taxonkit_dir/merged.dmp \\
+        \$taxonkit_dir/names.dmp \\
+        \$taxonkit_dir/nodes.dmp gc.prt
     """
 }

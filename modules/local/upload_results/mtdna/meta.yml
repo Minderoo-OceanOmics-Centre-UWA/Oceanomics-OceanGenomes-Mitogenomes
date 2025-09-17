@@ -1,0 +1,20 @@
+name: push_mtdna_assm_results
+description: Parse assembly logs/FASTA and push mtDNA assembly statistics to the SQL database.
+keywords: [upload, assembly, stats, postgres]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
+  - name: psycopg2
+    homepage: https://www.psycopg.org/
+    licence: LGPL-3.0
+input:
+  - meta: { type: map, description: Sample metadata (expects mt_assembly_prefix) }
+  - fasta: { type: file, description: Assembled mitogenome FASTA }
+  - out_log: { type: file, description: Assembly log file }
+  - config: { type: file, description: PostgreSQL INI config file with [postgres] section }
+output:
+  - upload: { type: file, description: Upload status/log, pattern: "*.mtdna.upload.txt" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

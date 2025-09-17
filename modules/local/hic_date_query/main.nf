@@ -81,4 +81,15 @@ process HIC_DATE_QUERY {
         f.write('    python: "3.9"\\n')
         f.write('    psycopg2: "2.9.5"\\n')
     """
+
+    stub:
+    """
+    # Emit a fixed date string to stdout for stub-run
+    echo -n "000000"
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: "stub"
+        psycopg2: "stub"
+    END_VERSIONS
+    """
 }

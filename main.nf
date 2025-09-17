@@ -19,7 +19,6 @@ include { OCEANGENOMESMITOGENOMES } from './workflows/oceangenomesmitogenomes'
 include { PREPARE_SAMPLESHEET     } from './subworkflows/local/prepare_samplesheet'
 include { PIPELINE_INITIALISATION } from './subworkflows/local/utils_nfcore_oceangenomesmitogenomes_pipeline'
 include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_oceangenomesmitogenomes_pipeline'
-include { getGenomeAttribute      } from './subworkflows/local/utils_nfcore_oceangenomesmitogenomes_pipeline'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -44,7 +43,6 @@ workflow NFCORE_OCEANGENOMESMITOGENOMES {
     OCEANGENOMESMITOGENOMES (
         getorg_input,    // tuple for getorganelle - tuple(meta, reads)
         mitohifi_input, // tuple for mitohifi - tuple(meta, reads)
-        params.bs_config,
         params.curated_blast_db,
         params.sql_config,
         params.organelle_type,
@@ -65,7 +63,7 @@ workflow {
     PREPARE_SAMPLESHEET (
         params.input,
         params.input_dir,
-        params.samplesheet_prefix
+        params.samplesheet_prefix ?: "samplesheet"
     )
     
     //

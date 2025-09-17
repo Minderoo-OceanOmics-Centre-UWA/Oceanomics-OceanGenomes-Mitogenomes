@@ -28,6 +28,15 @@ process PUSH_LCA_BLAST_RESULTS {
         version 1 - need to version control these upload scripts.
     END_VERSIONS
     """
+    
+    stub:
+    """
+    : > ${meta.id}.lca_blast.upload.txt
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        upload: "stub"
+    END_VERSIONS
+    """
     }
 
 

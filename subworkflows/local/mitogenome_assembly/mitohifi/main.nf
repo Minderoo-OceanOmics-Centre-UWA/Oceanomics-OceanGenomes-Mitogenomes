@@ -34,7 +34,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     //
 
     ch_species_query = fastp_reads
-    .map { meta, files -> meta }
+    .map { meta, _files -> meta }
     .view()
     
     //
@@ -105,25 +105,18 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     )
 
     //
-    // Collect files
+    // Collect MultiQC inputs and versions
+    //   - Prefer feeding human‑readable logs and summary tables to MultiQC.
     //
 
-    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_FINDMITOREFERENCE.out.versions.first())
+    // MitoHiFi per-sample stats and logs
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.stats.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.logs.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.command_logs.collect { it[1] })
+
+    // Versions for versions.yml collation (not MultiQC inputs)
     ch_versions = ch_versions.mix(CAT_FASTQ.out.versions.first())
     ch_versions = ch_versions.mix(MITOHIFI_MITOHIFI.out.versions.first())
-
-
-    //
-    // Collate and save software versions
-    //
-
-    softwareVersionsToYAML(ch_versions)
-        .collectFile(
-            storeDir: "${params.outdir}/pipeline_info",
-            name: 'nf_core_'  +  'oceangenomes_draftgenomes_software_'  + 'mqc_'  + 'versions.yml',
-            sort: true,
-            newLine: true
-        ).set { ch_collated_versions }
 
 
     //
@@ -134,5 +127,5 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     assembly_fasta  = MITOHIFI_MITOHIFI.out.fasta
     assembly_log    = MITOHIFI_MITOHIFI.out.logs
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
-    versions        = ch_collated_versions              // channel: [ path(versions.yml) ]
+    versions        = ch_versions              // channel: [ path(versions.yml) ]
 }

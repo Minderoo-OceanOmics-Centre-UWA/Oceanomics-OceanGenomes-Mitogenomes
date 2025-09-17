@@ -1,0 +1,18 @@
+name: species_validation
+description: Validate species identity by comparing LCA results and filtered BLAST hits to nominal IDs.
+keywords: [species, validation, blast, lca]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
+input:
+  - meta: { type: map, description: Sample metadata }
+  - blast_files: { type: files, description: Filtered BLAST results list }
+  - lca_files: { type: files, description: LCA results list }
+  - config: { type: file, description: SQL/DB configuration file }
+output:
+  - summary: { type: file, description: Per-sample LCA summary TSV, pattern: "lca_results.*.tsv" }
+  - full: { type: files, description: Combined LCA and BLAST tables, pattern: "lca_combined.*.tsv, blast_combined.*.tsv" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

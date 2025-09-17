@@ -1,0 +1,19 @@
+name: hic_date_query
+description: Query PostgreSQL database to retrieve Hi-C sequencing date for a sample.
+keywords: [postgres, query, metadata]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
+  - name: psycopg2
+    homepage: https://www.psycopg.org/
+    licence: LGPL-3.0
+input:
+  - sample_id: { type: string, description: Sample/HIC library tube ID }
+  - meta: { type: map, description: Sample metadata }
+  - sql_config: { type: file, description: PostgreSQL INI config file with [postgres] section }
+output:
+  - date: { type: string, description: YYMMDD sequencing date (stdout) }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

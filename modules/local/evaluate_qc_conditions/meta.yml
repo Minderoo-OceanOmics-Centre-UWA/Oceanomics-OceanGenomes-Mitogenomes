@@ -1,0 +1,16 @@
+name: evaluate_qc_conditions
+description: Evaluate species validation and annotation stats to decide if a sample proceeds to QC.
+keywords: [qc, decision]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
+input:
+  - meta: { type: map, description: Sample metadata }
+  - blast_table: { type: file, description: LCA summary TSV }
+  - annotation_csv: { type: file, description: Annotation stats CSV }
+output:
+  - evaluation: { type: files, description: species_name.txt and proceed_qc.txt, pattern: "*.txt" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

@@ -1,26 +1,16 @@
 name: extract_genes_gff
-description: Extract mitochondrial genes (CDS + tRNA/rRNA) from FASTA + GFF into per-gene FASTAs and a concatenated multi-FASTA
-keywords: [mitochondria, gff, biopython, extraction]
-modules:
-- python
+description: Extract genes (including tRNAs) from a GFF annotation and FASTA.
+keywords: [gff, annotation, genes]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
 input:
-- meta:
-type: map
-description: Sample metadata map
-- fasta:
-type: file
-description: Genome FASTA
-- gff:
-type: file
-description: Matching GFF annotation
+  - meta: { type: map, description: Sample metadata }
+  - fasta: { type: file, description: Assembled mitochondrial genome FASTA }
+  - gff: { type: file, description: GFF annotation file }
 output:
-- genes_dir:
-type: directory
-description: Directory containing per-gene FASTAs and concatenated multi-FASTA
-- genes_fastas:
-type: file
-description: Gene FASTAs (*.fa) including <assembly>.genes.fa
-pattern: genes/*.fa
-authors:
-- "T"
-- "ChatGPT"
+  - genes_dir: { type: directory, description: Extracted genes directory, pattern: "genes" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

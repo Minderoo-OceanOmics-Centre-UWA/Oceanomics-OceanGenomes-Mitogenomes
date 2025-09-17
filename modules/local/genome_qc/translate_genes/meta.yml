@@ -1,23 +1,15 @@
 name: translate_genes
-description: Translate nucleotide FASTAs to amino acids using NCBI translation table (default 2, vertebrate mitochondrial)
-keywords: [translation, protein, biopython]
-modules:
-- python
+description: Translate coding sequences to protein sequences using a specified translation table.
+keywords: [translation, proteins, cds]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
 input:
-- meta:
-type: map
-description: Sample metadata map
-- genes_path:
-type: file/directory
-description: Either a directory with *.fa files or a single multi-FASTA
+  - meta: { type: map, description: Sample metadata }
+  - genes_dir: { type: directory, description: Directory containing extracted genes }
 output:
-- proteins_dir:
-type: directory
-description: Directory with translated protein FASTAs
-- protein_fastas:
-type: file
-description: Output protein FASTAs (*.protein.fa)
-pattern: proteins/*.fa
-authors:
-- "T"
-- "ChatGPT"
+  - proteins_dir: { type: directory, description: Translated protein FASTA files, pattern: "proteins" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

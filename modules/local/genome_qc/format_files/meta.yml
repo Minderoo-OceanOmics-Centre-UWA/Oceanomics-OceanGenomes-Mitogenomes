@@ -1,52 +1,20 @@
-name: "process_genbank_files"
-description: Process and clean GenBank submission files (FASTA, GFF, TBL, GB) with proper headers and feature names
-keywords:
-  - genbank
-  - fasta
-  - gff
-  - tbl
-  - gb
-  - mitochondrial
-  - genome
-  - annotation
+name: format_files
+description: Standardise annotation files for GenBank submission and create CMT file.
+keywords: [genbank, formatting, qc]
 tools:
-  - "python":
-      description: "Python programming language"
-      homepage: "https://www.python.org/"
-      documentation: "https://docs.python.org/"
-
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
 input:
-  - meta:
-      type: map
-      description: |
-        Groovy Map containing sample information including:
-        - id: Sample identifier
-        - og_id: Original sample ID (isolate)
-        - seqid: Sequence ID
-        - species: Species name
-        - assembly: Assembly identifier
-        e.g. [ id:'sample1', og_id:'OG123', seqid:'seq1', species:'Homo sapiens', assembly:'assembly1' ]
-  - input_files:
-      type: file
-      description: Input files to be processed (.fa, .fasta, .gff, .tbl, .gb)
-      pattern: "*.{fa,fasta,gff,tbl,gb}"
-
+  - meta: { type: map, description: Sample metadata }
+  - species_name: { type: string, description: Nominal species name }
+  - proceed_qc: { type: string, description: QC proceed flag (true/false) }
+  - input_files: { type: directory, description: Emma output directory staged as input }
 output:
-  - meta:
-      type: map
-      description: |
-        Groovy Map containing sample information
-        e.g. [ id:'sample1', og_id:'OG123', seqid:'seq1', species:'Homo sapiens', assembly:'assembly1' ]
-  - versions:
-      type: file
-      description: File containing software versions
-      pattern: "versions.yml"
-  - processed_files:
-      type: file
-      description: Processed and cleaned GenBank submission files
-      pattern: "processed/*"
+  - processed_files: { type: files, description: processed FASTA/TBL/CMT, pattern: "processed/*.{fa,fasta,tbl,cmt}" }
+  - gff: { type: files, description: processed FASTA and GFF, pattern: "processed/*.{fa,fasta},processed/*.gff" }
+  - gb: { type: files, description: processed FASTA and TBL/GB, pattern: "processed/*.{fa,fasta,gb,tbl}" }
+  - meta: { type: map, description: Passthrough metadata }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
 
-authors:
-  - "@your_username"
-maintainers:
-  - "@your_username"

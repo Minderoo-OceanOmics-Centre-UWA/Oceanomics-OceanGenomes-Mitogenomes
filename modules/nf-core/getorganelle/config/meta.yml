@@ -1,0 +1,12 @@
+name: getorganelle_config
+description: Fetch GetOrganelle configuration and databases for a specified organelle type.
+keywords: [getorganelle, config, database]
+tools:
+  - name: getorganelle
+    homepage: https://github.com/Kinggerm/GetOrganelle
+    licence: GPL-3.0
+input:
+  - organelle_type: { type: string, description: Target organelle (e.g., animal_mt) }
+output:
+  - db: { type: directory, description: GetOrganelle configuration directory, pattern: "getorganelle" }
+

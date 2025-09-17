@@ -1,0 +1,17 @@
+name: qc_summary
+description: Generate per-sample QC summary TSV combining species name, proceed flag, and key annotation stats.
+keywords: [multiqc, qc, summary]
+tools:
+  - name: bash
+    homepage: https://www.gnu.org/software/bash/
+    licence: GPL-3.0
+input:
+  - meta: { type: map, description: Sample metadata map }
+  - species_file: { type: file, description: species_name.txt from EVALUATE_QC_CONDITIONS }
+  - proceed_file: { type: file, description: proceed_qc.txt from EVALUATE_QC_CONDITIONS }
+  - annotation_stats_csv: { type: file, description: Annotation statistics CSV }
+output:
+  - table: { type: file, description: "<sample>.qc_summary.tsv", pattern: "*.qc_summary.tsv" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

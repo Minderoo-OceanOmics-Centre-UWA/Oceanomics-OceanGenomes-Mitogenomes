@@ -26,7 +26,6 @@ workflow MITOGENOME_ANNOTATION {
     take:
     mito_assembly //  tuple val(meta), path(fasta)
     curated_blast_db // params.curated_blast_db
-    sql_config // params.sql_config
     
     main:
 
@@ -46,15 +45,14 @@ workflow MITOGENOME_ANNOTATION {
     DOWNLOAD_TAXONKIT_DB(Channel.value("taxdump"))
     
     //
-    // Check if mt_assembly_prefix already exists in meta if this subworkflow is running after the mitogenome assmebly subworkflow.
-    // Otherwise extract the assembly name from the fasta file and embeds it into the meta map.
+    // Extract the assembly name from the fasta file and embeds it into the meta map.
+    // Overwrites mt_assembly_prefix if it already exists in meta to allow for any concatgenated sequences created in sanitse fasta module.
+    // The concatinated fasta is to allow for species validation from multiple contig/scaffold assemblies.
     //
 
     fasta_with_mt_assembly_prefix = mito_assembly
     .map { meta, fasta ->
-        def meta_ext = meta.containsKey('mt_assembly_prefix') 
-            ? meta 
-            : meta + [ mt_assembly_prefix: fasta.baseName ]
+        def meta_ext = meta + [ mt_assembly_prefix: fasta.baseName ]
         [meta_ext, fasta]
     }
     
@@ -132,19 +130,6 @@ workflow MITOGENOME_ANNOTATION {
 
 
     //
-    // Collate and save software versions
-    //
-
-    softwareVersionsToYAML(ch_versions)
-        .collectFile(
-            storeDir: "${params.outdir}/pipeline_info",
-            name: 'nf_core_'  +  'oceangenomes_draftgenomes_software_'  + 'mqc_'  + 'versions.yml',
-            sort: true,
-            newLine: true
-        ).set { ch_collated_versions }
-
-
-    //
     // Emit outputs
     //
 
@@ -153,5 +138,5 @@ workflow MITOGENOME_ANNOTATION {
     annotation_results      = EMMA.out.results
     blast_filtered_results  = BLAST_BLASTN.out.validation
     lca_results             = LCA.out.lca
-    versions                = ch_collated_versions              // channel: [ path(versions.yml) ]
+    versions                = ch_versions              // channel: [ path(versions.yml) ]
 }

@@ -25,4 +25,14 @@ process TRANSLATE_GENES {
         python: \$(python --version | sed 's/Python //')
     END_VERSIONS
     """
+
+    stub:
+    """
+    mkdir -p proteins
+    : > proteins/${meta.id ?: 'stub'}.faa
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: "stub"
+    END_VERSIONS
+    """
 }

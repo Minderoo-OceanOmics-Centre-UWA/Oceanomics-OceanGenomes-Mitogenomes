@@ -1,0 +1,17 @@
+name: download_blast_db
+description: Download and cache the NCBI BLAST taxonomy database (taxdb.btd/bti).
+keywords: [download, blast, taxonomy, database]
+tools:
+  - name: wget
+    homepage: https://www.gnu.org/software/wget/
+    licence: GPL-3.0
+  - name: tar
+    homepage: https://www.gnu.org/software/tar/
+    licence: GPL-3.0
+input:
+  - db_name: { type: string, description: Database identifier (e.g., 'taxdb') }
+output:
+  - db_files: { type: files, description: Downloaded BLAST taxonomy files, pattern: "taxdb.*" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

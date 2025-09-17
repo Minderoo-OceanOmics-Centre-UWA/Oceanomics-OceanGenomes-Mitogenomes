@@ -1,0 +1,2 @@
+# Dummy bs config for tests
+key=value

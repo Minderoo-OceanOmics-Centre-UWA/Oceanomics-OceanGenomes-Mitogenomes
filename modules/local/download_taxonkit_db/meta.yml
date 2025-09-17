@@ -1,0 +1,17 @@
+name: download_taxonkit_db
+description: Download and cache the NCBI taxonomy dump for TaxonKit.
+keywords: [download, taxonkit, taxonomy, database]
+tools:
+  - name: wget
+    homepage: https://www.gnu.org/software/wget/
+    licence: GPL-3.0
+  - name: tar
+    homepage: https://www.gnu.org/software/tar/
+    licence: GPL-3.0
+input:
+  - db_name: { type: string, description: Database identifier (e.g., 'taxdump') }
+output:
+  - db_files: { type: directory, description: Unpacked taxonomy dump directory, pattern: "taxonkit_dbs" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

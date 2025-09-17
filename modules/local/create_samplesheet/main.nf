@@ -1,5 +1,5 @@
 process CREATE_SAMPLESHEET {
-    tag "Creating samplesheet from ${input_path}"
+    tag "Creating samplesheet from ${input_files}"
     
     conda "conda-forge::python=3.9"
     
@@ -210,5 +210,15 @@ process CREATE_SAMPLESHEET {
     with open("versions.yml", "w") as f:
         f.write('"${task.process}":\\n')
         f.write('    python: "3.9"\\n')
+    """
+
+    stub:
+    """
+    # Create minimal outputs for stub-run
+    : > ${output_name}
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: "3.9"
+    END_VERSIONS
     """
 }

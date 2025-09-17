@@ -82,4 +82,15 @@ process SPECIES_QUERY {
         f.write('    python: "3.9"\\n')
         f.write('    psycopg2: "2.9.5"\\n')
     """
+
+    stub:
+    """
+    # Emit a placeholder species value to stdout for stub-run
+    echo -n "unknown"
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: "stub"
+        psycopg2: "stub"
+    END_VERSIONS
+    """
 }

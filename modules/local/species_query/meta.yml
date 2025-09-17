@@ -1,0 +1,18 @@
+name: species_query
+description: Query PostgreSQL database for nominal species for a given sample.
+keywords: [postgres, query, species]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
+  - name: psycopg2
+    homepage: https://www.psycopg.org/
+    licence: LGPL-3.0
+input:
+  - meta: { type: map, description: Sample metadata }
+  - sql_config: { type: file, description: PostgreSQL INI config file with [postgres] section }
+output:
+  - species: { type: string, description: Nominal species (stdout) }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+

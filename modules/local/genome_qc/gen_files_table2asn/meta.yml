@@ -1,0 +1,22 @@
+name: gen_files_table2asn
+description: Generate submission files and run NCBI table2asn for GenBank packaging.
+keywords: [genbank, table2asn, submission]
+tools:
+  - name: table2asn
+    homepage: https://www.ncbi.nlm.nih.gov/genbank/table2asn/
+    licence: Public-Domain
+input:
+  - meta: { type: map, description: Sample metadata }
+  - sample_fa: { type: file, description: Processed FASTA }
+  - sample_tbl: { type: file, description: Processed TBL/GB table }
+  - sample_cmt: { type: file, description: Comment file (.cmt) }
+  - sample_src: { type: file, description: Source modifiers file (.src) }
+  - sample_sbt: { type: file, description: Submission template (.sbt) }
+output:
+  - sqn_file: { type: files, description: Submission file, pattern: "*.sqn" }
+  - val_file: { type: files, description: Validation report, pattern: "*.val" }
+  - gbf_file: { type: files, description: GenBank flat file, pattern: "*.gbf" }
+  - dr_file: { type: files, description: Discrepancy report, pattern: "*.dr" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
+
