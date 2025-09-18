@@ -7,3 +7,6 @@ testing/
 testing*
 *.pyc
 null/
+
+blast_dbs/
+taxonkit_dbs/
