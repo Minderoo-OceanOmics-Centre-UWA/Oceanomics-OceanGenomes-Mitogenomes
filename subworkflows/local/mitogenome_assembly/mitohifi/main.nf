@@ -54,19 +54,32 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         SPECIES_QUERY.out.species
     )
 
+    // Split fastp_reads based on whether concatenation is needed
+    fastp_reads_split = fastp_reads.branch { meta, reads ->
+        def readList = reads instanceof List ? reads.collect { it.toString() } : [reads.toString()]
+        def needsConcatenation = meta.single_end ? readList.size > 1 : readList.size > 2
+        
+        needs_concat: needsConcatenation
+            return [meta, reads]
+        no_concat: !needsConcatenation
+            return [meta, reads]
+    }
     //
     // MODULE: Concatenate fastq reads where there are multiple fastq files
     //
 
     CAT_FASTQ (
-        fastp_reads
+        fastp_reads_split.needs_concat
     )
+
+    // Combine the results
+    final_reads = fastp_reads_split.no_concat.mix(CAT_FASTQ.out.reads)
 
     //
     // Combine fastp files with the mito reference output
     //
 
-    combined_ch = CAT_FASTQ.out.reads.join(MITOHIFI_FINDMITOREFERENCE.out.reference, by: 0)
+    combined_ch = final_reads.join(MITOHIFI_FINDMITOREFERENCE.out.reference, by: 0)
 
     //
     // Get the MitoHifi version to be used in the naming. Ensures the proper version is always used.
