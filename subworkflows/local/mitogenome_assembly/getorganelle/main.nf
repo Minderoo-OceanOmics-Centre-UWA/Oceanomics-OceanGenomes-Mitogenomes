@@ -38,14 +38,27 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         organelle_type // val(organelle_type)
     )
 
+    // Split fastp_reads based on whether concatenation is needed
+    fastp_reads_split = fastp_reads.branch { meta, reads ->
+        def readList = reads instanceof List ? reads.collect { it.toString() } : [reads.toString()]
+        def needsConcatenation = meta.single_end ? readList.size > 1 : readList.size > 2
+        
+        needs_concat: needsConcatenation
+            return [meta, reads]
+        no_concat: !needsConcatenation
+            return [meta, reads]
+    }
     //
     // MODULE: Concatenate fastq reads where there are multiple fastq R1 and R2 files
     //
 
     CAT_FASTQ (
-        fastp_reads
+        fastp_reads_split.needs_concat
     )
     
+    // Combine the results
+    final_reads = fastp_reads_split.no_concat.mix(CAT_FASTQ.out.reads)
+
     //
     // Get the GetOrganelle version to be used in the naming. Ensures the proper version is always used.
     //
@@ -62,7 +75,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // Embed the assembly prefix into meta.
     //
 
-    fastp_with_mt_assembly_prefix = CAT_FASTQ.out.reads.combine(version_ch)
+    fastp_with_mt_assembly_prefix = final_reads.combine(version_ch)
     .map { meta, fasta, version ->  // Destructure all 3 elements correctly
         def version_stripped = version.replaceAll('\\.', '')
         def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.getorg${version_stripped}"
