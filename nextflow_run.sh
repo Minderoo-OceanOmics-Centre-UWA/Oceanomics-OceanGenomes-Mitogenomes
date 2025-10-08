@@ -7,7 +7,7 @@ module load singularity/4.1.0-nompi
     -resume \
     -profile singularity \
     -with-report \
-    --input_dir "/scratch/pawsey0964/tpeirce/_NFCORE/test_dir/*.fastq.gz" \
+    --input_dir "/scratch/pawsey0964/$USER/_NFCORE/test_dir/*.fastq.gz" \
     --outdir "$(realpath ../_outdir)" \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \
@@ -17,7 +17,7 @@ module load singularity/4.1.0-nompi
     --bs_config ~/.basespace/default.cfg \
     --sql_config ~/postgresql_details/oceanomics.cfg \
     --binddir /scratch \
-    --tempdir /scratch/pawsey0964/tpeirce/tmp \
+    --tempdir /scratch/pawsey0964/$USER/tmp \
     --refresh-modules \
     --skip_mitogenome_assembly_getorg false \
     --skip_mitogenome_assembly_hifi false \
@@ -29,6 +29,6 @@ module load singularity/4.1.0-nompi
     
     
     # /scratch/pawsey0964/tpeirce/nextflow-24.10.5-dist -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core
-    # -work-dir /scratch/pawsey0964/tpeirce/_NFCORE/work_mito_codexupdated \. ### include work dir if you want to run this nf-core on multiple occasions and keep the work files separate.
+    # -work-dir /scratch/pawsey0964/$USER/_NFCORE/work_mito_codexupdated \. ### include work dir if you want to run this nf-core on multiple occasions and keep the work files separate.
     # --input assets/samplesheet.csv \  # include a samplesheet if you are not downloading sample.
     
