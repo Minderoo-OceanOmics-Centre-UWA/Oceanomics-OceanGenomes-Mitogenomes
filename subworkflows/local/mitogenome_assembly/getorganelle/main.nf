@@ -102,7 +102,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // Collect files
     //
 
-    ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_FROMREADS.out.etc.collect{it[1]})
+    // ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_FROMREADS.out.etc.collect{it[1]})
     ch_versions = ch_versions.mix(GETORGANELLE_CONFIG.out.versions.first())
     ch_versions = ch_versions.mix(GETORGANELLE_FROMREADS.out.versions.first())
     ch_versions = ch_versions.mix(CAT_FASTQ.out.versions.first())

@@ -132,15 +132,18 @@ workflow PREPARE_SAMPLESHEET {
             // Extract date from HiFi filename (use first file if multiple)
             // Example: OG111_m84154_241004_105305_s3.hifi_reads.bc2068.filt.fastq.gz
             // Date is in format YYMMDD after the second underscore
+            def cleaned_id = meta.id.replaceAll(/^(OG\d+).*/, '$1')
             def filename = reads[0].name
             def parts = filename.split('_')
             def date = parts.size() >= 3 ? parts[2] : 'unknown'
             
             // Create assembly prefix: ${sample}.${sequencing_type}.${date}
             def assembly_prefix = "${meta.id}.${meta.sequencing_type}.${date}"
-            
+
             // Enhanced meta map
             def enhanced_meta = meta + [
+                id: cleaned_id,           // Update the ID to cleaned version
+                original_id: meta.id,     // Keep original ID for reference
                 date: date,
                 assembly_prefix: assembly_prefix
             ]
