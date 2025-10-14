@@ -1,0 +1,114 @@
+name: "hifi_date_query"
+description: Query PostgreSQL database to retrieve sequencing run dates for HiFi samples
+keywords:
+  - database
+  - query
+  - hifi
+  - sequencing
+  - date
+  - postgresql
+tools:
+  - python:
+      description: Python programming language
+      homepage: https://www.python.org/
+      documentation: https://docs.python.org/3/
+      tool_dev_url: https://github.com/python/cpython
+      licence: ["Python Software Foundation License"]
+  - psycopg2:
+      description: PostgreSQL adapter for Python
+      homepage: https://psycopg.org/
+      documentation: https://psycopg.org/docs/
+      tool_dev_url: https://github.com/psycopg/psycopg2
+      licence: ["LGPL with exceptions"]
+
+input:
+  - meta:
+      type: map
+      description: |
+        Groovy Map containing sample information
+        e.g. [ id:'test', single_end:false ]
+  - sample_id:
+      type: string
+      description: Sample identifier (og_id) to query in the database
+  - completion_date:
+      type: string
+      description: |
+        Completion date extracted from filename in YYMMDD format
+        (e.g., "250311" for March 11, 2025). Used as upper bound for sequencing date search.
+        Can be "unknown" if date extraction failed.
+  - sql_config:
+      type: file
+      description: |
+        PostgreSQL configuration file containing database connection parameters
+        Must include [postgres] section with: dbname, user, password, host, port
+
+output:
+  - meta:
+      type: map
+      description: |
+        Groovy Map containing sample information
+        e.g. [ id:'test', single_end:false ]
+  - date:
+      type: string
+      description: |
+        Sequencing run date in YYMMDD format (e.g., "250310") retrieved from database.
+        Returns "unknown" if no matching record found or query fails.
+        Represents the most recent sequencing run date within the search window.
+  - versions:
+      type: file
+      description: File containing software versions
+      pattern: "versions.yml"
+
+authors:
+  - "@yourusername"
+maintainers:
+  - "@yourusername"
+
+requirements:
+  - postgresql_server: "Database server must be accessible and contain 'sequencing' table with 'og_id' and 'seq_date' columns"
+  - python_packages:
+    - psycopg2
+    - configparser
+    - pathlib
+    - datetime
+
+notes:
+  - |
+    This module queries a PostgreSQL database to find sequencing run dates based on sample IDs.
+    It searches for sequencing dates within a configurable window (default: 30 days) before the completion date.
+    The seq_date column in the database should be stored as text in YYMMDD format.
+  - |
+    Database schema requirements:
+    - Table: 'sequencing'  
+    - Columns: 'og_id' (text), 'seq_date' (text in YYMMDD format)
+  - |
+    Configuration file format:
+    [postgres]
+    dbname = your_database_name
+    user = your_username  
+    password = your_password
+    host = your_host
+    port = 5432
+
+database_schema:
+  table_name: sequencing
+  required_columns:
+    - og_id:
+        type: text
+        description: Original sample identifier
+    - seq_date:
+        type: text
+        description: Sequencing run date in YYMMDD format (e.g., "250310")
+
+search_logic:
+  - Converts completion_date from YYMMDD string to date object
+  - Calculates search window (completion_date - 30 days to completion_date)
+  - Converts search bounds back to YYMMDD format for database comparison
+  - Returns most recent seq_date within the search window
+  - Falls back to most recent seq_date for the og_id if date parsing fails
+
+error_handling:
+  - Returns "unknown" if database connection fails
+  - Returns "unknown" if no matching records found
+  - Falls back to simple og_id query if completion_date parsing fails
+  - Logs detailed error messages to stderr for debugging

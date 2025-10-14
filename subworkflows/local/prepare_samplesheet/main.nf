@@ -9,6 +9,7 @@
 */
 
 include { CREATE_SAMPLESHEET      } from '../../../modules/local/create_samplesheet'
+include { HIFI_DATE_QUERY          } from '../../../modules/local/hifi_date_query'
 include { HIC_DATE_QUERY          } from '../../../modules/local/hic_date_query'
 include { samplesheetToList         } from 'plugin/nf-schema'
 
@@ -136,14 +137,36 @@ workflow PREPARE_SAMPLESHEET {
             def filename = reads[0].name
             def parts = filename.split('_')
             def date = parts.size() >= 3 ? parts[2] : 'unknown'
-            
-            // Create assembly prefix: ${sample}.${sequencing_type}.${date}
-            def assembly_prefix = "${meta.id}.${meta.sequencing_type}.${date}"
 
             // Enhanced meta map
             def enhanced_meta = meta + [
                 id: cleaned_id,           // Update the ID to cleaned version
                 original_id: meta.id,     // Keep original ID for reference
+                completion_date: date,
+            ]
+            
+            [enhanced_meta, reads]
+        }
+    
+    // Query database to get hic sample sequencing date
+    ch_hifi_query_meta = ch_hifi_with_meta
+        .map { meta, _reads -> 
+            [meta.id, meta.completion_date, meta] 
+        }
+
+    HIFI_DATE_QUERY(
+        ch_hifi_query_meta,
+        params.sql_config
+    )
+
+    ch_hifi_with_files = ch_hifi_with_meta
+        .join(HIFI_DATE_QUERY.out.date, by: 0)
+        .map { meta, reads, date ->
+            // Create assembly prefix: ${cleaned_sample}.${sequencing_type}.${date}
+            def assembly_prefix = "${meta.id}.${meta.sequencing_type}.${date}"
+            
+            // Enhanced meta map with sequencing date
+            def enhanced_meta = meta + [
                 date: date,
                 assembly_prefix: assembly_prefix
             ]
@@ -224,7 +247,7 @@ workflow PREPARE_SAMPLESHEET {
     emit:
     samplesheet = samplesheet_ch
     getorg_input = ch_getorg
-    mitohifi_input = ch_hifi_with_meta
+    mitohifi_input = ch_hifi_with_files
 }
 
 /*

@@ -29,7 +29,7 @@ workflow MITOGENOME_QC {
     mitogenome_qc // tuple val(meta), val(species_name), val(proceed_qc true/false), path(emma/*)
     
     main:
-
+    
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
 

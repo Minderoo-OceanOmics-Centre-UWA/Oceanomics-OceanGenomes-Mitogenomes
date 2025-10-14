@@ -1,4 +1,6 @@
 process GEN_FILES_TABLE2ASN {
+    container 'docker://staphb/ncbi-table2asn:latest'
+
     tag "$meta.id"
     label 'process_medium'
     conda "bioconda::table2asn"

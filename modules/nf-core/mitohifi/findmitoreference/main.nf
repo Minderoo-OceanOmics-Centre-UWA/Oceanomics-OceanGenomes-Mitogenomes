@@ -1,6 +1,7 @@
 process MITOHIFI_FINDMITOREFERENCE {
     tag "${meta.id} $species"
     label 'process_single'
+    label 'error_retry'
 
     // Docker image available at the project github repository
     container 'ghcr.io/marcelauliano/mitohifi:master'

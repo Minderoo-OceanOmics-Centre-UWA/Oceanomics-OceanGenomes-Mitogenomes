@@ -7,8 +7,8 @@ module load singularity/4.1.0-nompi
     -resume \
     -profile singularity \
     -with-report \
-    --input_dir "/scratch/pawsey0964/$USER/_NFCORE/test_dir/*.fastq.gz" \
-    --outdir "$(realpath ../_outdir)" \
+    --input_dir "/scratch/pawsey0964/olivianguyen/Hic/OG*/*.fastq.gz" \
+    --outdir "$(realpath ../_hic_outdir)" \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \
     --curated_blast_db /scratch/pawsey0964/pbayer/OceanGenomes.CuratedNT.NBDLTranche1and2.CuratedBOLD.fasta \
@@ -24,8 +24,8 @@ module load singularity/4.1.0-nompi
     --skip_mitogenome_annotation false \
     --skip_upload_results false \
     --samplesheet_prefix "samplesheet" \
-    --template_sbt "/home/tpeirce/template.sbt" \
-    --translation_table "2"
+    --template_sbt "/scratch/pawsey0964/$USER/Oceanomics-OceanGenomes-Mitogenomes/bin/template.sbt" \
+    --translation_table "2" 
     
     
     # /scratch/pawsey0964/tpeirce/nextflow-24.10.5-dist -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core
