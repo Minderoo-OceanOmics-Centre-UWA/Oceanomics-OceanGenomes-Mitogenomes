@@ -1,13 +1,13 @@
-module load nextflow/24.10.0
+module load nextflow/25.04.6
 module load singularity/4.1.0-nompi
 
-/scratch/pawsey0964/tpeirce/nextflow-24.10.5-dist \
+nextflow \
     run main.nf \
     -c pawsey_profile.config \
     -resume \
     -profile singularity \
     -with-report \
-    --input_dir "/scratch/pawsey0964/olivianguyen/Hic/OG*/*.fastq.gz" \
+    --input_dir "/scratch/pawsey0964/tpeirce/_NFCORE/OG1288/*.fastq.gz" \
     --outdir "$(realpath ../_hic_outdir)" \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \

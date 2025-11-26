@@ -62,23 +62,23 @@ workflow OCEANGENOMESMITOGENOMES {
     // SUBWORKFLOW: MITOGENOME_ASSEMBLY_GETORG
     //
 
-    if (!params.skip_mitogenome_assembly) {
+    if (!params.skip_mitogenome_assembly_getorg) {
         MITOGENOME_ASSEMBLY_GETORG (
             getorg_input,
             organelle_type // params.organelle_type
         )
         ch_mitogenome_getorg_assembly_fasta = MITOGENOME_ASSEMBLY_GETORG.out.assembly_fasta
         ch_mitogenome_getorg_assembly_log = MITOGENOME_ASSEMBLY_GETORG.out.assembly_log
-    } else if (params.precomputed_mitogenome_assembly_results) {
+    } else if (params.precomputed_mitogenome_assembly_fasta_getorg) {
         // Use precomputed results if analysis is skipped
-        ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta, checkIfExists: true)
+        ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: true)
         .map { file ->
             // Extract sample_id from the filename (without extension)
             def filename = file.baseName  // Gets filename without .fasta extension
             def parts = filename.split('\\.')
             def meta_id = parts[0]
             def date = parts.length > 2 ? parts[2] : null
-            def sample_id = parts.length > 2 ? parts[0..2].join('.') : filename
+            def sample_id = parts.length > 2 ? parts[0..3].join('.') : filename
             
             def meta = [
                 id: meta_id,
@@ -88,14 +88,14 @@ workflow OCEANGENOMESMITOGENOMES {
             ]
             return tuple(meta, file)
         }
-        ch_mitogenome_getorg_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log, checkIfExists: true)
+        ch_mitogenome_getorg_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_getorg, checkIfExists: true)
         .map { file ->
             // Extract sample_id from the filename (without extension)
             def filename = file.baseName  // Gets filename without extension
             def parts = filename.split('\\.')
             def meta_id = parts[0]
             def date = parts.length > 2 ? parts[2] : null
-            def sample_id = parts.length > 2 ? parts[0..2].join('.') : filename
+            def sample_id = parts.length > 2 ? parts[0..3].join('.') : filename
             
             def meta = [
                 id: meta_id,
@@ -115,22 +115,22 @@ workflow OCEANGENOMESMITOGENOMES {
     // SUBWORKFLOW: MITOGENOME_ASSEMBLY_MITOHIFI
     //
 
-    if (!params.skip_mitogenome_assembly) {
+    if (!params.skip_mitogenome_assembly_hifi) {
         MITOGENOME_ASSEMBLY_MITOHIFI (
             mitohifi_input,
         )
         ch_mitogenome_hifi_assembly_fasta = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_fasta
         ch_mitogenome_hifi_assembly_log = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_log
-    } else if (params.precomputed_mitogenome_assembly_results) {
+    } else if (params.precomputed_mitogenome_assembly_fasta_hifi) {
         // Use precomputed results if analysis is skipped
-        ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta, checkIfExists: true)
+        ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_hifi, checkIfExists: true)
         .map { file ->
             // Extract sample_id from the filename (without extension)
             def filename = file.baseName  // Gets filename without .fasta extension
             def parts = filename.split('\\.')
             def meta_id = parts[0]
             def date = parts.length > 2 ? parts[2] : null
-            def sample_id = parts.length > 2 ? parts[0..2].join('.') : filename
+            def sample_id = parts.length > 2 ? parts[0..3].join('.') : filename
             
             def meta = [
                 id: meta_id,
@@ -140,14 +140,14 @@ workflow OCEANGENOMESMITOGENOMES {
             ]
             return tuple(meta, file)
         }
-        ch_mitogenome_hifi_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log, checkIfExists: true)
+        ch_mitogenome_hifi_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_hifi, checkIfExists: true)
         .map { file ->
             // Extract sample_id from the filename (without extension)
             def filename = file.baseName  // Gets filename without extension
             def parts = filename.split('\\.')
             def meta_id = parts[0]
             def date = parts.length > 2 ? parts[2] : null
-            def sample_id = parts.length > 2 ? parts[0..2].join('.') : filename
+            def sample_id = parts.length > 2 ? parts[0..3].join('.') : filename
             
             def meta = [
                 id: meta_id,
@@ -237,8 +237,8 @@ workflow OCEANGENOMESMITOGENOMES {
     // Collect all MultiQC files from all subworkflows
     //
 
-    if (!params.skip_mitogenome_assembly) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_GETORG.out.multiqc_files)}
-    if (!params.skip_mitogenome_assembly) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_MITOHIFI.out.multiqc_files)}
+    if (!params.skip_mitogenome_assembly_getorg) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_GETORG.out.multiqc_files)}
+    if (!params.skip_mitogenome_assembly_hifi) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_MITOHIFI.out.multiqc_files)}
     if (!params.skip_mitogenome_annotation) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ANNOTATION.out.multiqc_files)}
     if (!params.skip_upload_results) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS.out.multiqc_files)}
     if (!params.skip_upload_results) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)}
@@ -247,9 +247,13 @@ workflow OCEANGENOMESMITOGENOMES {
     // Collect all versions from subworkflows
     //
 
-    if (!params.skip_mitogenome_assembly) {
+    if (!params.skip_mitogenome_assembly_getorg) {
         ch_versions = ch_versions.mix(
             MITOGENOME_ASSEMBLY_GETORG.out.versions,
+        )
+    }
+    if (!params.skip_mitogenome_assembly_hifi) {
+        ch_versions = ch_versions.mix(
             MITOGENOME_ASSEMBLY_MITOHIFI.out.versions
         )
     }
