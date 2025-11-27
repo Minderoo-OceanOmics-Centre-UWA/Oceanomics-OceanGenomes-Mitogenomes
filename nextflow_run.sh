@@ -11,7 +11,7 @@ nextflow \
     --outdir "$(realpath ../_hic_outdir)" \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \
-    --curated_blast_db /scratch/pawsey0964/pbayer/OceanGenomes.CuratedNT.NBDLTranche1and2.CuratedBOLD.fasta \
+    --curated_blast_db /software/projects/pawsey0964/curated_db/OceanGenomes.CuratedNT.NBDLTranche1and2and3.CuratedBOLD.NoDuplicate.fasta \
     --organelle_type "animal_mt" \
     --kvalue "21" \
     --bs_config ~/.basespace/default.cfg \
@@ -28,7 +28,7 @@ nextflow \
     --translation_table "2" 
     
     
-    # /scratch/pawsey0964/tpeirce/nextflow-24.10.5-dist -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core
-    # -work-dir /scratch/pawsey0964/$USER/_NFCORE/work_mito_codexupdated \. ### include work dir if you want to run this nf-core on multiple occasions and keep the work files separate.
+    # nextflow -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core
+    # -work-dir /scratch/pawsey0964/$USER/directory \. ### include work dir if you want to run this nf-core on multiple occasions and keep the work files separate.
     # --input assets/samplesheet.csv \  # include a samplesheet if you are not downloading sample.
     
