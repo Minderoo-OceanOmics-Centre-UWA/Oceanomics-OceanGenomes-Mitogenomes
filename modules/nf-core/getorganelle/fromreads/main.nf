@@ -13,10 +13,10 @@ process GETORGANELLE_FROMREADS {
     output:
     tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}.fasta")            , emit: fasta
     tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}.get_org.log.txt")  , emit: log
-    path("*.selected_graph.gfa")                                               , emit: org_assm_graph // the organelle-only assembly graph")
-    path("*extended_K*.assembly_graph.fastg")                                  , emit: raw_assm_graph // the raw assembly graph
-    path("*extended_K*.assembly_graph.fastg.extend_animal_mt.fastg")  , emit: simp_assm_graph // a simplified assembly graph
-    path("*extended_K*.assembly_graph.fastg.extend_animal_mt.csv")    , emit: contig_label // a tab-format contig label file for bandage visualization
+    path("mtdna/*.selected_graph.gfa")                                               , emit: org_assm_graph // the organelle-only assembly graph")
+    path("mtdna/*extended_K*.assembly_graph.fastg")                                  , emit: raw_assm_graph // the raw assembly graph
+    path("mtdna/*extended_K*.assembly_graph.fastg.extend_animal_mt.fastg")  , emit: simp_assm_graph // a simplified assembly graph
+    path("mtdna/*extended_K*.assembly_graph.fastg.extend_animal_mt.csv")    , emit: contig_label // a tab-format contig label file for bandage visualization
     // path("mtdna/*")                                                         , emit: etc // have only included the files we want above, uncomment if you want everything
     path "versions.yml"                                                     , emit: versions
 
