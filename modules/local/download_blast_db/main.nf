@@ -8,6 +8,7 @@ process DOWNLOAD_BLAST_DB {
     
     output:
     path "${db_name}*", emit: db_files
+    path "taxonomy4blast.sqlite3", emit: taxdb_file
     
     script:
     db_path = params.blast_db_dir
