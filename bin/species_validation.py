@@ -4,6 +4,8 @@ import csv
 import configparser
 import sys
 
+SPECIES_IN_LCA_COLUMN = "species_in_LCA"   # <--- NEW
+
 def load_db_config(config_file):
     config = configparser.ConfigParser()
     config.read(config_file)
@@ -21,6 +23,26 @@ def concatenate_files(file_list, output_file):
         for filename in file_list:
             with open(filename, 'r') as infile:
                 outfile.writelines(infile)
+
+def concatenate_lca_files(file_list, output_file):
+    """
+    Concatenate LCA files that each have a header line.
+    Writes the header only once (from the first file).
+    """
+    first_file = True
+    with open(output_file, 'w') as outfile:
+        for filename in file_list:
+            with open(filename, 'r') as infile:
+                for line_num, line in enumerate(infile):
+                    # Always write the header from the first file
+                    if first_file:
+                        outfile.write(line)
+                    else:
+                        # Skip header line for subsequent files
+                        if line_num == 0:
+                            continue
+                        outfile.write(line)
+            first_file = False
 
 def normalise_name(name):
     return name.strip().lower().replace('_', ' ')
@@ -42,13 +64,15 @@ def get_species_for_ogid(db_params, og_id):
 
 def load_blast_species_set(filepath):
     with open(filepath, 'r') as f:
+        # We keep this as a big lowercased blob and search for the
+        # normalised DB species name in it later.
         return f.read().lower()
 
 def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_file):
     db_params = load_db_config(config_path)
 
     # Combine files
-    concatenate_files(lca_files, f"lca_combined.{og_id}.tsv")
+    concatenate_lca_files(lca_files, f"lca_combined.{og_id}.tsv")
     concatenate_files(blast_files, f"blast_combined.{og_id}.tsv")
 
     # Get nominal_species_id from DB
@@ -65,17 +89,36 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
 
     # Process LCA and compare
     with open(f"lca_combined.{og_id}.tsv", newline='') as tsvfile, open(output_file, "w", newline='') as out:
-        reader = csv.reader(tsvfile, delimiter='\t')
+        # Use DictReader so we can refer to columns by name
+        reader = csv.DictReader(tsvfile, delimiter='\t')
         writer = csv.writer(out, delimiter='\t')
         writer.writerow(["og_id", "LCA_result", "nom_species_id", "Match_YN", "Found_in_blast_YN"])
 
         for row in reader:
-            if len(row) < 3:
+            if not row:
                 continue
-            lca = row[2].strip()
-            match = "Yes" if normalise_name(lca) == db_species_norm else "No"
+
+            # Get the comma-separated species list from the LCA file
+            species_in_lca_raw = row.get(SPECIES_IN_LCA_COLUMN)
+            if not species_in_lca_raw:
+                # If the column isn't present or is empty, skip this row
+                continue
+
+            # Split on commas and normalise each species name
+            species_list_norm = [
+                normalise_name(s)
+                for s in species_in_lca_raw.split(',')
+                if s.strip()
+            ]
+
+            # Check if DB nominal species is among the LCA species list
+            match = "Yes" if db_species_norm in species_list_norm else "No"
+
+            # Check if nominal species appears in BLAST output (as before)
             in_blast = "Yes" if db_species_norm in blast_blob else "No"
-            writer.writerow([og_id, lca, db_species, match, in_blast])
+
+            # LCA_result column: store the raw species_in_LCA string
+            writer.writerow([og_id, species_in_lca_raw, db_species, match, in_blast])
 
     print(f"[INFO] Results written to: {output_file}")
 

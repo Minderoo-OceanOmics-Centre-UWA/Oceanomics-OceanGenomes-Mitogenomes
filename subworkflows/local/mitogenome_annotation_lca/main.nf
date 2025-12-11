@@ -38,6 +38,8 @@ workflow MITOGENOME_ANNOTATION {
 
     DOWNLOAD_BLAST_DB(Channel.value("taxdb"))
     
+    ch_blast_db = DOWNLOAD_BLAST_DB.out.db_files
+
     // 
     // MODULE: Download taxonkit database
     //
@@ -101,18 +103,20 @@ workflow MITOGENOME_ANNOTATION {
     BLAST_BLASTN (
         combined_sequences, // tuple val(meta), path(fasta), val(gene_type), val(annotation_name)
         curated_blast_db, // params.curated_blast_db
-        DOWNLOAD_BLAST_DB.out.db_files // path(db)
+        ch_blast_db // path(db)
     )
 
 
     //
     // MODULE: Calculate the Lowest Common Ancestor (LCA) from the filtered BLAST results
     //
+    ch_worms = channel.fromPath("https://raw.githubusercontent.com/Minderoo-OceanOmics-Centre-UWA/LCA_With_Fishbase/main/data/worms_species.txt.gz")
 
     LCA (
         BLAST_BLASTN.out.filtered,
+        ch_worms.first()
         // valid_blast_results, // tuple val(meta), path(blast_filtered), val(gene_type), val(annotation_name)
-        DOWNLOAD_TAXONKIT_DB.out.db_files // path(db)
+        // DOWNLOAD_TAXONKIT_DB.out.db_files // path(db)
     )
 
 

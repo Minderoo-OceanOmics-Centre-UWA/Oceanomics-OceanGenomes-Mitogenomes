@@ -135,19 +135,25 @@ def process_blast(blast_file, sample, db_params):
 
 
 lca_column_headers = [
-    "query_id", "taxonomy", "lca", "percent_match",
-    "length", "lca_run_date", "region"
+    "seq_id", "species_in_LCA", "numberOfUnq_BlastHits", "domain",
+    "phylum", "class", "order", "family", "genus", "specificEpithet",
+    "scientificName", "scientificNameAuthorship", "taxonRank", "top_taxonID",
+    "taxonID_db", "top_verbatimIdentification", "top_accession_id", "accession_id_ref_db",
+    "top_percent_match", "top_percent_query_cover", "top_percent_query_cover_hsp", "alignment_length",
+    "subject_length", "sequence_length", "top_confidence_score", "sequence_region", "lca_run_date",
+    "dna_sequence", "identificationRemarks"
 ]
 
 def process_lca(lca_file, sample, db_params):
     print(f"📂 Reading LCA file: {lca_file}")
-    df = pd.read_csv(lca_file, sep='\t', header=None, names=lca_column_headers).replace({np.nan: None})
+    # df = pd.read_csv(lca_file, sep='\t', header=True, names=lca_column_headers).replace({np.nan: None})
+    df = pd.read_csv(lca_file, sep='\t', header=0).replace({np.nan: None})
 
-    if 'query_id' not in df.columns:
-        print("❌ Missing 'query_id' in LCA file")
+    if 'seq_id' not in df.columns:
+        print("❌ Missing 'seq_id' in LCA file")
         return
 
-    df[['og_id', 'tech', 'seq_date', 'code', 'annotation']] = df['query_id'].str.split('.', expand=True)
+    df[['og_id', 'tech', 'seq_date', 'code', 'annotation']] = df['seq_id'].str.split('.', expand=True)
     success, failure = 0, 0
     
     with psycopg2.connect(**db_params) as conn:
@@ -156,50 +162,141 @@ def process_lca(lca_file, sample, db_params):
             row_dict = row.to_dict()
             upsert_query = """
             INSERT INTO lca (
-                og_id, tech, seq_date, code, annotation, taxonomy, lca, percent_match,
-                length, lca_run_date, region
+                og_id,
+                tech,
+                seq_date,
+                code,
+                annotation,
+                region,
+                lca_run_date,
+                species_in_lca,
+                number_unq_blast_hits,
+                domain,
+                phylum,
+                class,
+                "order",
+                family,
+                genus,
+                specific_epiphet,
+                species,
+                scientific_name_authorship,
+                taxon_rank,
+                top_taxon_id,
+                taxon_id_db,
+                top_accession_id,
+                accession_id_ref_db,
+                top_percent_match,
+                top_percent_query_cover,
+                top_percent_query_cover_hsp,
+                alignment_length,
+                subject_length,
+                sequence_length,
+                top_confidence_score
             )
             VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s, %(taxonomy)s, %(lca)s,
-                %(percent_match)s, %(length)s, %(lca_run_date)s, %(region)s
+                %(og_id)s,
+                %(tech)s,
+                %(seq_date)s,
+                %(code)s,
+                %(annotation)s,
+                %(region)s,
+                %(lca_run_date)s,
+                %(species_in_lca)s,
+                %(number_unq_blast_hits)s,
+                %(domain)s,
+                %(phylum)s,
+                %(class)s,
+                %(order)s,
+                %(family)s,
+                %(genus)s,
+                %(specific_epiphet)s,
+                %(species)s,
+                %(scientific_name_authorship)s,
+                %(taxon_rank)s,
+                %(top_taxon_id)s,
+                %(taxon_id_db)s,
+                %(top_accession_id)s,
+                %(accession_id_ref_db)s,
+                %(top_percent_match)s,
+                %(top_percent_query_cover)s,
+                %(top_percent_query_cover_hsp)s,
+                %(alignment_length)s,
+                %(subject_length)s,
+                %(sequence_length)s,
+                %(top_confidence_score)s
             )
             ON CONFLICT (og_id, tech, seq_date, code, annotation, region, lca_run_date)
             DO UPDATE SET
-                taxonomy = EXCLUDED.taxonomy,
-                lca = EXCLUDED.lca,
-                percent_match = EXCLUDED.percent_match,
-                length = EXCLUDED.length,
-                lca_run_date = EXCLUDED.lca_run_date;
+                species_in_lca          = EXCLUDED.species_in_lca,
+                number_unq_blast_hits = EXCLUDED.number_unq_blast_hits,
+                domain                     = EXCLUDED.domain,
+                phylum                     = EXCLUDED.phylum,
+                class                      = EXCLUDED.class,
+                "order"                    = EXCLUDED."order",
+                family                     = EXCLUDED.family,
+                genus                      = EXCLUDED.genus,
+                specific_epiphet           = EXCLUDED.specific_epiphet,
+                species                    = EXCLUDED.species,
+                scientific_name_authorship = EXCLUDED.scientific_name_authorship,
+                taxon_rank                 = EXCLUDED.taxon_rank,
+                top_taxon_id                   = EXCLUDED.top_taxon_id,
+                taxon_id_db                = EXCLUDED.taxon_id_db,
+                top_accession_id               = EXCLUDED.top_accession_id,
+                accession_id_ref_db        = EXCLUDED.accession_id_ref_db,
+                top_percent_match              = EXCLUDED.top_percent_match,
+                top_percent_query_cover        = EXCLUDED.top_percent_query_cover,
+                top_percent_query_cover_hsp    = EXCLUDED.top_percent_query_cover_hsp,
+                alignment_length           = EXCLUDED.alignment_length,
+                subject_length             = EXCLUDED.subject_length,
+                sequence_length            = EXCLUDED.sequence_length,
+                top_confidence_score           = EXCLUDED.top_confidence_score;
             """
-            
+
+            # params: 1:1 mapping between placeholders and df column names
             params = {
-                "og_id": row_dict["og_id"],
-                "tech": row_dict["tech"],
-                "seq_date": row_dict["seq_date"],
-                "code": row_dict["code"],
-                "annotation": row_dict["annotation"],
-                "taxonomy": row_dict.get("taxonomy"),
-                "lca": row_dict.get("lca"),
-                "percent_match": row_dict.get("percent_match"),
-                "length": row_dict.get("length"),
+                "og_id": row_dict.get("og_id"),
+                "tech": row_dict.get("tech"),
+                "seq_date": row_dict.get("seq_date"),
+                "code": row_dict.get("code"),
+                "annotation": row_dict.get("annotation"),
+                "region": row_dict.get("sequence_region"),
                 "lca_run_date": row_dict.get("lca_run_date"),
-                "region": row_dict["region"]
+
+                "species_in_lca": row_dict.get("species_in_LCA"),
+                "number_unq_blast_hits": row_dict.get("numberOfUnq_BlastHits"),
+                "domain": row_dict.get("domain"),
+                "phylum": row_dict.get("phylum"),
+                "class": row_dict.get("class"),
+                "order": row_dict.get("order"),
+                "family": row_dict.get("family"),
+                "genus": row_dict.get("genus"),
+
+                "specific_epiphet": row_dict.get("specificEpithet"),
+                "species": row_dict.get("scientificName"),
+                "scientific_name_authorship": row_dict.get("scientificNameAuthorship"),
+                "taxon_rank": row_dict.get("taxonRank"),
+
+                "top_taxon_id": row_dict.get("top_taxonID"),
+                "taxon_id_db": row_dict.get("taxonID_db"),
+                "top_accession_id": row_dict.get("top_accession_id"),
+                "accession_id_ref_db": row_dict.get("accession_id_ref_db"),
+                "top_percent_match": row_dict.get("top_percent_match"),
+                "top_percent_query_cover": row_dict.get("top_percent_query_cover"),
+                "top_percent_query_cover_hsp": row_dict.get("top_percent_query_cover_hsp"),
+
+                "alignment_length": row_dict.get("alignment_length"),
+                "subject_length": row_dict.get("subject_length"),
+                "sequence_length": row_dict.get("sequence_length"),
+                "top_confidence_score": row_dict.get("top_confidence_score"),
             }
 
-            check = """
-            SELECT * FROM mitogenome_data
-                WHERE og_id = 'OG0'
-                AND tech = 'ilmn'
-                AND seq_date = '00'
-                AND code = 'getorg1770';
-            """
             try:
                 cursor.execute(upsert_query, params)
                 success += 1
             except Exception as e:
                 failure += 1
-                print(f"❌ LCA row failed ({row_dict.get('query_id')}): {e}")
-    
+                print(f"❌ LCA row failed ({row_dict.get('seq_id')}): {e}")
+
     print(f"✅ LCA upload complete: {success} rows succeeded, {failure} failed")
 
 if __name__ == "__main__":

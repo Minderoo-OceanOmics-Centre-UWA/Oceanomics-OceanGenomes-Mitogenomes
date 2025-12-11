@@ -32,15 +32,12 @@ workflow PREPARE_SAMPLESHEET {
     if (input && input_dir) {
         error "Please specify either --input (samplesheet) OR --input_dir (directory), not both"
     }
-    
-    if (input && input_dir) {
-        error "Please specify either --input (samplesheet) or --input_dir (directory)"
-    }
-    
-    if (input_dir) {
+        
+    else if (input_dir) {
         // Resolve the glob pattern to actual files
         input_files_ch = Channel.fromPath(input_dir, checkIfExists: true)
             .collect()
+
 
         // Create samplesheet from directory
         CREATE_SAMPLESHEET(
@@ -49,58 +46,38 @@ workflow PREPARE_SAMPLESHEET {
         )
 
         samplesheet_ch = CREATE_SAMPLESHEET.out.samplesheet
+    }
+    else if (input) {
+        samplesheet_ch = Channel.fromPath(input, checkIfExists: true)
+    }
+    else {
+        error "No input provided: specify --input or --input_dir or provide reads downstream"
+    }
+
+    // Parse samplesheet into channel of [meta, fastq_files]
+    def ch_samplesheet = samplesheet_ch
             .map { samplesheet_file ->
                 samplesheetToList(samplesheet_file, "${projectDir}/assets/schema_input.json")
             }
             .flatMap { sample_list ->
                 // Convert each sample record to the expected format
                 sample_list.collect { sample_record ->
-                    def meta = sample_record[0]
+                    // sample_record[0] is a meta map like [id:OG1341] so we want to destructure the map.
+                    def raw_meta  = sample_record[0]
+                    def sample_id = (raw_meta instanceof Map) ? raw_meta.id : raw_meta
+                    
+                    def meta = [
+                        id              : sample_id,
+                        sequencing_type : sample_record[3]
+                    ]
                     def fastq_1 = sample_record[1]
                     def fastq_2 = sample_record[2]
-                    def sequencing_type = sample_record[3]
-                    
-                    // Add sequencing_type to meta
-                    def enhanced_meta = meta + [sequencing_type: sequencing_type]
-                    
-                    if (!fastq_2 || fastq_2.toString() == '[]') {
-                        return [ enhanced_meta.id, enhanced_meta + [ single_end:true ], [ fastq_1 ] ]
-                    } else {
-                        return [ enhanced_meta.id, enhanced_meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
-                    }
-                }
-            }
-            .groupTuple()
-            .map { samplesheet ->
-                return validateInputSamplesheet(samplesheet)
-            }
-            .map {
-                meta, fastqs ->
-                    return [ meta, fastqs.flatten() ]
-            }
 
-    } else {
-        samplesheet_ch = Channel
-            .fromList(samplesheetToList(params.input, "${projectDir}/assets/schema_input.json"))
-            .map { item ->
-                println "DEBUG ELSE 1: Item = ${item}"
-                return item
-            }
-             .flatMap { sample_list ->
-                // Convert each sample record to the expected format
-                sample_list.collect { sample_record ->
-                    def meta = sample_record[0]
-                    def fastq_1 = sample_record[1]
-                    def fastq_2 = sample_record[2]
-                    def sequencing_type = sample_record[3]
-                    
-                    // Add sequencing_type to meta
-                    def enhanced_meta = meta + [sequencing_type: sequencing_type]
                     
                     if (!fastq_2 || fastq_2.toString() == '[]') {
-                        return [ enhanced_meta.id, enhanced_meta + [ single_end:true ], [ fastq_1 ] ]
+                        return [ meta.id, meta + [ single_end:true ], [ fastq_1 ] ]
                     } else {
-                        return [ enhanced_meta.id, enhanced_meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
+                        return [ meta.id, meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
                     }
                 }
             }
@@ -112,13 +89,13 @@ workflow PREPARE_SAMPLESHEET {
                 meta, fastqs ->
                     return [ meta, fastqs.flatten() ]
             }
-    }
+            .view()
 
     // DEBUG
-    samplesheet_ch.view { meta, _reads -> "Sample: ${meta.id}, Type: ${meta.sequencing_type}, Meta: ${meta}" }
+    ch_samplesheet.view { meta, _reads -> "Sample: ${meta.id}, Type: ${meta.sequencing_type}, Meta: ${meta}" }
     
     // Branch by sequencing type
-    samplesheet_ch.branch { meta, reads ->
+    ch_samplesheet.branch { meta, reads ->
         hifi: meta.sequencing_type == 'hifi'
             return [meta, reads]
         ilmn: meta.sequencing_type == 'ilmn'
