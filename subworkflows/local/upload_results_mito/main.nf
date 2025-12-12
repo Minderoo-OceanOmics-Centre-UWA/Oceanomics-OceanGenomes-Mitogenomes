@@ -56,7 +56,7 @@ workflow UPLOAD_RESULTS {
     //
 
     grouped_lca = lca_results
-        .groupTuple(by: 0, size: 3)
+        .groupTuple(by: 0)
         .map { tuple ->
             def meta = tuple[0]
             def files = tuple[1..-1].flatten()
@@ -64,7 +64,7 @@ workflow UPLOAD_RESULTS {
         }
 
     grouped_blast = blast_filtered_results
-        .groupTuple(by: 0, size: 3)
+        .groupTuple(by: 0)
         .map { tuple ->
             def meta = tuple[0]
             def files = tuple[1..-1].flatten()
