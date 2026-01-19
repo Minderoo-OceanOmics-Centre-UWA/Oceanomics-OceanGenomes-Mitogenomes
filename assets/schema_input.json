@@ -43,6 +43,45 @@
                 "enum": ["hic", "hifi", "ilmn"],
                 "errorMessage": "Sequencing type must be one of: hic, hifi, or ilmn",
                 "description": "Type of sequencing technology used: hic (Hi-C), hifi (PacBio HiFi), or ilmn (Illumina)"
+            },
+            "single_end": {
+                "anyOf": [
+                    { "type": "boolean" },
+                    { "type": "string" }
+                ],
+                "meta": ["single_end"],
+                "description": "Whether the sample is single-end (true) or paired-end (false)"
+            },
+            "original_id": {
+                "type": "string",
+                "meta": ["original_id"],
+                "description": "Original sample identifier before any cleaning or normalization"
+            },
+            "completion_date": {
+                "anyOf": [
+                    { "type": "integer" },
+                    { "type": "string" }
+                ],
+                "meta": ["completion_date"],
+                "description": "HiFi completion date parsed from filename (YYMMDD)"
+            },
+            "date": {
+                "anyOf": [
+                    { "type": "integer" },
+                    { "type": "string" }
+                ],
+                "meta": ["date"],
+                "description": "Sequencing date derived from filename or database (YYMMDD)"
+            },
+            "assembly_prefix": {
+                "type": "string",
+                "meta": ["assembly_prefix"],
+                "description": "Assembly prefix derived from sample id, sequencing type, and date"
+            },
+            "nominal_species_id": {
+                "type": "string",
+                "meta": ["nominal_species_id"],
+                "description": "Nominal species identifier from the sample table"
             }
         },
         "required": ["sample", "fastq_1", "sequencing_type"]

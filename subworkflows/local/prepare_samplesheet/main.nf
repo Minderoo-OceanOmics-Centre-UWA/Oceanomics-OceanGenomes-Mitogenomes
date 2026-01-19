@@ -8,9 +8,7 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-include { CREATE_SAMPLESHEET      } from '../../../modules/local/create_samplesheet'
-include { HIFI_DATE_QUERY          } from '../../../modules/local/hifi_date_query'
-include { HIC_DATE_QUERY          } from '../../../modules/local/hic_date_query'
+include { CREATE_SAMPLESHEET_ENRICHED } from '../../../modules/local/create_samplesheet_enriched'
 include { samplesheetToList         } from 'plugin/nf-schema'
 
 /*
@@ -24,7 +22,7 @@ workflow PREPARE_SAMPLESHEET {
     take:
     input               //  string: Path to input samplesheet
     input_dir           //  string: Path to input samplesheet
-    samplesheet_prefix  // 
+    samplesheet_name 
     
     main:
 
@@ -39,13 +37,14 @@ workflow PREPARE_SAMPLESHEET {
             .collect()
 
 
-        // Create samplesheet from directory
-        CREATE_SAMPLESHEET(
+        // Create enriched samplesheet from directory
+        CREATE_SAMPLESHEET_ENRICHED(
             input_files_ch,
-            "${samplesheet_prefix}.csv"
+            "samplesheet.csv",
+            params.sql_config
         )
 
-        samplesheet_ch = CREATE_SAMPLESHEET.out.samplesheet
+        samplesheet_ch = CREATE_SAMPLESHEET_ENRICHED.out.samplesheet
     }
     else if (input) {
         samplesheet_ch = Channel.fromPath(input, checkIfExists: true)
@@ -66,19 +65,28 @@ workflow PREPARE_SAMPLESHEET {
                     def raw_meta  = sample_record[0]
                     def sample_id = (raw_meta instanceof Map) ? raw_meta.id : raw_meta
                     
-                    def meta = [
-                        id              : sample_id,
-                        sequencing_type : sample_record[3]
-                    ]
+                    def meta = (raw_meta instanceof Map) ? raw_meta : [ id: raw_meta ]
+                    meta = meta + [ sequencing_type: sample_record[3] ]
                     def fastq_1 = sample_record[1]
                     def fastq_2 = sample_record[2]
+                    def single_end = (!fastq_2 || fastq_2.toString() == '[]')
+                    def meta_single_end = meta.single_end
 
-                    
-                    if (!fastq_2 || fastq_2.toString() == '[]') {
-                        return [ meta.id, meta + [ single_end:true ], [ fastq_1 ] ]
-                    } else {
-                        return [ meta.id, meta + [ single_end:false ], [ fastq_1, fastq_2 ] ]
+                    if (meta_single_end instanceof String) {
+                        meta_single_end = meta_single_end.toLowerCase() == 'true'
                     }
+
+                    if (meta_single_end == null || meta_single_end.toString().trim() == '') {
+                        meta = meta + [ single_end: single_end ]
+                    } else {
+                        meta = meta + [ single_end: meta_single_end ]
+                    }
+
+                    if (single_end) {
+                        return [ meta.id, meta, [ fastq_1 ] ]
+                    }
+
+                    return [ meta.id, meta, [ fastq_1, fastq_2 ] ]
                 }
             }
             .groupTuple()
@@ -104,119 +112,10 @@ workflow PREPARE_SAMPLESHEET {
             return [meta, reads]
     }.set { branched_samples }
 
-    // Process HiFi data
-    ch_hifi_with_meta = branched_samples.hifi
-        .map { meta, reads ->
-            // Extract date from HiFi filename (use first file if multiple)
-            // Example: OG111_m84154_241004_105305_s3.hifi_reads.bc2068.filt.fastq.gz
-            // Date is in format YYMMDD after the second underscore
-            def cleaned_id = meta.id.replaceAll(/^(OG\d+).*/, '$1')
-            def filename = reads[0].name
-            def parts = filename.split('_')
-            def date = parts.size() >= 3 ? parts[2] : 'unknown'
-
-            // Enhanced meta map
-            def enhanced_meta = meta + [
-                id: cleaned_id,           // Update the ID to cleaned version
-                original_id: meta.id,     // Keep original ID for reference
-                completion_date: date,
-            ]
-            
-            [enhanced_meta, reads]
-        }
-    
-    // Query database to get hic sample sequencing date
-    ch_hifi_query_meta = ch_hifi_with_meta
-        .map { meta, _reads -> 
-            [meta.id, meta.completion_date, meta] 
-        }
-
-    HIFI_DATE_QUERY(
-        ch_hifi_query_meta,
-        params.sql_config
-    )
-
-    ch_hifi_with_files = ch_hifi_with_meta
-        .join(HIFI_DATE_QUERY.out.date, by: 0)
-        .map { meta, reads, date ->
-            // Create assembly prefix: ${cleaned_sample}.${sequencing_type}.${date}
-            def assembly_prefix = "${meta.id}.${meta.sequencing_type}.${date}"
-            
-            // Enhanced meta map with sequencing date
-            def enhanced_meta = meta + [
-                date: date,
-                assembly_prefix: assembly_prefix
-            ]
-            
-            [enhanced_meta, reads]
-        }
-
-    // Process Illumina data  
-    ch_ilmn_with_meta = branched_samples.ilmn
-        .map { meta, reads ->
-            // Extract date from Illumina filename (use first file)
-            // Example: OG764.ilmn.240716.R1.fastq.gz
-            // Date is the 3rd segment when split by '.'
-            def filename = reads[0].name
-            def parts = filename.split('\\.')
-            def date = parts.size() >= 3 ? parts[2] : 'unknown'
-            
-            // Assembly prefix is first 3 parts separated by '.'
-            // Example: OG764.ilmn.240716
-            def assembly_prefix = parts.size() >= 3 ? 
-                "${parts[0]}.${parts[1]}.${parts[2]}" : 
-                "${meta.id}.${meta.sequencing_type}.${date}"
-            
-            // Enhanced meta map
-            def enhanced_meta = meta + [
-                date: date,
-                assembly_prefix: assembly_prefix
-            ]
-            
-            [enhanced_meta, reads]
-        }
-
-
-    // Query database to get hic sample sequencing date
-    ch_query_meta = branched_samples.hic
-        .map { meta, _reads -> 
-            [meta.id, meta] 
-        }
-    
-    HIC_DATE_QUERY(
-        ch_query_meta,
-        params.sql_config
-    )
-    
-    // Combine database results with original files
-    ch_hic_with_files = branched_samples.hic
-        .map { meta, reads -> 
-            [meta, reads] 
-        }
-        .combine(
-            HIC_DATE_QUERY.out.date.map { meta, date -> 
-                [meta, date] 
-            }, 
-            by: 0
-        )
-        .map { meta, reads, date ->
-            // Clean up the sample ID: remove everything after first set of numbers
-            // Example: OG111M-3_HICL -> OG111
-            def cleaned_id = meta.id.replaceAll(/^(OG\d+).*/, '$1')
-            
-            // Create assembly prefix: ${cleaned_sample}.${sequencing_type}.${date}
-            def assembly_prefix = "${cleaned_id}.${meta.sequencing_type}.${date}"
-            
-            // Enhanced meta map with cleaned ID
-            def enhanced_meta = meta + [
-                id: cleaned_id,           // Update the ID to cleaned version
-                original_id: meta.id,     // Keep original ID for reference
-                date: date,
-                assembly_prefix: assembly_prefix
-            ]
-            
-            [enhanced_meta, reads]
-        }
+    // Channels already contain enriched meta from the samplesheet
+    ch_hifi_with_files = branched_samples.hifi
+    ch_ilmn_with_meta  = branched_samples.ilmn
+    ch_hic_with_files  = branched_samples.hic
 
     // Combine all processed data
     ch_getorg = ch_ilmn_with_meta.mix(ch_hic_with_files)

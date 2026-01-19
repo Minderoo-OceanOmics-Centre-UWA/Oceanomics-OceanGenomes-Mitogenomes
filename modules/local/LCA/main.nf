@@ -28,7 +28,6 @@ process LCA {
     cat <<-END_VERSIONS > versions_LCA.yml
     "${task.process}":
         Python: \$(python -V | sed 's/Python //g')
-        TaxonKit: \$(/taxonkit version | sed 's/taxonkit //g')
     END_VERSIONS
     
     """
@@ -40,7 +39,6 @@ process LCA {
     cat <<-END_VERSIONS > versions_LCA.yml
     "${task.process}":
         Python: \$(python -V | sed 's/Python //g')
-        TaxonKit: \$(/taxonkit version | sed 's/taxonkit //g')
     END_VERSIONS
     """
 }

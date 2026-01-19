@@ -194,6 +194,86 @@
                     "hidden": true
                 }
             }
+        },
+        "pipeline_options": {
+            "title": "Pipeline options",
+            "type": "object",
+            "fa_icon": "fas fa-cogs",
+            "description": "Pipeline-specific options for oceangenomesmitogenomes.",
+            "properties": {
+                "organelle_type": {
+                    "type": "string",
+                    "description": "Organelle label passed to GetOrganelle (e.g. animal_mt)."
+                },
+                "blast_db_dir": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "description": "Directory used to cache downloaded BLAST taxdb files."
+                },
+                "taxonkit_db_dir": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "description": "Directory used to cache the NCBI taxdump for TaxonKit."
+                },
+                "curated_blast_db": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Path to curated BLAST database fasta."
+                },
+                "template_sbt": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "GenBank submission template passed to table2asn."
+                },
+                "sql_config": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Database config file for SQL connection."
+                },
+                "bs_config": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Basespace config file."
+                },
+                "binddir": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "description": "Singularity bind mount root."
+                },
+                "tempdir": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "description": "Temporary directory for large intermediate files."
+                },
+                "samplesheet_prefix": {
+                    "type": "string",
+                    "description": "Prefix for generated samplesheet files."
+                },
+                "kvalue": {
+                    "type": "integer",
+                    "description": "K-mer size for related genome modules."
+                },
+                "translation_table": {
+                    "type": "integer",
+                    "description": "NCBI translation table (e.g. 2)."
+                },
+                "max_cpus": {
+                    "type": "integer",
+                    "description": "Maximum CPUs to use for processes."
+                },
+                "max_time": {
+                    "type": "string",
+                    "description": "Maximum walltime for processes (e.g. 1d, 2h)."
+                },
+                "refreshModules": {
+                    "type": "boolean",
+                    "description": "Force module cache refresh when running on HPC systems."
+                }
+            }
         }
     },
     "allOf": [
@@ -205,6 +285,9 @@
         },
         {
             "$ref": "#/$defs/generic_options"
+        },
+        {
+            "$ref": "#/$defs/pipeline_options"
         }
     ]
 }

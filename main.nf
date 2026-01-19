@@ -16,7 +16,7 @@
 */
 
 include { OCEANGENOMESMITOGENOMES } from './workflows/oceangenomesmitogenomes'
-include { PREPARE_SAMPLESHEET     } from './subworkflows/local/prepare_samplesheet'
+include { PREPARE_SAMPLESHEET     } from './subworkflows/local/prepare_samplesheet/main'
 include { PIPELINE_INITIALISATION } from './subworkflows/local/utils_nfcore_oceangenomesmitogenomes_pipeline'
 include { PIPELINE_COMPLETION     } from './subworkflows/local/utils_nfcore_oceangenomesmitogenomes_pipeline'
 

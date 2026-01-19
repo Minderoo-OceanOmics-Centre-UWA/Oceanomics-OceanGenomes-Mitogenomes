@@ -40,6 +40,13 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
 
+    // Map samplesheet meta by sample id + sequencing type + date for reuse with precomputed files
+    ch_samplesheet_meta = getorg_input
+        .map { meta, _reads -> [ [meta.id, meta.sequencing_type, meta.date], meta ] }
+        .mix(mitohifi_input.map { meta, _reads -> [ [meta.id, meta.sequencing_type, meta.date], meta ] })
+        .groupTuple()
+        .map { sample_key, metas -> [ sample_key, metas[0] ] }
+
     /* The if and else statements in this workflow are for when steps are skipped in the nextflow_run script.
         What it is doing is 'if' this processes isnt skipped then run the subworkflow and provide the standard outputs.
         
@@ -73,39 +80,36 @@ workflow OCEANGENOMESMITOGENOMES {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: true)
         .map { file ->
-            // Extract sample_id from the filename (without extension)
-            def filename = file.baseName  // Gets filename without .fasta extension
+            def filename = file.baseName
             def parts = filename.split('\\.')
             def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
             def date = parts.length > 2 ? parts[2] : null
-            def sample_id = parts.length > 2 ? parts[0..3].join('.') : filename
-            
-            def meta = [
-                id: meta_id,
-                run: params.run,
-                date: date,
-                mt_assembly_prefix: sample_id
-            ]
-            return tuple(meta, file)
+            def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .join(ch_samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
         }
         ch_mitogenome_getorg_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_getorg, checkIfExists: true)
         .map { file ->
-            // Extract sample_id from the filename (without extension)
-            def filename = file.baseName  // Gets filename without extension
+            def filename = file.baseName
             def parts = filename.split('\\.')
             def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
             def date = parts.length > 2 ? parts[2] : null
-            def sample_id = parts.length > 2 ? parts[0..3].join('.') : filename
-            
-            def meta = [
-                id: meta_id,
-                run: params.run,
-                date: date,
-                mt_assembly_prefix: sample_id
-            ]
-            return tuple(meta, file)
+            def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .join(ch_samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
         }
     } else {
+
         ch_mitogenome_getorg_assembly_fasta = Channel.empty()
         ch_mitogenome_getorg_assembly_log = Channel.empty()
     }
@@ -125,39 +129,36 @@ workflow OCEANGENOMESMITOGENOMES {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_hifi, checkIfExists: true)
         .map { file ->
-            // Extract sample_id from the filename (without extension)
-            def filename = file.baseName  // Gets filename without .fasta extension
+            def filename = file.baseName
             def parts = filename.split('\\.')
             def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
             def date = parts.length > 2 ? parts[2] : null
-            def sample_id = parts.length > 2 ? parts[0..3].join('.') : filename
-            
-            def meta = [
-                id: meta_id,
-                run: params.run,
-                date: date,
-                mt_assembly_prefix: sample_id
-            ]
-            return tuple(meta, file)
+            def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .join(ch_samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
         }
         ch_mitogenome_hifi_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_hifi, checkIfExists: true)
         .map { file ->
-            // Extract sample_id from the filename (without extension)
-            def filename = file.baseName  // Gets filename without extension
+            def filename = file.baseName
             def parts = filename.split('\\.')
             def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
             def date = parts.length > 2 ? parts[2] : null
-            def sample_id = parts.length > 2 ? parts[0..3].join('.') : filename
-            
-            def meta = [
-                id: meta_id,
-                run: params.run,
-                date: date,
-                mt_assembly_prefix: sample_id
-            ]
-            return tuple(meta, file)
+            def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .join(ch_samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
         }
     } else {
+
         ch_mitogenome_hifi_assembly_fasta = Channel.empty()
         ch_mitogenome_hifi_assembly_log = Channel.empty()
     }
@@ -188,9 +189,46 @@ workflow OCEANGENOMESMITOGENOMES {
     } else if (params.precomputed_mitogenome_annotation_results) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_annotation_results = Channel.fromPath(params.precomputed_mitogenome_annotation_results)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
+            def date = parts.length > 2 ? parts[2] : null
+            return [ [meta_id, sequencing_type, date], file ]
+        }
+        .join(ch_samplesheet_meta, by: 0)
+        .map { sample_key, file, meta ->
+            return tuple(meta, file)
+        }
         ch_mitogenome_blast_results = Channel.fromPath(params.precomputed_mitogenome_blast_results)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
+            def date = parts.length > 2 ? parts[2] : null
+            return [ [meta_id, sequencing_type, date], file ]
+        }
+        .join(ch_samplesheet_meta, by: 0)
+        .map { sample_key, file, meta ->
+            return tuple(meta, file)
+        }
         ch_mitogenome_lca_results = Channel.fromPath(params.precomputed_mitogenome_lca_results)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
+            def date = parts.length > 2 ? parts[2] : null
+            return [ [meta_id, sequencing_type, date], file ]
+        }
+        .join(ch_samplesheet_meta, by: 0)
+        .map { sample_key, file, meta ->
+            return tuple(meta, file)
+        }
     } else {
+
         ch_mitogenome_annotation_results = Channel.empty()
         ch_mitogenome_blast_results = Channel.empty()
         ch_mitogenome_lca_results = Channel.empty()
