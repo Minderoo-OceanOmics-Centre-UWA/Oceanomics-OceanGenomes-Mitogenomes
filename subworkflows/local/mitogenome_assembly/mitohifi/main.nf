@@ -7,7 +7,6 @@
 include { softwareVersionsToYAML    } from '../../../nf-core/utils_nfcore_pipeline'
 
 // Mitogenome assembly
-include { SPECIES_QUERY                         } from '../../../../modules/local/species_query'
 include { MITOHIFI_FINDMITOREFERENCE       } from '../../../../modules/nf-core/mitohifi/findmitoreference'
 include { CAT_FASTQ                         } from '../../../../modules/nf-core/cat/fastq'
 include { MITOHIFI_MITOHIFI    } from '../../../../modules/nf-core/mitohifi/mitohifi'
@@ -33,25 +32,16 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // map just the meta for the species query
     //
 
-    ch_species_query = fastp_reads
+    ch_species_reference = fastp_reads
     .map { meta, _files -> meta }
     .view()
     
-    //
-    // MODULE: Extract nominal species from database
-    //
-
-    SPECIES_QUERY (
-        ch_species_query,
-        params.sql_config
-    )
-
     //
     // MODULE: Find a closely related species for reference
     //
 
     MITOHIFI_FINDMITOREFERENCE (
-        SPECIES_QUERY.out.species
+        ch_species_reference
     )
 
     // Split fastp_reads based on whether concatenation is needed

@@ -32,6 +32,9 @@ workflow PREPARE_SAMPLESHEET {
     }
         
     else if (input_dir) {
+        if (!params.sql_config) {
+            error "No --sql_config provided. When using --input_dir, please provide --input (samplesheet) instead."
+        }
         // Resolve the glob pattern to actual files
         input_files_ch = Channel.fromPath(input_dir, checkIfExists: true)
             .collect()

@@ -7,7 +7,7 @@ process MITOHIFI_FINDMITOREFERENCE {
     container 'ghcr.io/marcelauliano/mitohifi:master'
 
     input:
-    tuple val(meta), val(species)
+    tuple val(meta)
 
     output:
     tuple val(meta), path("*.fasta"), path("*.gb")  , emit: reference
@@ -21,7 +21,7 @@ process MITOHIFI_FINDMITOREFERENCE {
     def args = task.ext.args ?: ''
     """
     findMitoReference.py \\
-        --species "$species" \\
+        --species "$meta.nominal_species_id" \\
         --outfolder . \\
         $args
 

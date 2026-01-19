@@ -248,7 +248,8 @@ workflow OCEANGENOMESMITOGENOMES {
     //
     // Conditional uploading of results to SQL and species check - only run if not skipped
     // All these processes access the OceanOmics PostgreSQL database.
-    if (!params.skip_upload_results) {
+    def ch_qc_input = Channel.empty()
+    if (!params.skip_upload_results && params.sql_config) {
         UPLOAD_RESULTS (
             ch_mitogenome_assembly_results,
             ch_mitogenome_annotation_results,
@@ -256,20 +257,20 @@ workflow OCEANGENOMESMITOGENOMES {
             ch_mitogenome_lca_results,
             sql_config // params.sql_config
         )
+
+        ch_qc_input = UPLOAD_RESULTS.out.qc_ready.join(ch_mitogenome_annotation_results, by:0)
+
+        // If the LCA validation is correct, then run the QC to prepare for submission to GenBank
+        // Need to add this into the pipeline.
+        // Now that protein lengths are being added to the database it could provide a list of 
+        // non submitted mitogenomes they can be grouped with to submit and then say when there is a 
+        // group of similar mitogenomes they can be submitted as a batch.
+        MITOGENOME_QC (
+            ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), path(emma/*)
+        )
+    } else if (!params.skip_upload_results && !params.sql_config) {
+        log.warn "Skipping upload/QC because --sql_config not provided"
     }
-
-
-    
-    ch_qc_input = UPLOAD_RESULTS.out.qc_ready.join(ch_mitogenome_annotation_results, by:0)
-
-    // If the LCA validation is correct, then run the QC to prepare for submission to GenBank
-    // Need to add this into the pipeline.
-    // Now that protein lengths are being added to the database it could provide a list of 
-    // non submitted mitogenomes they can be grouped with to submit and then say when there is a 
-    // group of similar mitogenomes they can be submitted as a batch.
-    MITOGENOME_QC (
-        ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), path(emma/*)
-    )
 
     //
     // Collect all MultiQC files from all subworkflows
@@ -278,8 +279,8 @@ workflow OCEANGENOMESMITOGENOMES {
     if (!params.skip_mitogenome_assembly_getorg) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_GETORG.out.multiqc_files)}
     if (!params.skip_mitogenome_assembly_hifi) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_MITOHIFI.out.multiqc_files)}
     if (!params.skip_mitogenome_annotation) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ANNOTATION.out.multiqc_files)}
-    if (!params.skip_upload_results) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS.out.multiqc_files)}
-    if (!params.skip_upload_results) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)}
+    if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS.out.multiqc_files)}
+    if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)}
 
     // 
     // Collect all versions from subworkflows
@@ -299,11 +300,13 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_versions = ch_versions.mix(MITOGENOME_ANNOTATION.out.versions)
     }
     // Upload + QC subworkflows provide versions; guard independently
-    if (!params.skip_upload_results) {
+    if (!params.skip_upload_results && params.sql_config) {
         ch_versions = ch_versions.mix(UPLOAD_RESULTS.out.versions)
     }
     // Run of MITOGENOME_QC depends on upstream evaluation; include if present
-    ch_versions = ch_versions.mix(MITOGENOME_QC.out.versions)
+    if (!params.skip_upload_results && params.sql_config) {
+        ch_versions = ch_versions.mix(MITOGENOME_QC.out.versions)
+    }
 
 
 
