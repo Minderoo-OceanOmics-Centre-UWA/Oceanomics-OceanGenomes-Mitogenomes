@@ -9,10 +9,10 @@
         "properties": {
             "sample": {
                 "type": "string",
-                "pattern": "^OG\\d+[A-Za-z]?(-\\d+)?(?:_HIC[A-Za-z]*\\d*)?$",
-                "errorMessage": "Sample name must start with 'OG' followed by numbers, optionally followed by a letter and/or dash-number (e.g., OG820M-1, OG785, OG764)",
+                "pattern": "^[^\\s]+$",
+                "errorMessage": "Sample name must be a non-empty string without whitespace",
                 "meta": ["id"],
-                "description": "Sample identifier starting with OG followed by numbers"
+                "description": "Sample identifier (any non-empty string without spaces)"
             },
             "fastq_1": {
                 "type": "string",
