@@ -223,18 +223,21 @@
                 },
                 "template_sbt": {
                     "type": "string",
+                    "default": null,
                     "format": "file-path",
                     "exists": true,
                     "description": "GenBank submission template passed to table2asn."
                 },
                 "sql_config": {
                     "type": "string",
+                    "default": null,
                     "format": "file-path",
                     "exists": true,
                     "description": "Database config file for SQL connection."
                 },
                 "bs_config": {
                     "type": "string",
+                    "default": null,
                     "format": "file-path",
                     "exists": true,
                     "description": "Basespace config file."
