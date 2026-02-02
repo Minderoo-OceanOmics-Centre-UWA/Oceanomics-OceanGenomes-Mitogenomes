@@ -166,10 +166,10 @@ if __name__ == "__main__":
         )
         ON CONFLICT (og_id, tech, seq_date, code) 
         DO UPDATE SET
-            stats = CASE WHEN mitogenome_data.stats IS NULL THEN EXCLUDED.stats ELSE mitogenome_data.stats END,
-            length = CASE WHEN mitogenome_data.length IS NULL THEN EXCLUDED.length ELSE mitogenome_data.length END,
-            avg_coverage = CASE WHEN mitogenome_data.avg_coverage IS NULL THEN EXCLUDED.avg_coverage ELSE mitogenome_data.avg_coverage END,
-            avg_base_coverage = CASE WHEN mitogenome_data.avg_base_coverage IS NULL THEN EXCLUDED.avg_base_coverage ELSE mitogenome_data.avg_base_coverage END
+            stats = EXCLUDED.stats,
+            length = EXCLUDED.length,
+            avg_coverage = EXCLUDED.avg_coverage,
+            avg_base_coverage = EXCLUDED.avg_base_coverage
         RETURNING stats, length, avg_coverage, avg_base_coverage
         """
 

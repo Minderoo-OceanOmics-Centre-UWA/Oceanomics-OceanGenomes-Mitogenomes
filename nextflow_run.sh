@@ -27,7 +27,7 @@ nextflow \
     --template_sbt "/scratch/pawsey0964/$USER/Oceanomics-OceanGenomes-Mitogenomes/bin/template.sbt" \
     --translation_table "2" 
     
-    
+    # --getorganelle_fromreads_args "-R 20 -w 75 -k 21,45,65,85,105 --max-extending-len inf" ## Include this line if you want to customise the getorganelle fromreads args.
     # nextflow -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core
     # -work-dir /scratch/pawsey0964/$USER/directory \. ### include work dir if you want to run this nf-core on multiple occasions and keep the work files separate.
     # --input assets/samplesheet.csv \  # include a samplesheet if you are not downloading sample.

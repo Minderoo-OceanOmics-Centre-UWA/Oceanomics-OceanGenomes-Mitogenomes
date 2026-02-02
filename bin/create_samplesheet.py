@@ -207,7 +207,7 @@ def query_nominal_species_id(cursor, sample_id):
 def parse_args():
     parser = argparse.ArgumentParser(description="Create enriched samplesheet from staged FASTQ files.")
     parser.add_argument("--output", required=True, help="Output samplesheet CSV path.")
-    parser.add_argument("--sql-config", required=True, help="Path to SQL config file.")
+    parser.add_argument("--sql-config", required=False, default=None, help="Optional path to SQL config file.")
     parser.add_argument("--input-files", nargs="*", default=None, help="Optional explicit list of input files.")
     return parser.parse_args()
 
@@ -247,12 +247,13 @@ def main():
 
     cursor = None
     conn = None
-    try:
-        db_params = load_db_config(args.sql_config)
-        conn = psycopg2.connect(**db_params)
-        cursor = conn.cursor()
-    except Exception as exc:
-        print(f"Error connecting to database: {exc}", file=sys.stderr)
+    if args.sql_config:
+        try:
+            db_params = load_db_config(args.sql_config)
+            conn = psycopg2.connect(**db_params)
+            cursor = conn.cursor()
+        except Exception as exc:
+            print(f"Error connecting to database: {exc}", file=sys.stderr)
 
     with open(args.output, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)

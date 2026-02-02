@@ -35,7 +35,6 @@ process GETORGANELLE_FROMREADS {
 
     get_organelle_from_reads.py \\
         $args \\
-        --continue \\
         --prefix ${prefix}. \\
         -F $organelle_type \\
         --config-dir $db \\
