@@ -7,8 +7,8 @@ nextflow \
     -resume \
     -profile singularity \
     -with-report \
-    --input_dir "/scratch/pawsey0964/tpeirce/_NFCORE/OG1288/*.fastq.gz" \
-    --outdir "$(realpath ../_hic_outdir)" \
+    --input_dir "/scratch/pawsey0964/tpeirce/OGP029/OG1410_fastp/*.fastq.gz" \
+    --outdir "$(realpath ../_outdir)" \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \
     --curated_blast_db /software/projects/pawsey0964/curated_db/OceanGenomes.CuratedNT.NBDLTranche1and2and3.CuratedBOLD.NoDuplicate.fasta \
@@ -24,7 +24,7 @@ nextflow \
     --skip_mitogenome_annotation false \
     --skip_upload_results false \
     --samplesheet_prefix "samplesheet" \
-    --template_sbt "/scratch/pawsey0964/$USER/Oceanomics-OceanGenomes-Mitogenomes/bin/template.sbt" \
+    --template_sbt "bin/template.sbt" \
     --translation_table "2" 
     
     # --getorganelle_fromreads_args "-R 20 -w 75 -k 21,45,65,85,105 --max-extending-len inf" ## Include this line if you want to customise the getorganelle fromreads args.
