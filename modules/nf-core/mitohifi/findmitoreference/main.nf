@@ -7,7 +7,7 @@ process MITOHIFI_FINDMITOREFERENCE {
     container 'ghcr.io/marcelauliano/mitohifi:master'
 
     input:
-    tuple val(meta)
+    val(meta)
 
     output:
     tuple val(meta), path("*.fasta"), path("*.gb")  , emit: reference
