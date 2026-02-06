@@ -11,6 +11,7 @@ nextflow_pipeline {
                 samplesheet_prefix = "test"
                 bs_config = "test_data/bs_config.txt"
                 curated_blast_db = "test_data/blast_db"
+                nt_blast_db = "test_data/blast_db"
                 sql_config = "test_data/sql_config.txt"
                 organelle_type = "mitochondrion"
                 version = "1.0"
@@ -41,6 +42,7 @@ nextflow_pipeline {
                 samplesheet_prefix = "test"
                 bs_config = "invalid_config.txt"
                 curated_blast_db = "invalid_db"
+                nt_blast_db = "invalid_db"
                 sql_config = "invalid_sql.txt"
                 organelle_type = "invalid"
             }
@@ -63,6 +65,7 @@ nextflow_workflow {
             params {
                 bs_config = "test_data/bs_config.txt"
                 curated_blast_db = "test_data/blast_db"
+                nt_blast_db = "test_data/blast_db"
                 sql_config = "test_data/sql_config.txt"
                 organelle_type = "mitochondrion"
             }

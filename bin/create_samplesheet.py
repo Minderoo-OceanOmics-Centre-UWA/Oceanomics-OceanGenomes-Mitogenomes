@@ -232,6 +232,7 @@ def main():
         'date',
         'assembly_prefix',
         'nominal_species_id',
+        'invertebrates',
         'fastq_1',
         'fastq_2'
     ]
@@ -302,6 +303,7 @@ def main():
                     date,
                     assembly_prefix,
                     nominal_species_id,
+                    '',
                     r1,
                     r2
                 ])

@@ -8,8 +8,7 @@ process BLAST_BLASTN {
         'community.wave.seqera.io/library/blast:2.16.0--540f4b669b0a0ddd' }"
 
     input:
-    tuple val(meta), path(fasta), val(gene_type), val(annotation_name)
-    val(curated_blast_db)
+    tuple val(meta), path(fasta), val(gene_type), val(annotation_name), val(blast_db)
     path(taxdb)
 
     output:
@@ -30,7 +29,7 @@ process BLAST_BLASTN {
     
     blastn \\
         -num_threads ${task.cpus} \\
-        -db ${curated_blast_db} \\
+        -db ${blast_db} \\
         -query ${fasta} \\
         ${args} \\
         -out ${prefix}.tsv

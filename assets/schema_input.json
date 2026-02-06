@@ -82,6 +82,14 @@
                 "type": "string",
                 "meta": ["nominal_species_id"],
                 "description": "Nominal species identifier from the sample table"
+            },
+            "invertebrates": {
+                "anyOf": [
+                    { "type": "boolean" },
+                    { "type": "string" }
+                ],
+                "meta": ["invertebrates"],
+                "description": "Whether the sample is an invertebrate (true/false)"
             }
         },
         "required": ["sample", "fastq_1", "sequencing_type"]

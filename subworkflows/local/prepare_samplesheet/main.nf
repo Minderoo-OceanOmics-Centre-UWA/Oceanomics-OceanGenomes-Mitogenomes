@@ -74,6 +74,9 @@ workflow PREPARE_SAMPLESHEET {
                     def fastq_2 = sample_record[2]
                     def single_end = (!fastq_2 || fastq_2.toString() == '[]')
                     def meta_single_end = meta.single_end
+                    if (meta.date != null) {
+                        meta = meta + [ date: meta.date.toString() ]
+                    }
 
                     if (meta_single_end instanceof String) {
                         meta_single_end = meta_single_end.toLowerCase() == 'true'
@@ -83,6 +86,18 @@ workflow PREPARE_SAMPLESHEET {
                         meta = meta + [ single_end: single_end ]
                     } else {
                         meta = meta + [ single_end: meta_single_end ]
+                    }
+
+                    def meta_invertebrates = meta.invertebrates
+
+                    if (meta_invertebrates instanceof String) {
+                        meta_invertebrates = meta_invertebrates.toLowerCase() == 'true'
+                    }
+
+                    if (meta_invertebrates == null || meta_invertebrates.toString().trim() == '') {
+                        meta = meta + [ invertebrates: false ]
+                    } else {
+                        meta = meta + [ invertebrates: meta_invertebrates ]
                     }
 
                     if (single_end) {

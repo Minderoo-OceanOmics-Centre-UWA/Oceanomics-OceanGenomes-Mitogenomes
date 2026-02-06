@@ -17,6 +17,7 @@ nextflow run nf-core/oceangenomesmitogenomes \
   --outdir results \
   --organelle_type animal_mt \
   --curated_blast_db /path/to/OceanGenomes.CuratedNT.fasta \
+  --nt_blast_db /path/to/nt/db/core_nt \
   --sql_config /path/to/postgres.cfg \
   --blast_db_dir /scratch/databases/blast \
   --taxonkit_db_dir /scratch/databases/taxonkit \
@@ -35,6 +36,7 @@ that matches your container/conda environment.
 | `--outdir` | ✔ | Destination for all published results. |
 | `--organelle_type` | ✔ | Organelle label passed to GetOrganelle (e.g. `animal_mt`). |
 | `--curated_blast_db` | ✔ | NCBI-format BLAST database used for species validation. Provide an absolute path. |
+| `--nt_blast_db` | Conditional | NCBI nt BLAST database used when samples are marked `invertebrates=true`. |
 | `--sql_config` | ✔* | INI file with `[postgres] dbname,user,password,host,port`. Required whenever Hi-C samples or species validation/database upload steps run. |
 | `--blast_db_dir` | ✔ | Directory used to cache the downloaded `taxdb.*` files; re-use between runs to avoid repeated downloads. |
 | `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
@@ -104,6 +106,9 @@ The pipeline orchestrates several helper modules that all require absolute file 
   ```
 - **Curated BLAST database (`--curated_blast_db`)** – Provide the `*.fasta` (or BLAST database
   prefix) curated for OceanGenomes validations. Ensure `blastn` can resolve the files.
+- **NCBI nt BLAST database (`--nt_blast_db`)** – Provide the `core_nt` (or equivalent) database
+  prefix used for invertebrate samples. The pipeline selects this automatically when
+  `invertebrates=true` in the samplesheet.
 - **Taxonomy caches (`--blast_db_dir`, `--taxonkit_db_dir`)** – Large downloads (`taxdb.*`, NCBI
   `taxdump.tar.gz`) are stored under these directories using `storeDir`. Point them to a shared or
   persistent filesystem to avoid repeated downloads.
@@ -138,6 +143,7 @@ input: oceanomics_samples.csv
 outdir: results
 organelle_type: animal_mt
 curated_blast_db: /databases/OceanGenomes.CuratedNT.fasta
+nt_blast_db: /databases/blast/core_nt
 sql_config: ~/.config/oceanomics/postgres.cfg
 blast_db_dir: /scratch/shared/blast
 taxonkit_db_dir: /scratch/shared/taxdump
@@ -182,6 +188,7 @@ nextflow run nf-core/oceangenomesmitogenomes \
   -profile test,singularity \
   --input assets/samplesheet.csv \
   --curated_blast_db test_data/blast_db \
+  --nt_blast_db test_data/blast_db \
   --sql_config test_data/sql_config.txt \
   --template_sbt test_data/template.sbt \
   --outdir stub_results \

@@ -49,6 +49,7 @@ nextflow run nf-core/oceangenomesmitogenomes \
   --outdir results \
   --organelle_type animal_mt \
   --curated_blast_db /path/to/OceanGenomes.CuratedNT.fasta \
+  --nt_blast_db /path/to/nt/db/core_nt \
   --sql_config ~/postgresql_details/oceanomics.cfg \
   --blast_db_dir /scratch/shared/blast \
   --taxonkit_db_dir /scratch/shared/taxdump \
@@ -65,6 +66,7 @@ nextflow run nf-core/oceangenomesmitogenomes \
   --outdir results \
   --organelle_type animal_mt \
   --curated_blast_db /path/to/OceanGenomes.CuratedNT.fasta \
+  --nt_blast_db /path/to/nt/db/core_nt \
   --sql_config ~/postgresql_details/oceanomics.cfg \
   --blast_db_dir /scratch/shared/blast \
   --taxonkit_db_dir /scratch/shared/taxdump \
@@ -78,6 +80,7 @@ nextflow run nf-core/oceangenomesmitogenomes \
   -profile test,singularity \  # uses bundled test data
   --input assets/samplesheet.csv \
   --curated_blast_db test_data/blast_db \
+  --nt_blast_db test_data/blast_db \
   --sql_config test_data/sql_config.txt \
   --template_sbt test_data/template.sbt \
   --outdir stub_results \
@@ -105,6 +108,7 @@ For general nf-core best practices (custom configs, resource tuning, module over
 - `--input` / `--input_dir` – mutually exclusive input modes; both validate against `assets/schema_input.json`.
 - `--organelle_type` – passed to GetOrganelle (e.g. `animal_mt`, `embryophyta_mt`).
 - `--curated_blast_db` – absolute path to the OceanGenomes-curated BLAST database.
+- `--nt_blast_db` – absolute path to the NCBI nt BLAST database (used for invertebrate samples).
 - `--sql_config` – INI credentials for PostgreSQL-backed modules (`SPECIES_QUERY`, upload steps, QC gating).
 - `--blast_db_dir`, `--taxonkit_db_dir` – scratch/persistent directories for caching taxonomy resources.
 - `--template_sbt` – GenBank submission template consumed by `table2asn`.

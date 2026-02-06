@@ -26,6 +26,7 @@ workflow MITOGENOME_ANNOTATION {
     take:
     mito_assembly //  tuple val(meta), path(fasta)
     curated_blast_db // params.curated_blast_db
+    nt_blast_db // params.nt_blast_db
     
     main:
 
@@ -97,12 +98,24 @@ workflow MITOGENOME_ANNOTATION {
         )
     
     //
+    // Select the BLAST database per sample (curated for vertebrates, nt for invertebrates)
+    //
+
+    combined_sequences_with_db = combined_sequences
+        .map { meta, file, gene_type, annotation_name ->
+            if (meta.invertebrates && !nt_blast_db) {
+                error "Sample ${meta.id} is marked invertebrates=true, but --nt_blast_db was not provided"
+            }
+            def blast_db = (meta.invertebrates ? nt_blast_db : curated_blast_db)
+            [meta, file, gene_type, annotation_name, blast_db]
+        }
+    
+    //
     // MODULE: Using CO1,12s and 16s run BLAST and filter the results to provide matches for the calculation of the LCA
     //
 
     BLAST_BLASTN (
-        combined_sequences, // tuple val(meta), path(fasta), val(gene_type), val(annotation_name)
-        curated_blast_db, // params.curated_blast_db
+        combined_sequences_with_db, // tuple val(meta), path(fasta), val(gene_type), val(annotation_name), val(blast_db)
         ch_blast_db // path(db)
     )
 

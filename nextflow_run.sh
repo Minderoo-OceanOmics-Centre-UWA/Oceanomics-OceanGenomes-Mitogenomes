@@ -12,6 +12,7 @@ nextflow \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \
     --curated_blast_db /software/projects/pawsey0964/curated_db/OceanGenomes.CuratedNT.NBDLTranche1and2and3.CuratedBOLD.NoDuplicate.fasta \
+    --nt_blast_db /scratch/references/blastdb_update/blast-2026-02-01/db/core_nt \
     --organelle_type "animal_mt" \
     --kvalue "21" \
     --bs_config ~/.basespace/default.cfg \
@@ -25,9 +26,10 @@ nextflow \
     --skip_upload_results false \
     --samplesheet_prefix "samplesheet" \
     --template_sbt "bin/template.sbt" \
-    --translation_table "2" 
+    --translation_table "2" \
+    --getorganelle_fromreads_args "-R 20 -w 75 -k 21,45,65,85 --max-extending-len inf --max-n-words 1000000000 --continue" 
     
-    # --getorganelle_fromreads_args "-R 20 -w 75 -k 21,45,65,85,105 --max-extending-len inf" ## Include this line if you want to customise the getorganelle fromreads args.
+    # --getorganelle_fromreads_args "-R 20 -w 75 -k 21,45,65,85,105 --max-extending-len inf --max-n-words 1000000000 --continue" ## Include this line if you want to customise the getorganelle fromreads args.
     # nextflow -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core
     # -work-dir /scratch/pawsey0964/$USER/directory \. ### include work dir if you want to run this nf-core on multiple occasions and keep the work files separate.
     # --input assets/samplesheet.csv \  # include a samplesheet if you are not downloading sample.

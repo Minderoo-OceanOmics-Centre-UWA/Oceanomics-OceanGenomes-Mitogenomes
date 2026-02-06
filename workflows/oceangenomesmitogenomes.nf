@@ -32,6 +32,7 @@ workflow OCEANGENOMESMITOGENOMES {
     getorg_input    // tuple for getorganelle - tuple(meta, reads)
     mitohifi_input // tuple for mitohifi - tuple(meta, reads)
     curated_blast_db // params.curated_blast_db
+    nt_blast_db // params.nt_blast_db
     sql_config // params.sql_config
     organelle_type // params.organelle_type "animal_mt"
 
@@ -78,7 +79,7 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_getorg_assembly_log = MITOGENOME_ASSEMBLY_GETORG.out.assembly_log
     } else if (params.precomputed_mitogenome_assembly_fasta_getorg) {
         // Use precomputed results if analysis is skipped
-        ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: true)
+        ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: false)
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
@@ -93,7 +94,7 @@ workflow OCEANGENOMESMITOGENOMES {
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
-        ch_mitogenome_getorg_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_getorg, checkIfExists: true)
+        ch_mitogenome_getorg_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_getorg, checkIfExists: false)
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
@@ -127,7 +128,7 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_hifi_assembly_log = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_log
     } else if (params.precomputed_mitogenome_assembly_fasta_hifi) {
         // Use precomputed results if analysis is skipped
-        ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_hifi, checkIfExists: true)
+        ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_hifi, checkIfExists: false)
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
@@ -142,7 +143,7 @@ workflow OCEANGENOMESMITOGENOMES {
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
-        ch_mitogenome_hifi_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_hifi, checkIfExists: true)
+        ch_mitogenome_hifi_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_hifi, checkIfExists: false)
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
@@ -181,7 +182,8 @@ workflow OCEANGENOMESMITOGENOMES {
     if (!params.skip_mitogenome_annotation) {
         MITOGENOME_ANNOTATION (
             ch_annotation_input_sanitised,
-            curated_blast_db
+            curated_blast_db,
+            nt_blast_db
         )
         ch_mitogenome_annotation_results = MITOGENOME_ANNOTATION.out.annotation_results
         ch_mitogenome_blast_results = MITOGENOME_ANNOTATION.out.blast_filtered_results
@@ -330,12 +332,12 @@ workflow OCEANGENOMESMITOGENOMES {
     // MODULE: MultiQC
     //
     ch_multiqc_config        = Channel.fromPath(
-        "$projectDir/assets/multiqc_config.yml", checkIfExists: true)
+        "$projectDir/assets/multiqc_config.yml", checkIfExists: false)
     ch_multiqc_custom_config = params.multiqc_config ?
-        Channel.fromPath(params.multiqc_config, checkIfExists: true) :
+        Channel.fromPath(params.multiqc_config, checkIfExists: false) :
         Channel.empty()
     ch_multiqc_logo          = params.multiqc_logo ?
-        Channel.fromPath(params.multiqc_logo, checkIfExists: true) :
+        Channel.fromPath(params.multiqc_logo, checkIfExists: false) :
         Channel.empty()
 
     summary_params      = paramsSummaryMap(
@@ -344,8 +346,8 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_multiqc_files = ch_multiqc_files.mix(
         ch_workflow_summary.collectFile(name: 'workflow_summary_mqc.yaml'))
     ch_multiqc_custom_methods_description = params.multiqc_methods_description ?
-        file(params.multiqc_methods_description, checkIfExists: true) :
-        file("$projectDir/assets/methods_description_template.yml", checkIfExists: true)
+        file(params.multiqc_methods_description, checkIfExists: false) :
+        file("$projectDir/assets/methods_description_template.yml", checkIfExists: false)
     ch_methods_description                = Channel.value(
         methodsDescriptionText(ch_multiqc_custom_methods_description))
 

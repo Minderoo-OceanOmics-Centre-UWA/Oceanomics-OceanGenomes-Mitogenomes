@@ -221,6 +221,11 @@
                     "exists": true,
                     "description": "Path to curated BLAST database fasta."
                 },
+                "nt_blast_db": {
+                    "type": "string",
+                    "format": "file-path",
+                    "description": "Path to NCBI nt BLAST database for invertebrate samples."
+                },
                 "template_sbt": {
                     "type": "string",
                     "default": null,

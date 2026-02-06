@@ -20,7 +20,9 @@ process EMMA {
     path "versions_emma.yml", emit: versions
 
     script:
-        def args   = task.ext.args ?: ''
+        def base_args = (task.ext.args ?: '').toString().trim()
+        def inv_flag  = (meta.invertebrates ? '--invertebrates' : '')
+        def args      = [base_args, inv_flag].findAll{ it }.join(' ')
         def prefix = task.ext.prefix ?: meta.mt_assembly_prefix
 
         """
