@@ -89,7 +89,7 @@ workflow OCEANGENOMESMITOGENOMES {
             def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
             return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
         }
-        .join(ch_samplesheet_meta, by: 0)
+        .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
@@ -104,7 +104,7 @@ workflow OCEANGENOMESMITOGENOMES {
             def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
             return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
         }
-        .join(ch_samplesheet_meta, by: 0)
+        .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
@@ -138,7 +138,7 @@ workflow OCEANGENOMESMITOGENOMES {
             def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
             return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
         }
-        .join(ch_samplesheet_meta, by: 0)
+        .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
@@ -153,7 +153,7 @@ workflow OCEANGENOMESMITOGENOMES {
             def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
             return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
         }
-        .join(ch_samplesheet_meta, by: 0)
+        .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
@@ -199,7 +199,7 @@ workflow OCEANGENOMESMITOGENOMES {
             def date = parts.length > 2 ? parts[2] : null
             return [ [meta_id, sequencing_type, date], file ]
         }
-        .join(ch_samplesheet_meta, by: 0)
+        .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, file, meta ->
             return tuple(meta, file)
         }
@@ -207,12 +207,12 @@ workflow OCEANGENOMESMITOGENOMES {
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
-            def meta_id = parts[0]
-            def sequencing_type = parts.length > 1 ? parts[1] : null
-            def date = parts.length > 2 ? parts[2] : null
+            def meta_id = parts[2]
+            def sequencing_type = parts.length > 1 ? parts[3] : null
+            def date = parts.length > 2 ? parts[4] : null
             return [ [meta_id, sequencing_type, date], file ]
         }
-        .join(ch_samplesheet_meta, by: 0)
+        .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, file, meta ->
             return tuple(meta, file)
         }
@@ -220,12 +220,12 @@ workflow OCEANGENOMESMITOGENOMES {
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
-            def meta_id = parts[0]
-            def sequencing_type = parts.length > 1 ? parts[1] : null
-            def date = parts.length > 2 ? parts[2] : null
+            def meta_id = parts[2]
+            def sequencing_type = parts.length > 3 ? parts[3] : null
+            def date = parts.length > 4 ? parts[4] : null
             return [ [meta_id, sequencing_type, date], file ]
         }
-        .join(ch_samplesheet_meta, by: 0)
+        .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, file, meta ->
             return tuple(meta, file)
         }
