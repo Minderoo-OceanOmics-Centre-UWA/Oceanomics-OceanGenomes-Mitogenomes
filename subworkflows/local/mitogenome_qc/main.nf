@@ -32,6 +32,8 @@ workflow MITOGENOME_QC {
     
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
+    def sql_config_file = file(params.sql_config, checkIfExists: true)
+    def template_sbt_file = file(params.template_sbt, checkIfExists: true)
 
 
     //
@@ -56,7 +58,7 @@ workflow MITOGENOME_QC {
 
     BUILD_SOURCE_MODIFIERS (
         FORMAT_FILES.out.meta, // val(meta)
-        params.sql_config // val(db_config)
+        sql_config_file // val(db_config)
     )
     ch_versions = ch_versions.mix(BUILD_SOURCE_MODIFIERS.out.versions.first())
 
@@ -96,7 +98,7 @@ workflow MITOGENOME_QC {
 
     GEN_FILES_TABLE2ASN (
         ch_processed_files, // tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), path("*.src") 
-        params.template_sbt // sbt template generated from genbank, specific for OceanOmics
+        template_sbt_file // sbt template generated from genbank, specific for OceanOmics
     )
     ch_versions = ch_versions.mix(GEN_FILES_TABLE2ASN.out.versions.first())
     // Feed table2asn validation output into MultiQC inputs (text summary)

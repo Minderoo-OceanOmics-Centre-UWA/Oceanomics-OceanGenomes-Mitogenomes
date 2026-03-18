@@ -1,0 +1,17 @@
+name: validated_species_query
+description: Query lca_validation for validated_species_name using OG/tech/date/code/annotation keys.
+keywords: [postgres, lca_validation, species]
+tools:
+  - name: python
+    homepage: https://www.python.org/
+    licence: PSF-2.0
+  - name: psycopg2
+    homepage: https://www.psycopg.org/
+    licence: LGPL-3.0
+input:
+  - meta: { type: map, description: Sample metadata including id, sequencing_type, date, code, annotation }
+  - sql_config: { type: file, description: PostgreSQL INI config file with [postgres] section }
+output:
+  - species: { type: string, description: validated_species_name from lca_validation (stdout) }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
