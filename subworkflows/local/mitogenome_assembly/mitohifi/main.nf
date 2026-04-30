@@ -10,6 +10,7 @@ include { softwareVersionsToYAML    } from '../../../nf-core/utils_nfcore_pipeli
 include { MITOHIFI_FINDMITOREFERENCE       } from '../../../../modules/nf-core/mitohifi/findmitoreference'
 include { CAT_FASTQ                         } from '../../../../modules/nf-core/cat/fastq'
 include { MITOHIFI_MITOHIFI    } from '../../../../modules/nf-core/mitohifi/mitohifi'
+include { MITOHIFI_AVERAGE_COVERAGE        } from '../../../../modules/local/mitohifi/average_coverage'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
 /*
@@ -107,19 +108,27 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         "2"  // could change to params.translation_table / mito_code - Organism genetic code following NCBI table (for mitogenome annotation) using 2. Vertebrate mitogenome
     )
 
+    ch_average_coverage_input = MITOHIFI_MITOHIFI.out.stats.join(MITOHIFI_MITOHIFI.out.coverage_mapping, by: 0)
+
+    MITOHIFI_AVERAGE_COVERAGE (
+        ch_average_coverage_input
+    )
+
     //
     // Collect MultiQC inputs and versions
     //   - Prefer feeding human‑readable logs and summary tables to MultiQC.
     //
 
     // MitoHiFi per-sample stats and logs
-    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.stats.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.stats.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.coverage.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.logs.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.command_logs.collect { it[1] })
 
     // Versions for versions.yml collation (not MultiQC inputs)
     ch_versions = ch_versions.mix(CAT_FASTQ.out.versions.first())
     ch_versions = ch_versions.mix(MITOHIFI_MITOHIFI.out.versions.first())
+    ch_versions = ch_versions.mix(MITOHIFI_AVERAGE_COVERAGE.out.versions.first())
 
 
     //
@@ -128,7 +137,8 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
     emit:
     assembly_fasta  = MITOHIFI_MITOHIFI.out.fasta
-    assembly_log    = MITOHIFI_MITOHIFI.out.logs
+    assembly_log    = MITOHIFI_AVERAGE_COVERAGE.out.stats
+    coverage_stats  = MITOHIFI_AVERAGE_COVERAGE.out.coverage
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]
 }

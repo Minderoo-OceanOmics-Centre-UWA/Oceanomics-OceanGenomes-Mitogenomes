@@ -53,35 +53,44 @@ def coerce_bool(val):
 def try_parse_contig_stats(tsv_path: Path, target_contig="final_mitogenome"):
     """
     If tsv_path looks like contig_stats (has contig_id & was_circular),
-    return "circular genome"/"scaffold" based on target row.
-    If file missing or not a contig_stats file, return None.
+    return stats and optional average coverage from the target row.
+    If file missing or not a contig_stats file, return (None, None).
     """
     try:
         if not tsv_path.exists():
-            return None
+            return None, None
         # Fast sniff: extension or first line with tabs
         is_tsvish = tsv_path.suffix.lower() in {".tsv", ".txt"} or "\t" in tsv_path.read_text(encoding="utf-8", errors="ignore").splitlines()[0]
         if not is_tsvish:
-            return None
+            return None, None
 
-        df = pd.read_csv(tsv_path, sep="\t")
+        df = pd.read_csv(tsv_path, sep="\t", comment="#")
         if not {"contig_id", "was_circular"}.issubset(df.columns):
-            return None
+            return None, None
 
         rows = df.loc[df["contig_id"] == target_contig]
         if rows.empty:
             # No exact target row → treat as not applicable
-            return None
+            return None, None
 
         was_circ_raw = rows["was_circular"].iloc[0]
         was_circ = coerce_bool(was_circ_raw)
         if was_circ is None:
-            return None
+            return None, None
 
-        return "circular genome" if was_circ else "scaffold"
+        stats = "circular genome" if was_circ else "scaffold"
+        avg_coverage = None
+        if "avg_coverage" in rows.columns:
+            cov_raw = rows["avg_coverage"].iloc[0]
+            if cov_raw is not None and not (isinstance(cov_raw, float) and np.isnan(cov_raw)):
+                cov_str = str(cov_raw).strip()
+                if cov_str and cov_str.upper() != "NA":
+                    avg_coverage = cov_str
+
+        return stats, avg_coverage
     except Exception as e:
         print(f"⚠️ Could not parse contig_stats-like file: {e}")
-        return None
+        return None, None
 
 def parse_log_for_stats_and_cov(log_text: str):
     """Parse GetOrganelle-style log for stats, avg_coverage, avg_base_coverage."""
@@ -115,11 +124,13 @@ if __name__ == "__main__":
     avg_base_coverage = None
 
     # First, try interpreting the 3rd arg as contig_stats.tsv
-    stats_from_tsv = try_parse_contig_stats(input_path, target_contig="final_mitogenome")
+    stats_from_tsv, avg_coverage_from_tsv = try_parse_contig_stats(input_path, target_contig="final_mitogenome")
 
     if stats_from_tsv is not None:
         # HiFi-style input: use circular/scaffold mapping
         stats = stats_from_tsv
+        avg_coverage = avg_coverage_from_tsv
+        avg_base_coverage = avg_coverage_from_tsv
         print(f"ℹ️ Detected contig_stats.tsv. Using stats = '{stats}' from final_mitogenome row.")
     else:
         # Fall back to GetOrganelle log parsing
