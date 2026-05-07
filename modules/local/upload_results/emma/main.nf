@@ -14,6 +14,7 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
     output:
     tuple val(meta), path("${meta.id}.annotation.upload.txt"), emit: upload
     tuple val(meta), path("${meta.id}.annotation_stats.csv"), emit: stats
+    tuple val(meta), path("12_push_mtdna_annotation_results.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
     when:
@@ -22,6 +23,7 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
     script:
     def args = task.ext.args ?: ''
     def args2 = task.ext.args2 ?: ''
+    def effective_args = ["annotation_stats.py ${args} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.id}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
     """
     # Compile the statistics 
     annotation_stats.py \\
@@ -38,6 +40,10 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
         ${meta.id} \\
         ${meta.id}.annotation_stats.csv \\
         > ${meta.id}.annotation.upload.txt
+
+    cat <<-END_TOOL_PARAMS > 12_push_mtdna_annotation_results.tool_params_mqcrow.html
+    <tr><td>Push mtDNA Annotation Results</td><td><samp>${effective_args}</samp></td><td>Calculates annotation statistics and uploads annotation results for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
     
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -48,9 +54,16 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
     """
 
     stub:
+    def args = task.ext.args ?: ''
+    def args2 = task.ext.args2 ?: ''
+    def effective_args = ["annotation_stats.py ${args} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.id}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
     """
     touch ${meta.id}.annotation.upload.txt
     touch ${meta.id}.annotation_stats.csv
+
+    cat <<-END_TOOL_PARAMS > 12_push_mtdna_annotation_results.tool_params_mqcrow.html
+    <tr><td>Push mtDNA Annotation Results</td><td><samp>${effective_args}</samp></td><td>Calculates annotation statistics and uploads annotation results for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
     
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

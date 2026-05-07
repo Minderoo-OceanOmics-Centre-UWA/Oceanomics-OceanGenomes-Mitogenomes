@@ -1,0 +1,17 @@
+name: mitogenome_assembly_summary
+description: Generate a MultiQC custom-content TSV summarising MitoHiFi and GetOrganelle mitogenome assembly QC.
+keywords: [multiqc, mitogenome, mitohifi, getorganelle, qc]
+tools:
+  - name: mitogenome_assembly_summary
+    description: Local Python parser for mitogenome assembly outputs.
+input:
+  - assembly_files:
+      type: file
+      description: MitoHiFi and GetOrganelle output files to scan.
+output:
+  - table:
+      type: file
+      description: MultiQC custom-content table.
+      pattern: "mitogenome_assembly_summary_mqc.tsv"
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]

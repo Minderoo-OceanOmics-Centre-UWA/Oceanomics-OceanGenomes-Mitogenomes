@@ -13,6 +13,7 @@ process GEN_FILES_TABLE2ASN {
     tuple val(meta), path("*.sqn")    , emit: sqn_file
     tuple val(meta), path("*.val")    , emit: val_file
     tuple val(meta), path("*.gbf")    , emit: gbf_file
+    tuple val(meta), path("19_table2asn.tool_params_mqcrow.html"), emit: tool_params
 
     path "versions.yml"                     , emit: versions
 
@@ -23,6 +24,7 @@ process GEN_FILES_TABLE2ASN {
     script:
     def LOGFILE = "${meta.id}.table2asn.log"
     def sample_out = "${meta.mt_assembly_prefix}.sqn"
+    def effective_args = "-indir . -euk -J -t ${sample_sbt} -i ${sample_fa} -f ${sample_tbl} -w ${sample_cmt} -src-file ${sample_src} -o ${sample_out} -M n -j '[mgcode=2] [location=mitochondrion] [topology=circular]' -V vb -Z -W"
     
     """
     # Run table2asn with correct syntax
@@ -41,6 +43,10 @@ process GEN_FILES_TABLE2ASN {
         -V vb \\
         -Z \\
         -W \\
+
+    cat <<-END_TOOL_PARAMS > 19_table2asn.tool_params_mqcrow.html
+    <tr><td>Table2ASN</td><td><samp>${effective_args}</samp></td><td>Generates GenBank submission files and validation reports for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
     
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -49,11 +55,16 @@ process GEN_FILES_TABLE2ASN {
     """
     
     stub:
+    def sample_out = "${meta.mt_assembly_prefix ?: (meta.id ?: 'stub')}.sqn"
+    def effective_args = "-indir . -euk -J -t ${sample_sbt} -i ${sample_fa} -f ${sample_tbl} -w ${sample_cmt} -src-file ${sample_src} -o ${sample_out} -M n -j '[mgcode=2] [location=mitochondrion] [topology=circular]' -V vb -Z -W"
     """
     prefix=${meta.mt_assembly_prefix ?: (meta.id ?: "stub")}
     : > \${prefix}.sqn
     : > \${prefix}.val
     : > \${prefix}.gbf
+    cat <<-END_TOOL_PARAMS > 19_table2asn.tool_params_mqcrow.html
+    <tr><td>Table2ASN</td><td><samp>${effective_args}</samp></td><td>Generates GenBank submission files and validation reports for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         table2asn: "stub"

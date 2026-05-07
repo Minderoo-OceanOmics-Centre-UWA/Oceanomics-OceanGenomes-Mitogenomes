@@ -15,6 +15,7 @@ process BLAST_BLASTN {
     tuple val(meta), path("blast.${gene_type}.${annotation_name}.filtered.tsv"), val(gene_type), val(annotation_name), emit: filtered
     tuple val(meta), path("blast.${gene_type}.${annotation_name}.filtered.tsv"), emit: validation
     path "filtered_summary.${gene_type}.txt"   , emit: summary
+    tuple val(meta), path("08_blast_blastn.${gene_type}.${annotation_name}.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"           , emit: versions
 
     when:
@@ -23,6 +24,7 @@ process BLAST_BLASTN {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "blast.${gene_type}.${annotation_name}"
+    def effective_args = ["-num_threads ${task.cpus}", "-db ${blast_db}", "-query ${fasta}", args, "-out ${prefix}.tsv"].findAll { it?.toString()?.trim() }.join(' ')
 
     """
     mkdir -p lca
@@ -33,6 +35,10 @@ process BLAST_BLASTN {
         -query ${fasta} \\
         ${args} \\
         -out ${prefix}.tsv
+
+    cat <<-END_TOOL_PARAMS > 08_blast_blastn.${gene_type}.${annotation_name}.tool_params_mqcrow.html
+    <tr><td>BLAST BLASTN</td><td><samp>${effective_args}</samp></td><td>Searches ${gene_type} sequence ${annotation_name} against the selected BLAST database for ${meta.id}; output is filtered for length and identity.</td></tr>
+    END_TOOL_PARAMS
 
     # Filter the results
     awk -F '\t' '{if ((\$15 - \$14 > 200) && (\$7 > 98)) print}' ${prefix}.tsv > ${prefix}.filtered.tsv
@@ -54,8 +60,14 @@ process BLAST_BLASTN {
 
     stub:
     def prefix = task.ext.prefix ?: "${meta.id}"
+    def args = task.ext.args ?: ''
+    def effective_args = ["-num_threads ${task.cpus}", "-db ${blast_db}", "-query ${fasta}", args, "-out ${prefix}.tsv"].findAll { it?.toString()?.trim() }.join(' ')
     """
     touch ${prefix}.txt
+
+    cat <<-END_TOOL_PARAMS > 08_blast_blastn.${gene_type}.${annotation_name}.tool_params_mqcrow.html
+    <tr><td>BLAST BLASTN</td><td><samp>${effective_args}</samp></td><td>Searches ${gene_type} sequence ${annotation_name} against the selected BLAST database for ${meta.id}; output is filtered for length and identity.</td></tr>
+    END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

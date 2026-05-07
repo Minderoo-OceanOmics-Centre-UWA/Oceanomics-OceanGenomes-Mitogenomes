@@ -140,6 +140,9 @@ workflow MITOGENOME_ANNOTATION {
     // Collect MultiQC files
     // Need to update this section to include everything
     ch_multiqc_files = ch_multiqc_files.mix(BLAST_BLASTN.out.summary.collect{it[1]})
+    ch_multiqc_files = ch_multiqc_files.mix(EMMA.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(BLAST_BLASTN.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(LCA.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(EMMA.out.versions.first())
     ch_versions = ch_versions.mix(BLAST_BLASTN.out.versions.first())
     ch_versions = ch_versions.mix(LCA.out.versions.first())

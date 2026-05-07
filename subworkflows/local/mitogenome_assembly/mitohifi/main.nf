@@ -28,6 +28,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
+    ch_summary_files = Channel.empty()
 
     //
     // map just the meta for the species query
@@ -124,6 +125,17 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.coverage.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.logs.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.command_logs.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_FINDMITOREFERENCE.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(CAT_FASTQ.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.tool_params.collect { it[1] })
+    ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.fasta.map { meta, fasta -> fasta })
+    ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.gb.map { meta, gb -> gb })
+    ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.command_logs.map { meta, log -> log })
+    ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.logs.map { meta, log -> log })
+    ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.reference_files.map { meta, refs -> refs })
+    ch_summary_files = ch_summary_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.stats.map { meta, stats -> stats })
+    ch_summary_files = ch_summary_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.coverage.map { meta, coverage -> coverage })
 
     // Versions for versions.yml collation (not MultiQC inputs)
     ch_versions = ch_versions.mix(CAT_FASTQ.out.versions.first())
@@ -139,6 +151,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     assembly_fasta  = MITOHIFI_MITOHIFI.out.fasta
     assembly_log    = MITOHIFI_AVERAGE_COVERAGE.out.stats
     coverage_stats  = MITOHIFI_AVERAGE_COVERAGE.out.coverage
+    summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]
 }

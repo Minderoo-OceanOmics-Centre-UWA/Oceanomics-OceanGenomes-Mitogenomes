@@ -15,6 +15,7 @@ process FORMAT_FILES {
     tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.gff"), emit: gff
     tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), emit: gb
     val meta        , emit: meta
+    tuple val(meta), path("15_format_files.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
     // when:
@@ -29,6 +30,7 @@ process FORMAT_FILES {
     script:
     def args = task.ext.args ?: ''
     def species = species_name ?: 'Unknown species'
+    def effective_args = [args, "--og-id ${meta.id}", "--species '${species}'", "--input-dir .", "--outdir processed"].findAll { it?.trim() }.join(' ')
 
     """
     mkdir -p processed
@@ -42,6 +44,10 @@ process FORMAT_FILES {
         --input-dir . \\
         --outdir processed
 
+    cat <<-END_TOOL_PARAMS > 15_format_files.tool_params_mqcrow.html
+    <tr><td>Format Files</td><td><samp>${effective_args}</samp></td><td>Formats EMMA outputs for GenBank preparation for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python --version | sed 's/Python //')
@@ -50,12 +56,19 @@ process FORMAT_FILES {
     """
 
     stub:
+    def args = task.ext.args ?: ''
+    def species = species_name ?: 'Unknown species'
+    def effective_args = [args, "--og-id ${meta.id}", "--species '${species}'", "--input-dir .", "--outdir processed"].findAll { it?.trim() }.join(' ')
     """
     mkdir -p processed
     touch processed/dummy.fa
     touch processed/dummy.gff
     touch processed/dummy.tbl
     touch processed/dummy.cmt
+
+    cat <<-END_TOOL_PARAMS > 15_format_files.tool_params_mqcrow.html
+    <tr><td>Format Files</td><td><samp>${effective_args}</samp></td><td>Formats EMMA outputs for GenBank preparation for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

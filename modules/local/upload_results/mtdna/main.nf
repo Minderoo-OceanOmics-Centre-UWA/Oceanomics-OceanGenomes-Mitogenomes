@@ -13,6 +13,7 @@ process PUSH_MTDNA_ASSM_RESULTS {
 
     output:
     path "${meta.id}.mtdna.upload.txt", emit: upload
+    tuple val(meta), path("10_push_mtdna_assm_results.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
     when:
@@ -21,6 +22,7 @@ process PUSH_MTDNA_ASSM_RESULTS {
     script:
     def args = task.ext.args ?: ''
     def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
+    def effective_args = [args, config, mt_assembly_prefix, out_log, fasta].findAll { it?.toString()?.trim() }.join(' ')
     """
     push_mtdna_assm_results.py \\
         $args \\
@@ -30,6 +32,10 @@ process PUSH_MTDNA_ASSM_RESULTS {
         $fasta \\
         > ${meta.id}.mtdna.upload.txt
 
+    cat <<-END_TOOL_PARAMS > 10_push_mtdna_assm_results.tool_params_mqcrow.html
+    <tr><td>Push mtDNA Assembly Results</td><td><samp>${effective_args}</samp></td><td>Uploads mitogenome assembly statistics for ${meta.id} to the SQL database.</td></tr>
+    END_TOOL_PARAMS
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python --version | sed 's/Python //')
@@ -38,8 +44,15 @@ process PUSH_MTDNA_ASSM_RESULTS {
     """
 
     stub:
+    def args = task.ext.args ?: ''
+    def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
+    def effective_args = [args, config, mt_assembly_prefix, out_log, fasta].findAll { it?.toString()?.trim() }.join(' ')
     """
     touch ${meta.id}.mtdna.upload.txt
+
+    cat <<-END_TOOL_PARAMS > 10_push_mtdna_assm_results.tool_params_mqcrow.html
+    <tr><td>Push mtDNA Assembly Results</td><td><samp>${effective_args}</samp></td><td>Uploads mitogenome assembly statistics for ${meta.id} to the SQL database.</td></tr>
+    END_TOOL_PARAMS
     
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

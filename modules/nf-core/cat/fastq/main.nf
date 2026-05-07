@@ -12,6 +12,7 @@ process CAT_FASTQ {
 
     output:
     tuple val(meta), path("*.merged.fastq.gz"), emit: reads
+    tuple val(meta), path("03_cat_fastq.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
     when:
@@ -20,10 +21,15 @@ process CAT_FASTQ {
     script:
     def prefix = task.ext.prefix ?: "${meta.assembly_prefix}"
     def readList = reads instanceof List ? reads.collect { it.toString() } : [reads.toString()]
+    def note = meta.single_end ? "Concatenates ${readList.size()} single-end FASTQ file(s)." : "Concatenates ${readList.size()} paired FASTQ files into merged R1 and R2 files."
     if (meta.single_end) {
         if (readList.size >= 1) {
             """
             cat ${readList.join(' ')} > ${prefix}.merged.fastq.gz
+
+            cat <<-END_TOOL_PARAMS > 03_cat_fastq.tool_params_mqcrow.html
+            <tr><td>Cat FASTQ</td><td><samp>cat ${readList.join(' ')}</samp></td><td>${note}</td></tr>
+            END_TOOL_PARAMS
 
             cat <<-END_VERSIONS > versions.yml
             "${task.process}":
@@ -43,6 +49,10 @@ process CAT_FASTQ {
             cat ${read1.join(' ')} > ${prefix}.R1.merged.fastq.gz
             cat ${read2.join(' ')} > ${prefix}.R2.merged.fastq.gz
 
+            cat <<-END_TOOL_PARAMS > 03_cat_fastq.tool_params_mqcrow.html
+            <tr><td>Cat FASTQ</td><td><samp>cat ${read1.join(' ')}; cat ${read2.join(' ')}</samp></td><td>${note}</td></tr>
+            END_TOOL_PARAMS
+
             cat <<-END_VERSIONS > versions.yml
             "${task.process}":
                 cat: \$(echo \$(cat --version 2>&1) | sed 's/^.*coreutils) //; s/ .*\$//')
@@ -56,10 +66,15 @@ process CAT_FASTQ {
     stub:
     def prefix = task.ext.prefix ?: "${meta.assembly_prefix}"
     def readList = reads instanceof List ? reads.collect { it.toString() } : [reads.toString()]
+    def note = meta.single_end ? "Concatenates ${readList.size()} single-end FASTQ file(s)." : "Concatenates ${readList.size()} paired FASTQ files into merged R1 and R2 files."
     if (meta.single_end) {
         if (readList.size >= 1) {
             """
             echo '' | gzip > ${prefix}.merged.fastq.gz
+
+            cat <<-END_TOOL_PARAMS > 03_cat_fastq.tool_params_mqcrow.html
+            <tr><td>Cat FASTQ</td><td><samp>cat ${readList.join(' ')}</samp></td><td>${note}</td></tr>
+            END_TOOL_PARAMS
 
             cat <<-END_VERSIONS > versions.yml
             "${task.process}":
@@ -75,6 +90,10 @@ process CAT_FASTQ {
             """
             echo '' | gzip > ${prefix}_1.merged.fastq.gz
             echo '' | gzip > ${prefix}_2.merged.fastq.gz
+
+            cat <<-END_TOOL_PARAMS > 03_cat_fastq.tool_params_mqcrow.html
+            <tr><td>Cat FASTQ</td><td><samp>cat paired reads</samp></td><td>${note}</td></tr>
+            END_TOOL_PARAMS
 
             cat <<-END_VERSIONS > versions.yml
             "${task.process}":

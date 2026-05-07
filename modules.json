@@ -124,6 +124,20 @@
                             "local"
                         ]
                     },
+                    "multiqc/mitogenome_assembly_summary": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
+                    "multiqc/per_sample": {
+                        "branch": "master",
+                        "git_sha": "",
+                        "installed_by": [
+                            "local"
+                        ]
+                    },
                     "sanitise_fasta": {
                         "branch": "master",
                         "git_sha": "",

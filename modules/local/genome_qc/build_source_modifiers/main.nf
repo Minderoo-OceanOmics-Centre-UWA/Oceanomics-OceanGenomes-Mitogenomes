@@ -13,12 +13,14 @@ process BUILD_SOURCE_MODIFIERS {
     tuple val(meta), path("${meta.id}.bankit_metadata.csv")                , emit: bankit_metadata
     tuple val(meta), path("${meta.id}.bankit_metadata_latlon_cleaned.csv") , emit: cleaned_metadata
     tuple val(meta), path("${meta.mt_assembly_prefix}*.src")                , emit: src_file, optional: true
+    tuple val(meta), path("16_build_source_modifiers.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                                                    , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
+    def effective_args = "--config ${config} --og-id ${meta.id} --seq-tech ${meta.sequencing_type} --assembly-id ${meta.mt_assembly_prefix}"
     """
 
     build_source_modifiers.py \\
@@ -27,6 +29,10 @@ process BUILD_SOURCE_MODIFIERS {
         --seq-tech "${meta.sequencing_type}" \\
         --assembly-id "${meta.mt_assembly_prefix}" \\
 
+    cat <<-END_TOOL_PARAMS > 16_build_source_modifiers.tool_params_mqcrow.html
+    <tr><td>Build Source Modifiers</td><td><samp>${effective_args}</samp></td><td>Builds GenBank source modifier files for ${meta.id} from SQL metadata.</td></tr>
+    END_TOOL_PARAMS
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python --version | sed 's/Python //')
@@ -34,11 +40,16 @@ process BUILD_SOURCE_MODIFIERS {
     """
 
     stub:
+    def effective_args = "--config ${config} --og-id ${meta.id} --seq-tech ${meta.sequencing_type} --assembly-id ${meta.mt_assembly_prefix}"
     """
     mkdir -p output src_files
     : > output/bankit_metadata.csv
     : > output/bankit_metadata_latlon_cleaned.csv
     : > src_files/dummy.src
+
+    cat <<-END_TOOL_PARAMS > 16_build_source_modifiers.tool_params_mqcrow.html
+    <tr><td>Build Source Modifiers</td><td><samp>${effective_args}</samp></td><td>Builds GenBank source modifier files for ${meta.id} from SQL metadata.</td></tr>
+    END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

@@ -17,6 +17,7 @@ process EMMA {
     tuple val(meta), path("emma/cds/*RNR1*.fa"),  emit: s12_sequences  
     tuple val(meta), path("emma/cds/*RNR2*.fa"),  emit: s16_sequences
     tuple val(meta), path("emma/*"), emit: results 
+    tuple val(meta), path("07_emma.tool_params_mqcrow.html"), emit: tool_params
     path "versions_emma.yml", emit: versions
 
     script:
@@ -24,6 +25,7 @@ process EMMA {
         def inv_flag  = (meta.invertebrates ? '--invertebrates' : '')
         def args      = [base_args, inv_flag].findAll{ it }.join(' ')
         def prefix = task.ext.prefix ?: meta.mt_assembly_prefix
+        def effective_args = [args, "--fa emma/<prefix>.fa", "--gff emma/<prefix>.gff", "--tbl emma/<prefix>.tbl", "--svg emma/<prefix>.svg", "--tempdir tempdir/", "--loglevel debug", fasta].findAll { it?.toString()?.trim() }.join(' ')
 
         """
             # Explicitly export the environment variable (double protection)
@@ -44,6 +46,10 @@ process EMMA {
                 --tempdir tempdir/ \\
                 --loglevel debug \\
                 ${fasta} 
+
+            cat <<-END_TOOL_PARAMS > 07_emma.tool_params_mqcrow.html
+            <tr><td>EMMA</td><td><samp>${effective_args}</samp></td><td>Annotates the mitogenome assembly for ${meta.id}; adds --invertebrates when the sample metadata requires it.</td></tr>
+            END_TOOL_PARAMS
             
             julia /opt/extract_proteins.jl \\
                 emma/ \\
@@ -74,6 +80,10 @@ process EMMA {
 
  stub:
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
+    def base_args = (task.ext.args ?: '').toString().trim()
+    def inv_flag  = (meta.invertebrates ? '--invertebrates' : '')
+    def args      = [base_args, inv_flag].findAll{ it }.join(' ')
+    def effective_args = [args, "--fa emma/<prefix>.fa", "--gff emma/<prefix>.gff", "--tbl emma/<prefix>.tbl", "--svg emma/<prefix>.svg", "--tempdir tempdir/", "--loglevel debug", fasta].findAll { it?.toString()?.trim() }.join(' ')
     
         """
         # Create mock emma version for stub
@@ -93,6 +103,10 @@ process EMMA {
         touch emma/cds/CO1_gene.\${emma_prefix}.fa
         touch emma/cds/RNR1_gene.\${emma_prefix}.fa
         touch emma/cds/RNR2_gene.\${emma_prefix}.fa
+
+        cat <<-END_TOOL_PARAMS > 07_emma.tool_params_mqcrow.html
+        <tr><td>EMMA</td><td><samp>${effective_args}</samp></td><td>Annotates the mitogenome assembly for ${meta.id}; adds --invertebrates when the sample metadata requires it.</td></tr>
+        END_TOOL_PARAMS
         
         # Create mock versions file
         cat <<-END_VERSIONS > versions_emma.yml

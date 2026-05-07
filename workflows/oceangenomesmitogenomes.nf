@@ -5,6 +5,7 @@
 */
 // Pipeline subworkflows
 include { MULTIQC                } from '../modules/nf-core/multiqc/main'
+include { MULTIQC_PER_SAMPLE     } from '../modules/local/multiqc/per_sample'
 include { paramsSummaryMap       } from 'plugin/nf-schema'
 include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pipeline'
@@ -17,6 +18,7 @@ include { MITOGENOME_ANNOTATION     } from '../subworkflows/local/mitogenome_ann
 include { UPLOAD_RESULTS            } from '../subworkflows/local/upload_results_mito'
 include { MITOGENOME_QC             } from '../subworkflows/local/mitogenome_qc'
 include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
+include { MITOGENOME_ASSEMBLY_SUMMARY } from '../modules/local/multiqc/mitogenome_assembly_summary'
 
 // Using local module SANITISE_FASTA (see modules/local/sanitise_fasta)
 
@@ -40,6 +42,7 @@ workflow OCEANGENOMESMITOGENOMES {
 
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
+    ch_assembly_summary_files = Channel.empty()
 
     // Map samplesheet meta by sample id + sequencing type + date for reuse with precomputed files
     ch_samplesheet_meta = getorg_input
@@ -115,6 +118,13 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_getorg_assembly_log = Channel.empty()
     }
 
+    if (!params.skip_mitogenome_assembly_getorg) {
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(MITOGENOME_ASSEMBLY_GETORG.out.summary_files)
+    } else {
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(ch_mitogenome_getorg_assembly_fasta.map { meta, fasta -> fasta })
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(ch_mitogenome_getorg_assembly_log.map { meta, log -> log })
+    }
+
 
     // 
     // SUBWORKFLOW: MITOGENOME_ASSEMBLY_MITOHIFI
@@ -162,6 +172,13 @@ workflow OCEANGENOMESMITOGENOMES {
 
         ch_mitogenome_hifi_assembly_fasta = Channel.empty()
         ch_mitogenome_hifi_assembly_log = Channel.empty()
+    }
+
+    if (!params.skip_mitogenome_assembly_hifi) {
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(MITOGENOME_ASSEMBLY_MITOHIFI.out.summary_files)
+    } else {
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(ch_mitogenome_hifi_assembly_fasta.map { meta, fasta -> fasta })
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(ch_mitogenome_hifi_assembly_log.map { meta, log -> log })
     }
 
     //
@@ -270,9 +287,25 @@ workflow OCEANGENOMESMITOGENOMES {
         MITOGENOME_QC (
             ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), path(emma/*)
         )
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(UPLOAD_RESULTS.out.assembly_summary_files)
     } else if (!params.skip_upload_results && !params.sql_config) {
         log.warn "Skipping upload/QC because --sql_config not provided"
     }
+
+    //
+    // MODULE: Mitogenome assembly summary for MultiQC custom content
+    //
+
+    ch_assembly_summary_inputs = ch_assembly_summary_files.ifEmpty(
+        file("$projectDir/assets/multiqc_config.yml", checkIfExists: false)
+    )
+
+    MITOGENOME_ASSEMBLY_SUMMARY (
+        ch_assembly_summary_inputs.collect()
+    )
+
+    ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_SUMMARY.out.table)
+    ch_versions = ch_versions.mix(MITOGENOME_ASSEMBLY_SUMMARY.out.versions)
 
     //
     // Collect all MultiQC files from all subworkflows
@@ -359,11 +392,27 @@ workflow OCEANGENOMESMITOGENOMES {
         )
     )
 
+    ch_multiqc_files_collected = ch_multiqc_files.collect()
+    ch_multiqc_config_list = ch_multiqc_config.toList()
+    ch_multiqc_custom_config_list = ch_multiqc_custom_config.toList()
+    ch_multiqc_logo_list = ch_multiqc_logo.toList()
+
+    if (!params.skip_per_sample_multiqc) {
+        MULTIQC_PER_SAMPLE (
+            ch_multiqc_files_collected,
+            ch_multiqc_config_list,
+            ch_multiqc_custom_config_list,
+            ch_multiqc_logo_list,
+            [],
+            []
+        )
+    }
+
     MULTIQC (
-        ch_multiqc_files.collect(),
-        ch_multiqc_config.toList(),
-        ch_multiqc_custom_config.toList(),
-        ch_multiqc_logo.toList(),
+        ch_multiqc_files_collected,
+        ch_multiqc_config_list,
+        ch_multiqc_custom_config_list,
+        ch_multiqc_logo_list,
         [],
         []
     )

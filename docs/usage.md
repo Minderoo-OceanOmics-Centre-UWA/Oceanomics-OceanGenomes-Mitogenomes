@@ -84,6 +84,27 @@ that matches your container/conda environment.
 OceanOmics metadata. When running with `--input`, you can omit `--sql_config`, but upload/QC stages
 are then skipped with a warning.
 
+## Assembly summary QC thresholds
+
+The pipeline writes `multiqc/mitogenome_assembly_summary_mqc.tsv` and includes it in MultiQC as
+`Mitogenome assembly summary`. The parser uses these thresholds to populate `manual_review_reason`:
+
+| Parameter | Default | Flag |
+|-----------|---------|------|
+| `--mitogenome_summary_min_mean_coverage` | `20` | `low_mean_coverage` |
+| `--mitogenome_summary_max_coverage_cv` | `1.0` | `high_coverage_variability` |
+| `--mitogenome_summary_min_length` | `10000` | `length_outside_expected_range` |
+| `--mitogenome_summary_max_length` | `25000` | `length_outside_expected_range` |
+| `--mitogenome_summary_expected_gene_count` | `37` | `missing_genes` when annotation-derived counts are lower |
+
+These thresholds are deliberately broad defaults for animal mitochondrial assemblies. Override them in
+the command line or a params file when processing taxa with known compact, expanded, or unusual
+mitogenomes.
+
+The pipeline also writes one filtered MultiQC report per detected sample under
+`multiqc/per_sample/<sample>/<sample>_multiqc_report.html`. Set `--skip_per_sample_multiqc true`
+to generate only the cohort-level report.
+
 ## Samplesheet requirements (`--input`)
 
 A valid CSV must match the schema in `assets/schema_input.json`:

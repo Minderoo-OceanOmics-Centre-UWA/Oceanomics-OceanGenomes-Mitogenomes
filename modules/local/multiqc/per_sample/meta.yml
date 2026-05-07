@@ -1,0 +1,43 @@
+name: multiqc_per_sample
+description: Generate one MultiQC report per sample from the pipeline MultiQC inputs.
+keywords:
+  - multiqc
+  - qc
+  - report
+tools:
+  - multiqc:
+      description: Aggregate results from bioinformatics analyses into a single report.
+      homepage: https://multiqc.info/
+      documentation: https://multiqc.info/docs/
+      tool_dev_url: https://github.com/MultiQC/MultiQC
+      doi: "10.1093/bioinformatics/btw354"
+      licence: ["GPL-3.0-or-later"]
+input:
+  - multiqc_files:
+      type: file
+      description: Files to be parsed by MultiQC.
+  - multiqc_config:
+      type: file
+      description: MultiQC configuration file.
+  - extra_multiqc_config:
+      type: file
+      description: Optional user MultiQC configuration file.
+  - multiqc_logo:
+      type: file
+      description: Optional MultiQC logo file.
+  - replace_names:
+      type: file
+      description: Optional MultiQC sample replacement file.
+  - sample_names:
+      type: file
+      description: Optional MultiQC sample names file.
+output:
+  - reports:
+      type: directory
+      description: Directory containing one MultiQC report directory per sample.
+  - versions:
+      type: file
+      description: File containing software versions.
+      pattern: "versions.yml"
+authors:
+  - "@tpeirce"

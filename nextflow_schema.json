@@ -168,6 +168,12 @@
                     "fa_icon": "fas fa-image",
                     "hidden": true
                 },
+                "skip_per_sample_multiqc": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Skip generation of one MultiQC report per sample.",
+                    "fa_icon": "fas fa-file-alt"
+                },
                 "multiqc_methods_description": {
                     "type": "string",
                     "description": "Custom MultiQC yaml file containing HTML including a methods description.",
@@ -268,6 +274,31 @@
                 "translation_table": {
                     "type": "integer",
                     "description": "NCBI translation table (e.g. 2)."
+                },
+                "mitogenome_summary_min_mean_coverage": {
+                    "type": "number",
+                    "default": 20,
+                    "description": "Minimum mean mitogenome assembly coverage before the MultiQC assembly summary flags low_mean_coverage."
+                },
+                "mitogenome_summary_max_coverage_cv": {
+                    "type": "number",
+                    "default": 1.0,
+                    "description": "Maximum allowed coverage coefficient of variation before the MultiQC assembly summary flags high_coverage_variability."
+                },
+                "mitogenome_summary_min_length": {
+                    "type": "integer",
+                    "default": 10000,
+                    "description": "Minimum expected mitogenome assembly length in bp for the MultiQC assembly summary."
+                },
+                "mitogenome_summary_max_length": {
+                    "type": "integer",
+                    "default": 25000,
+                    "description": "Maximum expected mitogenome assembly length in bp for the MultiQC assembly summary."
+                },
+                "mitogenome_summary_expected_gene_count": {
+                    "type": "integer",
+                    "default": 37,
+                    "description": "Expected mitochondrial gene count used when annotation-derived gene counts are available."
                 },
                 "max_cpus": {
                     "type": "integer",

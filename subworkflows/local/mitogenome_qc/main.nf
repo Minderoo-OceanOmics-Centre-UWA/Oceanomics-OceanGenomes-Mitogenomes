@@ -45,6 +45,7 @@ workflow MITOGENOME_QC {
         mitogenome_qc     // tuple val(meta), val(species_name), val(proceed_qc true/false), path(input_dir) - input dir is the annotation outputs directory
     )
     // output is tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), emit: processed_files
+    ch_multiqc_files = ch_multiqc_files.mix(FORMAT_FILES.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(FORMAT_FILES.out.versions.first())
 
 
@@ -60,6 +61,7 @@ workflow MITOGENOME_QC {
         FORMAT_FILES.out.meta, // val(meta)
         sql_config_file // val(db_config)
     )
+    ch_multiqc_files = ch_multiqc_files.mix(BUILD_SOURCE_MODIFIERS.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(BUILD_SOURCE_MODIFIERS.out.versions.first())
 
 
@@ -70,6 +72,7 @@ workflow MITOGENOME_QC {
     EXTRACT_GENES_GFF (
         FORMAT_FILES.out.gff    //tuple val(meta), path(fasta), path(gff)
     )
+    ch_multiqc_files = ch_multiqc_files.mix(EXTRACT_GENES_GFF.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(EXTRACT_GENES_GFF.out.versions.first())
 
     //
@@ -88,6 +91,7 @@ workflow MITOGENOME_QC {
     TRANSLATE_GENES (
         EXTRACT_GENES_GFF.out.genes_dir    // tuple val(meta), path(genes_path)
     )
+    ch_multiqc_files = ch_multiqc_files.mix(TRANSLATE_GENES.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(TRANSLATE_GENES.out.versions.first())
     // ch_multiqc_files = ch_multiqc_files.mix(TRANSLATE_GENES.out.proteins_dir)
     
@@ -100,6 +104,7 @@ workflow MITOGENOME_QC {
         ch_processed_files, // tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), path("*.src") 
         template_sbt_file // sbt template generated from genbank, specific for OceanOmics
     )
+    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(GEN_FILES_TABLE2ASN.out.versions.first())
     // Feed table2asn validation output into MultiQC inputs (text summary)
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.val_file.collect { it[1] })

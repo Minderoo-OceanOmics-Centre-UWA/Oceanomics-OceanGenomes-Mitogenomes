@@ -11,9 +11,11 @@ process PUSH_LCA_BLAST_RESULTS {
 
     output:
     path "${meta.id}.lca_blast.upload.txt", emit: upload
+    tuple val(meta), path("13_push_lca_blast_results.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                   , emit: versions
 
     script:
+    def effective_args = "${config} ${meta.id} ${lca_results} ${blast_results}"
     """
     # Push the results to SQL database
     push_lca_blast_results.py \\
@@ -23,6 +25,10 @@ process PUSH_LCA_BLAST_RESULTS {
         ${blast_results} \\
         > ${meta.id}.lca_blast.upload.txt
 
+    cat <<-END_TOOL_PARAMS > 13_push_lca_blast_results.tool_params_mqcrow.html
+    <tr><td>Push LCA BLAST Results</td><td><samp>${effective_args}</samp></td><td>Uploads combined LCA and filtered BLAST results for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         version 1 - need to version control these upload scripts.
@@ -30,8 +36,12 @@ process PUSH_LCA_BLAST_RESULTS {
     """
     
     stub:
+    def effective_args = "${config} ${meta.id} ${lca_results} ${blast_results}"
     """
     : > ${meta.id}.lca_blast.upload.txt
+    cat <<-END_TOOL_PARAMS > 13_push_lca_blast_results.tool_params_mqcrow.html
+    <tr><td>Push LCA BLAST Results</td><td><samp>${effective_args}</samp></td><td>Uploads combined LCA and filtered BLAST results for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         upload: "stub"

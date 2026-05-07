@@ -31,6 +31,7 @@ process MITOHIFI_MITOHIFI {
     tuple val(meta), path("MitoReference")                  , emit: reference_files            , optional: true
     tuple val(meta), path("${meta.mt_assembly_prefix}.hifiasm.log"), emit: logs 
     tuple val(meta), path("${meta.mt_assembly_prefix}.log"), emit: command_logs 
+    tuple val(meta), path("05_mitohifi.tool_params_mqcrow.html"), emit: tool_params
     path  "versions.yml"                                    , emit: versions
   
     when:
@@ -39,6 +40,7 @@ process MITOHIFI_MITOHIFI {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
+    def effective_args = ["-${input_mode} ${hifi_cat}", "-f ${ref_fa}", "-g ${ref_gb}", "-t ${task.cpus}", args, "-o ${mito_code}"].findAll { it?.toString()?.trim() }.join(' ')
     if (! ["c", "r"].contains(input_mode)) {
         error "r for reads or c for contigs must be specified"
     }
@@ -53,6 +55,10 @@ process MITOHIFI_MITOHIFI {
         -g ${ref_gb} \\
         -t $task.cpus ${args} \\
         -o ${mito_code}
+
+    cat <<-END_TOOL_PARAMS > 05_mitohifi.tool_params_mqcrow.html
+    <tr><td>MitoHiFi</td><td><samp>${effective_args}</samp></td><td>Runs MitoHiFi in ${input_mode == 'r' ? 'read' : 'contig'} mode for ${meta.id} with mitochondrial code ${mito_code}.</td></tr>
+    END_TOOL_PARAMS
 
     exit_code=\$?
 
@@ -78,11 +84,15 @@ process MITOHIFI_MITOHIFI {
 
     stub:
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
+    def args = task.ext.args ?: ''
+    def effective_args = ["-${input_mode} ${hifi_cat}", "-f ${ref_fa}", "-g ${ref_gb}", "-t ${task.cpus}", args, "-o ${mito_code}"].findAll { it?.toString()?.trim() }.join(' ')
     """
     # Create all expected output files for testing
     touch ${prefix}.fasta
     touch ${prefix}.gb
     touch ${prefix}.contigs_stats.tsv
+    touch ${prefix}.hifiasm.log
+    touch ${prefix}.log
     touch all_potential_contigs.fa
     touch contigs_annotations.png
     touch coverage_plot.png
@@ -96,6 +106,10 @@ process MITOHIFI_MITOHIFI {
     mkdir final_mitogenome_choice
     mkdir potential_contigs
     mkdir reads_mapping_and_assembly
+
+    cat <<-END_TOOL_PARAMS > 05_mitohifi.tool_params_mqcrow.html
+    <tr><td>MitoHiFi</td><td><samp>${effective_args}</samp></td><td>Runs MitoHiFi in ${input_mode == 'r' ? 'read' : 'contig'} mode for ${meta.id} with mitochondrial code ${mito_code}.</td></tr>
+    END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

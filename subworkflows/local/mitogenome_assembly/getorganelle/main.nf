@@ -28,6 +28,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
 
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
+    ch_summary_files = Channel.empty()
 
      
     //
@@ -103,6 +104,14 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     //
 
     // ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_FROMREADS.out.etc.collect{it[1]})
+    ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_CONFIG.out.tool_params)
+    ch_multiqc_files = ch_multiqc_files.mix(CAT_FASTQ.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_FROMREADS.out.tool_params.collect { it[1] })
+    ch_summary_files = ch_summary_files.mix(GETORGANELLE_FROMREADS.out.fasta.map { meta, fasta -> fasta })
+    ch_summary_files = ch_summary_files.mix(GETORGANELLE_FROMREADS.out.log.map { meta, log -> log })
+    ch_summary_files = ch_summary_files.mix(GETORGANELLE_FROMREADS.out.org_assm_graph)
+    ch_summary_files = ch_summary_files.mix(GETORGANELLE_FROMREADS.out.raw_assm_graph)
+    ch_summary_files = ch_summary_files.mix(GETORGANELLE_FROMREADS.out.simp_assm_graph)
     ch_versions = ch_versions.mix(GETORGANELLE_CONFIG.out.versions.first())
     ch_versions = ch_versions.mix(GETORGANELLE_FROMREADS.out.versions.first())
     ch_versions = ch_versions.mix(CAT_FASTQ.out.versions.first())
@@ -114,6 +123,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     emit:
     assembly_fasta  = GETORGANELLE_FROMREADS.out.fasta
     assembly_log    = GETORGANELLE_FROMREADS.out.log
+    summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]
 }

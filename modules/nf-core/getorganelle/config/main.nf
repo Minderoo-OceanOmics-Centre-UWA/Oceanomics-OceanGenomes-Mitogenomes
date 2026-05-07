@@ -12,6 +12,7 @@ process GETORGANELLE_CONFIG {
 
     output:
     tuple val(organelle_type), path("getorganelle"), emit: db
+    path "01_getorganelle_config.tool_params_mqcrow.html", emit: tool_params
     path "versions.yml"                            , emit: versions
 
     when:
@@ -19,11 +20,16 @@ process GETORGANELLE_CONFIG {
 
     script:
     def args = task.ext.args ?: ''
+    def effective_args = [args, "-a ${organelle_type}", "--config-dir getorganelle"].findAll { it?.trim() }.join(' ')
     """
     get_organelle_config.py \\
         $args \\
         -a ${organelle_type} \\
         --config-dir getorganelle
+
+    cat <<-END_TOOL_PARAMS > 01_getorganelle_config.tool_params_mqcrow.html
+    <tr><td>GetOrganelle Config</td><td><samp>${effective_args}</samp></td><td>Downloads the ${organelle_type} GetOrganelle database into the local config directory.</td></tr>
+    END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -32,9 +38,15 @@ process GETORGANELLE_CONFIG {
     """
 
     stub:
+    def args = task.ext.args ?: ''
+    def effective_args = [args, "-a ${organelle_type}", "--config-dir getorganelle"].findAll { it?.trim() }.join(' ')
     """
     mkdir -p getorganelle/{LabelDatabase,SeedDatabase}
     touch getorganelle/{LabelDatabase,SeedDatabase}/${organelle_type}.fasta
+
+    cat <<-END_TOOL_PARAMS > 01_getorganelle_config.tool_params_mqcrow.html
+    <tr><td>GetOrganelle Config</td><td><samp>${effective_args}</samp></td><td>Downloads the ${organelle_type} GetOrganelle database into the local config directory.</td></tr>
+    END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

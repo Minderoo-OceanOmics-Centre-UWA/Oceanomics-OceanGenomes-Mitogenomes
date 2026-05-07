@@ -18,6 +18,7 @@ process GETORGANELLE_FROMREADS {
     path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.fastg")  , emit: simp_assm_graph // a simplified assembly graph
     path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.csv")    , emit: contig_label // a tab-format contig label file for bandage visualization
     // path("mtdna/*")                                                         , emit: etc // have only included the files we want above, uncomment if you want everything
+    tuple val(meta), path("02_getorganelle_fromreads.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                                                     , emit: versions
 
     when:
@@ -26,6 +27,7 @@ process GETORGANELLE_FROMREADS {
     script:
     def args   = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
+    def effective_args = [args, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
 
     // Use persistent output directory for checkpoint/resume capability
     def checkpoint_base = "${params.outdir}/getorganelle_checkpoints"
@@ -42,6 +44,10 @@ process GETORGANELLE_FROMREADS {
         -1 ${fastp[0]} \\
         -2 ${fastp[1]} \\
         -o $output_dir
+
+    cat <<-END_TOOL_PARAMS > 02_getorganelle_fromreads.tool_params_mqcrow.html
+    <tr><td>GetOrganelle From Reads</td><td><samp>${effective_args}</samp></td><td>Assembles ${organelle_type} from cleaned read pairs for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
 
     wait
     
@@ -66,11 +72,21 @@ process GETORGANELLE_FROMREADS {
 
     stub:
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
+    def args   = task.ext.args ?: ''
+    def effective_args = [args, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
     """
     mkdir -p mtdna
        
     touch "mtdna/${prefix}.fasta"
-    touch "mtdna/stub_output.txt"
+    touch "mtdna/${prefix}.get_org.log.txt"
+    touch "mtdna/${prefix}.selected_graph.gfa"
+    touch "mtdna/${prefix}.extended_K21.assembly_graph.fastg"
+    touch "mtdna/${prefix}.extended_K21.assembly_graph.fastg.extend-animal_mt.fastg"
+    touch "mtdna/${prefix}.extended_K21.assembly_graph.fastg.extend-animal_mt.csv"
+
+    cat <<-END_TOOL_PARAMS > 02_getorganelle_fromreads.tool_params_mqcrow.html
+    <tr><td>GetOrganelle From Reads</td><td><samp>${effective_args}</samp></td><td>Assembles ${organelle_type} from cleaned read pairs for ${meta.id}.</td></tr>
+    END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
