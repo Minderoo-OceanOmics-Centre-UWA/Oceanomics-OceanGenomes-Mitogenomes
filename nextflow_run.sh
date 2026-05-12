@@ -26,8 +26,7 @@ nextflow \
     --skip_upload_results false \
     --samplesheet_prefix "samplesheet" \
     --template_sbt "bin/template.sbt" \
-    --translation_table "2" \
-    --getorganelle_fromreads_args "-R 20 -w 75 -k 21,45,65,85 --max-extending-len inf --max-n-words 1000000000 --continue" 
+    --translation_table "2" 
     
     # --getorganelle_fromreads_args "-R 20 -w 75 -k 21,45,65,85,105 --max-extending-len inf --max-n-words 1000000000 --continue" ## Include this line if you want to customise the getorganelle fromreads args.
     # nextflow -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core

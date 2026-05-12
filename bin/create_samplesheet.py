@@ -40,7 +40,7 @@ def load_db_config(config_file):
 def extract_sample_info(filename):
     """
     Extract sample information from filename based on three naming patterns:
-    1. OG820M-1_HICL_S4_L001_R1_001.fastq.gz -> OG820M-1_HICL (before second _)
+    1. OG820M-1_HICL_S4_L001_R1_001.fastq.gz -> OG820M-1_HICL (before second _; cleaned later to OG820)
     2. OG785_m84154_241004_105305_s3.hifi_reads.bc2068.filt.fastq.gz -> OG785 (before first _)
     3. OG764.ilmn.240716.R1.fastq.gz -> OG764 (before first .)
     """
@@ -124,7 +124,7 @@ def pick_primary_seq_type(seq_types, sample_id):
 
 
 def clean_sample_id(sample_id):
-    return re.sub(r'^(OG\\d+).*', r'\\1', sample_id)
+    return re.sub(r'^(OG\d+).*', r'\1', sample_id)
 
 
 def extract_hifi_completion_date(filename):
