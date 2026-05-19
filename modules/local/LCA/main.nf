@@ -11,7 +11,7 @@ process LCA {
 
     output:
     tuple val(meta), path("lca.${gene_type}.${annotation_name}.tsv"), emit: lca
-    path("lca_raw.${gene_type}.${annotation_name}.tsv"), emit: lca_raw
+    tuple val(meta), path("lca_raw.${gene_type}.${annotation_name}.tsv"), emit: lca_raw
     path("lca_short.${gene_type}.${annotation_name}.tsv"), emit: lca_short
     tuple val(meta), path("09_lca.${gene_type}.${annotation_name}.tool_params_mqcrow.html"), emit: tool_params
     path "versions_LCA.yml", emit: versions

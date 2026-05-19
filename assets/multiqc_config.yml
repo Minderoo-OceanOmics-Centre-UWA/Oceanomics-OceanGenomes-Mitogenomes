@@ -13,6 +13,8 @@ report_section_order:
     order: -100000
   mitogenome_assembly_summary:
     order: 100
+  upload_results_summary:
+    order: 95
 
 export_plots: true
 
@@ -78,6 +80,20 @@ custom_data:
     data_format: csv
     filename_glob: "*.annotation_stats.csv"
 
+  upload_results_summary:
+    section_name: "SQL Upload Summary"
+    description: "Per-sample status of each SQL upload step (assembly, annotation, species validation, LCA/BLAST, LCA raw)."
+    plot_type: table
+    data_format: tsv
+    filename_glob: "upload_results_summary_mqc.tsv"
+    headers:
+      og_id: "Sample"
+      assembly: "Assembly"
+      annotation: "Annotation"
+      species_validation: "Species validation"
+      lca_blast: "LCA / BLAST"
+      lca_raw: "LCA raw"
+
 custom_content:
   - id: table2asn_validation
     section_name: "Table2ASN Validation"
@@ -134,3 +150,11 @@ custom_content:
     file_format: tsv
     files:
       - "*.qc_summary.tsv"
+
+  - id: upload_results_summary
+    section_name: "SQL Upload Summary"
+    description: "Per-sample status of each SQL upload step (assembly, annotation, species validation, LCA/BLAST, LCA raw)."
+    plot_type: table
+    file_format: tsv
+    files:
+      - "upload_results_summary_mqc.tsv"

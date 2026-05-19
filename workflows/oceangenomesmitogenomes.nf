@@ -184,8 +184,13 @@ workflow OCEANGENOMESMITOGENOMES {
     //
     // mix the hifi and getorganelle outputs to feed into the annotation
     //
-
-    ch_annotation_input = ch_mitogenome_hifi_assembly_fasta.mix(ch_mitogenome_getorg_assembly_fasta)
+    // Samples whose assembler finished without producing a contig carry an
+    // empty placeholder FASTA. Filter those out so annotation / LCA / QC only
+    // run on real assemblies; PUSH_MTDNA_ASSM_RESULTS below still records the
+    // failure in the database.
+    ch_annotation_input = ch_mitogenome_hifi_assembly_fasta
+        .mix(ch_mitogenome_getorg_assembly_fasta)
+        .filter { _meta, fasta -> fasta.size() > 0 }
 
     // Sanitise FASTA before annotation to avoid duplicate IDs / multi-contig issues
     SANITISE_FASTA(
@@ -205,6 +210,7 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_annotation_results = MITOGENOME_ANNOTATION.out.annotation_results
         ch_mitogenome_blast_results = MITOGENOME_ANNOTATION.out.blast_filtered_results
         ch_mitogenome_lca_results = MITOGENOME_ANNOTATION.out.lca_results
+        ch_mitogenome_lca_raw_results = MITOGENOME_ANNOTATION.out.lca_raw_results
     } else if (params.precomputed_mitogenome_annotation_results) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_annotation_results = Channel.fromPath(params.precomputed_mitogenome_annotation_results)
@@ -246,11 +252,26 @@ workflow OCEANGENOMESMITOGENOMES {
         .map { sample_key, file, meta ->
             return tuple(meta, file)
         }
+        ch_mitogenome_lca_raw_results = params.precomputed_mitogenome_lca_raw_results
+            ? Channel.fromPath(params.precomputed_mitogenome_lca_raw_results)
+                .map { file ->
+                    def filename = file.baseName
+                    def parts = filename.split('\\.')
+                    // lca_raw.<region>.<og_id>.<tech>.<date>...
+                    def meta_id = parts[2]
+                    def sequencing_type = parts.length > 3 ? parts[3] : null
+                    def date = parts.length > 4 ? parts[4] : null
+                    return [ [meta_id, sequencing_type, date], file ]
+                }
+                .combine(ch_samplesheet_meta, by: 0)
+                .map { sample_key, file, meta -> tuple(meta, file) }
+            : Channel.empty()
     } else {
 
         ch_mitogenome_annotation_results = Channel.empty()
         ch_mitogenome_blast_results = Channel.empty()
         ch_mitogenome_lca_results = Channel.empty()
+        ch_mitogenome_lca_raw_results = Channel.empty()
     }
 
     //
@@ -274,6 +295,7 @@ workflow OCEANGENOMESMITOGENOMES {
             ch_mitogenome_annotation_results,
             ch_mitogenome_blast_results,
             ch_mitogenome_lca_results,
+            ch_mitogenome_lca_raw_results,
             sql_config // params.sql_config
         )
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 #singularity run $SING/psycopg2:0.1.sif python push_emma_annotation_results.py /home/tpeirce/postgresql_details/oceanomics.cfg OGtest /scratch/pawsey0964/tpeirce/_NFCORE/_OUT_DIR/mitogenomes/OG900/OG900.ilmn.250131.getorg1770/emma/structure_check/annotation_stats.csv
+import argparse
 import psycopg2
 import pandas as pd
 import numpy as np
@@ -38,13 +39,26 @@ def load_db_config(config_file):
 # Main logic
 # -------------------------------
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print("Usage:\n  push_emma_annotation_results.py <config_file> <meta.id> <annotation_stats>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Push EMMA annotation stats to the OceanOmics DB."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Overwrite an existing mitogenome_data row even when one is "
+            "already present. Off by default: existing rows are preserved."
+        ),
+    )
+    parser.add_argument("config_file")
+    parser.add_argument("sample")
+    parser.add_argument("annotation_stats")
+    args = parser.parse_args()
 
-    config_file = sys.argv[1]
-    sample = sys.argv[2]
-    annotation_stats = sys.argv[3]
+    config_file = args.config_file
+    sample = args.sample
+    annotation_stats = args.annotation_stats
+    force_overwrite = args.force
 
     print(f"Importing data from {annotation_stats}")
     # Load and preprocess annotation data
@@ -65,6 +79,27 @@ if __name__ == "__main__":
             row_dict = row.to_dict()
             # Extract primary key values
             og_id, tech, seq_date, code = row['og_id'], row['tech'], row['seq_date'], row['code']
+
+            # Insert-only by default. Skip rows that already exist unless
+            # --force was passed (e.g. an intentional re-annotation re-run).
+            if not force_overwrite:
+                cursor.execute(
+                    """
+                    SELECT 1
+                    FROM mitogenome_data
+                    WHERE og_id = %(og_id)s
+                      AND tech = %(tech)s
+                      AND seq_date = %(seq_date)s
+                      AND code = %(code)s
+                    """,
+                    {"og_id": og_id, "tech": tech, "seq_date": seq_date, "code": code},
+                )
+                if cursor.fetchone() is not None:
+                    print(
+                        f"⚠️ Existing values preserved for {og_id}.{tech}.{seq_date}.{code}: "
+                        "row already exists; pass --force to overwrite."
+                    )
+                    continue
 
             upsert_query = """
             INSERT INTO mitogenome_data (
@@ -234,19 +269,6 @@ if __name__ == "__main__":
             returned = cursor.fetchone()
             conn.commit()
 
-            print("📌 Final stored values:")
-            print(dict(zip([
-                "annotation", "extra_genes", "missing_genes", "order_correct", "passed", "length_emma", "seqlength_12s",
-                "seqlength_16s", "seqlength_co1", "cds_no", "trna_no", "rrna_no", "rrna12s",
-                "rrna16s", "atp6", "atp8", "cox1", "cox2", "cox3", "cytb", "nad1", "nad2", "nad3", "nad4", "nad4l",
-                "nad5", "nad6", "trna_phe", "trna_val", "trna_leuuag", "trna_leuuaa", "trna_ile", "trna_met",
-                "trna_thr", "trna_pro", "trna_lys", "trna_asp", "trna_glu", "trna_sergcu", "trna_seruga",
-                "trna_tyr", "trna_cys", "trna_trp", "trna_ala", "trna_asn", "trna_gly", "trna_arg", "trna_his",
-                "trna_gln", "atp6_trans", "atp8_trans", "cox1_trans", "cox2_trans", "cox3_trans", "cytb_trans", "nad1_trans",
-                "nad2_trans", "nad3_trans", "nad4_trans", "nad4l_trans", "nad5_trans", "nad6_trans"
-            ], returned)))
-
-            # Field-by-field comparison
             field_names = [
                 "annotation", "extra_genes", "missing_genes", "order_correct", "passed", "length_emma", "seqlength_12s",
                 "seqlength_16s", "seqlength_co1", "cds_no", "trna_no", "rrna_no", "rrna12s",
@@ -257,16 +279,9 @@ if __name__ == "__main__":
                 "trna_gln", "atp6_trans", "atp8_trans", "cox1_trans", "cox2_trans", "cox3_trans", "cytb_trans", "nad1_trans",
                 "nad2_trans", "nad3_trans", "nad4_trans", "nad4l_trans", "nad5_trans", "nad6_trans"
             ]
-            preserved_fields = []
-
-            for idx, field in enumerate(field_names):
-                if params[field] is None:
-                    continue  # Skipped intentionally
-                elif returned[idx] != params[field]:
-                    preserved_fields.append(field)
-
-            if preserved_fields:
-                print(f"⚠️ Existing values preserved for: {', '.join(preserved_fields)}")
+            print(f"📌 Final stored values: {dict(zip(field_names, returned))}")
+            if force_overwrite:
+                print(f"✅ Success: Overwrote mitogenome_data for {sample} (--force).")
             else:
                 print(f"✅ Success: Inserted/Updated mitogenome_data for {sample}")
 

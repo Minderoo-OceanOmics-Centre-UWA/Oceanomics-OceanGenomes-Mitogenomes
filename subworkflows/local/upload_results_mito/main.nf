@@ -9,6 +9,8 @@ include { PUSH_MTDNA_ASSM_RESULTS       } from '../../../modules/local/upload_re
 include { SPECIES_VALIDATION            } from '../../../modules/local/species_validation'
 include { PUSH_MTDNA_ANNOTATION_RESULTS } from '../../../modules/local/upload_results/emma'
 include { PUSH_LCA_BLAST_RESULTS        } from '../../../modules/local/upload_results/lca'
+include { PUSH_LCA_RAW_RESULTS          } from '../../../modules/local/upload_results/lca_raw'
+include { UPLOAD_RESULTS_SUMMARY        } from '../../../modules/local/upload_results/summary'
 include { EVALUATE_QC_CONDITIONS        } from '../../../modules/local/evaluate_qc_conditions'
 include { QC_SUMMARY                    } from '../../../modules/local/multiqc/qc_summary'
 
@@ -35,6 +37,7 @@ workflow UPLOAD_RESULTS {
     annotation_results
     blast_filtered_results
     lca_results
+    lca_raw_results
     sql_config // params.sql_config
     
     main:
@@ -101,6 +104,24 @@ workflow UPLOAD_RESULTS {
     )
 
     //
+    // MODULE: Pushing raw per-hit LCA rows into the lca_raw_results table.
+    //         Group the per-region lca_raw files by sample so each sample gets
+    //         one upload call with all its regions.
+    //
+    grouped_lca_raw = lca_raw_results
+        .groupTuple(by: 0)
+        .map { tuple_ ->
+            def meta = tuple_[0]
+            def files = tuple_[1..-1].flatten()
+            [meta, files]
+        }
+
+    PUSH_LCA_RAW_RESULTS (
+        grouped_lca_raw, // tuple val(meta), path(lca_raw.*.tsv)
+        sql_config // params.sql_config
+    )
+
+    //
     // SUBWORKFLOW: Evaluate the mitogenome and if it can continue on to final QC
     //
     /*  This solution provides a conditional QC subworkflow that evaluates two conditions and only proceeds with QC processes when **both** are satisfied:
@@ -163,6 +184,23 @@ workflow UPLOAD_RESULTS {
 
     
     //
+    // MODULE: Consolidate the per-step SQL upload status files into a single
+    //         summary TSV + detailed appendix so all upload outcomes can be
+    //         reviewed in one place instead of grep'ing many small files.
+    //
+
+    ch_upload_status_files = Channel.empty()
+        .mix(PUSH_MTDNA_ASSM_RESULTS.out.upload)
+        .mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.upload.map { _meta, f -> f })
+        .mix(SPECIES_VALIDATION.out.upload.map { _meta, f -> f })
+        .mix(PUSH_LCA_BLAST_RESULTS.out.upload)
+        .mix(PUSH_LCA_RAW_RESULTS.out.upload)
+
+    UPLOAD_RESULTS_SUMMARY (
+        ch_upload_status_files.collect()
+    )
+
+    //
     // Subworkflow finishing steps.
     //
 
@@ -178,12 +216,17 @@ workflow UPLOAD_RESULTS {
     ch_multiqc_files = ch_multiqc_files.mix(SPECIES_VALIDATION.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_LCA_BLAST_RESULTS.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(PUSH_LCA_RAW_RESULTS.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(EVALUATE_QC_CONDITIONS.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS_SUMMARY.out.summary)
+    ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS_SUMMARY.out.tool_params)
     ch_versions = ch_versions.mix(PUSH_MTDNA_ASSM_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(SPECIES_VALIDATION.out.versions.first())
     ch_versions = ch_versions.mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(PUSH_LCA_BLAST_RESULTS.out.versions.first())
+    ch_versions = ch_versions.mix(PUSH_LCA_RAW_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(EVALUATE_QC_CONDITIONS.out.versions)
+    ch_versions = ch_versions.mix(UPLOAD_RESULTS_SUMMARY.out.versions)
 
 
 
@@ -194,6 +237,8 @@ workflow UPLOAD_RESULTS {
     emit:
     qc_ready    = ch_qc_ready                   // channel: [ val(meta), val(species_name), val(proceed_qc true/false) ]
     assembly_summary_files = PUSH_MTDNA_ANNOTATION_RESULTS.out.stats.map { meta, stats -> stats }
+    upload_summary = UPLOAD_RESULTS_SUMMARY.out.summary    // channel: path(upload_results_summary.tsv)
+    upload_appendix = UPLOAD_RESULTS_SUMMARY.out.appendix  // channel: path(upload_results_appendix.txt)
     multiqc_files = ch_multiqc_files            // channel: [ path(multiqc_files) ]
     versions = ch_versions             // channel: [ path(versions.yml) ]
 }

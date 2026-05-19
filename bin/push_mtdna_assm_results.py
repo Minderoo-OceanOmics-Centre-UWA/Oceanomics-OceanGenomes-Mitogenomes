@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import psycopg2
 import pandas as pd
 import numpy as np
@@ -109,47 +110,76 @@ def parse_log_for_stats_and_cov(log_text: str):
 # Main logic
 # -------------------------------
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
-        print("Usage:\n  push_mtdna_assm_results.py <config_file> <assembly_prefix> <log_or_contigstats_file> <fasta_file>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Push mitogenome assembly stats to the OceanOmics DB."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Overwrite an existing mitogenome_data row even when it already "
+            "holds a real result. Off by default: existing successful rows "
+            "are preserved and only NULL / 'failed to assemble' rows get "
+            "updated automatically."
+        ),
+    )
+    parser.add_argument("config_file")
+    parser.add_argument("assembly_prefix")
+    parser.add_argument(
+        "input_path",
+        help="GetOrganelle log OR mitohifi contigs_stats.tsv.",
+    )
+    parser.add_argument("fasta_path")
+    args = parser.parse_args()
 
-    config_file = sys.argv[1]
-    assembly_prefix = sys.argv[2]
-    input_path = Path(sys.argv[3])  # can be a log OR a contig_stats.tsv
-    fasta_path = Path(sys.argv[4])
+    config_file = args.config_file
+    assembly_prefix = args.assembly_prefix
+    input_path = Path(args.input_path)
+    fasta_path = Path(args.fasta_path)
+    force_overwrite = args.force
 
     # Defaults
     stats = None
     avg_coverage = None
     avg_base_coverage = None
+    failed_to_assemble = False
 
-    # First, try interpreting the 3rd arg as contig_stats.tsv
-    stats_from_tsv, avg_coverage_from_tsv = try_parse_contig_stats(input_path, target_contig="final_mitogenome")
-
-    if stats_from_tsv is not None:
-        # HiFi-style input: use circular/scaffold mapping
-        stats = stats_from_tsv
-        avg_coverage = avg_coverage_from_tsv
-        avg_base_coverage = avg_coverage_from_tsv
-        print(f"ℹ️ Detected contig_stats.tsv. Using stats = '{stats}' from final_mitogenome row.")
-    else:
-        # Fall back to GetOrganelle log parsing
-        try:
-            log_text = input_path.read_text()
-        except Exception as e:
-            print(f"❌ Failed to read input file: {e}")
-            sys.exit(1)
-
-        stats, avg_coverage, avg_base_coverage = parse_log_for_stats_and_cov(log_text)
-        print("ℹ️ Detected log file. Parsed GetOrganelle-style fields.")
-
-    # Compute sequence length from FASTA
+    # Compute sequence length from FASTA up-front so we can detect the
+    # "process finished but produced no contig" case and short-circuit.
     try:
         with open(fasta_path) as f:
             length = sum(len(line.strip()) for line in f if not line.startswith(">"))
     except Exception as e:
         print(f"❌ Failed to read FASTA file: {e}")
         sys.exit(1)
+
+    if length == 0:
+        # Empty FASTA = assembler exited cleanly without producing a contig.
+        failed_to_assemble = True
+        stats = "failed to assemble"
+        avg_coverage = None
+        avg_base_coverage = None
+        print("ℹ️ Empty assembly FASTA detected — recording 'failed to assemble'.")
+    else:
+        # First, try interpreting the 3rd arg as contig_stats.tsv
+        stats_from_tsv, avg_coverage_from_tsv = try_parse_contig_stats(input_path, target_contig="final_mitogenome")
+
+        if stats_from_tsv is not None:
+            # HiFi-style input: use circular/scaffold mapping
+            stats = stats_from_tsv
+            avg_coverage = avg_coverage_from_tsv
+            avg_base_coverage = avg_coverage_from_tsv
+            print(f"ℹ️ Detected contig_stats.tsv. Using stats = '{stats}' from final_mitogenome row.")
+        else:
+            # Fall back to GetOrganelle log parsing
+            try:
+                log_text = input_path.read_text()
+            except Exception as e:
+                print(f"❌ Failed to read input file: {e}")
+                sys.exit(1)
+
+            stats, avg_coverage, avg_base_coverage = parse_log_for_stats_and_cov(log_text)
+            print("ℹ️ Detected log file. Parsed GetOrganelle-style fields.")
 
     print(f"Stats: {stats}")
     print(f"Length: {length}")
@@ -168,22 +198,7 @@ if __name__ == "__main__":
         conn = psycopg2.connect(**db_params)
         cursor = conn.cursor()
 
-        upsert_query = """
-        INSERT INTO mitogenome_data (
-            og_id, tech, seq_date, code, stats, length, avg_coverage, avg_base_coverage
-        )
-        VALUES (
-            %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(stats)s, %(length)s, %(avg_coverage)s, %(avg_base_coverage)s
-        )
-        ON CONFLICT (og_id, tech, seq_date, code) 
-        DO UPDATE SET
-            stats = EXCLUDED.stats,
-            length = EXCLUDED.length,
-            avg_coverage = EXCLUDED.avg_coverage,
-            avg_base_coverage = EXCLUDED.avg_base_coverage
-        RETURNING stats, length, avg_coverage, avg_base_coverage
-        """
-
+        field_names = ["stats", "length", "avg_coverage", "avg_base_coverage"]
         params = {
             "og_id": og_id,
             "tech": tech,
@@ -195,27 +210,84 @@ if __name__ == "__main__":
             "avg_base_coverage": float(avg_base_coverage) if avg_base_coverage is not None else None,
         }
 
-        cursor.execute(upsert_query, params)
-        returned = cursor.fetchone()
-        conn.commit()
+        # Look up the current row (if any) and decide whether to write.
+        # Default policy is insert-only: existing rows are preserved unless
+        #   - the new run is a successful assembly and the prior row holds
+        #     NULL or 'failed to assemble' (a strict upgrade — never
+        #     destructive), or
+        #   - --force was passed.
+        cursor.execute(
+            """
+            SELECT stats, length, avg_coverage, avg_base_coverage
+            FROM mitogenome_data
+            WHERE og_id = %(og_id)s
+              AND tech = %(tech)s
+              AND seq_date = %(seq_date)s
+              AND code = %(code)s
+            """,
+            {"og_id": og_id, "tech": tech, "seq_date": seq_date, "code": code},
+        )
+        existing = cursor.fetchone()
 
-        print("📌 Final stored values:")
-        print(dict(zip(["stats", "length", "avg_coverage", "avg_base_coverage"], returned)))
+        should_write = True
+        skip_reason = None
+        if existing is not None and not force_overwrite:
+            existing_stats = existing[0]
+            existing_is_failed = (
+                existing_stats is not None
+                and str(existing_stats).strip().lower() == "failed to assemble"
+            )
+            if existing_stats is None:
+                # Incomplete prior row; overwriting is strictly an improvement.
+                pass
+            elif existing_is_failed and not failed_to_assemble:
+                # New run upgrades a prior failure to a success — always allow.
+                pass
+            elif existing_is_failed and failed_to_assemble:
+                should_write = False
+                skip_reason = "row already records 'failed to assemble' (no change needed)"
+            else:
+                should_write = False
+                if failed_to_assemble:
+                    skip_reason = (
+                        "existing successful row found — refusing to overwrite with "
+                        "'failed to assemble'"
+                    )
+                else:
+                    skip_reason = "row already exists; pass --force to overwrite"
 
-        # Field-by-field comparison
-        field_names = ["stats", "length", "avg_coverage", "avg_base_coverage"]
-        preserved_fields = []
-
-        for idx, field in enumerate(field_names):
-            if params[field] is None:
-                continue  # Skipped intentionally
-            elif returned[idx] != params[field]:
-                preserved_fields.append(field)
-
-        if preserved_fields:
-            print(f"⚠️ Existing values preserved for: {', '.join(preserved_fields)}")
+        if not should_write:
+            existing_dict = dict(zip(field_names, existing))
+            print(f"⚠️ Existing values preserved for {assembly_prefix}: {skip_reason}.")
+            print(f"📌 Preserved stored values: {existing_dict}")
         else:
-            print(f"✅ Success: Inserted/Updated mitogenome_data for {assembly_prefix}")
+            upsert_query = """
+            INSERT INTO mitogenome_data (
+                og_id, tech, seq_date, code, stats, length, avg_coverage, avg_base_coverage
+            )
+            VALUES (
+                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(stats)s, %(length)s, %(avg_coverage)s, %(avg_base_coverage)s
+            )
+            ON CONFLICT (og_id, tech, seq_date, code)
+            DO UPDATE SET
+                stats = EXCLUDED.stats,
+                length = EXCLUDED.length,
+                avg_coverage = EXCLUDED.avg_coverage,
+                avg_base_coverage = EXCLUDED.avg_base_coverage
+            RETURNING stats, length, avg_coverage, avg_base_coverage
+            """
+            cursor.execute(upsert_query, params)
+            returned = cursor.fetchone()
+            conn.commit()
+
+            final_dict = dict(zip(field_names, returned))
+            print(f"📌 Final stored values: {final_dict}")
+            if force_overwrite and existing is not None:
+                print(
+                    f"✅ Success: Overwrote mitogenome_data for {assembly_prefix} (--force)."
+                )
+            else:
+                print(f"✅ Success: Inserted/Updated mitogenome_data for {assembly_prefix}")
 
     except Exception as e:
         if 'conn' in locals():

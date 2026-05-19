@@ -7,7 +7,7 @@ nextflow \
     -resume \
     -profile singularity \
     -with-report \
-    --input_dir "/scratch/pawsey0964/tpeirce/OGP029/OG1410_fastp/*.fastq.gz" \
+    --input_dir "/scratch/pawsey1348/$USER/path/to/fastp/*.fastq.gz" \
     --outdir "$(realpath ../_outdir)" \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \

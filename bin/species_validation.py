@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import psycopg2
 import csv
 import configparser
@@ -68,7 +69,130 @@ def load_blast_species_set(filepath):
         # normalised DB species name in it later.
         return f.read().lower()
 
-def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_file):
+def parse_assembly_key_from_blast(blast_file):
+    """
+    Extract (og_id, tech, seq_date, code, annotation) from the first
+    query_id field in a BLAST table. The query_id is expected to look like
+    'og_id.tech.seq_date.code.annotation' (5 dot-separated parts).
+    Returns (og_id, tech, seq_date, code, annotation) or None if the file
+    is empty / malformed.
+    """
+    try:
+        with open(blast_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                first_field = line.split('\t', 1)[0]
+                parts = first_field.split('.')
+                if len(parts) >= 5:
+                    return tuple(parts[:5])
+                return None
+    except Exception as e:
+        print(f"[WARN] Could not parse assembly key from BLAST file '{blast_file}': {e}")
+    return None
+
+
+def upsert_lca_validation(
+    db_params, key, validated_species_name, validator="nf-core", force=False
+):
+    """
+    Insert/update the lca_validation row for this sample with the validated
+    species name and validator tag. The composite key matches the assembly
+    naming convention: (og_id, tech, seq_date, code, annotation).
+
+    Guard: if an existing row carries a validator tag other than "nf-core",
+    the row was probably set by a human reviewer or another pipeline and
+    must not be silently overwritten by an automated re-run. Skip the
+    upsert in that case unless ``force=True``.
+    """
+    og_id, tech, seq_date, code, annotation = key
+    params = {
+        "og_id": og_id,
+        "tech": tech,
+        "seq_date": seq_date,
+        "code": code,
+        "annotation": annotation,
+        "validated_species_name": validated_species_name,
+        "validator": validator,
+    }
+    conn = None
+    try:
+        conn = psycopg2.connect(**db_params)
+        with conn.cursor() as cur:
+            if not force:
+                cur.execute(
+                    """
+                    SELECT validator, validated_species_name
+                    FROM lca_validation
+                    WHERE og_id = %(og_id)s
+                      AND tech = %(tech)s
+                      AND seq_date = %(seq_date)s
+                      AND code = %(code)s
+                      AND annotation = %(annotation)s
+                    """,
+                    params,
+                )
+                existing = cur.fetchone()
+                if existing is not None:
+                    existing_validator, existing_species = existing
+                    if (
+                        existing_validator is not None
+                        and str(existing_validator).strip().lower() != "nf-core"
+                    ):
+                        print(
+                            "⚠️ Existing values preserved for lca_validation "
+                            f"{og_id}.{tech}.{seq_date}.{code}.{annotation}: "
+                            f"validator='{existing_validator}' (not 'nf-core'); "
+                            "pass --force to overwrite."
+                        )
+                        print(
+                            "📌 Preserved stored values: "
+                            f"{{'validator': '{existing_validator}', "
+                            f"'validated_species_name': '{existing_species}'}}"
+                        )
+                        return True
+
+            upsert_query = """
+            INSERT INTO lca_validation (
+                og_id, tech, seq_date, code, annotation,
+                validated_species_name, validator
+            )
+            VALUES (
+                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s,
+                %(validated_species_name)s, %(validator)s
+            )
+            ON CONFLICT (og_id, tech, seq_date, code, annotation)
+            DO UPDATE SET
+                validated_species_name = EXCLUDED.validated_species_name,
+                validator = EXCLUDED.validator
+            """
+            cur.execute(upsert_query, params)
+        conn.commit()
+        if force:
+            print(
+                "✅ Success: lca_validation overwritten (--force) for "
+                f"{og_id}.{tech}.{seq_date}.{code}.{annotation} "
+                f"-> validated_species_name='{validated_species_name}', validator='{validator}'"
+            )
+        else:
+            print(
+                "✅ Success: lca_validation upserted for "
+                f"{og_id}.{tech}.{seq_date}.{code}.{annotation} "
+                f"-> validated_species_name='{validated_species_name}', validator='{validator}'"
+            )
+        return True
+    except Exception as e:
+        if conn is not None:
+            conn.rollback()
+        print(f"❌ Database error while writing lca_validation: {e}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_file, force=False):
     db_params = load_db_config(config_path)
 
     # Combine files
@@ -86,6 +210,8 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
 
     # Load BLAST results
     blast_blob = load_blast_species_set(f"blast_combined.{og_id}.tsv")
+
+    sample_validated = False
 
     # Process LCA and compare
     with open(f"lca_combined.{og_id}.tsv", newline='') as tsvfile, open(output_file, "w", newline='') as out:
@@ -116,25 +242,74 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
 
             # Check if nominal species appears in BLAST output (as before)
             in_blast = "Yes" if db_species_norm in blast_blob else "No"
+            if in_blast == "Yes":
+                sample_validated = True
 
             # LCA_result column: store the raw species_in_LCA string
             writer.writerow([og_id, species_in_lca_raw, db_species, match, in_blast])
 
     print(f"[INFO] Results written to: {output_file}")
 
+    # Push the validation result to the lca_validation table. We only write a
+    # row when the sample is validated (Found_in_blast_YN = Yes for at least
+    # one region) so unvalidated samples leave the existing DB row untouched.
+    if sample_validated:
+        key = parse_assembly_key_from_blast(f"blast_combined.{og_id}.tsv")
+        if key is None:
+            print(
+                "❌ Could not derive (og_id, tech, seq_date, code, annotation) from "
+                f"blast_combined.{og_id}.tsv — skipping lca_validation upsert."
+            )
+        else:
+            upsert_lca_validation(db_params, key, db_species, validator="nf-core", force=force)
+    else:
+        print(
+            f"ℹ️ Sample {og_id} not validated (no Found_in_blast_YN=Yes) — "
+            "skipping lca_validation upsert."
+        )
+
 
 # ---------------------------
 # Entry point
 # ---------------------------
 if __name__ == "__main__":
-    if len(sys.argv) < 5:
-        print("Usage:\n  python compare_lca_blast.py <db.cfg> <OG_ID> <lca1,lca2,...> <blast1,blast2,...>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compare per-region LCA / BLAST results against the nominal species "
+            "stored in the OceanOmics DB, write a summary TSV, and (when "
+            "validated) upsert the result into the lca_validation table."
+        )
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Overwrite an existing lca_validation row even when its validator "
+            "is something other than 'nf-core' (e.g. a human reviewer). Off "
+            "by default."
+        ),
+    )
+    parser.add_argument("config_file")
+    parser.add_argument("og_id")
+    parser.add_argument(
+        "lca_files",
+        help="Comma-separated list of per-region LCA TSVs.",
+    )
+    parser.add_argument(
+        "blast_files",
+        help="Comma-separated list of filtered BLAST TSVs.",
+    )
+    args = parser.parse_args()
 
-    config_file = sys.argv[1]
-    og_id = sys.argv[2]
-    lca_files = sys.argv[3].split(',')
-    blast_files = sys.argv[4].split(',')
+    lca_files = args.lca_files.split(',')
+    blast_files = args.blast_files.split(',')
 
-    output_file = f"lca_results.{og_id}.tsv"
-    compare_lca_and_blast(config_file, og_id, lca_files, blast_files, output_file)
+    output_file = f"lca_results.{args.og_id}.tsv"
+    compare_lca_and_blast(
+        args.config_file,
+        args.og_id,
+        lca_files,
+        blast_files,
+        output_file,
+        force=args.force,
+    )

@@ -14,6 +14,7 @@ process SPECIES_VALIDATION {
     output:
     tuple val(meta), path("lca_results.${meta.id}.tsv"), emit: summary
     tuple val(meta), path("lca_combined.${meta.id}.tsv"), path("blast_combined.${meta.id}.tsv"), emit: full
+    tuple val(meta), path("${meta.id}.species_validation.upload.txt"), emit: upload
     tuple val(meta), path("11_species_validation.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
@@ -31,7 +32,8 @@ process SPECIES_VALIDATION {
         $config \\
         ${meta.id} \\
         "${lca_files_str}" \\
-        "${blast_files_str}"
+        "${blast_files_str}" \\
+        > ${meta.id}.species_validation.upload.txt
 
     cat <<-END_TOOL_PARAMS > 11_species_validation.tool_params_mqcrow.html
     <tr><td>Species Validation</td><td><samp>${effective_args}</samp></td><td>Compares filtered BLAST/LCA calls against the nominal species for ${meta.id}.</td></tr>
@@ -53,6 +55,7 @@ process SPECIES_VALIDATION {
     touch lca_results.${meta.id}.tsv
     touch lca_combined.${meta.id}.tsv
     touch blast_combined.${meta.id}.tsv
+    touch ${meta.id}.species_validation.upload.txt
 
     cat <<-END_TOOL_PARAMS > 11_species_validation.tool_params_mqcrow.html
     <tr><td>Species Validation</td><td><samp>${effective_args}</samp></td><td>Compares filtered BLAST/LCA calls against the nominal species for ${meta.id}.</td></tr>

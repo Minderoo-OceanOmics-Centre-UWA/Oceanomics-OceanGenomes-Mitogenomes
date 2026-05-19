@@ -158,5 +158,6 @@ workflow MITOGENOME_ANNOTATION {
     annotation_results      = EMMA.out.results
     blast_filtered_results  = BLAST_BLASTN.out.validation
     lca_results             = LCA.out.lca
+    lca_raw_results         = LCA.out.lca_raw
     versions                = ch_versions              // channel: [ path(versions.yml) ]
 }

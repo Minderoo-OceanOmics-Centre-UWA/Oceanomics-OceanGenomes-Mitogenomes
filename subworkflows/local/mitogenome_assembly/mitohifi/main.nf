@@ -109,11 +109,31 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         "2"  // could change to params.translation_table / mito_code - Organism genetic code following NCBI table (for mitogenome annotation) using 2. Vertebrate mitogenome
     )
 
-    ch_average_coverage_input = MITOHIFI_MITOHIFI.out.stats.join(MITOHIFI_MITOHIFI.out.coverage_mapping, by: 0)
+    // Branch the assembled fasta on emptiness: when MitoHiFi finishes without
+    // producing a final mitogenome the wrapper emits an empty placeholder.
+    // Only run the coverage step for samples that actually assembled.
+    ch_mitohifi_fasta_branched = MITOHIFI_MITOHIFI.out.fasta.branch { meta, fasta ->
+        assembled: fasta.size() > 0
+        failed:    fasta.size() == 0
+    }
+
+    ch_average_coverage_input = ch_mitohifi_fasta_branched.assembled
+        .join(MITOHIFI_MITOHIFI.out.stats, by: 0)
+        .join(MITOHIFI_MITOHIFI.out.coverage_mapping, by: 0)
+        .map { meta, _fasta, stats, cov_map -> [meta, stats, cov_map] }
 
     MITOHIFI_AVERAGE_COVERAGE (
         ch_average_coverage_input
     )
+
+    // For samples that failed to assemble, fall back to the (empty)
+    // contigs_stats.tsv as a log placeholder so PUSH_MTDNA_ASSM_RESULTS still
+    // gets a tuple to process.
+    ch_failed_assembly_log = ch_mitohifi_fasta_branched.failed
+        .join(MITOHIFI_MITOHIFI.out.stats, by: 0)
+        .map { meta, _fasta, stats -> [meta, stats] }
+
+    ch_assembly_log = MITOHIFI_AVERAGE_COVERAGE.out.stats.mix(ch_failed_assembly_log)
 
     //
     // Collect MultiQC inputs and versions
@@ -149,7 +169,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
     emit:
     assembly_fasta  = MITOHIFI_MITOHIFI.out.fasta
-    assembly_log    = MITOHIFI_AVERAGE_COVERAGE.out.stats
+    assembly_log    = ch_assembly_log
     coverage_stats  = MITOHIFI_AVERAGE_COVERAGE.out.coverage
     summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]

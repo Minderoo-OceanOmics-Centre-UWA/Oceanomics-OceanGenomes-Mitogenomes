@@ -62,17 +62,20 @@ process MITOHIFI_MITOHIFI {
 
     exit_code=\$?
 
-    # Rename files
-    mv final_mitogenome.fasta ${prefix}.fasta
-    mv final_mitogenome.gb ${prefix}.gb
-    mv reads_mapping_and_assembly/hifiasm.log ${prefix}.hifiasm.log
-    mv .command.log ${prefix}.log
-    mv contigs_stats.tsv ${prefix}.contigs_stats.tsv
+    # Rename files. MitoHiFi may finish without producing a final assembly
+    # (e.g. when no contig passes filtering); in that case keep going and emit
+    # an empty placeholder so downstream stages can detect "failed to assemble"
+    # instead of crashing on the missing output.
+    mv final_mitogenome.fasta ${prefix}.fasta 2>/dev/null || touch ${prefix}.fasta
+    mv final_mitogenome.gb ${prefix}.gb 2>/dev/null || true
+    mv reads_mapping_and_assembly/hifiasm.log ${prefix}.hifiasm.log 2>/dev/null || touch ${prefix}.hifiasm.log
+    mv .command.log ${prefix}.log 2>/dev/null || touch ${prefix}.log
+    mv contigs_stats.tsv ${prefix}.contigs_stats.tsv 2>/dev/null || touch ${prefix}.contigs_stats.tsv
 
     mkdir -p MitoReference
     cp $ref_fa $ref_gb MitoReference/
     # Check if the main output was created and rename the fasta header to include the mt_assembly_prefix
-    if [ -f "${prefix}.fasta" ]; then
+    if [ -s "${prefix}.fasta" ]; then
         sed -i "/^>/s/.*/>${prefix}/g" ${prefix}.fasta
     fi
 

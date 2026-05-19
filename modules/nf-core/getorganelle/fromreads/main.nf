@@ -13,10 +13,10 @@ process GETORGANELLE_FROMREADS {
     output:
     tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}.fasta")            , emit: fasta
     tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}.get_org.log.txt")  , emit: log
-    path("mtdna/*.selected_graph.gfa")                                               , emit: org_assm_graph // the organelle-only assembly graph")
-    path("mtdna/*extended_K*.assembly_graph.fastg")                                  , emit: raw_assm_graph // the raw assembly graph
-    path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.fastg")  , emit: simp_assm_graph // a simplified assembly graph
-    path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.csv")    , emit: contig_label // a tab-format contig label file for bandage visualization
+    path("mtdna/*.selected_graph.gfa")                                               , emit: org_assm_graph,  optional: true
+    path("mtdna/*extended_K*.assembly_graph.fastg")                                  , emit: raw_assm_graph,  optional: true
+    path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.fastg")  , emit: simp_assm_graph,  optional: true
+    path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.csv")    , emit: contig_label,     optional: true
     // path("mtdna/*")                                                         , emit: etc // have only included the files we want above, uncomment if you want everything
     tuple val(meta), path("02_getorganelle_fromreads.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                                                     , emit: versions
@@ -50,19 +50,38 @@ process GETORGANELLE_FROMREADS {
     END_TOOL_PARAMS
 
     wait
-    
+
     mkdir -p mtdna
-    cp $output_dir/${prefix}.*1.1.*.fasta \\
-        $output_dir/${meta.mt_assembly_prefix}.get_org.log.txt \\
-        $output_dir/*.selected_graph.gfa \\
-        $output_dir/*extended_K*.assembly_graph.fastg* \\
-        mtdna/
+    shopt -s nullglob
 
-    wait 
+    # GetOrganelle log is always produced; copy if present, otherwise stub it.
+    if [ -f "$output_dir/${meta.mt_assembly_prefix}.get_org.log.txt" ]; then
+        cp $output_dir/${meta.mt_assembly_prefix}.get_org.log.txt mtdna/
+    else
+        touch mtdna/${meta.mt_assembly_prefix}.get_org.log.txt
+    fi
 
-    # Move and rename the output file to include the version in the filename
-    mv mtdna/${prefix}.*1.1.*.fasta mtdna/${prefix}.fasta
-    sed -i "/^>/s/.*/>${prefix}/g" mtdna/${prefix}.fasta
+    # Assembly graph outputs may be absent if GetOrganelle bailed out very early.
+    for f in $output_dir/*.selected_graph.gfa; do cp "\$f" mtdna/; done
+    for f in $output_dir/*extended_K*.assembly_graph.fastg; do cp "\$f" mtdna/; done
+    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-animal_mt.fastg; do cp "\$f" mtdna/; done
+    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-animal_mt.csv; do cp "\$f" mtdna/; done
+
+    # The assembled organelle FASTA (`*1.1.*.fasta`) is only produced when
+    # GetOrganelle successfully assembled a contig. When the run finishes
+    # without producing one, emit an empty placeholder so downstream stages can
+    # detect the "failed to assemble" state instead of crashing on the missing
+    # output.
+    fasta_files=( $output_dir/${prefix}.*1.1.*.fasta )
+    if [ \${#fasta_files[@]} -gt 0 ]; then
+        cp "\${fasta_files[@]}" mtdna/
+        mv mtdna/${prefix}.*1.1.*.fasta mtdna/${prefix}.fasta
+        sed -i "/^>/s/.*/>${prefix}/g" mtdna/${prefix}.fasta
+    else
+        touch mtdna/${prefix}.fasta
+    fi
+
+    wait
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
