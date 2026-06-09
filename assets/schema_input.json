@@ -83,6 +83,16 @@
                 "meta": ["nominal_species_id"],
                 "description": "Nominal species identifier from the sample table"
             },
+            "reference_species_id": {
+                "type": "string",
+                "meta": ["reference_species_id"],
+                "description": "NCBI-valid taxon name (species, else genus/family) resolved from nominal_species_id, used as the MitoHiFi reference query and GetOrganelle reseed source."
+            },
+            "class": {
+                "type": "string",
+                "meta": ["class"],
+                "description": "NCBI taxonomic class resolved from nominal_species_id (e.g. Actinopteri, Anthozoa). Used to select downstream resources."
+            },
             "invertebrates": {
                 "anyOf": [
                     { "type": "boolean" },

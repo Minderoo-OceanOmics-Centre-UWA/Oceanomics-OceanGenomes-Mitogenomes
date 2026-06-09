@@ -13,6 +13,48 @@ from pathlib import Path
 import psycopg2
 
 
+# NCBI classes treated as invertebrates for downstream BLAST DB selection and
+# EMMA's --invertebrates flag. Extend as new sample classes are encountered.
+INVERT_CLASSES = frozenset({
+    # Cnidaria
+    'Anthozoa', 'Hydrozoa', 'Scyphozoa', 'Cubozoa', 'Staurozoa', 'Myxozoa',
+    'Polypodiozoa', 'Cnidaria',
+    # Mollusca
+    'Bivalvia', 'Gastropoda', 'Cephalopoda', 'Polyplacophora', 'Scaphopoda',
+    'Monoplacophora', 'Caudofoveata', 'Solenogastres', 'Mollusca',
+    # Annelida
+    'Polychaeta', 'Clitellata', 'Annelida',
+    # Arthropoda (crustaceans + chelicerates)
+    'Malacostraca', 'Hexanauplia', 'Branchiopoda', 'Ostracoda',
+    'Cephalocarida', 'Remipedia', 'Maxillopoda', 'Pycnogonida',
+    # Echinodermata
+    'Echinoidea', 'Asteroidea', 'Ophiuroidea', 'Holothuroidea', 'Crinoidea',
+    'Echinodermata',
+    # Porifera
+    'Demospongiae', 'Calcarea', 'Hexactinellida', 'Homoscleromorpha', 'Porifera',
+    # Tunicata (subphylum of Chordata, but uses invert mt code)
+    'Ascidiacea', 'Thaliacea', 'Appendicularia', 'Tunicata',
+    # Bryozoa
+    'Gymnolaemata', 'Stenolaemata', 'Phylactolaemata', 'Bryozoa',
+    # Brachiopoda
+    'Lingulata', 'Craniata', 'Rhynchonellata', 'Brachiopoda',
+    # Ctenophora
+    'Tentaculata', 'Nuda', 'Ctenophora',
+    # Hemichordata
+    'Enteropneusta', 'Pterobranchia', 'Hemichordata',
+    # Chaetognatha
+    'Sagittoidea', 'Chaetognatha',
+    # Platyhelminthes
+    'Turbellaria', 'Trematoda', 'Cestoda', 'Monogenea', 'Rhabditophora',
+    'Platyhelminthes',
+    # Nematoda
+    'Chromadorea', 'Enoplea', 'Secernentea', 'Nematoda',
+    # Other phyla seen in marine collections
+    'Placozoa', 'Nemertea', 'Sipuncula', 'Echiura', 'Tardigrada', 'Onychophora',
+    'Rotifera',
+})
+
+
 def load_db_config(config_file):
     if not Path(config_file).exists():
         raise FileNotFoundError(f"Config file '{config_file}' does not exist.")
@@ -179,29 +221,165 @@ def query_hifi_date(cursor, sample_id, completion_date_str):
 def query_hic_date(cursor, sample_id):
     if cursor is None:
         return "unknown"
+    # A hic_library_tube_id can appear on multiple sequencing runs. Order by
+    # seq_date so the most recent run wins, and warn if there was a collision.
     cursor.execute(
-        "SELECT seq_date FROM sequencing WHERE hic_library_tube_id = %s",
+        "SELECT seq_date FROM sequencing WHERE hic_library_tube_id = %s ORDER BY seq_date DESC",
         (sample_id,)
     )
-    result = cursor.fetchone()
-    if not result:
+    rows = cursor.fetchall()
+    if not rows:
         return "unknown"
-    value = result[0]
+    if len(rows) > 1:
+        print(
+            f"Warning: hic_library_tube_id {sample_id} matched {len(rows)} sequencing "
+            f"rows; using most recent seq_date {rows[0][0]}",
+            file=sys.stderr
+        )
+    value = rows[0][0]
     return value.strftime('%y%m%d') if hasattr(value, 'strftime') else str(value)
 
 
-def query_nominal_species_id(cursor, sample_id):
+def clean_species_name(name):
+    """
+    Strip the qualifier noise that makes a nominal_species_id unusable as an
+    NCBI taxonomy query (e.g. 'Alepes vari (TBC)', 'Astronesthes spp.',
+    "Nesogobius sp. `groove cheek`"). Returns the best plain query string we can
+    salvage: 'Genus species' if a binomial survives, otherwise the bare genus.
+    Used only as a fallback when the species table yields no match.
+    """
+    if not name:
+        return ""
+    s = str(name)
+    s = re.sub(r"\([^)]*\)", " ", s)        # drop parentheticals: (TBC), (Eptatretus cf. goliath)
+    s = re.sub(r"`[^`]*`", " ", s)           # drop backtick descriptors: `groove cheek`
+    s = re.sub(r"[`'\"]", " ", s)            # stray quotes
+    # drop open-nomenclature qualifiers and undescribed-species markers
+    s = re.sub(r"\b(spp?|cf|aff|nr|sp|TBC)\.?\b", " ", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip()
+    tokens = s.split()
+    if not tokens:
+        return ""
+    # keep at most a binomial (Genus species); a lone genus is a valid query too
+    return " ".join(tokens[:2])
+
+
+def query_species_info(cursor, sample_id):
+    """
+    Resolve (nominal_species_id, tax_class, reference_species_id) for a sample by
+    joining the sample table's nominal_species_id against the species table via
+    species/genus/family/order matches (exact, then trigram fuzzy). Mirrors the
+    approach used in OceanOmics-OceanGenomes-Draft-Genomes/bin/create_samplesheet.py
+    so the two pipelines stay in sync.
+
+    reference_species_id is the most specific *NCBI-valid* taxon name found for
+    the sample (the matched species binomial, else genus, else family/order). It
+    is fed to MitoHiFi's findMitoReference instead of the raw nominal name, which
+    is frequently rejected by NCBI ('No such species in NCBI!') because of typos,
+    'spp.'/'sp.' markers or parenthetical notes.
+    """
     if cursor is None:
-        return "unknown"
-    cursor.execute(
-        "SELECT nominal_species_id FROM sample WHERE og_id = %s",
-        (sample_id,)
+        return "unknown", "unknown", ""
+
+    query = """
+    WITH sample_q AS (
+        SELECT
+            s.og_id,
+            s.nominal_species_id,
+            trim(s.nominal_species_id) AS nominal_name,
+            split_part(trim(s.nominal_species_id), ' ', 1) AS nominal_genus
+        FROM sample s
+        WHERE s.og_id = %s
     )
+    SELECT
+        s.nominal_species_id,
+        m.class,
+        m.ref_name
+    FROM sample_q s
+    LEFT JOIN LATERAL (
+        SELECT *
+        FROM (
+            SELECT sp.class, sp.species AS ref_name, 1 AS priority, 1.0 AS sim
+            FROM species sp
+            WHERE sp.ncbi_taxon_id IS NOT NULL
+              AND lower(sp.species) = lower(s.nominal_name)
+
+            UNION ALL
+
+            SELECT sp.class, sp.genus AS ref_name, 2 AS priority, 1.0 AS sim
+            FROM species sp
+            WHERE sp.ncbi_taxon_id IS NOT NULL
+              AND lower(sp.genus) = lower(s.nominal_genus)
+
+            UNION ALL
+
+            SELECT sp.class, sp.family AS ref_name, 3 AS priority, 1.0 AS sim
+            FROM species sp
+            WHERE sp.ncbi_taxon_id IS NOT NULL
+              AND lower(sp.family) = lower(s.nominal_name)
+
+            UNION ALL
+
+            SELECT sp.class, sp.ordr AS ref_name, 4 AS priority, 1.0 AS sim
+            FROM species sp
+            WHERE sp.ncbi_taxon_id IS NOT NULL
+              AND lower(sp.ordr) = lower(s.nominal_name)
+
+            UNION ALL
+
+            SELECT sp.class, sp.species AS ref_name, 5 AS priority,
+                   similarity(sp.species, s.nominal_name) AS sim
+            FROM species sp
+            WHERE sp.ncbi_taxon_id IS NOT NULL
+              AND lower(sp.genus) = lower(s.nominal_genus)
+              AND sp.species %% s.nominal_name
+
+            UNION ALL
+
+            SELECT sp.class, sp.family AS ref_name, 6 AS priority,
+                   similarity(sp.family, s.nominal_name) AS sim
+            FROM species sp
+            WHERE sp.ncbi_taxon_id IS NOT NULL
+              AND sp.family %% s.nominal_name
+              AND similarity(sp.family, s.nominal_name) >= 0.65
+
+            UNION ALL
+
+            SELECT sp.class, sp.ordr AS ref_name, 7 AS priority,
+                   similarity(sp.ordr, s.nominal_name) AS sim
+            FROM species sp
+            WHERE sp.ncbi_taxon_id IS NOT NULL
+              AND sp.ordr %% s.nominal_name
+              AND similarity(sp.ordr, s.nominal_name) >= 0.65
+        ) ranked
+        ORDER BY priority, sim DESC
+        LIMIT 1
+    ) m ON TRUE;
+    """
+
+    try:
+        cursor.execute(query, (sample_id,))
+    except Exception as exc:
+        print(f"Error querying species info for {sample_id}: {exc}", file=sys.stderr)
+        return "unknown", "unknown", ""
+
     result = cursor.fetchone()
     if not result:
-        return "unknown"
-    value = result[0]
-    return value.strftime('%y%m%d') if hasattr(value, 'strftime') else str(value)
+        return "unknown", "unknown", ""
+
+    nominal_species_id, tax_class, ref_name = result
+    # Fall back to a cleaned form of the nominal name when the species table has
+    # no usable match, so findMitoReference still gets a plausible query string.
+    reference_species_id = ref_name or clean_species_name(nominal_species_id)
+    return (
+        nominal_species_id if nominal_species_id else "unknown",
+        tax_class if tax_class else "unknown",
+        reference_species_id or "",
+    )
+
+
+def is_invertebrate(tax_class):
+    return 'true' if tax_class in INVERT_CLASSES else 'false'
 
 
 def parse_args():
@@ -232,6 +410,8 @@ def main():
         'date',
         'assembly_prefix',
         'nominal_species_id',
+        'reference_species_id',
+        'class',
         'invertebrates',
         'fastq_1',
         'fastq_2'
@@ -291,7 +471,8 @@ def main():
             else:
                 assembly_prefix = f"{cleaned_id}.{sequencing_type}.{date}"
 
-            nominal_species_id = query_nominal_species_id(cursor, cleaned_id)
+            nominal_species_id, tax_class, reference_species_id = query_species_info(cursor, cleaned_id)
+            invertebrates = is_invertebrate(tax_class)
 
             def write_row(r1, r2, single_end):
                 writer.writerow([
@@ -303,7 +484,9 @@ def main():
                     date,
                     assembly_prefix,
                     nominal_species_id,
-                    '',
+                    reference_species_id,
+                    tax_class,
+                    invertebrates,
                     r1,
                     r2
                 ])

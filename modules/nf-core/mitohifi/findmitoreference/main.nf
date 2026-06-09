@@ -20,15 +20,19 @@ process MITOHIFI_FINDMITOREFERENCE {
 
     script:
     def args = task.ext.args ?: ''
-    def effective_args = ["--species '${meta.nominal_species_id}'", "--outfolder .", args].findAll { it?.trim() }.join(' ')
+    // Prefer the NCBI-valid name resolved at samplesheet creation; fall back to
+    // the raw nominal name for older samplesheets that lack the column. The raw
+    // nominal name is frequently rejected by NCBI ('No such species in NCBI!').
+    def query_species = (meta.reference_species_id?.trim()) ? meta.reference_species_id : meta.nominal_species_id
+    def effective_args = ["--species '${query_species}'", "--outfolder .", args].findAll { it?.trim() }.join(' ')
     """
     findMitoReference.py \\
-        --species "$meta.nominal_species_id" \\
+        --species "${query_species}" \\
         --outfolder . \\
         $args
 
     cat <<-END_TOOL_PARAMS > 04_mitohifi_findmitoreference.tool_params_mqcrow.html
-    <tr><td>MitoHiFi Find Reference</td><td><samp>${effective_args}</samp></td><td>Finds a mitochondrial reference for ${meta.id} using nominal species ${meta.nominal_species_id}.</td></tr>
+    <tr><td>MitoHiFi Find Reference</td><td><samp>${effective_args}</samp></td><td>Finds a mitochondrial reference for ${meta.id} using query species ${query_species} (nominal: ${meta.nominal_species_id}).</td></tr>
     END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml
@@ -39,13 +43,14 @@ process MITOHIFI_FINDMITOREFERENCE {
 
     stub:
     def args = task.ext.args ?: ''
-    def effective_args = ["--species '${meta.nominal_species_id}'", "--outfolder .", args].findAll { it?.trim() }.join(' ')
+    def query_species = (meta.reference_species_id?.trim()) ? meta.reference_species_id : meta.nominal_species_id
+    def effective_args = ["--species '${query_species}'", "--outfolder .", args].findAll { it?.trim() }.join(' ')
     """
     touch accession.fasta
     touch accession.gb
 
     cat <<-END_TOOL_PARAMS > 04_mitohifi_findmitoreference.tool_params_mqcrow.html
-    <tr><td>MitoHiFi Find Reference</td><td><samp>${effective_args}</samp></td><td>Finds a mitochondrial reference for ${meta.id} using nominal species ${meta.nominal_species_id}.</td></tr>
+    <tr><td>MitoHiFi Find Reference</td><td><samp>${effective_args}</samp></td><td>Finds a mitochondrial reference for ${meta.id} using query species ${query_species} (nominal: ${meta.nominal_species_id}).</td></tr>
     END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml
