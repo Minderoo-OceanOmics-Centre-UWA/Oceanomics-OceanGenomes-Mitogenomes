@@ -17,6 +17,7 @@ from typing import Iterable
 
 COLUMNS = [
     "sample_id",
+    "assembly_prefix",
     "assembler",
     "status",
     "final_length_bp",
@@ -565,7 +566,7 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
 
 def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterable[Path]) -> dict[str, str]:
     row = {column: MISSING for column in COLUMNS}
-    row.update({"sample_id": run.sample_id, "assembler": "MitoHiFi"})
+    row.update({"sample_id": run.sample_id, "assembly_prefix": run.prefix, "assembler": "MitoHiFi"})
     row.update(parse_mitohifi_stats(run.files))
 
     final_fasta = choose_final_fasta(run.files, "MitoHiFi", run.prefix)
@@ -675,7 +676,7 @@ def getorganelle_graph_ambiguous(files: Iterable[Path]) -> bool:
 
 def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Iterable[Path]) -> dict[str, str]:
     row = {column: MISSING for column in COLUMNS}
-    row.update({"sample_id": run.sample_id, "assembler": "GetOrganelle"})
+    row.update({"sample_id": run.sample_id, "assembly_prefix": run.prefix, "assembler": "GetOrganelle"})
 
     final_fasta = choose_final_fasta(run.files, "GetOrganelle", run.prefix)
     if final_fasta:

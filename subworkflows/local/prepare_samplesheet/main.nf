@@ -100,11 +100,17 @@ workflow PREPARE_SAMPLESHEET {
                         meta = meta + [ invertebrates: meta_invertebrates ]
                     }
 
+                    // Group by sample id + sequencing type + date so that single-end
+                    // (e.g. hifi bc + unassigned) and paired-end (e.g. hic lanes) reads
+                    // for the same specimen don't collide on a shared cleaned id.
+                    // Reads sharing this key are merged into one assembly downstream.
+                    def group_key = [ meta.id, meta.sequencing_type, meta.date ]
+
                     if (single_end) {
-                        return [ meta.id, meta, [ fastq_1 ] ]
+                        return [ group_key, meta, [ fastq_1 ] ]
                     }
 
-                    return [ meta.id, meta, [ fastq_1, fastq_2 ] ]
+                    return [ group_key, meta, [ fastq_1, fastq_2 ] ]
                 }
             }
             .groupTuple()

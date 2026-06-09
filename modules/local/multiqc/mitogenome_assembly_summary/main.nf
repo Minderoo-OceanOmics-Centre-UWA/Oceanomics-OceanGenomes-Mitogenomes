@@ -41,7 +41,7 @@ process MITOGENOME_ASSEMBLY_SUMMARY {
 
     stub:
     """
-    printf "sample_id\\tassembler\\tstatus\\tfinal_length_bp\\tcircularised\\tnum_candidate_contigs\\tnum_final_contigs\\tnum_genes\\tmissing_genes\\tframeshift_flag\\tmean_coverage\\tcoverage_cv\\treference_species\\treference_accession\\tnumt_flag\\tmanual_review_reason\\n" > mitogenome_assembly_summary_mqc.tsv
+    printf "sample_id\\tassembly_prefix\\tassembler\\tstatus\\tfinal_length_bp\\tcircularised\\tnum_candidate_contigs\\tnum_final_contigs\\tnum_genes\\tmissing_genes\\tframeshift_flag\\tmean_coverage\\tcoverage_cv\\treference_species\\treference_accession\\tnumt_flag\\tmanual_review_reason\\n" > mitogenome_assembly_summary_mqc.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

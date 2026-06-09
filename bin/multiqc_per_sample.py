@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -24,6 +25,12 @@ except ImportError:  # pragma: no cover - exercised on minimal login Python inst
 
 SUMMARY_NAME = "mitogenome_assembly_summary_mqc.tsv"
 SAMPLE_RE = re.compile(r"(?<![A-Za-z0-9_-])(OG[0-9][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])")
+ASSEMBLY_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])"
+    r"(?P<prefix>(?P<sample>OG[0-9][A-Za-z0-9_-]*)\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\."
+    r"(?:getorg[0-9A-Za-z_-]+|(?:v[0-9A-Za-z_-]+)?mitohifi[0-9A-Za-z_-]*))"
+    r"(?:\.emma[0-9A-Za-z_-]+)?"
+)
 TEXT_SUFFIXES = {
     ".csv",
     ".fa",
@@ -109,6 +116,12 @@ ROW_PATTERN = re.compile(
     r"<tr><td>(?P<tool>.*?)</td><td>(?P<params>.*?)</td><td>(?P<notes>.*?)</td></tr>",
     re.IGNORECASE | re.DOTALL,
 )
+
+
+@dataclass(frozen=True)
+class AssemblyTarget:
+    sample: str
+    prefix: str
 
 
 def warn(message: str) -> None:
@@ -210,48 +223,86 @@ def load_multiqc_args(path: Path | None) -> list[str]:
     return args
 
 
-def discover_samples(files: list[Path]) -> list[str]:
+def text_for_matching(path: Path) -> str:
+    if path.suffix.lower() not in TEXT_SUFFIXES:
+        return ""
+    try:
+        if path.stat().st_size > 5_000_000:
+            return ""
+        return path.read_text(errors="ignore")
+    except OSError:
+        return ""
+
+
+def assembly_prefixes_from_text(text: str) -> set[AssemblyTarget]:
+    targets = set()
+    for match in ASSEMBLY_RE.finditer(text):
+        prefix = match.group("prefix")
+        targets.add(AssemblyTarget(match.group("sample"), prefix))
+    return targets
+
+
+def summary_targets(path: Path) -> tuple[set[AssemblyTarget], set[str]]:
+    targets = set()
+    samples = set()
+    try:
+        with path.open(newline="") as handle:
+            reader = csv.DictReader(handle, delimiter="\t")
+            for row in reader:
+                sample_id = (row.get("sample_id") or "").strip()
+                assembly_prefix = (
+                    row.get("assembly_prefix")
+                    or row.get("mt_assembly_prefix")
+                    or row.get("prefix")
+                    or ""
+                ).strip()
+                if sample_id:
+                    samples.add(sample_id)
+                if sample_id and assembly_prefix:
+                    targets.add(AssemblyTarget(sample_id, assembly_prefix))
+    except Exception as exc:
+        warn(f"could not parse {path}: {exc}")
+    return targets, samples
+
+
+def discover_assembly_targets(files: list[Path]) -> list[AssemblyTarget]:
+    targets = set()
     samples = set()
     for path in files:
         if path.name == SUMMARY_NAME:
-            try:
-                with path.open(newline="") as handle:
-                    reader = csv.DictReader(handle, delimiter="\t")
-                    for row in reader:
-                        sample_id = (row.get("sample_id") or "").strip()
-                        if sample_id:
-                            samples.add(sample_id)
-            except Exception as exc:
-                warn(f"could not parse {path}: {exc}")
+            summary_file_targets, summary_samples = summary_targets(path)
+            targets.update(summary_file_targets)
+            samples.update(summary_samples)
 
+        targets.update(assembly_prefixes_from_text(str(path)))
+        targets.update(assembly_prefixes_from_text(text_for_matching(path)))
         for match in SAMPLE_RE.finditer(str(path)):
             samples.add(match.group(1))
 
-    return sorted(samples)
+    if targets:
+        return sorted(targets, key=lambda target: (target.sample, target.prefix))
+
+    return [AssemblyTarget(sample, sample) for sample in sorted(samples)]
 
 
 def text_contains_sample(path: Path, sample: str) -> bool:
-    if path.suffix.lower() not in TEXT_SUFFIXES:
-        return False
-    try:
-        if path.stat().st_size > 5_000_000:
-            return False
-        return sample in path.read_text(errors="ignore")
-    except OSError:
-        return False
+    return sample in text_for_matching(path)
+
+
+def text_contains_assembly(path: Path, target: AssemblyTarget) -> bool:
+    return target.prefix in text_for_matching(path)
 
 
 def has_any_sample_id(path: Path) -> bool:
     if SAMPLE_RE.search(str(path)):
         return True
-    if path.suffix.lower() not in TEXT_SUFFIXES:
-        return False
-    try:
-        if path.stat().st_size > 5_000_000:
-            return False
-        return SAMPLE_RE.search(path.read_text(errors="ignore")) is not None
-    except OSError:
-        return False
+    return SAMPLE_RE.search(text_for_matching(path)) is not None
+
+
+def has_any_assembly_prefix(path: Path) -> bool:
+    if ASSEMBLY_RE.search(str(path)):
+        return True
+    return ASSEMBLY_RE.search(text_for_matching(path)) is not None
 
 
 def is_common_file(path: Path) -> bool:
@@ -266,6 +317,24 @@ def belongs_to_sample(path: Path, sample: str) -> bool:
     if path.name.endswith(".tool_params_mqcrow.html"):
         return sample in str(path) or text_contains_sample(path, sample) or not has_any_sample_id(path)
     return sample in str(path) or text_contains_sample(path, sample)
+
+
+def belongs_to_assembly(path: Path, target: AssemblyTarget) -> bool:
+    if path.name == SUMMARY_NAME:
+        return True
+    if is_common_file(path):
+        return True
+    if target.prefix in str(path):
+        return True
+    if text_contains_assembly(path, target):
+        return True
+    if path.name.endswith(".tool_params_mqcrow.html"):
+        return (
+            target.sample in str(path)
+            or text_contains_sample(path, target.sample)
+            or not has_any_sample_id(path)
+        ) and not has_any_assembly_prefix(path)
+    return (target.sample in str(path) or text_contains_sample(path, target.sample)) and not has_any_assembly_prefix(path)
 
 
 def safe_name(sample: str) -> str:
@@ -321,14 +390,23 @@ def unique_destination(directory: Path, source_name: str) -> Path:
         counter += 1
 
 
-def write_filtered_summary(source: Path, destination: Path, sample: str) -> bool:
+def write_filtered_summary(source: Path, destination: Path, target: AssemblyTarget) -> bool:
     try:
         with source.open(newline="") as in_handle:
             reader = csv.DictReader(in_handle, delimiter="\t")
             fieldnames = reader.fieldnames or []
-            rows = [row for row in reader if (row.get("sample_id") or "").strip() == sample]
+            has_assembly_prefix = "assembly_prefix" in fieldnames
+            rows = [
+                row
+                for row in reader
+                if (row.get("sample_id") or "").strip() == target.sample
+                and (
+                    not has_assembly_prefix
+                    or (row.get("assembly_prefix") or "").strip() == target.prefix
+                )
+            ]
     except Exception as exc:
-        warn(f"could not filter {source} for {sample}: {exc}")
+        warn(f"could not filter {source} for {target.prefix}: {exc}")
         return False
 
     with destination.open("w", newline="") as out_handle:
@@ -445,25 +523,28 @@ def prepare_sample_inputs(
     sample_input_root: Path,
     output_root: Path,
     html_output_root: Path | None = None,
-) -> list[tuple[str, Path, Path, Path]]:
+) -> list[tuple[str, str, Path, Path, Path]]:
     files = sorted(path for path in input_root.rglob("*") if path.is_file())
-    samples = discover_samples(files)
+    targets = discover_assembly_targets(files)
     output_root.mkdir(parents=True, exist_ok=True)
     sample_input_root.mkdir(parents=True, exist_ok=True)
 
-    if not samples:
-        warn("no sample IDs found in MultiQC inputs")
-        (output_root / "NO_SAMPLES_FOUND.txt").write_text("No sample IDs were found in the MultiQC inputs.\n", encoding="utf-8")
+    if not targets:
+        warn("no sample or assembly IDs found in MultiQC inputs")
+        (output_root / "NO_SAMPLES_FOUND.txt").write_text(
+            "No sample or assembly IDs were found in the MultiQC inputs.\n",
+            encoding="utf-8",
+        )
         return []
 
     prepared = []
-    for sample in samples:
-        sample_label = safe_name(sample)
-        sample_input_dir = sample_input_root / sample_label
-        sample_files = [source for source in files if belongs_to_sample(source, sample)]
-        assembly_prefix = safe_name(infer_assembly_prefix(sample_files, sample))
-        sample_report_dir = output_root / sample_label
-        sample_html_dir = (html_output_root / sample_label / assembly_prefix) if html_output_root else sample_report_dir
+    for target in targets:
+        sample_label = safe_name(target.sample)
+        assembly_label = safe_name(target.prefix)
+        sample_input_dir = sample_input_root / sample_label / assembly_label
+        sample_files = [source for source in files if belongs_to_assembly(source, target)]
+        sample_report_dir = output_root / sample_label / assembly_label
+        sample_html_dir = (html_output_root / sample_label / assembly_label) if html_output_root else sample_report_dir
         sample_input_dir.mkdir(parents=True, exist_ok=True)
         sample_report_dir.mkdir(parents=True, exist_ok=True)
         sample_html_dir.mkdir(parents=True, exist_ok=True)
@@ -472,25 +553,25 @@ def prepare_sample_inputs(
         for source in sample_files:
             destination = unique_destination(sample_input_dir, source.name)
             if source.name == SUMMARY_NAME:
-                if not write_filtered_summary(source, destination, sample):
+                if not write_filtered_summary(source, destination, target):
                     continue
             else:
                 shutil.copy2(source, destination)
             matched += 1
 
         if matched == 0:
-            warn(f"no MultiQC inputs matched sample {sample}")
+            warn(f"no MultiQC inputs matched assembly {target.prefix}")
             continue
 
         prepare_multiqc_custom_content(sample_input_dir)
-        prepared.append((sample_label, sample_input_dir, sample_report_dir, sample_html_dir))
+        prepared.append((sample_label, assembly_label, sample_input_dir, sample_report_dir, sample_html_dir))
 
     return prepared
 
 
-def run_multiqc(prepared_samples: list[tuple[str, Path, Path, Path]], multiqc_args: list[str]) -> None:
-    for sample_label, sample_input_dir, sample_report_dir, sample_html_dir in prepared_samples:
-        report_name = f"{sample_label}_multiqc_report.html"
+def run_multiqc(prepared_samples: list[tuple[str, str, Path, Path, Path]], multiqc_args: list[str]) -> None:
+    for _sample_label, assembly_label, sample_input_dir, sample_report_dir, sample_html_dir in prepared_samples:
+        report_name = f"{assembly_label}_multiqc_report.html"
         command = [
             "multiqc",
             "--force",
