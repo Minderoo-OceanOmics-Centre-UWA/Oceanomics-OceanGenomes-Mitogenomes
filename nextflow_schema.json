@@ -232,6 +232,16 @@
                     "format": "file-path",
                     "description": "Path to NCBI nt BLAST database for invertebrate samples."
                 },
+                "mitos_refdb": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "description": "Path to the MITOS2 RefSeq reference data directory (parent of the version dir), downloaded from Zenodo. Required for invertebrate (MITOS2) annotation."
+                },
+                "mitos_refseq_ver": {
+                    "type": "string",
+                    "default": "refseq89m",
+                    "description": "MITOS2 reference version subdir name passed to runmitos.py -r (e.g. refseq89m for RefSeq89 Metazoa)."
+                },
                 "template_sbt": {
                     "type": "string",
                     "default": null,

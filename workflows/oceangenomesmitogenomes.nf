@@ -35,6 +35,7 @@ workflow OCEANGENOMESMITOGENOMES {
     mitohifi_input // tuple for mitohifi - tuple(meta, reads)
     curated_blast_db // params.curated_blast_db
     nt_blast_db // params.nt_blast_db
+    mitos_refdb // params.mitos_refdb (MITOS2 RefSeq reference data dir)
     sql_config // params.sql_config
     organelle_type // params.organelle_type "animal_mt"
 
@@ -205,7 +206,8 @@ workflow OCEANGENOMESMITOGENOMES {
         MITOGENOME_ANNOTATION (
             ch_annotation_input_sanitised,
             curated_blast_db,
-            nt_blast_db
+            nt_blast_db,
+            mitos_refdb
         )
         ch_mitogenome_annotation_results = MITOGENOME_ANNOTATION.out.annotation_results
         ch_mitogenome_blast_results = MITOGENOME_ANNOTATION.out.blast_filtered_results
@@ -220,11 +222,17 @@ workflow OCEANGENOMESMITOGENOMES {
             def meta_id = parts[0]
             def sequencing_type = parts.length > 1 ? parts[1] : null
             def date = parts.length > 2 ? parts[2] : null
-            return [ [meta_id, sequencing_type, date], file ]
+            // Reconstruct the assembly prefix (id.tech.date.assembler) from the
+            // GFF name so downstream naming (e.g. <prefix>.annotation_stats.csv)
+            // stays per-assembly. Without this, meta.mt_assembly_prefix is null
+            // on the upload-only path and CSVs collide as null.annotation_stats.csv.
+            def mt_assembly_prefix = parts.length > 3 ? parts[0..3].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
         }
         .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, file, meta ->
-            return tuple(meta, file)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
         }
         ch_mitogenome_blast_results = Channel.fromPath(params.precomputed_mitogenome_blast_results)
         .map { file ->

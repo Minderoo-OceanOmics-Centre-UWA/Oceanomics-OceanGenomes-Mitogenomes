@@ -8,6 +8,7 @@
 include { DOWNLOAD_BLAST_DB      } from '../../../modules/local/download_blast_db'
 include { DOWNLOAD_TAXONKIT_DB   } from '../../../modules/local/download_taxonkit_db'
 include { EMMA                   } from '../../../modules/local/EMMA'
+include { MITOS2                 } from '../../../modules/local/mitos2'
 include { BLAST_BLASTN           } from '../../../modules/nf-core/blast/blastn'
 include { LCA                    } from '../../../modules/local/LCA'
 
@@ -27,7 +28,8 @@ workflow MITOGENOME_ANNOTATION {
     mito_assembly //  tuple val(meta), path(fasta)
     curated_blast_db // params.curated_blast_db
     nt_blast_db // params.nt_blast_db
-    
+    mitos_refdb // params.mitos_refdb (MITOS2 RefSeq reference data dir, for invertebrates)
+
     main:
 
     ch_versions = Channel.empty()
@@ -60,12 +62,45 @@ workflow MITOGENOME_ANNOTATION {
     }
     
     //
-    // MODULE: Run the program EMMA to do the annotation of the mitogenome
+    // MODULE: Annotate the mitogenome.
+    // Route by meta.invertebrates: vertebrates -> EMMA, invertebrates -> MITOS2.
+    // EMMA does not annotate inverts correctly, so coral/invert samples use
+    // MITOS2 instead. MITOS2 emits the same output channels as EMMA so the rest
+    // of this subworkflow is annotator-agnostic.
     //
-               
+
+    ch_annot_branched = fasta_with_mt_assembly_prefix.branch { meta, _fasta ->
+        invert: meta.invertebrates
+        vert:   true
+    }
+
+    // MITOS2 needs its RefSeq reference data dir; fail clearly if an invert
+    // sample is present but --mitos_refdb was not provided.
+    ch_mitos_refdb = mitos_refdb
+        ? Channel.fromPath(mitos_refdb, checkIfExists: true).first()
+        : Channel.value([])
+
     EMMA (
-        fasta_with_mt_assembly_prefix // tuple val(meta), path(fasta), val(assembly_prefix)
+        ch_annot_branched.vert // tuple val(meta), path(fasta)
     )
+
+    MITOS2 (
+        ch_annot_branched.invert.map { meta, fasta ->
+            if (!mitos_refdb) {
+                error "Sample ${meta.id} is marked invertebrates=true, but --mitos_refdb was not provided"
+            }
+            [meta, fasta]
+        },
+        ch_mitos_refdb
+    )
+
+    // Merge the two annotators' outputs so everything downstream is unchanged.
+    ch_annot_co1     = EMMA.out.co1_sequences.mix(MITOS2.out.co1_sequences)
+    ch_annot_s12     = EMMA.out.s12_sequences.mix(MITOS2.out.s12_sequences)
+    ch_annot_s16     = EMMA.out.s16_sequences.mix(MITOS2.out.s16_sequences)
+    ch_annot_results = EMMA.out.results.mix(MITOS2.out.results)
+    ch_annot_params  = EMMA.out.tool_params.mix(MITOS2.out.tool_params)
+    ch_annot_versions = EMMA.out.versions.mix(MITOS2.out.versions)
 
     //
     // Function to extract annotation name
@@ -81,19 +116,19 @@ workflow MITOGENOME_ANNOTATION {
     // Use mix() to process CO1, 12s and 16s sequences through blast
     //
 
-    combined_sequences = EMMA.out.co1_sequences
-        .map { meta, file -> 
+    combined_sequences = ch_annot_co1
+        .map { meta, file ->
             def annotation_name = getAnnotationName(file.name)
-            [meta, file, 'CO1', annotation_name] 
+            [meta, file, 'CO1', annotation_name]
         }
         .mix(
-            EMMA.out.s12_sequences.map { meta, file -> 
+            ch_annot_s12.map { meta, file ->
                 def annotation_name = getAnnotationName(file.name)
-                [meta, file, '12s', annotation_name] 
+                [meta, file, '12s', annotation_name]
             },
-            EMMA.out.s16_sequences.map { meta, file -> 
+            ch_annot_s16.map { meta, file ->
                 def annotation_name = getAnnotationName(file.name)
-                [meta, file, '16s', annotation_name] 
+                [meta, file, '16s', annotation_name]
             }
         )
     
@@ -140,10 +175,10 @@ workflow MITOGENOME_ANNOTATION {
     // Collect MultiQC files
     // Need to update this section to include everything
     ch_multiqc_files = ch_multiqc_files.mix(BLAST_BLASTN.out.summary.collect{it[1]})
-    ch_multiqc_files = ch_multiqc_files.mix(EMMA.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(ch_annot_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(BLAST_BLASTN.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(LCA.out.tool_params.collect { it[1] })
-    ch_versions = ch_versions.mix(EMMA.out.versions.first())
+    ch_versions = ch_versions.mix(ch_annot_versions.first())
     ch_versions = ch_versions.mix(BLAST_BLASTN.out.versions.first())
     ch_versions = ch_versions.mix(LCA.out.versions.first())
 
@@ -155,7 +190,7 @@ workflow MITOGENOME_ANNOTATION {
 
     emit:
     multiqc_files           = ch_multiqc_files             // channel: [ path(multiqc_files) ]
-    annotation_results      = EMMA.out.results
+    annotation_results      = ch_annot_results
     blast_filtered_results  = BLAST_BLASTN.out.validation
     lca_results             = LCA.out.lca
     lca_raw_results         = LCA.out.lca_raw

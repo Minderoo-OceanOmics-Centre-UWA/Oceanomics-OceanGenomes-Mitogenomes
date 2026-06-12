@@ -45,6 +45,7 @@ workflow NFCORE_OCEANGENOMESMITOGENOMES {
         mitohifi_input, // tuple for mitohifi - tuple(meta, reads)
         params.curated_blast_db,
         params.nt_blast_db,
+        params.mitos_refdb,
         params.sql_config,
         params.organelle_type,
     )

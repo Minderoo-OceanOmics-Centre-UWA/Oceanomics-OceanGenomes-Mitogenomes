@@ -1,0 +1,22 @@
+name: MITOS2
+description: Annotate invertebrate mitochondrial genomes with MITOS2 and reshape the output to the EMMA contract used downstream.
+keywords: [mitos2, annotation, mitochondria, invertebrate]
+tools:
+  - name: MITOS2
+    description: De novo annotation of metazoan mitochondrial genomes
+    homepage: https://gitlab.com/Bernt/MITOS
+    documentation: https://gitlab.com/Bernt/MITOS
+    licence: ["GPL-3.0"]
+input:
+  - meta: { type: map, description: Sample metadata }
+  - fasta: { type: file, description: Assembled mitochondrial genome FASTA }
+  - refdb: { type: directory, description: MITOS2 RefSeq reference data directory (parent of the refseq version dir) }
+output:
+  - co1_sequences: { type: files, description: CO1 CDS FASTA files, pattern: "emma/cds/*CO1*.fa" }
+  - s12_sequences: { type: files, description: 12S rRNA (RNR1) FASTA files, pattern: "emma/cds/*RNR1*.fa" }
+  - s16_sequences: { type: files, description: 16S rRNA (RNR2) FASTA files, pattern: "emma/cds/*RNR2*.fa" }
+  - results: { type: files, description: EMMA-contract outputs (gff, genome fasta, cds/, proteins/, raw MITOS2 under mitos_raw/), pattern: "emma/*" }
+  - tool_params: { type: file, description: MultiQC tool-params row, pattern: "07_mitos.tool_params_mqcrow.html" }
+  - versions: { type: file, description: Software versions, pattern: "versions_mitos.yml" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]
