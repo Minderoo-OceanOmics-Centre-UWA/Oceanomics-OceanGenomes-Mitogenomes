@@ -8,8 +8,9 @@
 // reference_species_id) and passes it to GetOrganelle as a custom seed (-s),
 // while keeping the animal_mt label database (-F animal_mt) for disentangling.
 //
-// Outputs use a ".reseed" prefix so they never collide with the first pass in
-// the persistent checkpoint directory.
+// Outputs use a "reseed" suffix (appended to mt_assembly_prefix, no separating
+// dot) so they never collide with the first pass in the persistent checkpoint
+// directory while keeping the dot-delimited naming convention intact.
 process GETORGANELLE_RESEED {
     tag "$meta.id"
     label 'process_high'
@@ -23,8 +24,8 @@ process GETORGANELLE_RESEED {
     tuple val(meta), path(fastp), val(organelle_type), path(db), path(seed)
 
     output:
-    tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}.reseed.fasta")           , emit: fasta
-    tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}.reseed.get_org.log.txt") , emit: log
+    tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}reseed.fasta")            , emit: fasta
+    tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}reseed.get_org.log.txt")  , emit: log
     path("mtdna/*.selected_graph.gfa")                                               , emit: org_assm_graph,  optional: true
     path("mtdna/*extended_K*.assembly_graph.fastg")                                  , emit: raw_assm_graph,  optional: true
     path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.fastg")           , emit: simp_assm_graph, optional: true
@@ -37,7 +38,7 @@ process GETORGANELLE_RESEED {
 
     script:
     def args   = task.ext.args ?: ''
-    def prefix = "${meta.mt_assembly_prefix}.reseed"
+    def prefix = "${meta.mt_assembly_prefix}reseed"
     def seed_arg = seed ? "-s ${seed}" : ''
     def effective_args = [args, seed_arg, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
 
@@ -103,7 +104,7 @@ process GETORGANELLE_RESEED {
     """
 
     stub:
-    def prefix = "${meta.mt_assembly_prefix}.reseed"
+    def prefix = "${meta.mt_assembly_prefix}reseed"
     def args   = task.ext.args ?: ''
     def seed_arg = seed ? "-s ${seed}" : ''
     def effective_args = [args, seed_arg, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')

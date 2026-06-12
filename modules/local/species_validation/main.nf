@@ -14,7 +14,7 @@ process SPECIES_VALIDATION {
     output:
     tuple val(meta), path("lca_results.${meta.id}.tsv"), emit: summary
     tuple val(meta), path("lca_combined.${meta.id}.tsv"), path("blast_combined.${meta.id}.tsv"), emit: full
-    tuple val(meta), path("${meta.id}.species_validation.upload.txt"), emit: upload
+    tuple val(meta), path("${meta.mt_assembly_prefix ?: meta.id}.species_validation.upload.txt"), emit: upload
     tuple val(meta), path("11_species_validation.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
@@ -23,6 +23,7 @@ process SPECIES_VALIDATION {
 
     script:
     def args = task.ext.args ?: ''
+    def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
     def lca_files_str = lca_files instanceof List ? lca_files.join(',') : lca_files
     def blast_files_str = blast_files instanceof List ? blast_files.join(',') : blast_files
     def effective_args = [args, config, meta.id, lca_files_str, blast_files_str].findAll { it?.toString()?.trim() }.join(' ')
@@ -33,7 +34,7 @@ process SPECIES_VALIDATION {
         ${meta.id} \\
         "${lca_files_str}" \\
         "${blast_files_str}" \\
-        > ${meta.id}.species_validation.upload.txt
+        > ${mt_assembly_prefix}.species_validation.upload.txt
 
     cat <<-END_TOOL_PARAMS > 11_species_validation.tool_params_mqcrow.html
     <tr><td>Species Validation</td><td><samp>${effective_args}</samp></td><td>Compares filtered BLAST/LCA calls against the nominal species for ${meta.id}.</td></tr>
@@ -48,6 +49,7 @@ process SPECIES_VALIDATION {
 
     stub:
     def args = task.ext.args ?: ''
+    def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
     def lca_files_str = lca_files instanceof List ? lca_files.join(',') : lca_files
     def blast_files_str = blast_files instanceof List ? blast_files.join(',') : blast_files
     def effective_args = [args, config, meta.id, lca_files_str, blast_files_str].findAll { it?.toString()?.trim() }.join(' ')
@@ -55,7 +57,7 @@ process SPECIES_VALIDATION {
     touch lca_results.${meta.id}.tsv
     touch lca_combined.${meta.id}.tsv
     touch blast_combined.${meta.id}.tsv
-    touch ${meta.id}.species_validation.upload.txt
+    touch ${mt_assembly_prefix}.species_validation.upload.txt
 
     cat <<-END_TOOL_PARAMS > 11_species_validation.tool_params_mqcrow.html
     <tr><td>Species Validation</td><td><samp>${effective_args}</samp></td><td>Compares filtered BLAST/LCA calls against the nominal species for ${meta.id}.</td></tr>

@@ -41,19 +41,31 @@ STEP_ORDER = ["assembly", "annotation", "species_validation", "lca_blast", "lca_
 
 def parse_filename(path):
     """
-    Extract (og_id, step) from a ``<og_id>.<suffix>.upload.txt`` filename.
-    Returns ``(None, None)`` if the file doesn't match the expected pattern.
+    Extract (assembly_prefix, og_id, step) from an upload status filename.
+
+    Files are named ``<assembly_prefix>.<step>.upload.txt`` where the assembly
+    prefix is the unique per-assembly key (e.g. ``OG868.hic.250624.getorg1770``)
+    and ``<step>`` is the trailing token (``mtdna``, ``lca_raw`` …). The step is
+    therefore the *last* dot-delimited token before ``.upload.txt`` and the OG id
+    is the *first* token. Older single-token names (``OG868.mtdna.upload.txt``)
+    still parse correctly, with the prefix equal to the OG id.
+
+    Returns ``(None, None, None)`` if the file doesn't match the expected pattern.
     """
     name = path.name
     if not name.endswith(".upload.txt"):
-        return None, None
+        return None, None, None
     stem = name[: -len(".upload.txt")]
-    parts = stem.split(".", 1)
-    if len(parts) != 2:
-        return None, None
-    og_id, suffix = parts
+    parts = stem.split(".")
+    if len(parts) < 2:
+        return None, None, None
+    suffix = parts[-1]
     step = STEP_FROM_SUFFIX.get(suffix)
-    return og_id, step
+    if step is None:
+        return None, None, None
+    assembly_prefix = ".".join(parts[:-1])
+    og_id = parts[0]
+    return assembly_prefix, og_id, step
 
 
 def classify_status(step, text):
@@ -162,13 +174,15 @@ def classify_status(step, text):
 
 def collect_inputs(input_dir):
     """
-    Walk the input directory and group upload files by og_id.
-    Returns {og_id: {step: (path, text)}}.
+    Walk the input directory and group upload files by assembly prefix (the
+    unique per-assembly key) so each assembly gets one report row even when a
+    single OG has several assemblies. Returns
+    {assembly_prefix: {"og_id": og_id, "steps": {step: (path, text)}}}.
     """
     grouped = {}
     for path in sorted(Path(input_dir).rglob("*.upload.txt")):
-        og_id, step = parse_filename(path)
-        if og_id is None or step is None:
+        assembly_prefix, og_id, step = parse_filename(path)
+        if assembly_prefix is None or step is None:
             print(
                 f"[WARN] Skipping unrecognised upload file: {path.name}",
                 file=sys.stderr,
@@ -179,18 +193,20 @@ def collect_inputs(input_dir):
         except Exception as e:
             print(f"[WARN] Could not read {path}: {e}", file=sys.stderr)
             text = None
-        grouped.setdefault(og_id, {})[step] = (path, text)
+        entry = grouped.setdefault(assembly_prefix, {"og_id": og_id, "steps": {}})
+        entry["steps"][step] = (path, text)
     return grouped
 
 
 def write_summary_tsv(grouped, output_path):
-    header = ["og_id"] + STEP_ORDER
+    header = ["og_id", "assembly_prefix"] + STEP_ORDER
     with open(output_path, "w") as f:
         f.write("\t".join(header) + "\n")
-        for og_id in sorted(grouped):
-            row = [og_id]
+        for assembly_prefix in sorted(grouped):
+            steps = grouped[assembly_prefix]["steps"]
+            row = [grouped[assembly_prefix]["og_id"], assembly_prefix]
             for step in STEP_ORDER:
-                entry = grouped[og_id].get(step)
+                entry = steps.get(step)
                 text = entry[1] if entry else None
                 row.append(classify_status(step, text))
             f.write("\t".join(row) + "\n")
@@ -200,11 +216,12 @@ def write_appendix(grouped, output_path):
     with open(output_path, "w") as f:
         f.write("Per-sample SQL-upload report appendix\n")
         f.write("=" * 60 + "\n\n")
-        for og_id in sorted(grouped):
-            f.write(f"## Sample: {og_id}\n")
+        for assembly_prefix in sorted(grouped):
+            steps = grouped[assembly_prefix]["steps"]
+            f.write(f"## Assembly: {assembly_prefix}\n")
             for step in STEP_ORDER:
-                entry = grouped[og_id].get(step)
-                f.write(f"\n---- {og_id} :: {step} ----\n")
+                entry = steps.get(step)
+                f.write(f"\n---- {assembly_prefix} :: {step} ----\n")
                 if not entry:
                     f.write("(no upload file produced for this step)\n")
                     continue

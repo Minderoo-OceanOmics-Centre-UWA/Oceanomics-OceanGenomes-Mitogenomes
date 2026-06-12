@@ -13,10 +13,13 @@ process EMMA {
     tuple val(meta), path(fasta)
 
     output:
-    tuple val(meta), path("emma/cds/*CO1*.fa"),  emit: co1_sequences
-    tuple val(meta), path("emma/cds/*RNR1*.fa"),  emit: s12_sequences  
-    tuple val(meta), path("emma/cds/*RNR2*.fa"),  emit: s16_sequences
-    tuple val(meta), path("emma/*"), emit: results 
+    // Per-gene CDS outputs are optional: a partial/divergent mitogenome may not
+    // yield every gene. Without optional, a missing CO1/RNR1/RNR2 turns a
+    // successful annotation into a failed task and the sample is dropped.
+    tuple val(meta), path("emma/cds/*CO1*.fa"),  emit: co1_sequences, optional: true
+    tuple val(meta), path("emma/cds/*RNR1*.fa"),  emit: s12_sequences, optional: true
+    tuple val(meta), path("emma/cds/*RNR2*.fa"),  emit: s16_sequences, optional: true
+    tuple val(meta), path("emma/*"), emit: results
     tuple val(meta), path("07_emma.tool_params_mqcrow.html"), emit: tool_params
     path "versions_emma.yml", emit: versions
 

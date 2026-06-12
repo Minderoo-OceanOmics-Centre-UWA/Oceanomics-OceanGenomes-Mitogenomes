@@ -146,7 +146,11 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.gb.map { meta, gb -> gb })
     ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.command_logs.map { meta, log -> log })
     ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.logs.map { meta, log -> log })
-    ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.reference_files.map { meta, refs -> refs })
+    // NOTE: MITOHIFI_MITOHIFI.out.reference_files (the `MitoReference` directory)
+    // is deliberately NOT mixed in here. It is already published to the sample's
+    // mtdna/ dir, the assembly summary script ignores it, and every HiFi sample
+    // emits an identically-named `MitoReference` dir, which caused a fatal
+    // input-filename collision in MITOGENOME_ASSEMBLY_SUMMARY's flat collect().
     ch_summary_files = ch_summary_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.stats.map { meta, stats -> stats })
     ch_summary_files = ch_summary_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.coverage.map { meta, coverage -> coverage })
 

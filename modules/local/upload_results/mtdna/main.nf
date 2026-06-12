@@ -12,7 +12,7 @@ process PUSH_MTDNA_ASSM_RESULTS {
     path config
 
     output:
-    path "${meta.id}.mtdna.upload.txt", emit: upload
+    path "${meta.mt_assembly_prefix ?: meta.id}.mtdna.upload.txt", emit: upload
     tuple val(meta), path("10_push_mtdna_assm_results.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
@@ -30,7 +30,7 @@ process PUSH_MTDNA_ASSM_RESULTS {
         ${mt_assembly_prefix} \\
         $out_log \\
         $fasta \\
-        > ${meta.id}.mtdna.upload.txt
+        > ${mt_assembly_prefix}.mtdna.upload.txt
 
     cat <<-END_TOOL_PARAMS > 10_push_mtdna_assm_results.tool_params_mqcrow.html
     <tr><td>Push mtDNA Assembly Results</td><td><samp>${effective_args}</samp></td><td>Uploads mitogenome assembly statistics for ${meta.id} to the SQL database.</td></tr>
@@ -48,7 +48,7 @@ process PUSH_MTDNA_ASSM_RESULTS {
     def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
     def effective_args = [args, config, mt_assembly_prefix, out_log, fasta].findAll { it?.toString()?.trim() }.join(' ')
     """
-    touch ${meta.id}.mtdna.upload.txt
+    touch ${mt_assembly_prefix}.mtdna.upload.txt
 
     cat <<-END_TOOL_PARAMS > 10_push_mtdna_assm_results.tool_params_mqcrow.html
     <tr><td>Push mtDNA Assembly Results</td><td><samp>${effective_args}</samp></td><td>Uploads mitogenome assembly statistics for ${meta.id} to the SQL database.</td></tr>

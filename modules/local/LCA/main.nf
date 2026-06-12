@@ -10,9 +10,12 @@ process LCA {
     path(worms)
 
     output:
-    tuple val(meta), path("lca.${gene_type}.${annotation_name}.tsv"), emit: lca
-    tuple val(meta), path("lca_raw.${gene_type}.${annotation_name}.tsv"), emit: lca_raw
-    path("lca_short.${gene_type}.${annotation_name}.tsv"), emit: lca_short
+    // calculateLCA.py writes no output files when the region has no valid BLAST
+    // hits (an expected outcome for some 12S/16S/CO1 queries). Mark these
+    // optional so a hit-less region doesn't fail the task and drop the sample.
+    tuple val(meta), path("lca.${gene_type}.${annotation_name}.tsv"), emit: lca, optional: true
+    tuple val(meta), path("lca_raw.${gene_type}.${annotation_name}.tsv"), emit: lca_raw, optional: true
+    path("lca_short.${gene_type}.${annotation_name}.tsv"), emit: lca_short, optional: true
     tuple val(meta), path("09_lca.${gene_type}.${annotation_name}.tool_params_mqcrow.html"), emit: tool_params
     path "versions_LCA.yml", emit: versions
 

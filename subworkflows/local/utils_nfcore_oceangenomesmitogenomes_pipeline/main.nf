@@ -135,6 +135,40 @@ workflow PIPELINE_COMPLETION {
         }
 
         completionSummary(monochrome_logs)
+
+        // errorStrategy 'ignore' keeps the run alive when a process fails, but
+        // the default completion summary only reports a count - it never says
+        // WHICH samples failed, so silently-dropped tasks (e.g. a reseed whose
+        // output was not collected) are easy to miss. Re-surface them loudly
+        // here by reading the per-run execution trace, without aborting the run.
+        if (workflow.stats.ignoredCount > 0 || !workflow.success) {
+            def trace_file = file("${outdir}/pipeline_info/execution_trace_${params.trace_report_suffix}.txt")
+            def errored = []
+            if (trace_file.exists()) {
+                def lines = trace_file.readLines()
+                def header = lines ? lines[0].split('\t') : []
+                def name_idx = header.findIndexOf { it == 'name' }
+                def status_idx = header.findIndexOf { it == 'status' }
+                if (name_idx >= 0 && status_idx >= 0) {
+                    lines.drop(1).each { line ->
+                        def cols = line.split('\t')
+                        if (cols.size() > status_idx && cols[status_idx] in ['FAILED', 'ABORTED']) {
+                            errored << cols[name_idx]
+                        }
+                    }
+                }
+            }
+            log.warn "=================================================================="
+            log.warn "${workflow.stats.ignoredCount} process(es) failed and were ignored (run was not aborted)."
+            if (errored) {
+                log.warn "Failed/ignored tasks:"
+                errored.unique().sort().each { log.warn "  - ${it}" }
+            }
+            log.warn "Review these before trusting downstream results."
+            log.warn "Full per-task detail: ${trace_file}"
+            log.warn "=================================================================="
+        }
+
         if (hook_url) {
             imNotification(summary_params, hook_url)
         }

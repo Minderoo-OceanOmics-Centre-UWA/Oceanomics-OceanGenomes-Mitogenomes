@@ -34,7 +34,16 @@ process MITOHIFI_FINDMITOREFERENCE {
     // Prefer the NCBI-valid name resolved at samplesheet creation; fall back to
     // the raw nominal name for older samplesheets that lack the column. The raw
     // nominal name is frequently rejected by NCBI ('No such species in NCBI!').
-    def query_species = (meta.reference_species_id?.trim()) ? meta.reference_species_id : meta.nominal_species_id
+    // Older samplesheets lack the reference_species_id column; nf-schema fills the
+    // missing meta value with an empty list (not null), so coerce to a clean string
+    // before testing it and fall back to the raw nominal name when it's empty.
+    def ref_species = (meta.reference_species_id instanceof List)
+        ? meta.reference_species_id.join('').trim()
+        : (meta.reference_species_id ?: '').toString().trim()
+    // Defensive cleanup for samplesheets that already baked in a malformed name
+    // (e.g. 'Blachea .' from a 'spp.' nominal id): collapse whitespace and drop a
+    // trailing punctuation-only token, which NCBI rejects ('No such species').
+    def query_species = (ref_species ?: meta.nominal_species_id).toString().replaceAll(/\s+/, ' ').replaceAll(/\s+[^A-Za-z]+$/, '').trim()
     def effective_args = ["--species '${query_species}'", "--outfolder .", args].findAll { it?.trim() }.join(' ')
     """
     # Per-task matplotlib cache + headless backend so findMitoReference does not
@@ -64,7 +73,16 @@ process MITOHIFI_FINDMITOREFERENCE {
 
     stub:
     def args = task.ext.args ?: ''
-    def query_species = (meta.reference_species_id?.trim()) ? meta.reference_species_id : meta.nominal_species_id
+    // Older samplesheets lack the reference_species_id column; nf-schema fills the
+    // missing meta value with an empty list (not null), so coerce to a clean string
+    // before testing it and fall back to the raw nominal name when it's empty.
+    def ref_species = (meta.reference_species_id instanceof List)
+        ? meta.reference_species_id.join('').trim()
+        : (meta.reference_species_id ?: '').toString().trim()
+    // Defensive cleanup for samplesheets that already baked in a malformed name
+    // (e.g. 'Blachea .' from a 'spp.' nominal id): collapse whitespace and drop a
+    // trailing punctuation-only token, which NCBI rejects ('No such species').
+    def query_species = (ref_species ?: meta.nominal_species_id).toString().replaceAll(/\s+/, ' ').replaceAll(/\s+[^A-Za-z]+$/, '').trim()
     def effective_args = ["--species '${query_species}'", "--outfolder .", args].findAll { it?.trim() }.join(' ')
     """
     touch accession.fasta

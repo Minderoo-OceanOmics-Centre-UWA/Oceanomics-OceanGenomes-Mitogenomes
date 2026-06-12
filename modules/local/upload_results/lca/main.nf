@@ -10,11 +10,12 @@ process PUSH_LCA_BLAST_RESULTS {
     path config
 
     output:
-    path "${meta.id}.lca_blast.upload.txt", emit: upload
+    path "${meta.mt_assembly_prefix ?: meta.id}.lca_blast.upload.txt", emit: upload
     tuple val(meta), path("13_push_lca_blast_results.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                   , emit: versions
 
     script:
+    def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
     def effective_args = "${config} ${meta.id} ${lca_results} ${blast_results}"
     """
     # Push the results to SQL database
@@ -23,7 +24,7 @@ process PUSH_LCA_BLAST_RESULTS {
         ${meta.id} \\
         ${lca_results} \\
         ${blast_results} \\
-        > ${meta.id}.lca_blast.upload.txt
+        > ${mt_assembly_prefix}.lca_blast.upload.txt
 
     cat <<-END_TOOL_PARAMS > 13_push_lca_blast_results.tool_params_mqcrow.html
     <tr><td>Push LCA BLAST Results</td><td><samp>${effective_args}</samp></td><td>Uploads combined LCA and filtered BLAST results for ${meta.id}.</td></tr>
@@ -36,9 +37,10 @@ process PUSH_LCA_BLAST_RESULTS {
     """
     
     stub:
+    def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
     def effective_args = "${config} ${meta.id} ${lca_results} ${blast_results}"
     """
-    : > ${meta.id}.lca_blast.upload.txt
+    : > ${mt_assembly_prefix}.lca_blast.upload.txt
     cat <<-END_TOOL_PARAMS > 13_push_lca_blast_results.tool_params_mqcrow.html
     <tr><td>Push LCA BLAST Results</td><td><samp>${effective_args}</samp></td><td>Uploads combined LCA and filtered BLAST results for ${meta.id}.</td></tr>
     END_TOOL_PARAMS

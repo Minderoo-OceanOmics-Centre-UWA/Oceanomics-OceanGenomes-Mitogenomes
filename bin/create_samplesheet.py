@@ -257,7 +257,11 @@ def clean_species_name(name):
     # drop open-nomenclature qualifiers and undescribed-species markers
     s = re.sub(r"\b(spp?|cf|aff|nr|sp|TBC)\.?\b", " ", s, flags=re.IGNORECASE)
     s = re.sub(r"\s+", " ", s).strip()
-    tokens = s.split()
+    # Strip leading/trailing punctuation from each token and drop any token that
+    # has no letters. This removes the stray '.' left behind by e.g. 'spp.'
+    # ('Blachea spp.' -> 'Blachea', not 'Blachea .'), which NCBI rejects.
+    tokens = [re.sub(r"^[^A-Za-z]+|[^A-Za-z]+$", "", t) for t in s.split()]
+    tokens = [t for t in tokens if t]
     if not tokens:
         return ""
     # keep at most a binomial (Genus species); a lone genus is a valid query too

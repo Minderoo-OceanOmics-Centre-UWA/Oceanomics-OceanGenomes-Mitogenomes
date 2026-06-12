@@ -24,6 +24,12 @@ except ImportError:  # pragma: no cover - exercised on minimal login Python inst
 
 
 SUMMARY_NAME = "mitogenome_assembly_summary_mqc.tsv"
+UPLOAD_SUMMARY_NAME = "upload_results_summary_mqc.tsv"
+# Global MultiQC tables that carry one row per assembly/sample and must be
+# filtered down to the current target before they enter a per-sample report.
+FILTERED_SUMMARY_NAMES = {SUMMARY_NAME, UPLOAD_SUMMARY_NAME}
+# Column names that hold the sample/OG id across the different summary tables.
+SAMPLE_ID_FIELDS = ("sample_id", "og_id")
 SAMPLE_RE = re.compile(r"(?<![A-Za-z0-9_-])(OG[0-9][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])")
 ASSEMBLY_RE = re.compile(
     r"(?<![A-Za-z0-9_-])"
@@ -310,7 +316,7 @@ def is_common_file(path: Path) -> bool:
 
 
 def belongs_to_sample(path: Path, sample: str) -> bool:
-    if path.name == SUMMARY_NAME:
+    if path.name in FILTERED_SUMMARY_NAMES:
         return True
     if is_common_file(path):
         return True
@@ -320,7 +326,7 @@ def belongs_to_sample(path: Path, sample: str) -> bool:
 
 
 def belongs_to_assembly(path: Path, target: AssemblyTarget) -> bool:
-    if path.name == SUMMARY_NAME:
+    if path.name in FILTERED_SUMMARY_NAMES:
         return True
     if is_common_file(path):
         return True
@@ -395,11 +401,12 @@ def write_filtered_summary(source: Path, destination: Path, target: AssemblyTarg
         with source.open(newline="") as in_handle:
             reader = csv.DictReader(in_handle, delimiter="\t")
             fieldnames = reader.fieldnames or []
+            sample_field = next((field for field in SAMPLE_ID_FIELDS if field in fieldnames), None)
             has_assembly_prefix = "assembly_prefix" in fieldnames
             rows = [
                 row
                 for row in reader
-                if (row.get("sample_id") or "").strip() == target.sample
+                if (sample_field is None or (row.get(sample_field) or "").strip() == target.sample)
                 and (
                     not has_assembly_prefix
                     or (row.get("assembly_prefix") or "").strip() == target.prefix
@@ -552,7 +559,7 @@ def prepare_sample_inputs(
         matched = 0
         for source in sample_files:
             destination = unique_destination(sample_input_dir, source.name)
-            if source.name == SUMMARY_NAME:
+            if source.name in FILTERED_SUMMARY_NAMES:
                 if not write_filtered_summary(source, destination, target):
                     continue
             else:

@@ -12,7 +12,7 @@ process PUSH_LCA_RAW_RESULTS {
     path config
 
     output:
-    path "${meta.id}.lca_raw.upload.txt", emit: upload
+    path "${meta.mt_assembly_prefix ?: meta.id}.lca_raw.upload.txt", emit: upload
     tuple val(meta), path("15_push_lca_raw_results.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
@@ -21,6 +21,7 @@ process PUSH_LCA_RAW_RESULTS {
 
     script:
     def args = task.ext.args ?: ''
+    def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
     def files_str = lca_raw_files instanceof List ? lca_raw_files.collect{ it.toString() }.join(' ') : lca_raw_files.toString()
     def effective_args = [args, config, meta.id, files_str].findAll { it?.toString()?.trim() }.join(' ')
     """
@@ -29,7 +30,7 @@ process PUSH_LCA_RAW_RESULTS {
         $config \\
         ${meta.id} \\
         ${files_str} \\
-        > ${meta.id}.lca_raw.upload.txt
+        > ${mt_assembly_prefix}.lca_raw.upload.txt
 
     cat <<-END_TOOL_PARAMS > 15_push_lca_raw_results.tool_params_mqcrow.html
     <tr><td>Push LCA raw results</td><td><samp>${effective_args}</samp></td><td>Uploads raw per-hit LCA rows for ${meta.id} to the lca_raw_results table.</td></tr>
@@ -44,10 +45,11 @@ process PUSH_LCA_RAW_RESULTS {
 
     stub:
     def args = task.ext.args ?: ''
+    def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
     def files_str = lca_raw_files instanceof List ? lca_raw_files.collect{ it.toString() }.join(' ') : lca_raw_files.toString()
     def effective_args = [args, config, meta.id, files_str].findAll { it?.toString()?.trim() }.join(' ')
     """
-    touch ${meta.id}.lca_raw.upload.txt
+    touch ${mt_assembly_prefix}.lca_raw.upload.txt
 
     cat <<-END_TOOL_PARAMS > 15_push_lca_raw_results.tool_params_mqcrow.html
     <tr><td>Push LCA raw results</td><td><samp>${effective_args}</samp></td><td>Uploads raw per-hit LCA rows for ${meta.id} to the lca_raw_results table.</td></tr>
