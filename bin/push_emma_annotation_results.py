@@ -46,8 +46,10 @@ if __name__ == "__main__":
         "--force",
         action="store_true",
         help=(
-            "Overwrite an existing mitogenome_data row even when one is "
-            "already present. Off by default: existing rows are preserved."
+            "Overwrite the annotation columns even when the existing row "
+            "already has some of them filled. Off by default: a row is only "
+            "(re)written when every annotation cell is empty; partially-filled "
+            "rows are preserved."
         ),
     )
     parser.add_argument("config_file")
@@ -74,32 +76,30 @@ if __name__ == "__main__":
         db_params = load_db_config(config_file)
         conn = psycopg2.connect(**db_params)
         cursor = conn.cursor()
-        
+
+        # Annotation columns owned by this script. The PK row is pre-created by
+        # the assembly upload, so we don't gate on row existence — we gate on
+        # whether these cells are already (partially) filled.
+        annotation_columns = [
+            "annotation", "extra_genes", "missing_genes", "order_correct", "passed", "length_emma", "seqlength_12s",
+            "seqlength_16s", "seqlength_co1", "cds_no", "trna_no", "rrna_no", "rrna12s",
+            "rrna16s", "atp6", "atp8", "cox1", "cox2", "cox3", "cytb", "nad1", "nad2", "nad3", "nad4", "nad4l",
+            "nad5", "nad6", "trna_phe", "trna_val", "trna_leuuag", "trna_leuuaa", "trna_ile", "trna_met",
+            "trna_thr", "trna_pro", "trna_lys", "trna_asp", "trna_glu", "trna_sergcu", "trna_seruga",
+            "trna_tyr", "trna_cys", "trna_trp", "trna_ala", "trna_asn", "trna_gly", "trna_arg", "trna_his",
+            "trna_gln", "atp6_trans", "atp8_trans", "cox1_trans", "cox2_trans", "cox3_trans", "cytb_trans", "nad1_trans",
+            "nad2_trans", "nad3_trans", "nad4_trans", "nad4l_trans", "nad5_trans", "nad6_trans"
+        ]
+
         for index, row in stats.iterrows():
             row_dict = row.to_dict()
             # Extract primary key values
             og_id, tech, seq_date, code = row['og_id'], row['tech'], row['seq_date'], row['code']
-
-            # Insert-only by default. Skip rows that already exist unless
-            # --force was passed (e.g. an intentional re-annotation re-run).
-            if not force_overwrite:
-                cursor.execute(
-                    """
-                    SELECT 1
-                    FROM mitogenome_data
-                    WHERE og_id = %(og_id)s
-                      AND tech = %(tech)s
-                      AND seq_date = %(seq_date)s
-                      AND code = %(code)s
-                    """,
-                    {"og_id": og_id, "tech": tech, "seq_date": seq_date, "code": code},
-                )
-                if cursor.fetchone() is not None:
-                    print(
-                        f"⚠️ Existing values preserved for {og_id}.{tech}.{seq_date}.{code}: "
-                        "row already exists; pass --force to overwrite."
-                    )
-                    continue
+            # seq_date is a TEXT column in the DB, but pandas reads 260514 as an int.
+            # Bind it as a string so the existence-check comparison (text = %s) doesn't
+            # fail with "operator does not exist: text = integer".
+            if seq_date is not None:
+                seq_date = str(seq_date)
 
             upsert_query = """
             INSERT INTO mitogenome_data (
@@ -199,7 +199,7 @@ if __name__ == "__main__":
             params = {
                 "og_id": row_dict["og_id"],
                 "tech": row_dict["tech"],
-                "seq_date": row_dict["seq_date"],
+                "seq_date": seq_date,
                 "code": row_dict["code"],
                 "annotation": row_dict["annotation"],
                 "extra_genes": row_dict["extra_genes"],
@@ -265,21 +265,39 @@ if __name__ == "__main__":
                 "nad6_trans": row_dict.get("nd6_trans"),
             }
 
+            # Only (re)write when every annotation cell is empty. If any cell is
+            # already filled (e.g. a partial annotation from a previous run), we
+            # preserve the whole row so we never end up with a mix of old and new
+            # values. --force bypasses this and overwrites unconditionally.
+            if not force_overwrite:
+                cursor.execute(
+                    f"""
+                    SELECT {", ".join(annotation_columns)}
+                    FROM mitogenome_data
+                    WHERE og_id = %(og_id)s
+                      AND tech = %(tech)s
+                      AND seq_date = %(seq_date)s
+                      AND code = %(code)s
+                    """,
+                    {"og_id": og_id, "tech": tech, "seq_date": seq_date, "code": code},
+                )
+                existing = cursor.fetchone()
+                if existing is not None and any(v is not None for v in existing):
+                    preserved = dict(zip(annotation_columns, existing))
+                    attempted = {col: params[col] for col in annotation_columns}
+                    print(
+                        f"⚠️ Existing values preserved for {og_id}.{tech}.{seq_date}.{code}: "
+                        "row already has annotation data; pass --force to overwrite."
+                    )
+                    print(f"   🔒 Preserved (kept) values:    {preserved}")
+                    print(f"   ⬆️ New values NOT uploaded:    {attempted}")
+                    continue
+
             cursor.execute(upsert_query, params)
             returned = cursor.fetchone()
             conn.commit()
 
-            field_names = [
-                "annotation", "extra_genes", "missing_genes", "order_correct", "passed", "length_emma", "seqlength_12s",
-                "seqlength_16s", "seqlength_co1", "cds_no", "trna_no", "rrna_no", "rrna12s",
-                "rrna16s", "atp6", "atp8", "cox1", "cox2", "cox3", "cytb", "nad1", "nad2", "nad3", "nad4", "nad4l",
-                "nad5", "nad6", "trna_phe", "trna_val", "trna_leuuag", "trna_leuuaa", "trna_ile", "trna_met",
-                "trna_thr", "trna_pro", "trna_lys", "trna_asp", "trna_glu", "trna_sergcu", "trna_seruga",
-                "trna_tyr", "trna_cys", "trna_trp", "trna_ala", "trna_asn", "trna_gly", "trna_arg", "trna_his",
-                "trna_gln", "atp6_trans", "atp8_trans", "cox1_trans", "cox2_trans", "cox3_trans", "cytb_trans", "nad1_trans",
-                "nad2_trans", "nad3_trans", "nad4_trans", "nad4l_trans", "nad5_trans", "nad6_trans"
-            ]
-            print(f"📌 Final stored values: {dict(zip(field_names, returned))}")
+            print(f"📌 Final stored values: {dict(zip(annotation_columns, returned))}")
             if force_overwrite:
                 print(f"✅ Success: Overwrote mitogenome_data for {sample} (--force).")
             else:
