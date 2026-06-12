@@ -4,7 +4,7 @@ process MITOHIFI_MITOHIFI {
     errorStrategy { task.attempt <= 2 ? 'retry' : 'ignore' }
     maxRetries 2
 
-    container 'ghcr.io/marcelauliano/mitohifi:master'
+    container "${params.mitohifi_container}"   // pinned in nextflow.config (single source of truth)
 
     input:
     tuple val(meta), path(hifi_cat), path(ref_fa), path(ref_gb)
@@ -81,7 +81,7 @@ process MITOHIFI_MITOHIFI {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        mitohifi: \$( mitohifi.py --version 2>&1 | head -n1 | sed 's/^.*MitoHiFi //; s/ .*\$//' )
+        mitohifi: ${params.mitohifi_container.tokenize(':').last()}
     END_VERSIONS
     """
 
@@ -116,7 +116,7 @@ process MITOHIFI_MITOHIFI {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        mitohifi: \$( mitohifi.py --version 2>&1 | head -n1 | sed 's/^.*MitoHiFi //; s/ .*\$//')
+        mitohifi: ${params.mitohifi_container.tokenize(':').last()}
     END_VERSIONS
     """
 }

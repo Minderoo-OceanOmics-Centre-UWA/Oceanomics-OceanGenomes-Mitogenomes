@@ -74,28 +74,21 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     combined_ch = final_reads.join(MITOHIFI_FINDMITOREFERENCE.out.reference, by: 0)
 
     //
-    // Get the MitoHifi version to be used in the naming. Ensures the proper version is always used.
+    // Embed the assembly prefix into meta. The MitoHiFi version is parsed from the
+    // pinned container tag (params.mitohifi_container) rather than `mitohifi.py
+    // --version`, because the 3.2.3 release ships a stale self-reported version
+    // (3.2.1). The tag is the single source of truth: bump it in nextflow.config and
+    // the version in every assembly name follows automatically.
     //
 
-    version_ch = MITOHIFI_FINDMITOREFERENCE.out.versions_tuple
-    .map { meta, versions_file ->
-        def content = versions_file.text
-        def pattern = /mitohifi:\s*([^\s\n\r]+)/
-        def matcher = content =~ pattern
-        def version = matcher ? matcher[0][1].replaceAll(/["']/, '') : "unknown"
-        [meta, version]
-    }
+    def mitohifi_version = params.mitohifi_container.tokenize(':').last()
+    def mitohifi_version_stripped = mitohifi_version.replaceAll('\\.', '')
 
-    //
-    // Embed the assembly prefix into meta.
-    //
-
-    combined_with_mt_assembly_prefix = combined_ch.join(version_ch, by: 0)
-    .map { meta, fasta, ref_fasta, ref_gb, version ->  // Destructure all 3 elements correctly
-        def version_stripped = version.replaceAll('\\.', '')
-        def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${version_stripped}mitohifi"
+    combined_with_mt_assembly_prefix = combined_ch
+    .map { meta, fasta, ref_fasta, ref_gb ->
+        def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${mitohifi_version_stripped}mitohifi"
         def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
-        [meta_ext, fasta, ref_fasta, ref_gb]  // Return only what you want
+        [meta_ext, fasta, ref_fasta, ref_gb]
     }
 
 
