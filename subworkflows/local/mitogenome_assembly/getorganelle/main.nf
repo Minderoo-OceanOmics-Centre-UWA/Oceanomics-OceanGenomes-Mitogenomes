@@ -225,6 +225,27 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_versions = ch_versions.mix(CAT_FASTQ.out.versions.first())
 
     //
+    // Capture assembly topology (circular vs linear) into meta so downstream
+    // annotation (MITOS2) can choose the right mode: GetOrganelle assembles a
+    // circular molecule linearised at an arbitrary point, so running MITOS with
+    // --linear severs whichever gene straddles that break. GetOrganelle reports
+    // "Result status of ...: circular genome" in its log (the same signal used
+    // by needsReseed above); absence means non-circular, a failed parse means
+    // unknown (null). Enrich fasta + log together so both keep an identical meta
+    // map — the parent workflow joins these two channels by the whole meta map.
+    //
+    ch_assembly_topo = ch_assembly_fasta
+        .join(ch_assembly_log, by: 0)
+        .map { meta, fasta, log ->
+            def circ
+            try { circ = (log && (log.text =~ /Result status of .*: circular genome/)) ? true : false }
+            catch (ignored) { circ = null }
+            [ meta + [ circular: circ ], fasta, log ]
+        }
+    ch_assembly_fasta = ch_assembly_topo.map { meta, fasta, _log -> [ meta, fasta ] }
+    ch_assembly_log   = ch_assembly_topo.map { meta, _fasta, log -> [ meta, log ] }
+
+    //
     // Emit outputs
     //
 

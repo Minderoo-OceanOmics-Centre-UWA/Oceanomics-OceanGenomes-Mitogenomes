@@ -125,14 +125,30 @@ def write_gff(gff_path, features, chrom, seq_len, species):
             out.write(f"##organism {species}\n")
         for emma_name, (_c, start, end, strand, ftype) in ordered:
             product = PRODUCT.get(emma_name, emma_name)
-            attrs_gene = f"ID=gene-{emma_name};Name=MT-{emma_name};Product={product}"
-            attrs_feat = f"ID={emma_name};Parent=gene-{emma_name};Name=MT-{emma_name};Product={product}"
-            out.write(f"{chrom}\tmitos\tgene\t{start}\t{end}\t.\t{strand}\t.\t{attrs_gene}\n")
-            out.write(f"{chrom}\tmitos\t{ftype}\t{start}\t{end}\t.\t{strand}\t.\t{attrs_feat}\n")
+            # Origin-spanning feature (circular genome annotated by MITOS in
+            # circular mode): start > end means it wraps the linearisation point.
+            # GFF3 cannot express start > end on one line, so report the gene as a
+            # single line up to the sequence end and record the wrapped end in a
+            # Note. The full (concatenated) nucleotide/protein still goes to
+            # cds/ and proteins/ via gene_nt_seq below, so downstream BLAST/LCA and
+            # protein length are correct; only this gene's GFF span is truncated.
+            note = ""
+            gff_end = end
+            if start > end:
+                gff_end = seq_len
+                note = f";Note=origin-spanning;wrapped_end={end}"
+            attrs_gene = f"ID=gene-{emma_name};Name=MT-{emma_name};Product={product}{note}"
+            attrs_feat = f"ID={emma_name};Parent=gene-{emma_name};Name=MT-{emma_name};Product={product}{note}"
+            out.write(f"{chrom}\tmitos\tgene\t{start}\t{gff_end}\t.\t{strand}\t.\t{attrs_gene}\n")
+            out.write(f"{chrom}\tmitos\t{ftype}\t{start}\t{gff_end}\t.\t{strand}\t.\t{attrs_feat}\n")
 
 
 def gene_nt_seq(genome, chrom, start, end, strand):
-    seq = genome[chrom].seq[start - 1:end]
+    full = genome[chrom].seq
+    # Origin-spanning feature (start > end): take the tail (start..end-of-seq)
+    # followed by the head (1..end) so the gene is reconstructed across the
+    # circular join before translation.
+    seq = (full[start - 1:] + full[:end]) if start > end else full[start - 1:end]
     return seq.reverse_complement() if strand == "-" else seq
 
 

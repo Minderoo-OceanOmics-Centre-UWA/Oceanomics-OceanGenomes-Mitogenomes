@@ -29,21 +29,30 @@ process MITOS2 {
         def gcode    = task.ext.code ?: (meta.genetic_code ?: 5)
         def refver   = params.mitos_refseq_ver
         def species  = meta.species ?: ''
+        // The pinned BioContainer's `mitos` package self-reports version 0.0.0, so
+        // derive the version from the container pin instead (bump both together).
+        def mitos_version = '2.1.10'
+        def mitos_tag     = mitos_version.replaceAll('\\.', '')
         def base_args = (task.ext.args ?: '').toString().trim()
-        def effective_args = ["runmitos.py -i ${fasta} -c ${gcode} -r ${refver} -R ${refdb} --linear --noplots --best ${base_args}".trim(),
+        // GetOrganelle/MitoHiFi assemble a circular molecule; only pass --linear
+        // when the assembly is known to be non-circular. For circular (or unknown)
+        // topology, run MITOS circular so a gene straddling the linearisation point
+        // is annotated as one wrap-around feature instead of being split/dropped.
+        def topology_arg = (meta.circular == false) ? '--linear' : ''
+        def effective_args = ["runmitos -i ${fasta} -c ${gcode} -r ${refver} -R ${refdb} ${topology_arg} --noplots --best ${base_args}".replaceAll(/ +/, ' ').trim(),
                               "mitos_to_emma.py --bed result.bed --genome ${fasta} --code ${gcode}"].join('; ')
 
         """
         mkdir -p mitos_raw emma
 
         # Annotate with MITOS2 (invertebrate mito genetic code by default)
-        runmitos.py \\
+        runmitos \\
             -i ${fasta} \\
             -c ${gcode} \\
             -o mitos_raw \\
             -r ${refver} \\
             -R ${refdb} \\
-            --linear \\
+            ${topology_arg} \\
             --noplots \\
             --best \\
             ${base_args}
@@ -56,8 +65,7 @@ process MITOS2 {
             exit 1
         fi
 
-        mitos_ver=\$(python -c "import importlib.metadata as m; print(m.version('mitos').replace('.',''))" 2>/dev/null || echo "2110")
-        mitos_prefix="${prefix}.mitos\${mitos_ver}"
+        mitos_prefix="${prefix}.mitos${mitos_tag}"
 
         # Adapt MITOS2 output to the EMMA contract (gff + cds/ + proteins/)
         mitos_to_emma.py \\
@@ -79,7 +87,7 @@ process MITOS2 {
 
         cat <<-END_VERSIONS > versions_mitos.yml
         "${task.process}":
-            mitos: \$(python -c "import importlib.metadata as m; print(m.version('mitos'))" 2>/dev/null || echo "2.1.10")
+            mitos: ${mitos_version}
             python: \$(python --version | sed 's/^Python //')
         END_VERSIONS
         """
@@ -88,7 +96,8 @@ process MITOS2 {
         def prefix = task.ext.prefix ?: meta.mt_assembly_prefix
         def gcode  = task.ext.code ?: (meta.genetic_code ?: 5)
         def base_args = (task.ext.args ?: '').toString().trim()
-        def effective_args = "runmitos.py -i ${fasta} -c ${gcode} -r ${params.mitos_refseq_ver} -R <refdb> --linear --noplots --best ${base_args}".trim()
+        def topology_arg = (meta.circular == false) ? '--linear' : ''
+        def effective_args = "runmitos -i ${fasta} -c ${gcode} -r ${params.mitos_refseq_ver} -R <refdb> ${topology_arg} --noplots --best ${base_args}".replaceAll(/ +/, ' ').trim()
         """
         mitos_prefix="${prefix}.mitos2110"
 

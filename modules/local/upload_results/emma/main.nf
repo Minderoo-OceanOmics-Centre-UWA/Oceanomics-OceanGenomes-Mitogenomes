@@ -26,11 +26,16 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
     // Qualify the per-assembly output names with mt_assembly_prefix (not just
     // meta.id): a sample can have multiple assemblies (e.g. hifi v321 + v323 +
     // getorg), and id-only names collide when collected flat downstream.
-    def effective_args = ["annotation_stats.py ${args} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.mt_assembly_prefix}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
+    // Pass the taxonomic class so annotation_stats can apply the right
+    // completeness profile (e.g. cnidarians encode only ~2 mt tRNAs, so the
+    // vertebrate 22-tRNA expectation would wrongly flag them as failing).
+    def class_arg = meta.class ? "--class '${meta.class}'" : ''
+    def effective_args = ["annotation_stats.py ${args} ${class_arg} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.mt_assembly_prefix}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
     """
     # Compile the statistics
     annotation_stats.py \\
         $args \\
+        ${class_arg} \\
         *.gff \\
         proteins
 

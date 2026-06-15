@@ -13,11 +13,12 @@ Usage:
 import os
 import csv
 import sys
+import argparse
 from pathlib import Path
 from Bio import SeqIO
 
 
-# Reference gene order (tRNA, rRNA, CDS)
+# Reference gene order (tRNA, rRNA, CDS) — the standard vertebrate set.
 REF_GENES = [
     "TF", "RNR1", "TV", "RNR2", "TL2", "ND1", "TI", "TQ",
     "TM", "ND2", "TW", "TA", "TN", "TC", "TY", "CO1", "TS2",
@@ -32,6 +33,21 @@ PROT_GENES = [
     "CYTB", "ND1", "ND2", "ND3", "ND4",
     "ND4L", "ND5", "ND6"
 ]
+
+# Taxonomic classes whose mitogenomes follow the cnidarian pattern: 13 PCGs +
+# 2 rRNAs but only ~2 mt tRNAs (trnM/trnW) — the rest are nuclear-encoded and
+# imported. The vertebrate 22-tRNA expectation would wrongly fail these, so for
+# them completeness is judged on the conserved protein-coding + rRNA core only
+# and gene order is not evaluated.
+CNIDARIA_CLASSES = {
+    "anthozoa", "hydrozoa", "scyphozoa", "cubozoa",
+    "staurozoa", "myxozoa", "polypodiozoa", "cnidaria",
+}
+CNIDARIAN_CORE = PROT_GENES + ["RNR1", "RNR2"]
+
+
+def is_cnidarian(class_name):
+    return (class_name or "").strip().lower() in CNIDARIA_CLASSES
 
 def parse_gff_attributes(attr_str):
     return dict(
@@ -53,7 +69,7 @@ def get_annotation_name(gff_path):
     """Extracts annotation name from the GFF file basename (no extension)."""
     return Path(gff_path).stem
 
-def process_gff(gff_path, annotation_name):
+def process_gff(gff_path, annotation_name, class_name=""):
     parts = annotation_name.split(".")
     if len(parts) != 5:
         print(f"⚠️ Warning: Unexpected annotation_name format: {annotation_name}")
@@ -100,13 +116,21 @@ def process_gff(gff_path, annotation_name):
     gene_entries.sort(key=lambda x: x[1])  # sort by start
     found_by_coord = [g[0] for g in gene_entries]
 
-    missing = [g for g in REF_GENES if g not in found_by_coord]
-    extra = [g for g in found_by_coord if g not in REF_GENES]
-    
-    ref_subset = [g for g in REF_GENES if g in found_by_coord]
-    order_ok = (found_by_coord == ref_subset)
-    
-    passed = len(missing) == 0 and order_ok
+    if is_cnidarian(class_name):
+        # Judge completeness on the conserved protein-coding + rRNA core only;
+        # cnidarians legitimately lack most tRNAs, and their gene order is not
+        # the vertebrate order, so order is reported as NA rather than failed.
+        missing = [g for g in CNIDARIAN_CORE if g not in found_by_coord]
+        extra = [g for g in found_by_coord if g not in REF_GENES]
+        order_correct = "NA"
+        passed = len(missing) == 0
+    else:
+        missing = [g for g in REF_GENES if g not in found_by_coord]
+        extra = [g for g in found_by_coord if g not in REF_GENES]
+        ref_subset = [g for g in REF_GENES if g in found_by_coord]
+        order_ok = (found_by_coord == ref_subset)
+        order_correct = "yes" if order_ok else "no"
+        passed = len(missing) == 0 and order_ok
 
     gff_summary = {
         "og_id": og_id,
@@ -116,7 +140,7 @@ def process_gff(gff_path, annotation_name):
         "annotation": annotation,
         "missing_genes": ";".join(missing) if missing else "no",
         "extra_genes": ";".join(extra) if extra else "no",
-        "order_correct": "yes" if order_ok else "no",
+        "order_correct": order_correct,
         "passed": "yes" if passed else "no",
         "total_length": total_length if total_length is not None else "NA",
         "num_cds": num_cds,
@@ -145,12 +169,12 @@ def process_protein_lengths(prot_dir, annotation_name):
         print(f"✅ All translated genes present in {annotation_name}")
     return prot_lengths
 
-def main(gff_path):
+def main(gff_path, prot_dir, class_name=""):
     if not os.path.isfile(gff_path):
         sys.exit(f"❌ GFF file not found: {gff_path}")
 
     annotation_name = get_annotation_name(gff_path)
-    gff_summary = process_gff(gff_path, annotation_name)
+    gff_summary = process_gff(gff_path, annotation_name, class_name)
     prot_lengths = process_protein_lengths(prot_dir, annotation_name)
 
     combined = {**gff_summary, **prot_lengths}
@@ -165,11 +189,15 @@ def main(gff_path):
     print(f"✅ Combined summary written to:\n  {output_path}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python annotation_stats.py path/to/file.gff path/to/proteinsdir")
-        sys.exit(1)
-    # config_file = sys.argv[1]
-    gff_path = sys.argv[1]
-    prot_dir = Path(sys.argv[2])
+    ap = argparse.ArgumentParser(
+        description="Summarise mitogenome annotation stats from a GFF + proteins dir."
+    )
+    ap.add_argument("gff", help="path to the annotation .gff")
+    ap.add_argument("proteins", help="path to the proteins/ directory")
+    ap.add_argument("--class", dest="class_name", default="",
+                    help="taxonomic class (e.g. Anthozoa); selects the completeness "
+                         "profile. Cnidarian classes are judged on the PCG+rRNA core "
+                         "only. Defaults to the vertebrate 22-tRNA profile.")
+    args = ap.parse_args()
 
-    main(gff_path)
+    main(args.gff, Path(args.proteins), args.class_name)
