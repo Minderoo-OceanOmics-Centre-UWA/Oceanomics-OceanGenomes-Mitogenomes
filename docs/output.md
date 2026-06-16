@@ -18,7 +18,7 @@ results:
 - [Mitogenome assembly (MitoHiFi)](#mitogenome-assembly-mitohifi) – HiFi assemblies, stats and plots.
 - [Mitogenome assembly summary](#mitogenome-assembly-summary) – MultiQC-compatible table comparing assembly QC across tools.
 - [FASTA sanitisation](#fasta-sanitisation) – internal preparation step before annotation.
-- [Mitogenome annotation](#mitogenome-annotation) – EMMA annotations and per-gene FASTA exports.
+- [Mitogenome annotation](#mitogenome-annotation) – EMMA (vertebrate) / MITOS2 (invertebrate) annotations and per-gene FASTA exports.
 - [BLAST filtering and LCA calls](#blast-filtering-and-lca) – gene-level hits and lowest common ancestor tables.
 - [Species validation and SQL uploads](#species-validation-and-sql-uploads) – QA summaries plus database upload logs.
 - [Submission-ready packaging](#submission-ready-packaging) – GenBank-formatted artefacts produced by the QC subworkflow.
@@ -52,12 +52,22 @@ directly into schema validation and branching.
     per-sample prefix.
   - `mtdna/<assembly_prefix>.get_org.log.txt`: GetOrganelle execution log capturing command-line parameters and statistics.
   - `mtdna/*`: Additional files preserved from the GetOrganelle work directory (depth profiles, intermediate contigs, etc.).
+  - `<assembly_prefix>reseed.genedb.fasta`: Custom gene (label) database built from the reseed reference, present only
+    when a reseed was attempted (see below).
+  - `mtdna/<assembly_prefix>reseed.*`: Reseed assembly and log, present only when the first pass was reseeded.
 
 </details>
 
 By default, GetOrganelle runs with `-R 20 -w 95 --continue` (override via
 `--getorganelle_fromreads_args`). The module also keeps per-sample checkpoint outputs under
 `getorganelle_checkpoints/` in `--outdir`, which supports robust resume behavior.
+
+**Automatic reseed.** When a first-pass assembly fails or comes back fragmented/non-circular (the generic
+`animal_mt` seed was too divergent), the pipeline downloads a closely related mitogenome via
+`MITOHIFI_FINDMITOREFERENCE` and re-runs GetOrganelle with that reference as a custom seed (`-s`) **and** a custom
+gene/label database (`--genes`) built from the reference's annotated genes (`GETORGANELLE_GENEDB`). The gene database
+is only built when the reference yields at least `--getorganelle_genedb_min_genes` genes (default `10`); otherwise the
+sample keeps its first-pass result. The better of the two assemblies is carried forward, so no sample is dropped.
 
 These files form the short-read reference for later annotation and validation steps.
 
@@ -138,13 +148,18 @@ This is an internal step (`publishDir` disabled), so intermediate files are not 
 <summary>Output files</summary>
 
 - `mitogenomes/<sample>/<assembly_prefix>/`
-  - `emma/`: Directory of EMMA results, including:
+  - `annotation/`: Directory of EMMA results, including:
     - `<prefix>.emma<version>.fa|gff|tbl|svg`: Primary annotation outputs.
     - `cds/*emma<version>.fa`: Gene-specific nucleotide FASTA files (CO1, 12S, 16S are fed into BLAST).
     - `proteins/*emma<version>.fa`: Protein translations per locus.
   - `versions_emma.yml`: Tool provenance for EMMA (not published to the results directory by default).
 
 </details>
+
+Vertebrate samples are annotated with EMMA; invertebrate samples (`invertebrates=true`) are annotated with MITOS2,
+whose output is reshaped to the same EMMA directory contract. Both use the per-sample mitochondrial genetic code
+resolved from taxonomic class in samplesheet preparation (e.g. Cnidaria → 4), so divergent lineages such as corals are
+translated with the correct code rather than a single global table.
 
 Annotation outputs are reused by the BLAST/LCA subworkflow, QC gating, and GenBank packaging stages, so retaining
 the full EMMA directory allows for manual inspection or re-annotation if required.

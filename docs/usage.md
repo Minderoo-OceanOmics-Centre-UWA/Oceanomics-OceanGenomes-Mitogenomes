@@ -32,7 +32,7 @@ have annotation files and only need QC packaging, use the standalone workflow be
 ```bash
 nextflow run qc_only_from_annotations.nf \
   -profile singularity \
-  --annotation_files "/path/to/mitogenomes/*/*/emma/*.{fa,fasta,gff,tbl,gb}" \
+  --annotation_files "/path/to/mitogenomes/*/*/annotation/*.{fa,fasta,gff,tbl,gb}" \
   --sql_config /path/to/postgres.cfg \
   --template_sbt /absolute/path/to/template.sbt \
   --outdir qc_results
@@ -46,7 +46,7 @@ Required parameters for this standalone workflow:
 | `--sql_config` | ✔ | PostgreSQL config used to fetch `validated_species_name` from `lca_validation` and to build source modifier tables. |
 | `--template_sbt` | ✔ | `.sbt` template passed to `table2asn` via `GEN_FILES_TABLE2ASN`. |
 | `--outdir` | ✔ | Output directory for published GenBank/QC artefacts. |
-| `--translation_table` | Optional | Translation table used in gene translation steps (defaults to `2`). |
+| `--translation_table` | Optional | Fallback mitochondrial genetic code for gene translation when no per-sample code is available (defaults to `2`). In QC-only mode the taxonomic class is not re-derived, so this value is used directly. |
 
 Filename parsing and SQL matching rules:
 
@@ -78,7 +78,8 @@ that matches your container/conda environment.
 | `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
 | `--template_sbt` | ✔ | Submission template passed to `table2asn` when packaging GenBank artefacts. |
 | `--samplesheet_prefix` | Optional | Reserved for generated samplesheet naming in wrapper scripts. |
-| `--translation_table` | Optional | Override the mitochondrial translation table (defaults to vertebrate code `2`). |
+| `--getorganelle_genedb_min_genes` | Optional | Minimum genes a reference must yield to build the reseed custom gene database (default `10`). Below this, the sample keeps its first-pass GetOrganelle assembly instead of reseeding. |
+| `--translation_table` | Optional | Mitochondrial genetic code for vertebrate/unresolved samples (default `2`). Invertebrate codes are derived per-sample from the taxonomic `class` column (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4), so this no longer forces a single code across the whole run. |
 
 `--input_dir` mode requires `--sql_config` because the enriched samplesheet generator queries
 OceanOmics metadata. When running with `--input`, you can omit `--sql_config`, but upload/QC stages
@@ -115,7 +116,10 @@ A valid CSV must match the schema in `assets/schema_input.json`:
   subworkflow (GetOrganelle vs. MitoHiFi) is invoked and how metadata is derived.
 - Optional metadata columns are accepted and propagated into `meta`, including
   `single_end`, `original_id`, `completion_date`, `date`, `assembly_prefix`,
-  `nominal_species_id`, and `invertebrates`.
+  `nominal_species_id`, `invertebrates`, `class`, and `reference_species_id`.
+- `class` (NCBI taxonomic class, e.g. `Actinopteri`, `Anthozoa`) and `invertebrates` together determine the
+  per-sample mitochondrial genetic code used for annotation (e.g. Cnidaria → 4). In `--input_dir` mode these are
+  resolved automatically from `nominal_species_id`; in `--input` mode supply `class` for correct invertebrate codes.
 - When a sample has multiple libraries (e.g. several Illumina lanes), repeat the row with the same
   `sample` and `sequencing_type`. The pipeline concatenates the reads before downstream processing.
 

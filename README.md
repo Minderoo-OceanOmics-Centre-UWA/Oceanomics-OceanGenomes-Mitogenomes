@@ -26,8 +26,12 @@ rapid wiring tests.
 ## Pipeline summary
 
 - **Samplesheet preparation** – create or validate CSV input, derive sequencing dates, and enrich metadata for routing.
+  A per-sample mitochondrial genetic code is resolved from the taxonomic class (e.g. Cnidaria → 4) for downstream annotation.
 - **Mitogenome assembly** – concatenate lane-level FASTQs and run GetOrganelle or MitoHiFi depending on sequencing type.
-- **Sanitise and annotate** – normalise FASTA headers, run EMMA, and export gene- and protein-level FASTA collections.
+  Failed/fragmented GetOrganelle first passes are automatically reseeded with a closely related reference and a custom
+  gene (label) database built from that reference's annotated genes.
+- **Sanitise and annotate** – normalise FASTA headers, annotate (EMMA for vertebrates, MITOS2 for invertebrates) with the
+  per-sample genetic code, and export gene- and protein-level FASTA collections.
 - **BLAST + LCA** – download taxonomy caches on-demand, filter BLAST hits for CO1/12S/16S, and compute per-sample LCA.
 - **Database integration** – push assembly metrics, annotation stats, and BLAST/LCA summaries to PostgreSQL (optional).
 - **QC and packaging** – evaluate validation criteria, build GenBank-ready bundles, run `table2asn`, and collect diagnostics.
@@ -81,7 +85,7 @@ Use this when assemblies/annotations are already generated and you only want Gen
 ```bash
 nextflow run qc_only_from_annotations.nf \
   -profile singularity \
-  --annotation_files "/path/to/mitogenomes/*/*/emma/*.{fa,fasta,gff,tbl,gb}" \
+  --annotation_files "/path/to/mitogenomes/*/*/annotation/*.{fa,fasta,gff,tbl,gb}" \
   --sql_config ~/postgresql_details/oceanomics.cfg \
   --template_sbt /absolute/path/to/template.sbt \
   --outdir qc_results
@@ -128,6 +132,12 @@ For general nf-core best practices (custom configs, resource tuning, module over
 
 - `--input` / `--input_dir` – mutually exclusive input modes; both validate against `assets/schema_input.json`.
 - `--organelle_type` – passed to GetOrganelle (e.g. `animal_mt`, `embryophyta_mt`).
+- `--getorganelle_genedb_min_genes` – minimum number of genes a reference must yield to build the reseed custom gene
+  database (default `10`). References below this are treated as too sparsely annotated and the sample keeps its
+  first-pass assembly instead of reseeding.
+- `--translation_table` – mitochondrial genetic code for **vertebrate/unresolved** samples (default `2`). Invertebrate
+  codes are derived per-sample from taxonomic class (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4),
+  so this no longer forces a single code across all samples.
 - `--curated_blast_db` – absolute path to the OceanGenomes-curated BLAST database.
 - `--nt_blast_db` – absolute path to the NCBI nt BLAST database (used for invertebrate samples).
 - `--sql_config` – PostgreSQL config required for `--input_dir` (enriched samplesheet creation). If omitted with
