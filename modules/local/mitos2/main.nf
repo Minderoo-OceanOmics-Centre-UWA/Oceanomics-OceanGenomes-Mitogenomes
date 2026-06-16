@@ -17,10 +17,10 @@ process MITOS2 {
     // invertebrate (MITOS2) and vertebrate (EMMA) samples without rewiring.
     // Per-gene CDS outputs are optional: a partial/divergent mitogenome may not
     // yield every gene (matches EMMA's behaviour).
-    tuple val(meta), path("emma/cds/*CO1*.fa"),  emit: co1_sequences, optional: true
-    tuple val(meta), path("emma/cds/*RNR1*.fa"), emit: s12_sequences, optional: true
-    tuple val(meta), path("emma/cds/*RNR2*.fa"), emit: s16_sequences, optional: true
-    tuple val(meta), path("emma/*"), emit: results
+    tuple val(meta), path("annotation/cds/*CO1*.fa"),  emit: co1_sequences, optional: true
+    tuple val(meta), path("annotation/cds/*RNR1*.fa"), emit: s12_sequences, optional: true
+    tuple val(meta), path("annotation/cds/*RNR2*.fa"), emit: s16_sequences, optional: true
+    tuple val(meta), path("annotation/*"), emit: results
     tuple val(meta), path("07_mitos.tool_params_mqcrow.html"), emit: tool_params
     path "versions_mitos.yml", emit: versions
 
@@ -46,7 +46,7 @@ process MITOS2 {
                               "mitos_to_emma.py --bed result.bed --genome ${fasta} --code ${gcode}"].join('; ')
 
         """
-        mkdir -p mitos_raw emma
+        mkdir -p mitos_raw annotation
 
         # Annotate with MITOS2 (invertebrate mito genetic code by default)
         runmitos \\
@@ -75,14 +75,14 @@ process MITOS2 {
             --bed "\$bed" \\
             --genome ${fasta} \\
             --prefix "\${mitos_prefix}" \\
-            --outdir emma \\
+            --outdir annotation \\
             --code ${gcode} \\
             --species "${species}"
 
         # Preserve raw MITOS outputs for provenance, but in a subdir so the
         # top-level *.gff glob (used by annotation_stats) only sees the EMMA gff.
-        mkdir -p emma/mitos_raw
-        cp \$(dirname "\$bed")/result.* emma/mitos_raw/ 2>/dev/null || true
+        mkdir -p annotation/mitos_raw
+        cp \$(dirname "\$bed")/result.* annotation/mitos_raw/ 2>/dev/null || true
 
         cat <<-END_TOOL_PARAMS > 07_mitos.tool_params_mqcrow.html
         <tr><td>MITOS2</td><td><samp>${effective_args}</samp></td><td>Annotates the invertebrate mitogenome assembly for ${meta.id} with MITOS2 (genetic code ${gcode}) and reshapes the output to the EMMA contract.</td></tr>
@@ -104,15 +104,15 @@ process MITOS2 {
         """
         mitos_prefix="${prefix}.mitos2110"
 
-        mkdir -p emma/cds emma/proteins emma/mitos_raw
+        mkdir -p annotation/cds annotation/proteins annotation/mitos_raw
 
         # Mock EMMA-contract outputs
-        touch emma/\${mitos_prefix}.fa
-        touch emma/\${mitos_prefix}.gff
-        touch emma/cds/CO1.\${mitos_prefix}.fa
-        touch emma/cds/RNR1.\${mitos_prefix}.fa
-        touch emma/cds/RNR2.\${mitos_prefix}.fa
-        touch emma/proteins/MT-CO1.\${mitos_prefix}.fa
+        touch annotation/\${mitos_prefix}.fa
+        touch annotation/\${mitos_prefix}.gff
+        touch annotation/cds/CO1.\${mitos_prefix}.fa
+        touch annotation/cds/RNR1.\${mitos_prefix}.fa
+        touch annotation/cds/RNR2.\${mitos_prefix}.fa
+        touch annotation/proteins/MT-CO1.\${mitos_prefix}.fa
 
         cat <<-END_TOOL_PARAMS > 07_mitos.tool_params_mqcrow.html
         <tr><td>MITOS2</td><td><samp>${effective_args}</samp></td><td>Annotates the invertebrate mitogenome assembly for ${meta.id} with MITOS2 (genetic code ${gcode}) and reshapes the output to the EMMA contract.</td></tr>

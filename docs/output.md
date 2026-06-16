@@ -148,10 +148,10 @@ This is an internal step (`publishDir` disabled), so intermediate files are not 
 <summary>Output files</summary>
 
 - `mitogenomes/<sample>/<assembly_prefix>/`
-  - `annotation/`: Directory of EMMA results, including:
-    - `<prefix>.emma<version>.fa|gff|tbl|svg`: Primary annotation outputs.
-    - `cds/*emma<version>.fa`: Gene-specific nucleotide FASTA files (CO1, 12S, 16S are fed into BLAST).
-    - `proteins/*emma<version>.fa`: Protein translations per locus.
+  - `annotation/`: Directory of annotation results (EMMA for vertebrates, MITOS2 for invertebrates), including:
+    - `<prefix>.<tool><version>.fa|gff|tbl|svg`: Primary annotation outputs (e.g. `.emma100`, `.mitos2110`).
+    - `cds/*.<tool><version>.fa`: Gene-specific nucleotide FASTA files (CO1, 12S, 16S are fed into BLAST).
+    - `proteins/*.<tool><version>.fa`: Protein translations per locus.
   - `versions_emma.yml`: Tool provenance for EMMA (not published to the results directory by default).
 
 </details>
@@ -162,7 +162,7 @@ resolved from taxonomic class in samplesheet preparation (e.g. Cnidaria → 4), 
 translated with the correct code rather than a single global table.
 
 Annotation outputs are reused by the BLAST/LCA subworkflow, QC gating, and GenBank packaging stages, so retaining
-the full EMMA directory allows for manual inspection or re-annotation if required.
+the full annotation directory allows for manual inspection or re-annotation if required.
 
 ### BLAST filtering and LCA
 

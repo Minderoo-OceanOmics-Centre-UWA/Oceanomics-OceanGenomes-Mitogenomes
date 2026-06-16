@@ -6,7 +6,7 @@ Counts the length of each mitochondrial protein-coding gene
 from translated FASTA (.faa/.fasta) files in a `proteins/` directory.
 
 Usage:
-    singularity run $SING/psycopg2:0.1.sif python emma_stats.py /scratch/pawsey0964/tpeirce/_NFCORE/_OUT_DIR/mitogenomes/OG900/OG900.ilmn.250131.getorg1770/emma/*.gff /scratch/pawsey0964/tpeirce/_NFCORE/_OUT_DIR/mitogenomes/OG900/OG900.ilmn.250131.getorg1770/emma/
+    singularity run $SING/psycopg2:0.1.sif python emma_stats.py /scratch/pawsey0964/tpeirce/_NFCORE/_OUT_DIR/mitogenomes/OG900/OG900.ilmn.250131.getorg1770/annotation/*.gff /scratch/pawsey0964/tpeirce/_NFCORE/_OUT_DIR/mitogenomes/OG900/OG900.ilmn.250131.getorg1770/annotation/
 
 """
 

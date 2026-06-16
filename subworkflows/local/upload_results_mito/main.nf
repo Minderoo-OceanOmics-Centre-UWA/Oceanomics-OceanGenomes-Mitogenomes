@@ -90,7 +90,7 @@ workflow UPLOAD_RESULTS {
     //
 
     PUSH_MTDNA_ANNOTATION_RESULTS (
-        annotation_results, // tuple val(meta), path("emma/*")
+        annotation_results, // tuple val(meta), path("annotation/*")
         sql_config // params.sql_config
     )
 

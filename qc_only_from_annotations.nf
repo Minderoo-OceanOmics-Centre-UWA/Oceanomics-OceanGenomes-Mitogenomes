@@ -28,7 +28,7 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
     main:
 
     if (!params.annotation_files) {
-        error "Please provide --annotation_files with a glob for annotation files, e.g. --annotation_files '/path/to/mitogenomes/*/*/emma/*.{fa,fasta,gff,tbl,gb}'"
+        error "Please provide --annotation_files with a glob for annotation files, e.g. --annotation_files '/path/to/mitogenomes/*/*/annotation/*.{fa,fasta,gff,tbl,gb}'"
     }
     if (!params.sql_config) {
         error "Please provide --sql_config for validated species lookup and source modifier generation."

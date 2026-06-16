@@ -256,7 +256,7 @@ def infer_prefix(path: Path, assembler: str) -> str:
 def classify_file(path: Path) -> str | None:
     name = path.name.lower()
     parts = {part.lower() for part in path.parts}
-    ignored_parts = {"emma", "lca", "genbank", "cds", "proteins", "genes"}
+    ignored_parts = {"annotation", "emma", "lca", "genbank", "cds", "proteins", "genes"}
     ignored_prefixes = (
         "mt-",
         "blast.",

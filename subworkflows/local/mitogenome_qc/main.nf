@@ -26,7 +26,7 @@ include { GEN_FILES_TABLE2ASN   } from '../../../modules/local/genome_qc/gen_fil
 workflow MITOGENOME_QC {
 
     take:
-    mitogenome_qc // tuple val(meta), val(species_name), val(proceed_qc true/false), path(emma/*)
+    mitogenome_qc // tuple val(meta), val(species_name), val(proceed_qc true/false), path(annotation/*)
     
     main:
     

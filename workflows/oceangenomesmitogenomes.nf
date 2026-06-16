@@ -315,7 +315,7 @@ workflow OCEANGENOMESMITOGENOMES {
         // non submitted mitogenomes they can be grouped with to submit and then say when there is a 
         // group of similar mitogenomes they can be submitted as a batch.
         MITOGENOME_QC (
-            ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), path(emma/*)
+            ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), path(annotation/*)
         )
         ch_assembly_summary_files = ch_assembly_summary_files.mix(UPLOAD_RESULTS.out.assembly_summary_files)
     } else if (!params.skip_upload_results && !params.sql_config) {
