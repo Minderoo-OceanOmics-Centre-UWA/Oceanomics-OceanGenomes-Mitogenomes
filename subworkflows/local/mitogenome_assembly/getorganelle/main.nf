@@ -11,27 +11,28 @@ include { GETORGANELLE_CONFIG       } from '../../../../modules/nf-core/getorgan
 include { CAT_FASTQ                 } from '../../../../modules/nf-core/cat/fastq'
 include { GETORGANELLE_FROMREADS    } from '../../../../modules/nf-core/getorganelle/fromreads'
 include { GETORGANELLE_RESEED       } from '../../../../modules/local/getorganelle/reseed'
+include { GETORGANELLE_GENEDB       } from '../../../../modules/local/getorganelle/genedb'
 include { MITOHIFI_FINDMITOREFERENCE } from '../../../../modules/nf-core/mitohifi/findmitoreference'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
 // Decide whether a first-pass GetOrganelle result warrants a reseed attempt.
-// Triggered when the assembly is effectively absent (empty placeholder FASTA)
-// or the log shows the classic "seed too divergent" markers and the run did NOT
-// reach a circular genome. See get_org.log.txt markers observed in practice.
+// A circular genome is the only outright success: anything else (empty FASTA,
+// a fragmented multi-contig result, or a single non-circular contig) is worth
+// retrying with a closely-related seed BEFORE we fall back to concatenating
+// scaffolds just to scrape a species ID. The reseed result is never re-assessed
+// here, so this gate fires at most once per sample.
 def needsReseed(fasta, logFile) {
     // No assembled contig at all -> always worth a reseed.
     try { if (fasta == null || fasta.size() == 0) return true } catch (ignored) { return true }
+    // More than one contig -> fragmented assembly, worth a reseed.
+    try {
+        if (fasta.text.readLines().count { it.startsWith('>') } > 1) return true
+    } catch (ignored) { /* fall through to the log-based check below */ }
     def txt
     try { txt = logFile.text } catch (ignored) { return false }
-    // A circular genome is a success regardless of mid-run warnings.
+    // A circular genome is the success case; any non-circular result reseeds.
     if (txt =~ /Result status of .*: circular genome/) return false
-    def markers = [
-        'No sequence hit our LabelDatabase!',
-        'unreasonable seed/parameter choices',
-        'no target organelle contigs found',
-        'insufficient number of rounds',
-    ]
-    return markers.any { txt.contains(it) }
+    return true
 }
 
 /*
@@ -154,43 +155,79 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         ch_seed = MITOHIFI_FINDMITOREFERENCE.out.reference
             .map { meta, ref_fasta, _ref_gb -> [meta, ref_fasta] }   // [meta, seed]
 
-        ch_reseed_reads = ch_assessed.reseed.map { meta, _fasta, _log, reads -> [meta, reads] }
+        // Build a custom GetOrganelle label (gene) database from the reference
+        // GenBank that findMitoReference downloaded alongside the seed. This is
+        // what disentangles contigs during extension for divergent animal
+        // mitogenomes; the reseed is only ever run WITH it (see GETORGANELLE_GENEDB).
+        ch_ref_gb = MITOHIFI_FINDMITOREFERENCE.out.reference
+            .map { meta, _ref_fasta, ref_gb -> [meta, ref_gb] }      // [meta, ref_gb]
 
-        // Reseed candidates that actually got a seed downloaded.
-        ch_reseed_input = ch_reseed_reads
-            .join(ch_seed, by: 0)                       // [meta, reads, seed]
-            .combine(ch_db)                             // [meta, reads, seed, org_type, db]
-            .map { meta, reads, seed, org_type, db -> [meta, reads, org_type, db, seed] }
-
-        GETORGANELLE_RESEED (
-            ch_reseed_input // tuple val(meta), path(fastp), val(organelle_type), path(db), path(seed)
+        GETORGANELLE_GENEDB (
+            ch_ref_gb // tuple val(meta), path(gb)
         )
 
-        // Reseed candidates whose reference download was ignored/failed: fall
-        // back to their (empty) first-pass result so no sample is dropped.
-        ch_reseed_seedless = ch_assessed.reseed
-            .map { meta, fasta, _log, _reads -> [meta, fasta] }
-            .join(ch_seed, by: 0, remainder: true)
-            .filter { it[2] == null }
-            .map { meta, fasta, _seed -> [meta, fasta] }
+        // Only samples with a well-annotated gene database emit here; sparse /
+        // empty references are dropped (optional output absent) and fall back below.
+        ch_genes = GETORGANELLE_GENEDB.out.genes   // [meta, genes]
 
-        ch_reseed_seedless_log = ch_assessed.reseed
-            .map { meta, _fasta, log, _reads -> [meta, log] }
-            .join(ch_seed, by: 0, remainder: true)
-            .filter { it[2] == null }
-            .map { meta, log, _seed -> [meta, log] }
+        ch_reseed_reads = ch_assessed.reseed.map { meta, _fasta, _log, reads -> [meta, reads] }
 
-        // Final per-sample assembly = kept first-pass + reseed results + seedless fallback.
+        // Reseed candidates that got BOTH a seed AND a usable custom gene database.
+        // The inner joins drop any sample missing either input, enforcing the rule
+        // that a reseed never runs without --genes.
+        ch_reseed_input = ch_reseed_reads
+            .join(ch_seed, by: 0)                       // [meta, reads, seed]
+            .join(ch_genes, by: 0)                      // [meta, reads, seed, genes]
+            .combine(ch_db)                             // [meta, reads, seed, genes, org_type, db]
+            .map { meta, reads, seed, genes, org_type, db -> [meta, reads, org_type, db, seed, genes] }
+
+        GETORGANELLE_RESEED (
+            ch_reseed_input // tuple val(meta), path(fastp), val(organelle_type), path(db), path(seed), path(genes)
+        )
+
+        // Reseed candidates that could NOT be reseeded (no reference seed, or a
+        // reference too sparsely annotated to build a gene database): fall back to
+        // their first-pass result so no sample is dropped. Keyed off "ready"
+        // samples (those with both a seed and a gene database).
+        ch_reseed_ready = ch_seed.join(ch_genes, by: 0)
+            .map { meta, _seed, _genes -> [meta, true] }   // [meta, true]
+
+        ch_reseed_fallback = ch_assessed.reseed
+            .map { meta, fasta, log, _reads -> [meta, fasta, log] }
+            .join(ch_reseed_ready, by: 0, remainder: true)
+            .filter { it[3] == null }                      // not ready -> fall back
+            .map { meta, fasta, log, _ready -> [meta, fasta, log] }
+
+        ch_reseed_seedless     = ch_reseed_fallback.map { meta, fasta, _log -> [meta, fasta] }
+        ch_reseed_seedless_log = ch_reseed_fallback.map { meta, _fasta, log -> [meta, log] }
+
+        // Resolve each seeded reseed candidate to the better of (reseed result,
+        // first-pass result). Prefer the reseed output, but if it came back empty
+        // keep the first-pass assembly so the multi-contig concat / species-ID
+        // fallback (SANITISE_FASTA) still has something to work with.
+        ch_reseed_firstpass = ch_assessed.reseed
+            .map { meta, fasta, log, _reads -> [meta, fasta, log] }   // [meta, fp_fasta, fp_log]
+
+        ch_reseed_resolved = GETORGANELLE_RESEED.out.fasta
+            .join(GETORGANELLE_RESEED.out.log, by: 0)                 // [meta, rs_fasta, rs_log]
+            .join(ch_reseed_firstpass, by: 0)                        // [meta, rs_fasta, rs_log, fp_fasta, fp_log]
+            .map { meta, rs_fasta, rs_log, fp_fasta, fp_log ->
+                def useReseed = rs_fasta && rs_fasta.size() > 0
+                [meta, useReseed ? rs_fasta : fp_fasta, useReseed ? rs_log : fp_log]
+            }
+
+        // Final per-sample assembly = kept first-pass + resolved reseed + seedless fallback.
         ch_assembly_fasta = ch_assessed.keep.map { meta, fasta, _log, _reads -> [meta, fasta] }
-            .mix(GETORGANELLE_RESEED.out.fasta)
+            .mix(ch_reseed_resolved.map { meta, fasta, _log -> [meta, fasta] })
             .mix(ch_reseed_seedless)
         ch_assembly_log = ch_assessed.keep.map { meta, _fasta, log, _reads -> [meta, log] }
-            .mix(GETORGANELLE_RESEED.out.log)
+            .mix(ch_reseed_resolved.map { meta, _fasta, log -> [meta, log] })
             .mix(ch_reseed_seedless_log)
 
         // Reseed-specific files to fold into the collected channels below.
         ch_multiqc_files = ch_multiqc_files
             .mix(GETORGANELLE_RESEED.out.tool_params.collect { it[1] })
+            .mix(GETORGANELLE_GENEDB.out.tool_params.collect { it[1] })
             .mix(MITOHIFI_FINDMITOREFERENCE.out.tool_params.collect { it[1] })
         ch_summary_files = ch_summary_files
             .mix(GETORGANELLE_RESEED.out.fasta.map { _meta, fasta -> fasta })
@@ -200,6 +237,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             .mix(GETORGANELLE_RESEED.out.simp_assm_graph)
         ch_versions = ch_versions
             .mix(GETORGANELLE_RESEED.out.versions.first())
+            .mix(GETORGANELLE_GENEDB.out.versions.first())
             .mix(MITOHIFI_FINDMITOREFERENCE.out.versions.first())
 
     } else {

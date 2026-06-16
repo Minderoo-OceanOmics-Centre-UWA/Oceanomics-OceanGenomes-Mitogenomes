@@ -40,7 +40,10 @@ process MITOHIFI_MITOHIFI {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
-    def effective_args = ["-${input_mode} ${hifi_cat}", "-f ${ref_fa}", "-g ${ref_gb}", "-t ${task.cpus}", args, "-o ${mito_code}"].findAll { it?.toString()?.trim() }.join(' ')
+    // Prefer the per-sample mitochondrial code derived from taxonomic class
+    // (e.g. Cnidaria -> 4); fall back to the workflow-level mito_code value.
+    def code = meta.genetic_code ?: mito_code
+    def effective_args = ["-${input_mode} ${hifi_cat}", "-f ${ref_fa}", "-g ${ref_gb}", "-t ${task.cpus}", args, "-o ${code}"].findAll { it?.toString()?.trim() }.join(' ')
     if (! ["c", "r"].contains(input_mode)) {
         error "r for reads or c for contigs must be specified"
     }
@@ -54,10 +57,10 @@ process MITOHIFI_MITOHIFI {
         -f ${ref_fa} \\
         -g ${ref_gb} \\
         -t $task.cpus ${args} \\
-        -o ${mito_code}
+        -o ${code}
 
     cat <<-END_TOOL_PARAMS > 05_mitohifi.tool_params_mqcrow.html
-    <tr><td>MitoHiFi</td><td><samp>${effective_args}</samp></td><td>Runs MitoHiFi in ${input_mode == 'r' ? 'read' : 'contig'} mode for ${meta.id} with mitochondrial code ${mito_code}.</td></tr>
+    <tr><td>MitoHiFi</td><td><samp>${effective_args}</samp></td><td>Runs MitoHiFi in ${input_mode == 'r' ? 'read' : 'contig'} mode for ${meta.id} with mitochondrial code ${code}.</td></tr>
     END_TOOL_PARAMS
 
     exit_code=\$?
@@ -88,7 +91,8 @@ process MITOHIFI_MITOHIFI {
     stub:
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
     def args = task.ext.args ?: ''
-    def effective_args = ["-${input_mode} ${hifi_cat}", "-f ${ref_fa}", "-g ${ref_gb}", "-t ${task.cpus}", args, "-o ${mito_code}"].findAll { it?.toString()?.trim() }.join(' ')
+    def code = meta.genetic_code ?: mito_code
+    def effective_args = ["-${input_mode} ${hifi_cat}", "-f ${ref_fa}", "-g ${ref_gb}", "-t ${task.cpus}", args, "-o ${code}"].findAll { it?.toString()?.trim() }.join(' ')
     """
     # Create all expected output files for testing
     touch ${prefix}.fasta
@@ -111,7 +115,7 @@ process MITOHIFI_MITOHIFI {
     mkdir reads_mapping_and_assembly
 
     cat <<-END_TOOL_PARAMS > 05_mitohifi.tool_params_mqcrow.html
-    <tr><td>MitoHiFi</td><td><samp>${effective_args}</samp></td><td>Runs MitoHiFi in ${input_mode == 'r' ? 'read' : 'contig'} mode for ${meta.id} with mitochondrial code ${mito_code}.</td></tr>
+    <tr><td>MitoHiFi</td><td><samp>${effective_args}</samp></td><td>Runs MitoHiFi in ${input_mode == 'r' ? 'read' : 'contig'} mode for ${meta.id} with mitochondrial code ${code}.</td></tr>
     END_TOOL_PARAMS
 
     cat <<-END_VERSIONS > versions.yml

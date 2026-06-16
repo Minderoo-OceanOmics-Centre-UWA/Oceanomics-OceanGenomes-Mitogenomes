@@ -36,7 +36,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
     ch_species_reference = fastp_reads
     .map { meta, _files -> meta }
-    .view()
+    // .view()
     
     //
     // MODULE: Find a closely related species for reference
@@ -99,7 +99,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     MITOHIFI_MITOHIFI (
         combined_with_mt_assembly_prefix,
         "r",
-        "2"  // could change to params.translation_table / mito_code - Organism genetic code following NCBI table (for mitogenome annotation) using 2. Vertebrate mitogenome
+        "2"  // Fallback genetic code only: the module prefers meta.genetic_code (derived per-sample from taxonomic class in PREPARE_SAMPLESHEET). 2 = vertebrate mitochondrial.
     )
 
     // Branch the assembled fasta on emptiness: when MitoHiFi finishes without

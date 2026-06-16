@@ -11,6 +11,31 @@
 include { CREATE_SAMPLESHEET_ENRICHED } from '../../../modules/local/create_samplesheet_enriched'
 include { samplesheetToList         } from 'plugin/nf-schema'
 
+// Resolve the NCBI mitochondrial genetic code (translation table) for a sample
+// from its taxonomic class. Mitochondrial codes differ by lineage, and the wrong
+// code mistranslates CDS in MITOS2 annotation and QC protein translation:
+//   * Cnidaria (corals, anemones, jellyfish, hydroids) use the Coelenterate code (4),
+//   * echinoderms and flatworms use the Echinoderm/Flatworm code (9),
+//   * any other invertebrate falls back to the Coelenterate code (4): in practice
+//     the only invertebrates routed through this pipeline are cnidarians, so an
+//     unrecognised invertebrate class is far more likely to be one of those than
+//     a code-5 invertebrate. (Add an explicit class above if that ever changes.)
+//   * vertebrates (and anything unresolved) fall back to defaultCode (vertebrate, 2).
+def mitoGeneticCode(taxClass, isInvert, defaultCode) {
+    def c = (taxClass ?: '').toString().trim().toLowerCase()
+    if (c in ['anthozoa', 'hydrozoa', 'scyphozoa', 'cubozoa', 'staurozoa', 'myxozoa', 'polypodiozoa']) {
+        return 4
+    }
+    if (c in ['asteroidea', 'ophiuroidea', 'echinoidea', 'holothuroidea', 'crinoidea',
+              'rhabditophora', 'trematoda', 'cestoda', 'monogenea', 'turbellaria']) {
+        return 9
+    }
+    if (isInvert) {
+        return 4
+    }
+    return defaultCode
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     SUBWORKFLOW TO INITIALISE PIPELINE
@@ -100,6 +125,13 @@ workflow PREPARE_SAMPLESHEET {
                         meta = meta + [ invertebrates: meta_invertebrates ]
                     }
 
+                    // Derive the per-sample mitochondrial genetic code from the
+                    // resolved taxonomic class so MITOS2 / QC translation use the
+                    // correct code (e.g. Cnidaria -> 4) instead of a one-size
+                    // global table. --translation_table sets the vertebrate/default.
+                    def mt_genetic_code = mitoGeneticCode(meta.class, meta.invertebrates, (params.translation_table ?: 2) as int)
+                    meta = meta + [ genetic_code: mt_genetic_code ]
+
                     // Group by sample id + sequencing type + date so that single-end
                     // (e.g. hifi bc + unassigned) and paired-end (e.g. hic lanes) reads
                     // for the same specimen don't collide on a shared cleaned id.
@@ -121,10 +153,10 @@ workflow PREPARE_SAMPLESHEET {
                 meta, fastqs ->
                     return [ meta, fastqs.flatten() ]
             }
-            .view()
+            // .view()
 
     // DEBUG
-    ch_samplesheet.view { meta, _reads -> "Sample: ${meta.id}, Type: ${meta.sequencing_type}, Meta: ${meta}" }
+    // ch_samplesheet.view { meta, _reads -> "Sample: ${meta.id}, Type: ${meta.sequencing_type}, Meta: ${meta}" }
     
     // Branch by sequencing type
     ch_samplesheet.branch { meta, reads ->
@@ -143,7 +175,7 @@ workflow PREPARE_SAMPLESHEET {
 
     // Combine all processed data
     ch_getorg = ch_ilmn_with_meta.mix(ch_hic_with_files)
-    
+
     emit:
     samplesheet = samplesheet_ch
     getorg_input = ch_getorg

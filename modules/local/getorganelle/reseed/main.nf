@@ -5,8 +5,12 @@
 // (non-circular / label-database-miss) result because the generic animal_mt
 // seed was too divergent from the target. It takes a closely-related
 // mitogenome FASTA (downloaded by MITOHIFI_FINDMITOREFERENCE from the resolved
-// reference_species_id) and passes it to GetOrganelle as a custom seed (-s),
-// while keeping the animal_mt label database (-F animal_mt) for disentangling.
+// reference_species_id) and passes it to GetOrganelle as a custom seed (-s).
+// It ALSO passes a custom label/gene database (--genes), built by
+// GETORGANELLE_GENEDB from the reference GenBank, which is what actually
+// classifies and disentangles contigs during extension for divergent animal
+// mitogenomes. The built-in animal_mt label database is still selected via
+// -F animal_mt; --genes overrides the gene set used for labelling.
 //
 // Outputs use a "reseed" suffix (appended to mt_assembly_prefix, no separating
 // dot) so they never collide with the first pass in the persistent checkpoint
@@ -21,7 +25,7 @@ process GETORGANELLE_RESEED {
         'biocontainers/getorganelle:1.7.7.0--pyh7cba7a3_0' }"
 
     input:
-    tuple val(meta), path(fastp), val(organelle_type), path(db), path(seed)
+    tuple val(meta), path(fastp), val(organelle_type), path(db), path(seed), path(genes)
 
     output:
     tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}reseed.fasta")            , emit: fasta
@@ -40,7 +44,8 @@ process GETORGANELLE_RESEED {
     def args   = task.ext.args ?: ''
     def prefix = "${meta.mt_assembly_prefix}reseed"
     def seed_arg = seed ? "-s ${seed}" : ''
-    def effective_args = [args, seed_arg, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
+    def genes_arg = genes ? "--genes ${genes}" : ''
+    def effective_args = [args, seed_arg, genes_arg, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
 
     // Use persistent output directory for checkpoint/resume capability
     def checkpoint_base = "${params.outdir}/getorganelle_checkpoints"
@@ -51,6 +56,7 @@ process GETORGANELLE_RESEED {
     get_organelle_from_reads.py \\
         $args \\
         $seed_arg \\
+        $genes_arg \\
         --prefix ${prefix}. \\
         -F $organelle_type \\
         --config-dir $db \\
@@ -60,7 +66,7 @@ process GETORGANELLE_RESEED {
         -o $output_dir
 
     cat <<-END_TOOL_PARAMS > 02b_getorganelle_reseed.tool_params_mqcrow.html
-    <tr><td>GetOrganelle Reseed</td><td><samp>${effective_args}</samp></td><td>Re-assembles ${organelle_type} for ${meta.id} using a closely related seed (${seed}).</td></tr>
+    <tr><td>GetOrganelle Reseed</td><td><samp>${effective_args}</samp></td><td>Re-assembles ${organelle_type} for ${meta.id} using a closely related seed (${seed}) and custom gene database (${genes}).</td></tr>
     END_TOOL_PARAMS
 
     wait
@@ -107,7 +113,8 @@ process GETORGANELLE_RESEED {
     def prefix = "${meta.mt_assembly_prefix}reseed"
     def args   = task.ext.args ?: ''
     def seed_arg = seed ? "-s ${seed}" : ''
-    def effective_args = [args, seed_arg, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
+    def genes_arg = genes ? "--genes ${genes}" : ''
+    def effective_args = [args, seed_arg, genes_arg, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
     """
     mkdir -p mtdna
 
