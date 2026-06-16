@@ -118,6 +118,14 @@ workflow PIPELINE_COMPLETION {
     summary_params = paramsSummaryMap(workflow, parameters_schema: "nextflow_schema.json")
     def multiqc_reports = multiqc_report.toList()
 
+    // Capture the workflow metadata handle and params now: inside the onComplete
+    // closure the implicit `workflow` and `params` variables resolve to null (they
+    // are resolved against the closure delegate, not the script binding), so
+    // referencing them there throws a NullPointerException. Capturing them here
+    // makes the closure close over valid references.
+    def workflow_metadata = workflow
+    def trace_report_suffix = params.trace_report_suffix
+
     //
     // Completion email and summary
     //
@@ -141,8 +149,8 @@ workflow PIPELINE_COMPLETION {
         // WHICH samples failed, so silently-dropped tasks (e.g. a reseed whose
         // output was not collected) are easy to miss. Re-surface them loudly
         // here by reading the per-run execution trace, without aborting the run.
-        if (workflow.stats.ignoredCount > 0 || !workflow.success) {
-            def trace_file = file("${outdir}/pipeline_info/execution_trace_${params.trace_report_suffix}.txt")
+        if (workflow_metadata.stats.ignoredCount > 0 || !workflow_metadata.success) {
+            def trace_file = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
             def errored = []
             if (trace_file.exists()) {
                 def lines = trace_file.readLines()
@@ -159,7 +167,7 @@ workflow PIPELINE_COMPLETION {
                 }
             }
             log.warn "=================================================================="
-            log.warn "${workflow.stats.ignoredCount} process(es) failed and were ignored (run was not aborted)."
+            log.warn "${workflow_metadata.stats.ignoredCount} process(es) failed and were ignored (run was not aborted)."
             if (errored) {
                 log.warn "Failed/ignored tasks:"
                 errored.unique().sort().each { log.warn "  - ${it}" }

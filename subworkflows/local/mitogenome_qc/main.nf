@@ -39,7 +39,7 @@ workflow MITOGENOME_QC {
     //
     // MODULE: Format files to align better with GenBank requirements and generate the cmt file
     //
-    mitogenome_qc.view { "Input to FORMAT_FILES: $it" }
+    // mitogenome_qc.view { "Input to FORMAT_FILES: $it" }
 
     FORMAT_FILES (
         mitogenome_qc     // tuple val(meta), val(species_name), val(proceed_qc true/false), path(input_dir) - input dir is the annotation outputs directory

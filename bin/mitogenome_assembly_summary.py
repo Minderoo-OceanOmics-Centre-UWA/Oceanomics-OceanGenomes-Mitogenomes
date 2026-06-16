@@ -497,15 +497,19 @@ def parse_mitohifi_stats(files: Iterable[Path]) -> dict[str, str]:
 
 
 def has_numt_signal(files: Iterable[Path]) -> bool:
+    # Note: do NOT match the bare token "numt" or the "contigs_filtering"
+    # directory name -- both appear in every MitoHiFi run as part of its routine
+    # output (the standard "filter ... to avoid NUMTS" log line and the
+    # contigs_filtering/ working dir), so matching them flags ~every HiFi
+    # assembly as a false positive. Keep only patterns that indicate an actual
+    # nuclear-mitochondrial / low-confidence call.
     patterns = [
-        "numt",
         "nuclear mitochondrial",
         "rejected",
         "low-confidence",
         "low confidence",
         "low_coverage",
         "divergent",
-        "contigs_filtering",
     ]
     for path in files:
         text = str(path).lower()
@@ -530,7 +534,12 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
         reasons.append("missing_final_fasta")
     if row.get("circularised") == "false":
         reasons.append("not_circularised")
-    if num_candidate is not None and num_candidate > 1:
+    # hifiasm routinely emits many candidate contigs and MitoHiFi picks the best
+    # one, so num_candidate > 1 is the norm, not a defect. Only flag for review
+    # when the *final* assembly is not clean (multiple final contigs or not
+    # circular); a single circular final contig is fine regardless of candidates.
+    clean_final = num_final == 1 and row.get("circularised") == "true"
+    if num_candidate is not None and num_candidate > 1 and not clean_final:
         reasons.append("multiple_candidate_contigs")
     if num_final is not None and num_final > 1:
         reasons.append("multiple_final_contigs")
