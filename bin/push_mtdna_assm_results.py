@@ -98,7 +98,11 @@ def parse_log_for_stats_and_cov(log_text: str):
     match_stats = re.findall(r"Result status of animal_mt:\s*(.+)", log_text)
     stats = match_stats[-1].strip() if match_stats else None
 
-    match_avg_coverage = re.findall(r"Average animal_mt coverage =\s*([^\s]+)", log_text)
+    # GetOrganelle labels this line "Average animal_mt coverage = ..." for
+    # scaffold results but "Average animal_mt kmer-coverage = ..." for circular
+    # genomes. Accept both so circular assemblies (e.g. successful reseeds) still
+    # populate avg_coverage instead of recording NULL.
+    match_avg_coverage = re.findall(r"Average animal_mt (?:kmer-)?coverage =\s*([^\s]+)", log_text)
     avg_coverage = match_avg_coverage[-1].strip() if match_avg_coverage else None
 
     match_avg_base_coverage = re.findall(r"Average animal_mt base-coverage =\s*([^\s]+)", log_text)

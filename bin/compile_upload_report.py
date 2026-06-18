@@ -199,12 +199,12 @@ def collect_inputs(input_dir):
 
 
 def write_summary_tsv(grouped, output_path):
-    header = ["og_id", "assembly_prefix"] + STEP_ORDER
+    header = ["assembly_prefix", "og_id"] + STEP_ORDER
     with open(output_path, "w") as f:
         f.write("\t".join(header) + "\n")
         for assembly_prefix in sorted(grouped):
             steps = grouped[assembly_prefix]["steps"]
-            row = [grouped[assembly_prefix]["og_id"], assembly_prefix]
+            row = [assembly_prefix, grouped[assembly_prefix]["og_id"]]
             for step in STEP_ORDER:
                 entry = steps.get(step)
                 text = entry[1] if entry else None

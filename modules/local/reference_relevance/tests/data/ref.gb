@@ -1,0 +1,55 @@
+LOCUS       TESTREF01               2400 bp    DNA     circular UNK 01-JAN-1980
+DEFINITION  Testus coralus mitochondrion, test fixture.
+ACCESSION   TESTREF01
+VERSION     TESTREF01
+KEYWORDS    .
+SOURCE      .
+  ORGANISM  Testus coralus
+            Eukaryota; Metazoa; Cnidaria; Anthozoa; Hexacorallia; Scleractinia;
+            Testidae.
+FEATURES             Location/Qualifiers
+     rRNA            200..1799
+                     /gene="rrnL"
+                     /product="16S ribosomal RNA"
+ORIGIN
+        1 cagattttca tattatgcag aaaatctact tcgcctgata cgagtcggtt atcttcggat
+       61 actgtatagt cccacctggt gatcctatgc ttgtgagtac ccagaaaata gcgacggacc
+      121 gcggtgttaa gtgtcgagct acatcacttc tcatgtagcc agaaggctgc aactcatcga
+      181 ctctatgtag tgaccgcgtc gatgtcaaac cccgggggga gctcagatat ccgatacagg
+      241 gatgaagaaa taacctcatc ccattggtga cgaaaggttg taagtagctg gccgccgaga
+      301 tagctgagcg gcgaaccact agaaaaggtt cagaccccgg agcccagccg tcacgattgt
+      361 tatgcgtata agcccggttc actacgtccg ttctggcaag ccggggctaa tccgtcattg
+      421 tcaagagaca tctttcgtct cattaggcta ctaacgccgc cgggtcgtta ctcgaaaagc
+      481 aggtggaatt ggtgtattca gcttgctcga tttgatcgat ctgcaaggtg ctgtctagat
+      541 agataccatg gcccggaagt acgggcttct ggcgcatgtc gcactcgtcc ctggtcacga
+      601 actgtacaaa cattggacac tctttcccgt tctggtacaa aatgtgctcc aatcatgcat
+      661 gaaacagata catcgcttgg gccacgtagt ctagagcaca ctaaatgaga catcttagag
+      721 gagataggcg tagatccggt tactagccgt gatgcaaggt gggggaacgg gatgttgtaa
+      781 catgcgggtg tgcacgccac taagacgaaa cctagtgcct cttgctagtc attattagta
+      841 cgaagggttg tgctccgata gttgaaaatg tggtgttatg ctcacggcgt ggtgtgtctt
+      901 taaccccaag ctatcaatac tgaataggct acatatgtta tactccgtgt cgtaaggatg
+      961 acggctccgc tactggtggt ctgtcgcctc agccgttgac cgcaacaccg tgaagcacgg
+     1021 gtaaggcagc agaaaggcga gaactgcagg agagcgtatt tgcgcaaccc tgagggtcta
+     1081 gagagtccac ctgggccttt acggaactat attggtttaa taaaacgggt ccagcaagtg
+     1141 gatttgggtc cagactgaat ctctcacggc ttgtctttat gccattaaac ttgccagatt
+     1201 ctactccgca cctactcaca cttaataata caagtgtccg ttcttctggc ggcaggcggg
+     1261 gtgtaccgcc actccttcaa caatttccac tcgctgccgc gtgagctaga gtgaagccaa
+     1321 tcctactcga acttcgacct gttgtaccat atctgcaaat tccctgccga gataccgtaa
+     1381 tatgtggtat atggcgagtt aaaaagggag atatgacggc ccatgtgggg aacgtgaacg
+     1441 tacggccagt agcagggcat gaagtcatcc cacagtcagt ggcaatacga acacacctgc
+     1501 tggtacccgt tgataatgga tcttttcggt gggaattgct ctgcttaaga gagtagggac
+     1561 agaacgtgca cgggtttact cacccttccg gagttccagt gtgaggtaga tacgtgcaac
+     1621 cgaacaataa aaaggaactc gggccctact aggtaacacc ccgaagcatc caggaatccc
+     1681 aacaaacggt cagcgggttt atctgcacat ggggttgggt tagcgcgccc tcccagcggc
+     1741 gtgatcgtac gactaacggg ggactagcac ggtcgacgac accggcccag tttcgctagc
+     1801 ccccactgca gaccatcgca cgtaagtgct agggatgtag agacgcgggg ttagcgaatt
+     1861 cggtggcgcg atgcttctca caaattgctt attcgaggtc gatgccctag gcttacatcc
+     1921 ttaggccgcc gctttgcgcg cagattcttt gcaaaatctt cttactttgg cgcaaactgt
+     1981 gatatgttga ctttcgcgcc cctcaatatc gggtatttgg tggcatctct aaggtggtgt
+     2041 tcccccagag tagggtcgcg ttcatgccag tcgatagatc acgcttggcc ccccatctcg
+     2101 gcagccctta actccgcgga ttatcccaga gcaaatgatt gctggtttgc cacccacttt
+     2161 aacaatgtcc gtgatcgaga catcagccga tatatatact tcttgtaacg aagacaaatc
+     2221 agtatgtaag ttcggttagc ttgcgttttc gaactagggg cactattggc acgatgagat
+     2281 aagtatgacc aaaagccccc agtgcgcaga atgtttacca ttggccccag atgccgctat
+     2341 atgggcctat tacctagtcg acctactgtt tatctcagtt acgttgagcg aagtgagcat
+//

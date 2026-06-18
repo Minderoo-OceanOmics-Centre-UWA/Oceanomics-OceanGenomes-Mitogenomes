@@ -1,0 +1,82 @@
+nextflow_process {
+
+    name "Test Process REFERENCE_RELEVANCE"
+    script "../main.nf"
+    process "REFERENCE_RELEVANCE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "reference_relevance"
+
+    test("relevant reference -> PASS") {
+        // Assembly is the reference molecule re-origined (rotated) -- not byte-identical
+        // but ~100% identical over its full length, like a real same-individual call.
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_pass', mt_assembly_prefix:'test_pass' ],
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/match.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/ref.gb", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.flag[0][1] ==~ ".*/test_pass.reference_relevance.txt" },
+                { assert path(process.out.flag[0][1]).text.startsWith("PASS") },
+                { assert path(process.out.flag[0][1]).text.contains("Testidae") },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("wrong-family reference -> MISMATCH") {
+        // Assembly is an unrelated molecule: the reference does not align -> flagged.
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_mismatch', mt_assembly_prefix:'test_mismatch' ],
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/mismatch.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/ref.gb", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.flag[0][1]).text.startsWith("MISMATCH") }
+            )
+        }
+    }
+
+    test("stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'test_stub' ],
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/match.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/ref.gb", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(process.out).match() }
+            )
+        }
+    }
+}

@@ -42,6 +42,7 @@ custom_data:
     data_format: tsv
     filename_glob: "mitogenome_assembly_summary_mqc.tsv"
     headers:
+      assembly_prefix: "Assembly ID"
       sample_id: "Sample"
       assembler: "Assembler"
       status: "Status"
@@ -87,8 +88,8 @@ custom_data:
     data_format: tsv
     filename_glob: "upload_results_summary_mqc.tsv"
     headers:
-      og_id: "Sample"
       assembly_prefix: "Assembly ID"
+      og_id: "Sample"
       assembly: "Assembly"
       annotation: "Annotation"
       species_validation: "Species validation"

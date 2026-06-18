@@ -11,6 +11,7 @@ include { MITOHIFI_FINDMITOREFERENCE       } from '../../../../modules/nf-core/m
 include { CAT_FASTQ                         } from '../../../../modules/nf-core/cat/fastq'
 include { MITOHIFI_MITOHIFI    } from '../../../../modules/nf-core/mitohifi/mitohifi'
 include { MITOHIFI_AVERAGE_COVERAGE        } from '../../../../modules/local/mitohifi/average_coverage'
+include { RELABEL_REFERENCE_GB             } from '../../../../modules/local/relabel_reference_gb'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
 /*
@@ -91,6 +92,16 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         [meta_ext, fasta, ref_fasta, ref_gb]
     }
 
+    //
+    // MODULE: Relabel the reference GenBank to a per-sample name so it can be fed
+    // (collision-free) to the assembly summary, which reads the reference species
+    // and accession from it.
+    //
+
+    RELABEL_REFERENCE_GB (
+        combined_with_mt_assembly_prefix.map { meta, _fasta, _ref_fasta, ref_gb -> [meta, ref_gb] }
+    )
+
 
     //
     // MODULE: Run assembly using MitoHifi from reads
@@ -146,11 +157,12 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.gb.map { meta, gb -> gb })
     ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.command_logs.map { meta, log -> log })
     ch_summary_files = ch_summary_files.mix(MITOHIFI_MITOHIFI.out.logs.map { meta, log -> log })
-    // NOTE: MITOHIFI_MITOHIFI.out.reference_files (the `MitoReference` directory)
-    // is deliberately NOT mixed in here. It is already published to the sample's
-    // mtdna/ dir, the assembly summary script ignores it, and every HiFi sample
-    // emits an identically-named `MitoReference` dir, which caused a fatal
-    // input-filename collision in MITOGENOME_ASSEMBLY_SUMMARY's flat collect().
+    // The findMitoReference GenBank carries the reference species + accession the
+    // assembly summary reports. It cannot be staged under its native name (the
+    // accession-named `.gb` inside an identically-named `MitoReference` dir collides
+    // across samples in MITOGENOME_ASSEMBLY_SUMMARY's flat collect()), so relabel it
+    // to a per-sample `<assembly_prefix>.reference.gb` first.
+    ch_summary_files = ch_summary_files.mix(RELABEL_REFERENCE_GB.out.gb.map { _meta, gb -> gb })
     ch_summary_files = ch_summary_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.stats.map { meta, stats -> stats })
     ch_summary_files = ch_summary_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.coverage.map { meta, coverage -> coverage })
 
@@ -168,6 +180,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     assembly_fasta  = MITOHIFI_MITOHIFI.out.fasta
     assembly_log    = ch_assembly_log
     coverage_stats  = MITOHIFI_AVERAGE_COVERAGE.out.coverage
+    reference_gb    = RELABEL_REFERENCE_GB.out.gb  // channel: [ meta, reference.gb ]
     summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]

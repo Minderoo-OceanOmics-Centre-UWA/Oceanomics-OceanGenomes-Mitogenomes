@@ -1,0 +1,62 @@
+nextflow_process {
+
+    name "Test Process SELECT_CORAL_REFERENCE"
+    script "../main.nf"
+    process "SELECT_CORAL_REFERENCE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "select_coral_reference"
+
+    test("selects the best-matching DB record by sequence") {
+        // query.fa is a re-origined 3 kb slice of the first DB record, so the
+        // selector must pick that record (label-free) and emit its GenBank.
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', mt_assembly_prefix:'test' ],
+                    file("${projectDir}/modules/local/select_coral_reference/tests/data/query.fa", checkIfExists: true)
+                ])
+                input[1] = file("${projectDir}/modules/local/select_coral_reference/tests/data/mini_db.gb", checkIfExists: true)
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.status[0][1] ==~ ".*/test.reference_select.txt" },
+                { assert path(process.out.status[0][1]).text.startsWith("SELECTED") },
+                // emitted reference is the DB record the query was sliced from.
+                { assert process.out.reference[0][1] ==~ ".*/test.reference.gb" },
+                { assert path(process.out.reference[0][1]).text.contains("NC_083272") },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'test_stub' ],
+                    file("${projectDir}/modules/local/select_coral_reference/tests/data/query.fa", checkIfExists: true)
+                ])
+                input[1] = file("${projectDir}/modules/local/select_coral_reference/tests/data/mini_db.gb", checkIfExists: true)
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(process.out).match() }
+            )
+        }
+    }
+}

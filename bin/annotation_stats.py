@@ -82,9 +82,12 @@ def process_gff(gff_path, annotation_name, class_name=""):
     gene_lengths = {gene: "" for gene in REF_GENES}
     total_length = extract_total_length(gff_path)
 
-    num_cds = 0
-    num_trna = 0
-    num_rrna = 0
+    # Count features by the gene they belong to, not by feature line, so an
+    # intron-split gene written as multiple exon lines (e.g. a coral nad5 with a
+    # group I intron -> two CDS lines sharing one Parent) counts once.
+    cds_genes = set()
+    trna_genes = set()
+    rrna_genes = set()
 
     with open(gff_path, "r") as f:
         for line in f:
@@ -98,12 +101,14 @@ def process_gff(gff_path, annotation_name, class_name=""):
             end = int(parts[4])
             attributes = parse_gff_attributes(parts[8])
 
+            # Group by Parent (the gene) when present, else fall back to Name.
+            gene_key = attributes.get("Parent") or attributes.get("Name") or f"{start}-{end}"
             if feature_type == "cds":
-                num_cds += 1
+                cds_genes.add(gene_key)
             elif feature_type == "trna":
-                num_trna += 1
+                trna_genes.add(gene_key)
             elif feature_type == "rrna":
-                num_rrna += 1
+                rrna_genes.add(gene_key)
 
             if parts[2] == "gene" and "Name" in attributes:
                 gene_name = attributes["Name"].replace("MT-", "")
@@ -143,9 +148,9 @@ def process_gff(gff_path, annotation_name, class_name=""):
         "order_correct": order_correct,
         "passed": "yes" if passed else "no",
         "total_length": total_length if total_length is not None else "NA",
-        "num_cds": num_cds,
-        "num_trna": num_trna,
-        "num_rrna": num_rrna
+        "num_cds": len(cds_genes),
+        "num_trna": len(trna_genes),
+        "num_rrna": len(rrna_genes)
     }
     gff_summary.update(gene_lengths)
     return gff_summary

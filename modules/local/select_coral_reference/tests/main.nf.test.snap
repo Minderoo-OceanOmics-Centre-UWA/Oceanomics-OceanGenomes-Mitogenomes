@@ -1,0 +1,67 @@
+{
+    "selects the best-matching DB record by sequence": {
+        "content": [
+            [
+                "versions.yml:md5,ca1f5f4d09652d9fdc50d5c59faaff0a"
+            ]
+        ],
+        "timestamp": "2026-06-18T14:45:52.780940107",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "stub": {
+        "content": [
+            {
+                "0": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference.gb:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "1": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference_select.txt:md5,182831adcd2934ee563a428769cb07c0"
+                    ]
+                ],
+                "2": [
+                    "versions.yml:md5,1fdd8f78c1c9ab7483a5061f3df3e7b1"
+                ],
+                "reference": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference.gb:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "status": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference_select.txt:md5,182831adcd2934ee563a428769cb07c0"
+                    ]
+                ],
+                "versions": [
+                    "versions.yml:md5,1fdd8f78c1c9ab7483a5061f3df3e7b1"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-18T14:45:58.688651613",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

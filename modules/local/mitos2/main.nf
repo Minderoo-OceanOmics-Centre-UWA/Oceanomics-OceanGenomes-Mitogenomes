@@ -21,6 +21,10 @@ process MITOS2 {
     tuple val(meta), path("annotation/cds/*RNR1*.fa"), emit: s12_sequences, optional: true
     tuple val(meta), path("annotation/cds/*RNR2*.fa"), emit: s16_sequences, optional: true
     tuple val(meta), path("annotation/*"), emit: results
+    // Raw MITOS BED plus the EMMA GFF + proteins dir, consumed by the anthozoan
+    // QC gate and the coral fixer (which patches the BED and re-runs mitos_to_emma).
+    tuple val(meta), path("annotation/mitos_raw/result.bed"), emit: bed
+    tuple val(meta), path("annotation/*.gff"), path("annotation/proteins"), emit: gff_proteins
     tuple val(meta), path("07_mitos.tool_params_mqcrow.html"), emit: tool_params
     path "versions_mitos.yml", emit: versions
 
@@ -43,7 +47,7 @@ process MITOS2 {
         // is annotated as one wrap-around feature instead of being split/dropped.
         def topology_arg = (meta.circular == false) ? '--linear' : ''
         def effective_args = ["runmitos -i ${fasta} -c ${gcode} -r ${refver} -R ${refdb} ${topology_arg} --noplots --best ${base_args}".replaceAll(/ +/, ' ').trim(),
-                              "mitos_to_emma.py --bed result.bed --genome ${fasta} --code ${gcode}"].join('; ')
+                              "mitos_to_emma.py --bed result.bed --genome ${fasta} --code ${gcode} ${topology_arg}".replaceAll(/ +/, ' ').trim()].join('; ')
 
         """
         mkdir -p mitos_raw annotation
@@ -77,7 +81,8 @@ process MITOS2 {
             --prefix "\${mitos_prefix}" \\
             --outdir annotation \\
             --code ${gcode} \\
-            --species "${species}"
+            --species "${species}" \\
+            ${topology_arg}
 
         # Preserve raw MITOS outputs for provenance, but in a subdir so the
         # top-level *.gff glob (used by annotation_stats) only sees the EMMA gff.
@@ -113,6 +118,7 @@ process MITOS2 {
         touch annotation/cds/RNR1.\${mitos_prefix}.fa
         touch annotation/cds/RNR2.\${mitos_prefix}.fa
         touch annotation/proteins/MT-CO1.\${mitos_prefix}.fa
+        touch annotation/mitos_raw/result.bed
 
         cat <<-END_TOOL_PARAMS > 07_mitos.tool_params_mqcrow.html
         <tr><td>MITOS2</td><td><samp>${effective_args}</samp></td><td>Annotates the invertebrate mitogenome assembly for ${meta.id} with MITOS2 (genetic code ${gcode}) and reshapes the output to the EMMA contract.</td></tr>

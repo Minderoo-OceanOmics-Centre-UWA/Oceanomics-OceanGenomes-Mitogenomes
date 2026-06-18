@@ -16,8 +16,8 @@ from typing import Iterable
 
 
 COLUMNS = [
-    "sample_id",
     "assembly_prefix",
+    "sample_id",
     "assembler",
     "status",
     "final_length_bp",
@@ -226,6 +226,7 @@ def strip_known_suffix(name: str) -> str:
         ".contigs_stats.with_coverage.tsv",
         ".contigs_stats.tsv",
         ".coverage.tsv",
+        ".reference_relevance.txt",
         ".get_org.log.txt",
         ".hifiasm.log",
         ".log",
@@ -266,6 +267,11 @@ def classify_file(path: Path) -> str | None:
         "lca_short.",
     )
     if name.endswith(".annotation_stats.csv"):
+        return None
+    # Reference GenBanks (the relabelled <prefix>.reference.gb and the published
+    # MitoReference/reference_seed records) are inputs to the summary, not assembly
+    # runs of their own; never let them spawn a spurious run row.
+    if is_reference_genbank(path):
         return None
     if parts.intersection(ignored_parts) or name.startswith(ignored_prefixes):
         return None
@@ -418,19 +424,66 @@ def parse_genbank_reference(path: Path) -> tuple[str, str]:
     return species, accession
 
 
+GENBANK_SUFFIXES = {".gb", ".gbk", ".gbf"}
+
+
+def is_reference_genbank(path: Path) -> bool:
+    """True for a GenBank file that holds a *reference* mitogenome (not the assembly's own).
+
+    Recognises the relabelled file the pipeline stages into the summary inputs
+    (``<assembly_prefix>.reference.gb``), the per-sample published layouts
+    (``mtdna/MitoReference/NC_*.gb`` for MitoHiFi, ``mtdna/reference_seed/NC_*.gb``
+    for the GetOrganelle reseed), and bare RefSeq-accession-named records. The
+    assembly's own annotation (``<assembly_prefix>.gb``) is deliberately excluded.
+    """
+    if path.suffix.lower() not in GENBANK_SUFFIXES:
+        return False
+    name = path.name.lower()
+    parts = {part.lower() for part in path.parts}
+    if name.endswith(tuple(f".reference{suffix}" for suffix in GENBANK_SUFFIXES)):
+        return True
+    if "mitoreference" in parts or "reference_seed" in parts:
+        return True
+    if name.startswith(("nc_", "nw_", "nz_")):
+        return True
+    return False
+
+
+def files_for_run(files: Iterable[Path], run: "RunFiles") -> list[Path]:
+    """Restrict a flat file list to those belonging to a single assembly run.
+
+    The summary module stages every sample into one flat directory, so the
+    per-sample directory structure is gone in production; association then falls
+    back to the sample id that prefixes every relabelled reference filename. The
+    per-sample published layout (where files still sit under ``<sample>/``) is
+    matched by the directory checks.
+    """
+    sample_id = run.sample_id
+    matches = []
+    for path in files:
+        text = str(path)
+        if (
+            run.prefix in text
+            or f"/{sample_id}/" in text
+            or path.name.startswith(f"{sample_id}.")
+        ):
+            matches.append(path)
+    return matches
+
+
 def find_reference_genbank(files: Iterable[Path]) -> tuple[str, str]:
-    genbanks = [path for path in files if path.suffix.lower() in {".gb", ".gbk", ".gbf"}]
+    genbanks = [path for path in files if is_reference_genbank(path)]
 
     def score(path: Path) -> tuple[int, str]:
         lowered = [part.lower() for part in path.parts]
         name = path.name.lower()
         value = 0
-        if "mitoreference" in lowered:
+        if name.endswith(tuple(f".reference{suffix}" for suffix in GENBANK_SUFFIXES)):
+            value -= 150
+        if "mitoreference" in lowered or "reference_seed" in lowered:
             value -= 100
         if name.startswith(("nc_", "nw_", "nz_")):
             value -= 50
-        if "final" in name or "mitohifi" in name:
-            value += 20
         return value, str(path)
 
     for path in sorted(genbanks, key=score):
@@ -438,6 +491,19 @@ def find_reference_genbank(files: Iterable[Path]) -> tuple[str, str]:
         if not is_missing(species) and not is_missing(accession):
             return species, accession
     return MISSING, MISSING
+
+
+def reference_for_run(run: "RunFiles", all_files: Iterable[Path]) -> tuple[str, str]:
+    """Find the reference species/accession for one run, scoped to that run's files.
+
+    The lookup is strictly scoped to files belonging to this run: a run with no
+    reference of its own must report nothing rather than borrow another sample's
+    reference (every sample is staged into one flat directory in production).
+    """
+    scoped = [path for path in files_for_run(all_files, run) if is_reference_genbank(path)]
+    if not scoped:
+        return MISSING, MISSING
+    return find_reference_genbank(scoped)
 
 
 def parse_mitohifi_stats(files: Iterable[Path]) -> dict[str, str]:
@@ -520,6 +586,22 @@ def has_numt_signal(files: Iterable[Path]) -> bool:
     return False
 
 
+def reference_relevance_for_run(run: "RunFiles") -> str:
+    """Read the REFERENCE_RELEVANCE flag (PASS|MISMATCH|UNKNOWN) for this run, or ''.
+
+    The per-sample <prefix>.reference_relevance.txt records whether the resolved
+    reference actually aligns to the assembly; a MISMATCH means the species label
+    most likely pointed findMitoReference at a wrong-family reference, degrading
+    seeding and the coral annotation fix.
+    """
+    for path in run.files:
+        if path.name.endswith(".reference_relevance.txt"):
+            text = read_text(path).strip()
+            if text:
+                return text.split("\t", 1)[0].strip().upper()
+    return ""
+
+
 def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
     reasons = []
 
@@ -553,6 +635,8 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
         reasons.append("high_coverage_variability")
     if row.get("numt_flag") == "true":
         reasons.append("possible_numt")
+    if row.get("reference_relevance") == "MISMATCH":
+        reasons.append("reference_mismatch")
     if (
         thresholds.min_length is not None
         and length is not None
@@ -597,7 +681,7 @@ def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterabl
     if cov_cv is not None:
         row["coverage_cv"] = format_number(cov_cv)
 
-    species, accession = find_reference_genbank([*run.files, *all_files])
+    species, accession = reference_for_run(run, all_files)
     if species:
         row["reference_species"] = species
     if accession:
@@ -605,6 +689,7 @@ def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterabl
 
     row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
     row["numt_flag"] = "true" if has_numt_signal(run.files) else "false"
+    row["reference_relevance"] = reference_relevance_for_run(run)
 
     apply_qc(row, thresholds)
     if not row["final_length_bp"]:
@@ -707,6 +792,17 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
 
     row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
     row["numt_flag"] = "true" if has_numt_signal(run.files) else "false"
+
+    # The GetOrganelle reseed reference (relabelled <prefix>.reference.gb, or the
+    # published mtdna/reference_seed/NC_*.gb) is not tied to a run by classify_file,
+    # so look it up scoped to this run to avoid picking another sample's seed when
+    # everything is staged into one flat summary directory.
+    species, accession = reference_for_run(run, all_files)
+    if species:
+        row["reference_species"] = species
+    if accession:
+        row["reference_accession"] = accession
+    row["reference_relevance"] = reference_relevance_for_run(run)
 
     apply_qc(row, thresholds)
     if getorganelle_graph_ambiguous(run.files):

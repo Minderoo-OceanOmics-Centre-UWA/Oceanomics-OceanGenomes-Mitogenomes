@@ -12,7 +12,7 @@ nextflow \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \
     --curated_blast_db /software/projects/pawsey0964/curated_db/OceanGenomes.CuratedNT.NBDLTranche1and2and3.CuratedBOLD.NoDuplicate.fasta \
-    --nt_blast_db /scratch/references/blastdb_update/blast-2026-02-01/db/core_nt \
+    --nt_blast_db /scratch/references/blastdb_update/blast-2026-02-01/db/mito \
     --mitos_refdb /software/projects/pawsey0964/mitos_refdb \
     --mitos_refseq_ver refseq89m  \
     --organelle_type "animal_mt" \

@@ -1,0 +1,49 @@
+{
+    "relevant reference -> PASS": {
+        "content": [
+            [
+                "versions.yml:md5,6e6399b54b0d43357a925270220dffcb"
+            ]
+        ],
+        "timestamp": "2026-06-18T13:55:25.676084197",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "stub": {
+        "content": [
+            {
+                "0": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference_relevance.txt:md5,b8cf068ac92ff46bdf7ecdefab2a125e"
+                    ]
+                ],
+                "1": [
+                    "versions.yml:md5,cb6f910e903f913da8df700b549266d3"
+                ],
+                "flag": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference_relevance.txt:md5,b8cf068ac92ff46bdf7ecdefab2a125e"
+                    ]
+                ],
+                "versions": [
+                    "versions.yml:md5,cb6f910e903f913da8df700b549266d3"
+                ]
+            }
+        ],
+        "timestamp": "2026-06-18T13:55:40.032754128",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

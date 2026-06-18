@@ -8,7 +8,12 @@
 include { DOWNLOAD_BLAST_DB      } from '../../../modules/local/download_blast_db'
 include { DOWNLOAD_TAXONKIT_DB   } from '../../../modules/local/download_taxonkit_db'
 include { EMMA                   } from '../../../modules/local/EMMA'
+include { ROTATE_ORIGIN          } from '../../../modules/local/rotate_origin'
 include { MITOS2                 } from '../../../modules/local/mitos2'
+include { ANNOTATION_QC_GATE     } from '../../../modules/local/annotation_qc_gate'
+include { CORAL_ANNOTATION_FIX   } from '../../../modules/local/coral_annotation_fix'
+include { REFERENCE_RELEVANCE    } from '../../../modules/local/reference_relevance'
+include { SELECT_CORAL_REFERENCE } from '../../../modules/local/select_coral_reference'
 include { BLAST_BLASTN           } from '../../../modules/nf-core/blast/blastn'
 include { LCA                    } from '../../../modules/local/LCA'
 
@@ -29,6 +34,7 @@ workflow MITOGENOME_ANNOTATION {
     curated_blast_db // params.curated_blast_db
     nt_blast_db // params.nt_blast_db
     mitos_refdb // params.mitos_refdb (MITOS2 RefSeq reference data dir, for invertebrates)
+    reference_gb // tuple val(meta), path(reference.gb) - per-sample, partial (assembly stage)
 
     main:
 
@@ -60,7 +66,21 @@ workflow MITOGENOME_ANNOTATION {
         def meta_ext = meta + [ mt_assembly_prefix: fasta.baseName ]
         [meta_ext, fasta]
     }
-    
+
+    //
+    // MODULE: Reference relevance check.
+    // The reference is resolved from the sample's species label, so a wrong/coarse
+    // label yields a wrong-family reference that silently degrades seeding and the
+    // coral annotation fix. BLAST the resolved reference against the assembly and
+    // record a PASS/MISMATCH review flag for every sample that has one. Label- and
+    // taxonomy-DB-free; always exits 0.
+    //
+    REFERENCE_RELEVANCE (
+        fasta_with_mt_assembly_prefix.join(reference_gb)
+            .map { meta, fasta, ref -> [meta, fasta, ref] }
+    )
+    ch_reference_relevance = REFERENCE_RELEVANCE.out.flag
+
     //
     // MODULE: Annotate the mitogenome.
     // Route by meta.invertebrates: vertebrates -> EMMA, invertebrates -> MITOS2.
@@ -84,23 +104,89 @@ workflow MITOGENOME_ANNOTATION {
         ch_annot_branched.vert // tuple val(meta), path(fasta)
     )
 
-    MITOS2 (
+    // Re-origin invert (coral) assemblies to the cox1 start before MITOS2 so the
+    // anthozoan nad5 group I intron (and cox3) no longer straddle GetOrganelle's
+    // linearisation point. This mirrors EMMA's `--rotate MT-TF` for vertebrates;
+    // corals lack tRNA-Phe, so cox1 is the anchor. The original (un-rotated)
+    // assembly is published separately by the assembly stage and left untouched.
+    ch_cox1_ref = Channel.fromPath("${projectDir}/assets/cox1_anthozoa.faa", checkIfExists: true).first()
+
+    ROTATE_ORIGIN (
         ch_annot_branched.invert.map { meta, fasta ->
             if (!mitos_refdb) {
                 error "Sample ${meta.id} is marked invertebrates=true, but --mitos_refdb was not provided"
             }
             [meta, fasta]
         },
+        ch_cox1_ref
+    )
+
+    MITOS2 (
+        ROTATE_ORIGIN.out.fasta,
         ch_mitos_refdb
     )
 
-    // Merge the two annotators' outputs so everything downstream is unchanged.
-    ch_annot_co1     = EMMA.out.co1_sequences.mix(MITOS2.out.co1_sequences)
-    ch_annot_s12     = EMMA.out.s12_sequences.mix(MITOS2.out.s12_sequences)
-    ch_annot_s16     = EMMA.out.s16_sequences.mix(MITOS2.out.s16_sequences)
-    ch_annot_results = EMMA.out.results.mix(MITOS2.out.results)
-    ch_annot_params  = EMMA.out.tool_params.mix(MITOS2.out.tool_params)
-    ch_annot_versions = EMMA.out.versions.mix(MITOS2.out.versions)
+    //
+    // Anthozoan annotation QC gate + reference-based fixer.
+    // MITOS2 annotates coral PCGs + 12S correctly but routinely drops the
+    // divergent 16S and one exon of the intron-split nad5. The gate flags each
+    // invert annotation as FIX (deficient) or PASS, so only broken corals are
+    // re-annotated; correctly annotated batch-mates pass through MITOS2 untouched.
+    //
+    ANNOTATION_QC_GATE ( MITOS2.out.gff_proteins )
+
+    ch_gate = ANNOTATION_QC_GATE.out.decision
+        .map { meta, dfile -> [meta, dfile.text.split('\t')[0].trim()] }   // [meta, FIX|PASS]
+
+    // PASS corals: keep MITOS2 output unchanged.
+    ch_mitos_co1_pass     = MITOS2.out.co1_sequences.join(ch_gate).filter { it[-1] == 'PASS' }.map { meta, f, _d -> [meta, f] }
+    ch_mitos_s12_pass     = MITOS2.out.s12_sequences.join(ch_gate).filter { it[-1] == 'PASS' }.map { meta, f, _d -> [meta, f] }
+    ch_mitos_s16_pass     = MITOS2.out.s16_sequences.join(ch_gate).filter { it[-1] == 'PASS' }.map { meta, f, _d -> [meta, f] }
+    ch_mitos_results_pass = MITOS2.out.results.join(ch_gate).filter { it[-1] == 'PASS' }.map { meta, f, _d -> [meta, f] }
+
+    // FIX corals: fixer base = the cox1-rotated genome MITOS2 annotated + the raw BED.
+    ch_fix_base = ROTATE_ORIGIN.out.fasta
+        .join(MITOS2.out.bed)
+        .join(ch_gate)
+        .filter { it[-1] == 'FIX' }
+        .map { meta, genome, bed, _d -> [meta, genome, bed] }
+
+    // Reference resolution -- label-free. Pick the annotation reference from the
+    // curated Anthozoa mitogenome DB by SEQUENCE similarity to the assembly, so a
+    // wrong/coarse species label can no longer hand a wrong-family reference to
+    // the fixer. The bundled curated anthozoan reference is the only fallback (used
+    // just for the rare sample no DB record aligns to).
+    ch_coral_db = Channel.fromPath("${projectDir}/assets/coral_mito_refdb.gb", checkIfExists: true).first()
+
+    SELECT_CORAL_REFERENCE ( ch_fix_base.map { meta, genome, _bed -> [meta, genome] }, ch_coral_db )
+    ch_selected_ref = SELECT_CORAL_REFERENCE.out.reference   // [meta, reference.gb]
+
+    ch_fix_selected = ch_fix_base.join(ch_selected_ref)
+        .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }
+
+    // Fallback: a FIX sample for which the selector emitted no reference (no DB
+    // record aligned) gets the bundled curated anthozoan reference.
+    ch_sel_keys = ch_selected_ref.map { meta, _ref -> [meta, true] }
+    ch_curated_ref = Channel.fromPath("${projectDir}/assets/anthozoa_reference.gb", checkIfExists: true).first()
+    ch_fix_fallback = ch_fix_base.join(ch_sel_keys, remainder: true)
+        .filter { it[0] != null && it[1] != null && it[-1] == null }   // FIX sample, selector emitted nothing
+        .map { meta, genome, bed, _flag -> [meta, genome, bed] }
+        .combine(ch_curated_ref)
+        .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }
+
+    ch_coral_fix_input = ch_fix_selected.mix(ch_fix_fallback)
+
+    CORAL_ANNOTATION_FIX ( ch_coral_fix_input )
+
+    // Merge annotators: verts (EMMA) + PASS corals (MITOS2) + FIX corals (fixer).
+    ch_annot_co1     = EMMA.out.co1_sequences.mix(ch_mitos_co1_pass, CORAL_ANNOTATION_FIX.out.co1_sequences)
+    ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, CORAL_ANNOTATION_FIX.out.s12_sequences)
+    ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, CORAL_ANNOTATION_FIX.out.s16_sequences)
+    ch_annot_results = EMMA.out.results.mix(ch_mitos_results_pass, CORAL_ANNOTATION_FIX.out.results)
+    ch_annot_params  = EMMA.out.tool_params.mix(ROTATE_ORIGIN.out.tool_params, MITOS2.out.tool_params, CORAL_ANNOTATION_FIX.out.tool_params)
+    ch_annot_versions = EMMA.out.versions.mix(ROTATE_ORIGIN.out.versions, MITOS2.out.versions,
+                                              ANNOTATION_QC_GATE.out.versions, CORAL_ANNOTATION_FIX.out.versions,
+                                              SELECT_CORAL_REFERENCE.out.versions)
 
     //
     // Function to extract annotation name
@@ -181,6 +267,7 @@ workflow MITOGENOME_ANNOTATION {
     ch_versions = ch_versions.mix(ch_annot_versions.first())
     ch_versions = ch_versions.mix(BLAST_BLASTN.out.versions.first())
     ch_versions = ch_versions.mix(LCA.out.versions.first())
+    ch_versions = ch_versions.mix(REFERENCE_RELEVANCE.out.versions.first())
 
 
 
@@ -194,5 +281,6 @@ workflow MITOGENOME_ANNOTATION {
     blast_filtered_results  = BLAST_BLASTN.out.validation
     lca_results             = LCA.out.lca
     lca_raw_results         = LCA.out.lca_raw
+    reference_relevance     = ch_reference_relevance   // channel: [ meta, path(reference_relevance.txt) ] (PASS|MISMATCH|UNKNOWN)
     versions                = ch_versions              // channel: [ path(versions.yml) ]
 }

@@ -13,6 +13,7 @@ include { GETORGANELLE_FROMREADS    } from '../../../../modules/nf-core/getorgan
 include { GETORGANELLE_RESEED       } from '../../../../modules/local/getorganelle/reseed'
 include { GETORGANELLE_GENEDB       } from '../../../../modules/local/getorganelle/genedb'
 include { MITOHIFI_FINDMITOREFERENCE } from '../../../../modules/nf-core/mitohifi/findmitoreference'
+include { RELABEL_REFERENCE_GB      } from '../../../../modules/local/relabel_reference_gb'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
 // Decide whether a first-pass GetOrganelle result warrants a reseed attempt.
@@ -52,6 +53,11 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
     ch_summary_files = Channel.empty()
+    // Per-sample reference GenBank (findMitoReference, via RELABEL_REFERENCE_GB).
+    // Only reseed candidates download one, so this is a partial channel; the
+    // annotation subworkflow falls back to a fresh lookup / curated asset for the
+    // rest. Stays empty when the reseed stage is skipped.
+    ch_reference_gb = Channel.empty()
 
      
     //
@@ -144,37 +150,55 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             keep:   !needsReseed(fasta, log)
         }
 
-        // Download a closely related mitogenome to use as the seed. Reuses
-        // findMitoReference, now driven by the resolved reference_species_id.
-        ch_reseed_meta = ch_assessed.reseed.map { meta, _fasta, _log, _reads -> meta }
+        // Split reseed candidates by taxon. INVERTEBRATES (corals) seed from the
+        // curated coral mitogenome DB -- a broad, label-free Anthozoa seed + label
+        // database, so a wrong/coarse species label can no longer pick a wrong seed.
+        // VERTEBRATES keep the per-sample findMitoReference download. The coral DB is
+        // NEVER used for vertebrates.
+        ch_reseed_branched = ch_assessed.reseed.branch { meta, _fasta, _log, _reads ->
+            invert: meta.invertebrates
+            vert:   true
+        }
 
+        // --- Vertebrate reseed path: findMitoReference seed + custom gene db. ---
         MITOHIFI_FINDMITOREFERENCE (
-            ch_reseed_meta
+            ch_reseed_branched.vert.map { meta, _fasta, _log, _reads -> meta }
         )
-
-        ch_seed = MITOHIFI_FINDMITOREFERENCE.out.reference
+        ch_vert_seed = MITOHIFI_FINDMITOREFERENCE.out.reference
             .map { meta, ref_fasta, _ref_gb -> [meta, ref_fasta] }   // [meta, seed]
-
-        // Build a custom GetOrganelle label (gene) database from the reference
-        // GenBank that findMitoReference downloaded alongside the seed. This is
-        // what disentangles contigs during extension for divergent animal
-        // mitogenomes; the reseed is only ever run WITH it (see GETORGANELLE_GENEDB).
-        ch_ref_gb = MITOHIFI_FINDMITOREFERENCE.out.reference
+        ch_vert_ref_gb = MITOHIFI_FINDMITOREFERENCE.out.reference
             .map { meta, _ref_fasta, ref_gb -> [meta, ref_gb] }      // [meta, ref_gb]
 
-        GETORGANELLE_GENEDB (
-            ch_ref_gb // tuple val(meta), path(gb)
-        )
+        // Custom label database from the reference GenBank (disentangles contigs for
+        // divergent animal mitogenomes); the vertebrate reseed only runs WITH it.
+        GETORGANELLE_GENEDB ( ch_vert_ref_gb )
 
-        // Only samples with a well-annotated gene database emit here; sparse /
-        // empty references are dropped (optional output absent) and fall back below.
-        ch_genes = GETORGANELLE_GENEDB.out.genes   // [meta, genes]
+        // Relabel the reference GenBank to a per-sample name for the assembly summary.
+        RELABEL_REFERENCE_GB ( ch_vert_ref_gb )
+        // Per-sample reference GenBank (vertebrates only). Coral annotation now picks
+        // its reference from the DB by sequence, so corals need none here.
+        ch_reference_gb = RELABEL_REFERENCE_GB.out.gb
+
+        // --- Invertebrate (coral) reseed path: broad coral DB seed + label db. ---
+        ch_coral_seed  = Channel.fromPath("${projectDir}/assets/coral_mito_refdb.fasta",       checkIfExists: true).first()
+        ch_coral_label = Channel.fromPath("${projectDir}/assets/coral_mito_refdb.label.fasta", checkIfExists: true).first()
+        ch_invert_seed  = ch_reseed_branched.invert
+            .map { meta, _fasta, _log, _reads -> meta }.combine(ch_coral_seed)
+            .map { meta, seed -> [meta, seed] }
+        ch_invert_genes = ch_reseed_branched.invert
+            .map { meta, _fasta, _log, _reads -> meta }.combine(ch_coral_label)
+            .map { meta, genes -> [meta, genes] }
+
+        // Merge the two reseed paths. Inverts always carry both seed + genes (assets);
+        // verts carry them only when findMitoReference + GENEDB succeeded.
+        ch_seed  = ch_vert_seed.mix(ch_invert_seed)
+        ch_genes = GETORGANELLE_GENEDB.out.genes.mix(ch_invert_genes)
 
         ch_reseed_reads = ch_assessed.reseed.map { meta, _fasta, _log, reads -> [meta, reads] }
 
-        // Reseed candidates that got BOTH a seed AND a usable custom gene database.
-        // The inner joins drop any sample missing either input, enforcing the rule
-        // that a reseed never runs without --genes.
+        // Reseed candidates that got BOTH a seed AND a usable gene database. The inner
+        // joins drop any sample missing either input, enforcing "never reseed without
+        // --genes" (only ever bites a vertebrate with a sparse/absent reference).
         ch_reseed_input = ch_reseed_reads
             .join(ch_seed, by: 0)                       // [meta, reads, seed]
             .join(ch_genes, by: 0)                      // [meta, reads, seed, genes]
@@ -235,6 +259,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             .mix(GETORGANELLE_RESEED.out.org_assm_graph)
             .mix(GETORGANELLE_RESEED.out.raw_assm_graph)
             .mix(GETORGANELLE_RESEED.out.simp_assm_graph)
+            .mix(RELABEL_REFERENCE_GB.out.gb.map { _meta, gb -> gb })
         ch_versions = ch_versions
             .mix(GETORGANELLE_RESEED.out.versions.first())
             .mix(GETORGANELLE_GENEDB.out.versions.first())
@@ -290,6 +315,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     emit:
     assembly_fasta  = ch_assembly_fasta
     assembly_log    = ch_assembly_log
+    reference_gb    = ch_reference_gb              // channel: [ meta, reference.gb ] (partial: reseed candidates only)
     summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]

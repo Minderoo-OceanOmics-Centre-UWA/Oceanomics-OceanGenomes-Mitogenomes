@@ -10,3 +10,7 @@ null/
 run_*
 blast_dbs/
 taxonkit_dbs/
+
+# nf-test runtime
+.nf-test/
+.nf-test.log

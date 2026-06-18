@@ -70,7 +70,13 @@ workflow OCEANGENOMESMITOGENOMES {
     */
 
     
-    // 
+    // Per-sample reference GenBanks (findMitoReference, from the assembly stage)
+    // reused by the anthozoan annotation fixer. Partial / empty on precomputed or
+    // skip paths; the annotation subworkflow re-resolves any sample missing one.
+    ch_mitogenome_getorg_reference_gb = Channel.empty()
+    ch_mitogenome_hifi_reference_gb   = Channel.empty()
+
+    //
     // SUBWORKFLOW: MITOGENOME_ASSEMBLY_GETORG
     //
 
@@ -81,6 +87,7 @@ workflow OCEANGENOMESMITOGENOMES {
         )
         ch_mitogenome_getorg_assembly_fasta = MITOGENOME_ASSEMBLY_GETORG.out.assembly_fasta
         ch_mitogenome_getorg_assembly_log = MITOGENOME_ASSEMBLY_GETORG.out.assembly_log
+        ch_mitogenome_getorg_reference_gb = MITOGENOME_ASSEMBLY_GETORG.out.reference_gb
     } else if (params.precomputed_mitogenome_assembly_fasta_getorg) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: false)
@@ -137,6 +144,7 @@ workflow OCEANGENOMESMITOGENOMES {
         )
         ch_mitogenome_hifi_assembly_fasta = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_fasta
         ch_mitogenome_hifi_assembly_log = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_log
+        ch_mitogenome_hifi_reference_gb = MITOGENOME_ASSEMBLY_MITOHIFI.out.reference_gb
     } else if (params.precomputed_mitogenome_assembly_fasta_hifi) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_hifi, checkIfExists: false)
@@ -202,17 +210,28 @@ workflow OCEANGENOMESMITOGENOMES {
     //
     // SUBWORKFLOW: MITOGENOME_ANNOTATION
     //
+    // Per-sample reference GenBanks from whichever assembler ran, for the
+    // anthozoan annotation fixer to reuse before re-downloading.
+    ch_annotation_reference_gb = ch_mitogenome_hifi_reference_gb
+        .mix(ch_mitogenome_getorg_reference_gb)
+
     if (!params.skip_mitogenome_annotation) {
         MITOGENOME_ANNOTATION (
             ch_annotation_input_sanitised,
             curated_blast_db,
             nt_blast_db,
-            mitos_refdb
+            mitos_refdb,
+            ch_annotation_reference_gb
         )
         ch_mitogenome_annotation_results = MITOGENOME_ANNOTATION.out.annotation_results
         ch_mitogenome_blast_results = MITOGENOME_ANNOTATION.out.blast_filtered_results
         ch_mitogenome_lca_results = MITOGENOME_ANNOTATION.out.lca_results
         ch_mitogenome_lca_raw_results = MITOGENOME_ANNOTATION.out.lca_raw_results
+
+        // Feed the per-sample reference-relevance flag into the assembly summary so
+        // a wrong-family reference surfaces as a manual_review_reason.
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(
+            MITOGENOME_ANNOTATION.out.reference_relevance.map { meta, f -> f })
     } else if (params.precomputed_mitogenome_annotation_results) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_annotation_results = Channel.fromPath(params.precomputed_mitogenome_annotation_results)
