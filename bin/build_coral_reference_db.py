@@ -22,9 +22,14 @@ same completeness bar and merged in.
 
 Outputs (into --out-dir):
     coral_mito_refdb.gb          combined GenBank (canonical artifact; has features)
-    coral_mito_refdb.fasta       all sequences (for makeblastdb / selection)
+    coral_mito_refdb.fasta       all genome sequences (selection + GetOrganelle seed -s)
+    coral_mito_refdb.label.fasta GetOrganelle label/gene database (--genes), headers
+                                 '>gene type - accession--Organism'
     coral_mito_refdb.manifest.tsv  accession, organism, family, length, n_cds, n_rrna, source
     coral_mito_refdb.nucl.*       BLAST nucleotide DB (if makeblastdb is available)
+
+The .fasta (whole genomes) doubles as the GetOrganelle seed and the .label.fasta as
+its custom label database -- both used ONLY for invertebrate (coral) samples.
 
 Runs in the MITOS2 BioContainer (biopython + blast). NCBI access needs --email.
 
@@ -78,6 +83,42 @@ def record_is_complete(rec, min_cds):
 def family_of(rec):
     lineage = rec.annotations.get("taxonomy", []) or []
     return next((t for t in lineage if t.endswith("idae")), "")
+
+
+def write_label_db(records, path):
+    """Write a GetOrganelle label database from the kept records' gene features.
+
+    GetOrganelle's --genes database labels assembly-graph contigs by organelle gene
+    during disentangling; for divergent animal/coral mitogenomes a custom one helps
+    where the built-in animal_mt labels do not. Header format mirrors GetOrganelle's
+    get_annotated_regions_from_gb.py: '>gene type - accession--Organism_no_spaces'.
+    """
+    from Bio.SeqIO import write as _write
+    from Bio.SeqRecord import SeqRecord
+    out = []
+    for rec in records:
+        acc = rec.id
+        org = (rec.annotations.get("organism", "") or "").replace(" ", "_")
+        for feat in rec.features:
+            if feat.type not in ("CDS", "rRNA", "tRNA"):
+                continue
+            names = feat.qualifiers.get("gene") or feat.qualifiers.get("product")
+            if not names:
+                continue
+            gene = names[0].replace(" ", "_")
+            try:
+                seq = feat.extract(rec.seq)
+            except Exception:
+                continue
+            if len(seq) < 30:
+                continue
+            sr = SeqRecord(seq, id=f"{gene}", description="")
+            sr.description = f"{feat.type} - {acc}--{org}"
+            out.append(sr)
+    with open(path, "w") as fh:
+        for sr in out:
+            fh.write(f">{sr.id} {sr.description}\n{str(sr.seq)}\n")
+    return len(out)
 
 
 def fetch_refseq(taxon, email, api_key, batch, retmax):
@@ -173,9 +214,11 @@ def main():
 
     gb = args.out_dir / "coral_mito_refdb.gb"
     fa = args.out_dir / "coral_mito_refdb.fasta"
+    lab = args.out_dir / "coral_mito_refdb.label.fasta"
     mf = args.out_dir / "coral_mito_refdb.manifest.tsv"
     SeqIO.write(kept, str(gb), "genbank")
     SeqIO.write(kept, str(fa), "fasta")
+    n_label = write_label_db(kept, lab)
     with open(mf, "w") as fh:
         fh.write("accession\torganism\tfamily\tlength_bp\tn_cds\tn_rrna\tsource\n")
         for row in sorted(manifest, key=lambda r: (r[2], r[1])):
@@ -193,7 +236,8 @@ def main():
     fams = sorted({m[2] for m in manifest if m[2]})
     print(f"[build_db] kept {len(kept)} records, dropped {n_drop} (incomplete).")
     print(f"[build_db] families ({len(fams)}): {', '.join(fams)}")
-    print(f"[build_db] wrote {gb.name}, {fa.name}, {mf.name} to {args.out_dir}/")
+    print(f"[build_db] label db: {n_label} gene sequences")
+    print(f"[build_db] wrote {gb.name}, {fa.name}, {lab.name}, {mf.name} to {args.out_dir}/")
 
 
 if __name__ == "__main__":
