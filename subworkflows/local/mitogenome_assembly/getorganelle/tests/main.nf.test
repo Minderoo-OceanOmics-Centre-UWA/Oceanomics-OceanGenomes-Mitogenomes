@@ -1,0 +1,111 @@
+nextflow_workflow {
+
+    name "Test subworkflow MITOGENOME_ASSEMBLY_GETORG"
+    script "./wrapper.nf"
+    workflow "GETORG_TRIM_HARNESS"
+    tag "subworkflows"
+    tag "getorganelle"
+    tag "fastp"
+
+    // Every process in this path has a stub block, so the cases run with -stub.
+    // Reseed is skipped to keep the focus on the raw-read -> fastp ->
+    // GetOrganelle path. The single supplied read pair never triggers CAT_FASTQ
+    // (needs >2 files), so the only tasks are GETORGANELLE_CONFIG, the optional
+    // FASTP, and GETORGANELLE_FROMREADS -- task count alone distinguishes
+    // "fastp ran" (3) from "fastp skipped/bypassed" (2).
+
+    test("hic reads route through FASTP before assembly") {
+
+        options "-stub"
+
+        when {
+            params {
+                skip_getorganelle_reseed = true
+                skip_hic_fastp           = false
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id:'OG999', sequencing_type:'hic', single_end:false, date:'250101', invertebrates:false ],
+                    [ file("\${projectDir}/subworkflows/local/mitogenome_assembly/getorganelle/tests/fixtures/hic_R1.fastq.gz"),
+                      file("\${projectDir}/subworkflows/local/mitogenome_assembly/getorganelle/tests/fixtures/hic_R2.fastq.gz") ]
+                ])
+                input[1] = 'animal_mt'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // FASTP ran: 3 tasks (config + fastp + fromreads) vs 2 without it.
+                { assert workflow.trace.succeeded().size() == 3 },
+                { assert workflow.trace.succeeded().any { it.name.contains(':FASTP') } },
+                // ... and a single assembly still comes out the other side.
+                { assert workflow.out.assembly_fasta.size() == 1 }
+            )
+        }
+    }
+
+    test("ilmn reads bypass FASTP") {
+
+        options "-stub"
+
+        when {
+            params {
+                skip_getorganelle_reseed = true
+                skip_hic_fastp           = false
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id:'OG998', sequencing_type:'ilmn', single_end:false, date:'250101', invertebrates:false ],
+                    [ file("\${projectDir}/subworkflows/local/mitogenome_assembly/getorganelle/tests/fixtures/ilmn_R1.fastq.gz"),
+                      file("\${projectDir}/subworkflows/local/mitogenome_assembly/getorganelle/tests/fixtures/ilmn_R2.fastq.gz") ]
+                ])
+                input[1] = 'animal_mt'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // ilmn was already trimmed upstream: no FASTP, so only 2 tasks.
+                { assert workflow.trace.succeeded().size() == 2 },
+                { assert !workflow.trace.succeeded().any { it.name.contains(':FASTP') } },
+                { assert workflow.out.assembly_fasta.size() == 1 }
+            )
+        }
+    }
+
+    test("skip_hic_fastp disables trimming for hic") {
+
+        options "-stub"
+
+        when {
+            params {
+                skip_getorganelle_reseed = true
+                skip_hic_fastp           = true
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id:'OG997', sequencing_type:'hic', single_end:false, date:'250101', invertebrates:false ],
+                    [ file("\${projectDir}/subworkflows/local/mitogenome_assembly/getorganelle/tests/fixtures/hic_R1.fastq.gz"),
+                      file("\${projectDir}/subworkflows/local/mitogenome_assembly/getorganelle/tests/fixtures/hic_R2.fastq.gz") ]
+                ])
+                input[1] = 'animal_mt'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.succeeded().size() == 2 },
+                { assert !workflow.trace.succeeded().any { it.name.contains(':FASTP') } }
+            )
+        }
+    }
+}

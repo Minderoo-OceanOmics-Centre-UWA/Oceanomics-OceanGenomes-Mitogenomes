@@ -11,8 +11,30 @@ include { MITOHIFI_FINDMITOREFERENCE       } from '../../../../modules/nf-core/m
 include { CAT_FASTQ                         } from '../../../../modules/nf-core/cat/fastq'
 include { MITOHIFI_MITOHIFI    } from '../../../../modules/nf-core/mitohifi/mitohifi'
 include { MITOHIFI_AVERAGE_COVERAGE        } from '../../../../modules/local/mitohifi/average_coverage'
+include { MITOHIFI_CHECK_CIRCULARITY       } from '../../../../modules/local/mitohifi/check_circularity'
 include { RELABEL_REFERENCE_GB             } from '../../../../modules/local/relabel_reference_gb'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
+
+// Read the circularity verdict from a MITOHIFI_CHECK_CIRCULARITY evidence TSV.
+// Returns true / false (final_verdict_circular) or null when the column is
+// missing / NA / unparseable. Folded into meta.circular so the annotation stage
+// (EMMA / MITOS2) and the GenBank QC gate see the real HiFi topology, mirroring
+// the GetOrganelle path. Defined at file scope so it resolves inside .map closures.
+def parseFinalVerdictCircular(tsv) {
+    try {
+        def rows = tsv.text.readLines()
+        if (rows.size() < 2) return null
+        def header = rows[0].split('\t')
+        def idx = header.findIndexOf { it.trim() == 'final_verdict_circular' }
+        if (idx < 0) return null
+        def cells = rows[1].split('\t')
+        if (idx >= cells.size()) return null
+        def v = cells[idx].trim().toLowerCase()
+        return (v == 'true') ? true : (v == 'false' ? false : null)
+    } catch (ignored) {
+        return null
+    }
+}
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -130,6 +152,36 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         ch_average_coverage_input
     )
 
+    //
+    // MODULE: Re-test circularity for assemblies MitoHiFi flagged non-circular.
+    //   MitoHiFi's terminal-overlap check yields false negatives on hifiasm
+    //   assemblies that are genuinely circular (the closed unitig loses its
+    //   self-overlap once MitoHiFi rotates/trims it). Left uncorrected, the false
+    //   flag is written to the SQL db as a "scaffold" and trips the assembly
+    //   summary's not_circularised manual-review reason. The check remaps the
+    //   already-mapped HiFi reads to a doubled reference (junction-spanning reads)
+    //   and reads the hifiasm c/l contig flag, then corrects was_circular in the
+    //   with-coverage stats. The corrected table is a drop-in replacement (same
+    //   basename) so the SQL upload and summary pick it up with no further changes.
+    //
+
+    // gb is joined for the control-region location of any length-inflating tandem
+    // repeat. MitoHiFi writes final_mitogenome.gb whenever it writes the final
+    // FASTA, so every assembled sample carries one and the inner join drops none.
+    ch_check_circularity_input = ch_mitohifi_fasta_branched.assembled
+        .join(MITOHIFI_AVERAGE_COVERAGE.out.stats, by: 0)
+        .join(MITOHIFI_MITOHIFI.out.coverage_mapping, by: 0)
+        .join(MITOHIFI_MITOHIFI.out.gb, by: 0)
+        .map { meta, fasta, stats, cov_map, gb -> [meta, stats, fasta, cov_map, gb] }
+
+    MITOHIFI_CHECK_CIRCULARITY (
+        ch_check_circularity_input
+    )
+
+    // Corrected with-coverage stats supersede the average-coverage output for
+    // every downstream consumer (SQL upload, assembly summary, MultiQC).
+    ch_assembled_stats = MITOHIFI_CHECK_CIRCULARITY.out.stats
+
     // For samples that failed to assemble, fall back to the (empty)
     // contigs_stats.tsv as a log placeholder so PUSH_MTDNA_ASSM_RESULTS still
     // gets a tuple to process.
@@ -137,15 +189,44 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         .join(MITOHIFI_MITOHIFI.out.stats, by: 0)
         .map { meta, _fasta, stats -> [meta, stats] }
 
-    ch_assembly_log = MITOHIFI_AVERAGE_COVERAGE.out.stats.mix(ch_failed_assembly_log)
+    ch_assembly_log = ch_assembled_stats.mix(ch_failed_assembly_log)
+
+    //
+    // Fold the circularity verdict into meta.circular.
+    //   The verdict comes from the check-circularity evidence (final_verdict_circular);
+    //   failed assemblies have no evidence and carry circular=null (unknown). Every
+    //   emitted channel that is later joined by the whole meta map downstream
+    //   (assembly_fasta <-> assembly_log in the parent workflow; circularity_evidence
+    //   in UPLOAD_RESULTS; reference_gb in MITOGENOME_ANNOTATION) is enriched from the
+    //   SAME verdict so those joins still match.
+    //
+    ch_circ_verdict = MITOHIFI_CHECK_CIRCULARITY.out.evidence
+        .map { meta, tsv -> [ meta, parseFinalVerdictCircular(tsv) ] }
+
+    ch_assembly_fasta = MITOHIFI_MITOHIFI.out.fasta
+        .join(ch_circ_verdict, by: 0, remainder: true)
+        .map { meta, fasta, circ -> [ meta + [ circular: circ ], fasta ] }
+
+    ch_assembly_log = ch_assembly_log
+        .join(ch_circ_verdict, by: 0, remainder: true)
+        .map { meta, log, circ -> [ meta + [ circular: circ ], log ] }
+
+    ch_reference_gb = RELABEL_REFERENCE_GB.out.gb
+        .join(ch_circ_verdict, by: 0, remainder: true)
+        .map { meta, gb, circ -> [ meta + [ circular: circ ], gb ] }
+
+    ch_circularity_evidence = MITOHIFI_CHECK_CIRCULARITY.out.evidence
+        .map { meta, evidence -> [ meta + [ circular: parseFinalVerdictCircular(evidence) ], evidence ] }
 
     //
     // Collect MultiQC inputs and versions
     //   - Prefer feeding human‑readable logs and summary tables to MultiQC.
     //
 
-    // MitoHiFi per-sample stats and logs
-    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.stats.collect { it[1] })
+    // MitoHiFi per-sample stats and logs (circularity-corrected stats)
+    ch_multiqc_files = ch_multiqc_files.mix(ch_assembled_stats.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_CHECK_CIRCULARITY.out.evidence.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_CHECK_CIRCULARITY.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.coverage.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.logs.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.command_logs.collect { it[1] })
@@ -163,13 +244,19 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // across samples in MITOGENOME_ASSEMBLY_SUMMARY's flat collect()), so relabel it
     // to a per-sample `<assembly_prefix>.reference.gb` first.
     ch_summary_files = ch_summary_files.mix(RELABEL_REFERENCE_GB.out.gb.map { _meta, gb -> gb })
-    ch_summary_files = ch_summary_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.stats.map { meta, stats -> stats })
+    ch_summary_files = ch_summary_files.mix(ch_assembled_stats.map { meta, stats -> stats })
+    // The circularity-check evidence is a per-run sidecar: the assembly summary
+    // strips its .circularity_check.tsv suffix to the run prefix (so it joins the
+    // existing run rather than spawning a phantom) and folds its length/repeat
+    // anomaly into the manual_review_reason.
+    ch_summary_files = ch_summary_files.mix(MITOHIFI_CHECK_CIRCULARITY.out.evidence.map { meta, evidence -> evidence })
     ch_summary_files = ch_summary_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.coverage.map { meta, coverage -> coverage })
 
     // Versions for versions.yml collation (not MultiQC inputs)
     ch_versions = ch_versions.mix(CAT_FASTQ.out.versions.first())
     ch_versions = ch_versions.mix(MITOHIFI_MITOHIFI.out.versions.first())
     ch_versions = ch_versions.mix(MITOHIFI_AVERAGE_COVERAGE.out.versions.first())
+    ch_versions = ch_versions.mix(MITOHIFI_CHECK_CIRCULARITY.out.versions.first())
 
 
     //
@@ -177,10 +264,11 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     //
 
     emit:
-    assembly_fasta  = MITOHIFI_MITOHIFI.out.fasta
-    assembly_log    = ch_assembly_log
+    assembly_fasta  = ch_assembly_fasta            // channel: [ meta(+circular), assembly.fasta ]
+    assembly_log    = ch_assembly_log              // channel: [ meta(+circular), contigs_stats.tsv ]
     coverage_stats  = MITOHIFI_AVERAGE_COVERAGE.out.coverage
-    reference_gb    = RELABEL_REFERENCE_GB.out.gb  // channel: [ meta, reference.gb ]
+    reference_gb    = ch_reference_gb              // channel: [ meta(+circular), reference.gb ]
+    circularity_evidence = ch_circularity_evidence // channel: [ meta(+circular), circularity_check.tsv ]
     summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]

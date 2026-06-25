@@ -20,6 +20,15 @@ include { LCA                    } from '../../../modules/local/LCA'
 // Helper functions
 include { softwareVersionsToYAML } from '../../nf-core/utils_nfcore_pipeline'
 
+// Extract the annotation name from a per-gene FASTA filename: strip the trailing
+// .fa and return everything after the first dot (e.g. CO1.<prefix>.fa -> <prefix>).
+// Defined at file scope so it resolves inside the .map closures below (a closure
+// assigned to a local `def` is not in scope for nested operator closures).
+def getAnnotationName(filename) {
+    def name = filename.toString().replaceAll(/\.fa$/, '')
+    def parts = name.split('\\.', 2)
+    return parts.size() > 1 ? parts[1] : name
+}
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -189,16 +198,6 @@ workflow MITOGENOME_ANNOTATION {
                                               SELECT_CORAL_REFERENCE.out.versions)
 
     //
-    // Function to extract annotation name
-    //
-
-    def getAnnotationName = { filename ->
-        def name = filename.toString().replaceAll(/\.fa$/, '')
-        def parts = name.split('\\.', 2)
-        return parts.size() > 1 ? parts[1] : name
-    }
-
-    // 
     // Use mix() to process CO1, 12s and 16s sequences through blast
     //
 

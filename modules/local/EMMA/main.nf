@@ -28,6 +28,12 @@ process EMMA {
         def inv_flag  = (meta.invertebrates ? '--invertebrates' : '')
         def args      = [base_args, inv_flag].findAll{ it }.join(' ')
         def prefix = task.ext.prefix ?: meta.mt_assembly_prefix
+        // EMMA hard-codes Is_circular=true on the GFF region line regardless of the
+        // assembly. Rewrite it to false only when the assembler reported a
+        // non-circular genome (meta.circular == false; set by GetOrganelle).
+        // Unknown topology (e.g. MitoHiFi, which leaves meta.circular unset) keeps
+        // EMMA's default so we never assert false without evidence.
+        def emma_noncircular = (meta.circular == false)
         def effective_args = [args, "--fa annotation/<prefix>.fa", "--gff annotation/<prefix>.gff", "--tbl annotation/<prefix>.tbl", "--svg annotation/<prefix>.svg", "--tempdir tempdir/", "--loglevel debug", fasta].findAll { it?.toString()?.trim() }.join(' ')
 
         """
@@ -48,7 +54,17 @@ process EMMA {
                 --svg annotation/\${emma_prefix}.svg \\
                 --tempdir tempdir/ \\
                 --loglevel debug \\
-                ${fasta} 
+                ${fasta}
+
+            # Correct the GFF topology flag when the assembly is known non-circular.
+            # NB: `sed -i` does not preserve permissions on the Lustre scratch
+            # filesystem (the rewritten file lands at mode 000 inside the
+            # container), which makes the downstream extract_proteins.jl step
+            # fail with "Permission denied". Restore readable perms afterwards.
+            if ${emma_noncircular ? 'true' : 'false'}; then
+                sed -i 's/Is_circular=true/Is_circular=false/' annotation/\${emma_prefix}.gff
+                chmod 644 annotation/\${emma_prefix}.gff
+            fi
 
             cat <<-END_TOOL_PARAMS > 07_emma.tool_params_mqcrow.html
             <tr><td>EMMA</td><td><samp>${effective_args}</samp></td><td>Annotates the mitogenome assembly for ${meta.id}; adds --invertebrates when the sample metadata requires it.</td></tr>

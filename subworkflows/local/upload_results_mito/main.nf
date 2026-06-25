@@ -38,8 +38,9 @@ workflow UPLOAD_RESULTS {
     blast_filtered_results
     lca_results
     lca_raw_results
+    circularity_evidence // tuple val(meta), path(circularity_check.tsv) — HiFi only
     sql_config // params.sql_config
-    
+
     main:
 
     ch_versions = Channel.empty()
@@ -131,43 +132,60 @@ workflow UPLOAD_RESULTS {
             missing genes and the genes are in the right order.
     */
     
-    ch_qc_conditions = SPECIES_VALIDATION.out.summary.join(PUSH_MTDNA_ANNOTATION_RESULTS.out.stats, by:0)
+    // Attach the per-sample circularity-check evidence (HiFi only) so the gate can
+    // block length/repeat anomalies (concatemers, control-region VNTRs, unresolved
+    // over-length assemblies) from progressing to QC. Samples without a check
+    // (GetOrganelle, precomputed) get a "no anomaly" placeholder via a remainder
+    // join, so they are never dropped and never blocked on this condition.
+    def no_anomaly_file = file("${projectDir}/assets/empty_circularity_check.tsv", checkIfExists: true)
+    ch_qc_conditions = SPECIES_VALIDATION.out.summary
+        .join(PUSH_MTDNA_ANNOTATION_RESULTS.out.stats, by: 0)
+        .join(circularity_evidence, by: 0, remainder: true)
+        // Keep only base rows (species + annotation present); drop evidence-only
+        // remainder rows, which have a null in the blast slot.
+        .filter { items -> items.size() >= 3 && items[1] != null }
+        .map { items ->
+            def circ = items.size() > 3 ? items[3] : null
+            [items[0], items[1], items[2], circ ?: no_anomaly_file]
+        }
 
     //
     // MODULE: evaluating the results to determine if to process the sample through QC
     //
 
     EVALUATE_QC_CONDITIONS (
-        ch_qc_conditions // tuple val(meta), path(lca_results.${meta.id}.tsv), path(${meta.id}.annotation_stats.csv)
+        ch_qc_conditions // tuple val(meta), path(blast_filtered), path(annotation_stats.csv), path(circularity_check.tsv)
     )
 
     // Filter for samples that meet both conditions
     ch_qc_ready = EVALUATE_QC_CONDITIONS.out.evaluation
-        .map { meta, species_file, proceed_file ->
+        .map { meta, species_file, proceed_file, circular_file ->
             def species_name = species_file.text.trim()
             def proceed_qc = proceed_file.text.trim()
-            return [ meta, species_name, proceed_qc ]
+            def circular = circular_file.text.trim()
+            return [ meta, species_name, proceed_qc, circular ]
         }
-        .filter { meta, species_name, proceed_qc ->
+        .filter { meta, species_name, proceed_qc, circular ->
             proceed_qc == "true"
         }
-    
+
     // Log samples that will proceed to QC
-    ch_qc_ready.view { meta, species_name, proceed_qc ->
-        "Sample ${meta.id} will proceed to QC with species: ${species_name}"
+    ch_qc_ready.view { meta, species_name, proceed_qc, circular ->
+        "Sample ${meta.id} will proceed to QC with species: ${species_name} (circular: ${circular})"
     }
-    
+
     // Filter for samples that dont meet the conditions
     ch_not_qc_ready = EVALUATE_QC_CONDITIONS.out.evaluation
-        .map { meta, species_file, proceed_file ->
+        .map { meta, species_file, proceed_file, circular_file ->
             def species_name = species_file.text.trim()
             def proceed_qc = proceed_file.text.trim()
-            return [ meta, species_name, proceed_qc ]
+            def circular = circular_file.text.trim()
+            return [ meta, species_name, proceed_qc, circular ]
         }
-        .filter { meta, species_name, proceed_qc ->
+        .filter { meta, species_name, proceed_qc, circular ->
             proceed_qc == "false"
         }
-        .view { meta, species_name, proceed_qc ->
+        .view { meta, species_name, proceed_qc, circular ->
             "Sample ${meta.id} will NOT proceed to QC - conditions not met"
         }
 
@@ -177,7 +195,7 @@ workflow UPLOAD_RESULTS {
     // Build a per-sample QC summary TSV for MultiQC
     qc_summary_input = EVALUATE_QC_CONDITIONS.out.evaluation
         .join(PUSH_MTDNA_ANNOTATION_RESULTS.out.stats, by: 0)
-        .map { meta, species_file, proceed_file, annotation_csv -> [ meta, species_file, proceed_file, annotation_csv ] }
+        .map { meta, species_file, proceed_file, circular_file, annotation_csv -> [ meta, species_file, proceed_file, annotation_csv ] }
     QC_SUMMARY (
         qc_summary_input // tuple val(meta), path(species_name.txt), path(proceed_qc.txt), path(annotation_stats.csv)
     )
@@ -210,7 +228,7 @@ workflow UPLOAD_RESULTS {
     //  - QC evaluation flags (for quick visibility in report) and summary table
     ch_multiqc_files = ch_multiqc_files.mix(SPECIES_VALIDATION.out.summary.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.stats.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(EVALUATE_QC_CONDITIONS.out.evaluation.map { meta, species_file, proceed_file -> proceed_file })
+    ch_multiqc_files = ch_multiqc_files.mix(EVALUATE_QC_CONDITIONS.out.evaluation.map { meta, species_file, proceed_file, circular_file -> proceed_file })
     ch_multiqc_files = ch_multiqc_files.mix(QC_SUMMARY.out.table.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_MTDNA_ASSM_RESULTS.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(SPECIES_VALIDATION.out.tool_params.collect { it[1] })
@@ -235,7 +253,7 @@ workflow UPLOAD_RESULTS {
     //
 
     emit:
-    qc_ready    = ch_qc_ready                   // channel: [ val(meta), val(species_name), val(proceed_qc true/false) ]
+    qc_ready    = ch_qc_ready                   // channel: [ val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false) ]
     assembly_summary_files = PUSH_MTDNA_ANNOTATION_RESULTS.out.stats.map { meta, stats -> stats }
     upload_summary = UPLOAD_RESULTS_SUMMARY.out.summary    // channel: path(upload_results_summary.tsv)
     upload_appendix = UPLOAD_RESULTS_SUMMARY.out.appendix  // channel: path(upload_results_appendix.txt)

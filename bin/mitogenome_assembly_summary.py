@@ -225,6 +225,8 @@ def strip_known_suffix(name: str) -> str:
     suffixes = [
         ".contigs_stats.with_coverage.tsv",
         ".contigs_stats.tsv",
+        ".circularity_check.tsv",
+        ".getorg_check.tsv",
         ".coverage.tsv",
         ".reference_relevance.txt",
         ".get_org.log.txt",
@@ -586,6 +588,39 @@ def has_numt_signal(files: Iterable[Path]) -> bool:
     return False
 
 
+def anomaly_for_run(run: "RunFiles") -> dict[str, str]:
+    """Read the circularity-check sidecar for this run and return its
+    length/repeat anomaly fields. The MitoHiFi check writes
+    <prefix>.circularity_check.tsv and the GetOrganelle check writes
+    <prefix>.getorg_check.tsv; both carry anomaly_type / length_anomaly. The check
+    flags over-length assemblies as a concatemer (tandem genome duplication), a
+    control_region_repeat (D-loop VNTR) or unresolved; apply_qc turns these into
+    manual-review reasons."""
+    for path in run.files:
+        if path.name.endswith((".circularity_check.tsv", ".getorg_check.tsv")):
+            rows = read_table(path)
+            if rows:
+                row = rows[0]
+                return {
+                    "anomaly_type": first_value(row, ["anomaly_type"]),
+                    "length_anomaly": first_value(row, ["length_anomaly"]),
+                }
+    return {}
+
+
+def getorg_circular_override(run: "RunFiles") -> str:
+    """Corrected circular verdict from the GetOrganelle check sidecar
+    (<prefix>.getorg_check.tsv -> final_verdict_circular). 'true'/'false' or ''.
+    Lets a single scaffold the reference test confirms circular be recorded as
+    circularised even though GetOrganelle's log said 'N scaffold(s)'."""
+    for path in run.files:
+        if path.name.endswith(".getorg_check.tsv"):
+            rows = read_table(path)
+            if rows:
+                return parse_bool(first_value(rows[0], ["final_verdict_circular"])) or ""
+    return ""
+
+
 def reference_relevance_for_run(run: "RunFiles") -> str:
     """Read the REFERENCE_RELEVANCE flag (PASS|MISMATCH|UNKNOWN) for this run, or ''.
 
@@ -637,6 +672,14 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
         reasons.append("possible_numt")
     if row.get("reference_relevance") == "MISMATCH":
         reasons.append("reference_mismatch")
+    # Length / tandem-repeat anomaly from the circularity check. The specific type
+    # (concatemer / control_region_repeat / unresolved) is the curation action, so
+    # surface it verbatim; fall back to a generic flag if only length_anomaly is set.
+    anomaly_type = (row.get("anomaly_type") or "").strip().lower()
+    if anomaly_type and anomaly_type not in PLACEHOLDER_VALUES and anomaly_type != "none":
+        reasons.append(anomaly_type)
+    elif (row.get("length_anomaly") or "").strip().lower() == "yes":
+        reasons.append("length_anomaly")
     if (
         thresholds.min_length is not None
         and length is not None
@@ -690,6 +733,7 @@ def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterabl
     row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
     row["numt_flag"] = "true" if has_numt_signal(run.files) else "false"
     row["reference_relevance"] = reference_relevance_for_run(run)
+    row.update(anomaly_for_run(run))
 
     apply_qc(row, thresholds)
     if not row["final_length_bp"]:
@@ -731,7 +775,12 @@ def getorganelle_status_from_log(files: Iterable[Path]) -> tuple[str, str, float
             elif "incomplete" in status_text:
                 status = "incomplete"
                 circularised = "false"
-        if "traceback" in text or "error:" in text or "failed" in text:
+        # GetOrganelle emits benign INFO-level "Disentangling failed:" messages
+        # while it tries successive disentangling strategies before succeeding;
+        # those are not run failures. Only genuine ERROR-level log lines (e.g.
+        # "ERROR: Assembling failed.", "ERROR: No animal_mt seed reads found!")
+        # or a Python traceback indicate an actual failure.
+        if " - error:" in text or "traceback (most recent call last)" in text:
             status = "failed"
     return status, circularised, mean_coverage
 
@@ -787,11 +836,17 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
     status, circularised, mean_coverage = getorganelle_status_from_log(run.files)
     row["status"] = status
     row["circularised"] = circularised
+    # A single scaffold the reference test confirms circular is recorded as
+    # circularised even though GetOrganelle's log said "N scaffold(s)".
+    circ_override = getorg_circular_override(run)
+    if circ_override:
+        row["circularised"] = circ_override
     if mean_coverage is not None:
         row["mean_coverage"] = format_number(mean_coverage)
 
     row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
     row["numt_flag"] = "true" if has_numt_signal(run.files) else "false"
+    row.update(anomaly_for_run(run))
 
     # The GetOrganelle reseed reference (relabelled <prefix>.reference.gb, or the
     # published mtdna/reference_seed/NC_*.gb) is not tied to a run by classify_file,

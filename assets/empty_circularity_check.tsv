@@ -1,0 +1,2 @@
+sample	source_contig	mitohifi_was_circular	hifiasm_contig_circular	junction_spanning_reads	mapped_reads	min_spanning_reads	min_overhang	read_spanning_circular	final_verdict_circular	flag_corrected	note	assembly_length	reference_length	length_ratio	excess_bp	length_anomaly	tandem_repeat	repeat_region	repeat_unit_bp	repeat_copies	repeat_identity	repeat_in_control_region	anomaly_type	suggested_trim_region	curation_suggestion
+NA	NA	NA	NA	NA	NA	NA	NA	NA	NA	no	no_check	NA	NA	NA	NA	no	no	NA	NA	NA	NA	NA	none	NA	none

@@ -9,12 +9,35 @@ include { softwareVersionsToYAML    } from '../../../nf-core/utils_nfcore_pipeli
 // Mitogenome assembly
 include { GETORGANELLE_CONFIG       } from '../../../../modules/nf-core/getorganelle/config'
 include { CAT_FASTQ                 } from '../../../../modules/nf-core/cat/fastq'
+include { FASTP                     } from '../../../../modules/nf-core/fastp'
 include { GETORGANELLE_FROMREADS    } from '../../../../modules/nf-core/getorganelle/fromreads'
 include { GETORGANELLE_RESEED       } from '../../../../modules/local/getorganelle/reseed'
 include { GETORGANELLE_GENEDB       } from '../../../../modules/local/getorganelle/genedb'
 include { MITOHIFI_FINDMITOREFERENCE } from '../../../../modules/nf-core/mitohifi/findmitoreference'
 include { RELABEL_REFERENCE_GB      } from '../../../../modules/local/relabel_reference_gb'
+include { GETORGANELLE_CHECK        } from '../../../../modules/local/getorganelle/check'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
+
+// Read the corrected circular verdict from a GETORGANELLE_CHECK evidence TSV.
+// Returns true / false (final_verdict_circular) or null when the column is
+// missing / NA / unparseable. Folded back into meta.circular so the non-circular
+// scaffolds the reference test confirms circular are annotated (MITOS2) and gated
+// (GenBank QC) as circular. Defined at file scope so it resolves inside .map closures.
+def parseFinalVerdictCircular(tsv) {
+    try {
+        def rows = tsv.text.readLines()
+        if (rows.size() < 2) return null
+        def header = rows[0].split('\t')
+        def idx = header.findIndexOf { it.trim() == 'final_verdict_circular' }
+        if (idx < 0) return null
+        def cells = rows[1].split('\t')
+        if (idx >= cells.size()) return null
+        def v = cells[idx].trim().toLowerCase()
+        return (v == 'true') ? true : (v == 'false' ? false : null)
+    } catch (ignored) {
+        return null
+    }
+}
 
 // Decide whether a first-pass GetOrganelle result warrants a reseed attempt.
 // A circular genome is the only outright success: anything else (empty FASTA,
@@ -90,6 +113,31 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     final_reads = fastp_reads_split.no_concat.mix(CAT_FASTQ.out.reads)
 
     //
+    // MODULE: Trim raw HiC reads (adapter + poly-G) before assembly.
+    //   HiC reads enter this pipeline raw -- the draft-genome pipeline only trims
+    //   its Illumina short reads -- so residual Illumina adapter + NovaSeq poly-G
+    //   tails get assembled onto contig ends and block circularisation. fastp
+    //   strips them. Illumina (ilmn) reads were already fastp-trimmed upstream, so
+    //   they bypass this step to avoid double-trimming. Gated by skip_hic_fastp.
+    //
+    reads_for_assembly = final_reads
+    if (!params.skip_hic_fastp) {
+        reads_by_type = final_reads.branch { meta, _reads ->
+            hic:   meta.sequencing_type == 'hic'
+            other: true
+        }
+        FASTP (
+            reads_by_type.hic,
+            []   // adapter_fasta: empty -> fastp auto-detects adapters by overlap
+        )
+        reads_for_assembly = reads_by_type.other.mix(FASTP.out.reads)
+
+        ch_multiqc_files = ch_multiqc_files.mix(FASTP.out.json.map { _meta, json -> json })
+        ch_multiqc_files = ch_multiqc_files.mix(FASTP.out.tool_params.collect { it[1] })
+        ch_versions      = ch_versions.mix(FASTP.out.versions.first())
+    }
+
+    //
     // Get the GetOrganelle version to be used in the naming. Ensures the proper version is always used.
     //
 
@@ -105,7 +153,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // Embed the assembly prefix into meta.
     //
 
-    fastp_with_mt_assembly_prefix = final_reads.combine(version_ch)
+    fastp_with_mt_assembly_prefix = reads_for_assembly.combine(version_ch)
     .map { meta, fasta, version ->  // Destructure all 3 elements correctly
         def version_stripped = version.replaceAll('\\.', '')
         def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.getorg${version_stripped}"
@@ -309,6 +357,53 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_assembly_log   = ch_assembly_topo.map { meta, _fasta, log -> [ meta, log ] }
 
     //
+    // MODULE: Re-test circularity for non-circular GetOrganelle scaffolds + screen
+    //   length/tandem-repeat anomalies. A single scaffold GetOrganelle could not
+    //   formally close is frequently a complete circle linearised elsewhere; the
+    //   check confirms this against the related reference (full reference coverage)
+    //   and corrects the circular verdict. Samples with no findMitoReference get an
+    //   empty placeholder reference (the check then just records "no_reference").
+    //
+    // Join the reference by a stable key (mt_assembly_prefix): ch_reference_gb's
+    // meta predates the meta.circular enrichment above, so a whole-meta join would
+    // never match. ch_reference_gb is partial (reseed/vertebrate samples only), so
+    // remainder + placeholder keeps every fasta sample.
+    def no_reference_gb = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
+    ch_ref_keyed = ch_reference_gb.map { meta, ref -> [ meta.mt_assembly_prefix, ref ] }
+    ch_getorg_check_in = ch_assembly_fasta
+        .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+        .join(ch_ref_keyed, by: 0, remainder: true)
+        .filter { items -> items[1] != null }   // keep fasta rows; drop reference-only remainder
+        .map { items ->
+            def ref = items.size() > 3 ? items[3] : null
+            [ items[1], items[2], ref ?: no_reference_gb ]
+        }
+
+    GETORGANELLE_CHECK (
+        ch_getorg_check_in
+    )
+
+    // Fold the corrected circular verdict back into meta on BOTH the fasta and log
+    // channels (the parent workflow joins them by the whole meta map, so the two
+    // must stay identical). null verdict -> leave meta unchanged.
+    ch_circular_update = GETORGANELLE_CHECK.out.evidence
+        .map { meta, ev -> [ meta, parseFinalVerdictCircular(ev) ] }
+
+    ch_assembly_fasta = ch_assembly_fasta
+        .join(ch_circular_update, by: 0)
+        .map { meta, fasta, v -> [ (v == null ? meta : meta + [ circular: v ]), fasta ] }
+    ch_assembly_log = ch_assembly_log
+        .join(ch_circular_update, by: 0)
+        .map { meta, logf, v -> [ (v == null ? meta : meta + [ circular: v ]), logf ] }
+
+    // Evidence feeds the assembly summary (anomaly reason + circular override) and
+    // is emitted for the QC gate (anomaly block + circular condition).
+    ch_summary_files = ch_summary_files.mix(GETORGANELLE_CHECK.out.evidence.map { _meta, ev -> ev })
+    ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_CHECK.out.evidence.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_CHECK.out.tool_params.collect { it[1] })
+    ch_versions = ch_versions.mix(GETORGANELLE_CHECK.out.versions.first())
+
+    //
     // Emit outputs
     //
 
@@ -316,6 +411,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     assembly_fasta  = ch_assembly_fasta
     assembly_log    = ch_assembly_log
     reference_gb    = ch_reference_gb              // channel: [ meta, reference.gb ] (partial: reseed candidates only)
+    circularity_evidence = GETORGANELLE_CHECK.out.evidence  // channel: [ meta, getorg_check.tsv ]
     summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]

@@ -26,15 +26,21 @@ include { GEN_FILES_TABLE2ASN   } from '../../../modules/local/genome_qc/gen_fil
 workflow MITOGENOME_QC {
 
     take:
-    mitogenome_qc // tuple val(meta), val(species_name), val(proceed_qc true/false), path(annotation/*)
-    
+    mitogenome_qc // tuple val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false), path(annotation/*)
+
     main:
-    
+
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
     def sql_config_file = file(params.sql_config, checkIfExists: true)
     def template_sbt_file = file(params.template_sbt, checkIfExists: true)
 
+    // Per-sample circularity verdict (resolved at the QC gate) carried as a value
+    // so the table2asn topology/completeness modifiers reflect the real assembly,
+    // rather than asserting a circular topology on every sample. Dropped from the
+    // FORMAT_FILES input so that process keeps its existing signature.
+    ch_circular = mitogenome_qc.map { meta, _species, _proceed, circular, _files -> [ meta, circular ] }
+    ch_format_input = mitogenome_qc.map { meta, species, proceed, _circular, files -> [ meta, species, proceed, files ] }
 
     //
     // MODULE: Format files to align better with GenBank requirements and generate the cmt file
@@ -42,7 +48,7 @@ workflow MITOGENOME_QC {
     // mitogenome_qc.view { "Input to FORMAT_FILES: $it" }
 
     FORMAT_FILES (
-        mitogenome_qc     // tuple val(meta), val(species_name), val(proceed_qc true/false), path(input_dir) - input dir is the annotation outputs directory
+        ch_format_input   // tuple val(meta), val(species_name), val(proceed_qc true/false), path(input_dir) - input dir is the annotation outputs directory
     )
     // output is tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), emit: processed_files
     ch_multiqc_files = ch_multiqc_files.mix(FORMAT_FILES.out.tool_params.collect { it[1] })
@@ -98,16 +104,20 @@ workflow MITOGENOME_QC {
     //
     // MODULE: Generate files and run table2asn
     //
-    ch_processed_files = FORMAT_FILES.out.processed_files.join(BUILD_SOURCE_MODIFIERS.out.src_file, by:0)
+    ch_processed_files = FORMAT_FILES.out.processed_files
+        .join(BUILD_SOURCE_MODIFIERS.out.src_file, by:0)
+        .join(ch_circular, by:0)
 
     GEN_FILES_TABLE2ASN (
-        ch_processed_files, // tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), path("*.src") 
+        ch_processed_files, // tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), path("*.src"), val(circular)
         template_sbt_file // sbt template generated from genbank, specific for OceanOmics
     )
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(GEN_FILES_TABLE2ASN.out.versions.first())
     // Feed table2asn validation output into MultiQC inputs (text summary)
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.val_file.collect { it[1] })
+    // Per-sample missing-stop-codon (SEQ_FEAT.NoStop) flags for manual review
+    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.qc_flags.collect { it[1] })
     
     //
     // MODULE: Interperate the translation diagnostics from table2asn output

@@ -88,6 +88,7 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_getorg_assembly_fasta = MITOGENOME_ASSEMBLY_GETORG.out.assembly_fasta
         ch_mitogenome_getorg_assembly_log = MITOGENOME_ASSEMBLY_GETORG.out.assembly_log
         ch_mitogenome_getorg_reference_gb = MITOGENOME_ASSEMBLY_GETORG.out.reference_gb
+        ch_mitogenome_getorg_circularity_evidence = MITOGENOME_ASSEMBLY_GETORG.out.circularity_evidence
     } else if (params.precomputed_mitogenome_assembly_fasta_getorg) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: false)
@@ -120,10 +121,13 @@ workflow OCEANGENOMESMITOGENOMES {
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
+        // No check is re-run for precomputed assemblies -> no circularity evidence.
+        ch_mitogenome_getorg_circularity_evidence = Channel.empty()
     } else {
 
         ch_mitogenome_getorg_assembly_fasta = Channel.empty()
         ch_mitogenome_getorg_assembly_log = Channel.empty()
+        ch_mitogenome_getorg_circularity_evidence = Channel.empty()
     }
 
     if (!params.skip_mitogenome_assembly_getorg) {
@@ -145,6 +149,7 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_hifi_assembly_fasta = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_fasta
         ch_mitogenome_hifi_assembly_log = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_log
         ch_mitogenome_hifi_reference_gb = MITOGENOME_ASSEMBLY_MITOHIFI.out.reference_gb
+        ch_mitogenome_hifi_circularity_evidence = MITOGENOME_ASSEMBLY_MITOHIFI.out.circularity_evidence
     } else if (params.precomputed_mitogenome_assembly_fasta_hifi) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_hifi, checkIfExists: false)
@@ -177,10 +182,14 @@ workflow OCEANGENOMESMITOGENOMES {
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
+        // No circularity check is re-run for precomputed assemblies, so no anomaly
+        // gate is applied (samples proceed on the other QC conditions as before).
+        ch_mitogenome_hifi_circularity_evidence = Channel.empty()
     } else {
 
         ch_mitogenome_hifi_assembly_fasta = Channel.empty()
         ch_mitogenome_hifi_assembly_log = Channel.empty()
+        ch_mitogenome_hifi_circularity_evidence = Channel.empty()
     }
 
     if (!params.skip_mitogenome_assembly_hifi) {
@@ -317,12 +326,18 @@ workflow OCEANGENOMESMITOGENOMES {
     // All these processes access the OceanOmics PostgreSQL database.
     def ch_qc_input = Channel.empty()
     if (!params.skip_upload_results && params.sql_config) {
+        // Per-sample circularity-check evidence from both assemblers feeds the QC
+        // gate (anomaly block; the circular condition itself comes via meta.circular).
+        ch_mitogenome_circularity_evidence = ch_mitogenome_hifi_circularity_evidence
+            .mix(ch_mitogenome_getorg_circularity_evidence)
+
         UPLOAD_RESULTS (
             ch_mitogenome_assembly_results,
             ch_mitogenome_annotation_results,
             ch_mitogenome_blast_results,
             ch_mitogenome_lca_results,
             ch_mitogenome_lca_raw_results,
+            ch_mitogenome_circularity_evidence,
             sql_config // params.sql_config
         )
 
@@ -334,7 +349,7 @@ workflow OCEANGENOMESMITOGENOMES {
         // non submitted mitogenomes they can be grouped with to submit and then say when there is a 
         // group of similar mitogenomes they can be submitted as a batch.
         MITOGENOME_QC (
-            ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), path(annotation/*)
+            ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false), path(annotation/*)
         )
         ch_assembly_summary_files = ch_assembly_summary_files.mix(UPLOAD_RESULTS.out.assembly_summary_files)
     } else if (!params.skip_upload_results && !params.sql_config) {
