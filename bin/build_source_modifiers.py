@@ -252,9 +252,19 @@ def main():
     df_exp = df_exp.explode("SeqID")
     df_exp["SeqID"] = df_exp["SeqID"].str.strip()
 
-    # ensure lat/lon always has a value
+    # Leave lat_lon empty when we have no usable coordinate. NCBI's validator
+    # rejects the literal "unknown" (SEQ_DESCR.LatLonFormat); an empty cell in the
+    # .src simply omits the modifier, which is the correct way to signal "no value".
     df_exp["formatted_lat_lon"] = df_exp["lat_lon"].apply(convert_full_latlon)
-    df_exp["formatted_lat_lon"] = df_exp["formatted_lat_lon"].fillna("unknown")
+    df_exp["formatted_lat_lon"] = df_exp["formatted_lat_lon"].fillna("")
+    _unknown = df_exp["formatted_lat_lon"].str.strip().str.lower().eq("unknown")
+    df_exp.loc[_unknown, "formatted_lat_lon"] = ""
+
+    # geo_loc_name (the 'country' modifier) must start with a value from NCBI's
+    # controlled country/ocean list. The DB query substitutes 'Unknown' when the
+    # country is missing, which NCBI rejects; blank it so the modifier is omitted.
+    _no_country = df_exp["country"].astype(str).str.strip().str.lower().eq("unknown")
+    df_exp.loc[_no_country, "country"] = ""
 
     for _, row in df_exp.iterrows():
         full_seqid = row["SeqID"]
