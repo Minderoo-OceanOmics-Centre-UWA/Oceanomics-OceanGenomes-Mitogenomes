@@ -30,19 +30,23 @@ process FORMAT_FILES {
     script:
     def args = task.ext.args ?: ''
     def species = species_name ?: 'Unknown species'
-    def effective_args = [args, "--og-id ${meta.id}", "--species '${species}'", "--input-dir .", "--outdir processed"].findAll { it?.trim() }.join(' ')
+    def genetic_code = meta.genetic_code ?: 2
+    def effective_args = [args, "--og-id ${meta.id}", "--species '${species}'", "--input-dir .", "--outdir processed", "--genetic-code ${genetic_code}"].findAll { it?.trim() }.join(' ')
 
     """
     mkdir -p processed
 
     # All input files are staged in the current working directory
     # Pass the current directory as input-dir since files are staged here
+    # genetic_code is the per-sample mito translation table from meta.genetic_code
+    # (2=vertebrate, 4=coral/coelenterate, 9=echinoderm); drives mgcode + stop set.
     process_files.py \\
         $args \\
         --og-id "${meta.id}" \\
         --species "${species}" \\
         --input-dir . \\
-        --outdir processed
+        --outdir processed \\
+        --genetic-code ${genetic_code}
 
     cat <<-END_TOOL_PARAMS > 15_format_files.tool_params_mqcrow.html
     <tr><td>Format Files</td><td><samp>${effective_args}</samp></td><td>Formats EMMA outputs for GenBank preparation for ${meta.id}.</td></tr>

@@ -11,6 +11,10 @@ def parse_args():
     # directory in / out
     p.add_argument("--input-dir", required=True, help="Directory containing .fa/.fasta, .gff, and .gb/.tbl files")
     p.add_argument("--outdir", default="processed", help="Output directory (default: processed)")
+    p.add_argument("--genetic-code", type=int, default=2,
+                   help="NCBI mitochondrial translation table (mgcode). Per-sample value "
+                        "from meta.genetic_code: 2=vertebrate, 4=coelenterate/coral, "
+                        "9=echinoderm/flatworm (default: 2)")
     return p.parse_args()
 
 def log(msg):
@@ -112,19 +116,28 @@ def write_cmt(outdir: Path, seqid: str, assembly_method: str, seq_tech: str) -> 
     log(f"✅  Wrote {cmt_path.name}   (assembly = '{assembly_method}' ; tech = '{seq_tech}')")
     return cmt_path
 
-def process_fasta_file(input_file, output_file, species, assembly, og_id):
+def process_fasta_file(input_file, output_file, species, assembly, og_id, genetic_code=2):
     log(f"📝 Processing FASTA file: {input_file}")
     with open(input_file, 'r') as f_in, open(output_file, 'w') as f_out:
         for line in f_in:
             if line.startswith('>'):
-                f_out.write(f">{assembly} [organism={species}] [isolate={og_id}] [mgcode=2] {species} mitochondrion\n")
+                f_out.write(f">{assembly} [organism={species}] [isolate={og_id}] [mgcode={genetic_code}] {species} mitochondrion\n")
             else:
                 f_out.write(line)
     log(f"✅ Processed FASTA: {output_file}")
 
-# Vertebrate mitochondrial stop codons (transl_table 2). Used to confirm that an
+# Stop codons by NCBI mitochondrial translation table. Used to confirm that an
 # incomplete terminal codon really is a truncated stop before we assert aa:TERM.
-VERT_MITO_STOPS = ("TAA", "TAG", "AGA", "AGG")
+# Only the vertebrate code (2) reads AGA/AGG as stops; the coelenterate (4),
+# invertebrate (5) and echinoderm/flatworm (9) codes use TAA/TAG only (AGA/AGG
+# there are Arg or Ser). TGA is Trp, not a stop, in every mitochondrial code.
+_MITO_STOPS_BY_CODE = {
+    2: ("TAA", "TAG", "AGA", "AGG"),
+}
+_DEFAULT_MITO_STOPS = ("TAA", "TAG")
+
+def mito_stop_codons(genetic_code: int):
+    return _MITO_STOPS_BY_CODE.get(int(genetic_code), _DEFAULT_MITO_STOPS)
 # Substring of EMMA's note ("...TAA stop codon is completed by the addition of
 # 3' A residues to the mRNA") that survives the 'putative ' strip. Its presence
 # marks a CDS whose stop is completed post-transcriptionally by polyadenylation.
@@ -142,10 +155,11 @@ def read_fasta_sequence(fa_path) -> str:
 def _revcomp(s: str) -> str:
     return ''.join(_COMP.get(b, 'N') for b in reversed(s))
 
-def compute_transl_except_pos(start: int, end: int, seq: str):
+def compute_transl_except_pos(start: int, end: int, seq: str, stops):
     """For a single-interval CDS (1-based; start>end means minus strand), return
     the transl_except 'pos:' expression if its terminal codon is an incomplete,
-    polyadenylation-completed stop, else None.
+    polyadenylation-completed stop, else None. `stops` is the stop-codon tuple for
+    this sample's genetic code (see mito_stop_codons).
 
     table2asn raises SEQ_FEAT.NoStop when a CDS lacks an in-frame stop and cannot
     extend into the genome to find one (because the stop is really created by the
@@ -162,7 +176,7 @@ def compute_transl_except_pos(start: int, end: int, seq: str):
         if lo < 1 or hi > n:
             return None
         codon = seq[lo - 1:hi]               # coding-strand partial bases
-        if not any(stop.startswith(codon) for stop in VERT_MITO_STOPS):
+        if not any(stop.startswith(codon) for stop in stops):
             return None
         return f"{hi}" if rem == 1 else f"{lo}..{hi}"
     else:                                    # minus strand; 3' end at low coord
@@ -170,12 +184,13 @@ def compute_transl_except_pos(start: int, end: int, seq: str):
         if lo < 1 or hi > n:
             return None
         codon = _revcomp(seq[lo - 1:hi])     # coding-strand partial bases
-        if not any(stop.startswith(codon) for stop in VERT_MITO_STOPS):
+        if not any(stop.startswith(codon) for stop in stops):
             return None
         return f"complement({lo})" if rem == 1 else f"complement({lo}..{hi})"
 
-def process_tbl_gb_file(input_file, output_file, assembly, seq=None):
+def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_code=2):
     log(f"📝 Processing TBL/GB file: {input_file}")
+    stops = mito_stop_codons(genetic_code)
 
     def clean(line: str) -> str:
         if line.startswith('>Feature'):
@@ -215,7 +230,7 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None):
             if seq is not None and has_note and not has_te and not extra_intervals:
                 ic = interval.split('\t')
                 pos = compute_transl_except_pos(int(ic[0].lstrip('<>')),
-                                                int(ic[1].lstrip('<>')), seq)
+                                                int(ic[1].lstrip('<>')), seq, stops)
                 if pos:
                     out.append(f"\t\t\ttransl_except\t(pos:{pos},aa:TERM)")
                     added += 1
@@ -319,7 +334,8 @@ def main():
     gff_out   = outdir / Path(gff_in).name
     gb_out    = outdir / Path(gb_in).name
 
-    process_fasta_file(fasta_in, fasta_out, SPECIES, ASSEMBLY, OG_ID)
+    GENETIC_CODE = args.genetic_code
+    process_fasta_file(fasta_in, fasta_out, SPECIES, ASSEMBLY, OG_ID, genetic_code=GENETIC_CODE)
     tmp_gff = outdir / (gff_out.name + ".tmp")
     process_gff_file(gff_in, tmp_gff, ASSEMBLY)
     write_meta_directives(tmp_gff, SPECIES, OG_ID)
@@ -328,7 +344,7 @@ def main():
     # qualifiers (clears table2asn SEQ_FEAT.NoStop). Header rewriting does not touch
     # the bases, so coordinates match either the input or output FASTA.
     seq = read_fasta_sequence(fasta_in)
-    process_tbl_gb_file(gb_in, gb_out, ASSEMBLY, seq=seq)
+    process_tbl_gb_file(gb_in, gb_out, ASSEMBLY, seq=seq, genetic_code=GENETIC_CODE)
 
     log("🏁 File processing complete.")
 
