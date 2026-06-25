@@ -122,16 +122,113 @@ def process_fasta_file(input_file, output_file, species, assembly, og_id):
                 f_out.write(line)
     log(f"✅ Processed FASTA: {output_file}")
 
-def process_tbl_gb_file(input_file, output_file, assembly):
+# Vertebrate mitochondrial stop codons (transl_table 2). Used to confirm that an
+# incomplete terminal codon really is a truncated stop before we assert aa:TERM.
+VERT_MITO_STOPS = ("TAA", "TAG", "AGA", "AGG")
+# Substring of EMMA's note ("...TAA stop codon is completed by the addition of
+# 3' A residues to the mRNA") that survives the 'putative ' strip. Its presence
+# marks a CDS whose stop is completed post-transcriptionally by polyadenylation.
+POLYA_NOTE_MARK = "3' A residues"
+_COMP = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
+
+def read_fasta_sequence(fa_path) -> str:
+    seq = []
+    with open(fa_path) as f:
+        for line in f:
+            if not line.startswith('>'):
+                seq.append(line.strip())
+    return ''.join(seq).upper()
+
+def _revcomp(s: str) -> str:
+    return ''.join(_COMP.get(b, 'N') for b in reversed(s))
+
+def compute_transl_except_pos(start: int, end: int, seq: str):
+    """For a single-interval CDS (1-based; start>end means minus strand), return
+    the transl_except 'pos:' expression if its terminal codon is an incomplete,
+    polyadenylation-completed stop, else None.
+
+    table2asn raises SEQ_FEAT.NoStop when a CDS lacks an in-frame stop and cannot
+    extend into the genome to find one (because the stop is really created by the
+    3' poly(A) tail, not encoded). Declaring the truncated codon as aa:TERM tells
+    table2asn the terminator is present, clearing the error.
+    """
+    length = abs(end - start) + 1
+    rem = length % 3
+    if rem == 0:
+        return None
+    n = len(seq)
+    if start <= end:                         # plus strand; 3' end at high coord
+        hi, lo = end, end - rem + 1
+        if lo < 1 or hi > n:
+            return None
+        codon = seq[lo - 1:hi]               # coding-strand partial bases
+        if not any(stop.startswith(codon) for stop in VERT_MITO_STOPS):
+            return None
+        return f"{hi}" if rem == 1 else f"{lo}..{hi}"
+    else:                                    # minus strand; 3' end at low coord
+        lo, hi = end, end + rem - 1
+        if lo < 1 or hi > n:
+            return None
+        codon = _revcomp(seq[lo - 1:hi])     # coding-strand partial bases
+        if not any(stop.startswith(codon) for stop in VERT_MITO_STOPS):
+            return None
+        return f"complement({lo})" if rem == 1 else f"complement({lo}..{hi})"
+
+def process_tbl_gb_file(input_file, output_file, assembly, seq=None):
     log(f"📝 Processing TBL/GB file: {input_file}")
-    with open(input_file, 'r') as f_in, open(output_file, 'w') as f_out:
-        for line in f_in:
-            if line.startswith('>Feature'):
-                f_out.write(f">Feature {assembly}\n")
-            else:
-                cleaned_line = line.replace('MT-', '').replace('putative ', '')
-                f_out.write(cleaned_line)
-    log(f"✅ Processed TBL/GB: {output_file}")
+
+    def clean(line: str) -> str:
+        if line.startswith('>Feature'):
+            return f">Feature {assembly}"
+        return line.replace('MT-', '').replace('putative ', '')
+
+    with open(input_file) as f_in:
+        lines = f_in.read().splitlines()
+
+    out, added = [], 0
+    i, n = 0, len(lines)
+    while i < n:
+        cols = lines[i].split('\t')
+        # A CDS feature starts on a non-indented line: <start> <end> CDS
+        if len(cols) >= 3 and cols[2] == 'CDS' and not lines[i].startswith('\t'):
+            interval = lines[i]
+            j = i + 1
+            # Additional interval lines (joined CDS) are non-indented "<start> <end>".
+            extra_intervals = []
+            while (j < n and not lines[j].startswith('\t')
+                   and len(lines[j].split('\t')) == 2
+                   and lines[j].split('\t')[0].lstrip('<>').isdigit()):
+                extra_intervals.append(lines[j]); j += 1
+            # Qualifier lines are indented.
+            qual = []
+            while j < n and lines[j].startswith('\t'):
+                qual.append(lines[j]); j += 1
+
+            out.append(clean(interval))
+            for e in extra_intervals:
+                out.append(clean(e))
+
+            has_note = any(POLYA_NOTE_MARK in q for q in qual)
+            has_te = any('\ttransl_except\t' in q or q.lstrip().startswith('transl_except') for q in qual)
+            # Only single-interval CDS are handled (mitochondrial genes are single-exon);
+            # joined features are passed through untouched to avoid mis-locating the stop.
+            if seq is not None and has_note and not has_te and not extra_intervals:
+                ic = interval.split('\t')
+                pos = compute_transl_except_pos(int(ic[0].lstrip('<>')),
+                                                int(ic[1].lstrip('<>')), seq)
+                if pos:
+                    out.append(f"\t\t\ttransl_except\t(pos:{pos},aa:TERM)")
+                    added += 1
+            for q in qual:
+                out.append(clean(q))
+            i = j
+            continue
+        out.append(clean(lines[i]))
+        i += 1
+
+    with open(output_file, 'w') as f_out:
+        f_out.write('\n'.join(out) + '\n')
+    log(f"✅ Processed TBL/GB: {output_file} (transl_except added to {added} CDS)")
 
 def process_gff_file(input_file, output_file, assembly):
     log(f"📝 Processing GFF file: {input_file}")
@@ -227,7 +324,11 @@ def main():
     process_gff_file(gff_in, tmp_gff, ASSEMBLY)
     write_meta_directives(tmp_gff, SPECIES, OG_ID)
     tmp_gff.replace(gff_out)
-    process_tbl_gb_file(gb_in, gb_out, ASSEMBLY)
+    # Sequence is needed to resolve polyA-completed stop codons into transl_except
+    # qualifiers (clears table2asn SEQ_FEAT.NoStop). Header rewriting does not touch
+    # the bases, so coordinates match either the input or output FASTA.
+    seq = read_fasta_sequence(fasta_in)
+    process_tbl_gb_file(gb_in, gb_out, ASSEMBLY, seq=seq)
 
     log("🏁 File processing complete.")
 
