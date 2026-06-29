@@ -12,7 +12,10 @@ process BUILD_SOURCE_MODIFIERS {
     output:
     tuple val(meta), path("${meta.id}.bankit_metadata.csv")                , emit: bankit_metadata
     tuple val(meta), path("${meta.id}.bankit_metadata_latlon_cleaned.csv") , emit: cleaned_metadata
-    tuple val(meta), path("${meta.mt_assembly_prefix}*.src")                , emit: src_file, optional: true
+    // Require a dot after the assembly prefix (".<annotation>.src") so a prefix
+    // like getorg1770 cannot also collect getorg1770reseed's .src; table2asn must
+    // receive exactly one source qualifier file for the assembly being processed.
+    tuple val(meta), path("${meta.mt_assembly_prefix}.*.src")               , emit: src_file, optional: true
     tuple val(meta), path("16_build_source_modifiers.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                                                    , emit: versions
 

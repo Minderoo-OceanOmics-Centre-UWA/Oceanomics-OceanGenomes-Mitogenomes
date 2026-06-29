@@ -252,6 +252,24 @@ def main():
     df_exp = df_exp.explode("SeqID")
     df_exp["SeqID"] = df_exp["SeqID"].str.strip()
 
+    # Keep only the SeqID for the assembly actually being processed. The SQL
+    # STRING_AGG returns every assembly variant for this og_id+tech (e.g. both
+    # getorg1770 and getorg1770reseed), but table2asn submits one assembly and
+    # must receive exactly one .src; staging several trips a "source qualifier
+    # file does not exist" fatal. Match on the assembly prefix passed in (the
+    # SeqID is "<assembly-id>.<annotation>", so require a trailing dot so that
+    # getorg1770 does not also match getorg1770reseed). Fall back to writing all
+    # (the previous behaviour) only if nothing matches, so this can never drop
+    # more than it should.
+    _aid = (args.assembly_id or "").strip()
+    if _aid:
+        _match = df_exp["SeqID"].apply(lambda s: s == _aid or s.startswith(_aid + "."))
+        if _match.any():
+            df_exp = df_exp[_match].copy()
+        else:
+            print(f"⚠️  No SeqID matched assembly-id '{_aid}'; writing all "
+                  f"{len(df_exp)} source file(s) unfiltered.", flush=True)
+
     # Leave lat_lon empty when we have no usable coordinate. NCBI's validator
     # rejects the literal "unknown" (SEQ_DESCR.LatLonFormat); an empty cell in the
     # .src simply omits the modifier, which is the correct way to signal "no value".
