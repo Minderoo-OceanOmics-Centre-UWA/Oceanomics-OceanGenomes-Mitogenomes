@@ -13,6 +13,7 @@ include { MITOHIFI_MITOHIFI    } from '../../../../modules/nf-core/mitohifi/mito
 include { MITOHIFI_AVERAGE_COVERAGE        } from '../../../../modules/local/mitohifi/average_coverage'
 include { MITOHIFI_CHECK_CIRCULARITY       } from '../../../../modules/local/mitohifi/check_circularity'
 include { RELABEL_REFERENCE_GB             } from '../../../../modules/local/relabel_reference_gb'
+include { REFERENCE_DIVERGENCE             } from '../../../../modules/local/reference_divergence'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
 // Read the circularity verdict from a MITOHIFI_CHECK_CIRCULARITY evidence TSV.
@@ -122,6 +123,22 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
     RELABEL_REFERENCE_GB (
         combined_with_mt_assembly_prefix.map { meta, _fasta, _ref_fasta, ref_gb -> [meta, ref_gb] }
+    )
+
+    //
+    // MODULE: Pre-assembly reference divergence guard.
+    // findMitoReference walks the sample's NCBI lineage and grabs the first
+    // complete mitogenome, so a species with no congeneric record (deep-sea / poorly
+    // sampled taxa) silently gets a divergent reference. MitoHiFi then drops the most
+    // divergent gene blocks during reference-based read recruitment, yielding a
+    // clean-looking but gene-incomplete collapse. Compare sample vs reference
+    // taxonomy up front and record a CONGENERIC/.../NON_CONGENERIC review flag; the
+    // assembly summary turns anything non-congeneric into a manual_review reason.
+    // Taxonomy-only, always exits 0.
+    //
+
+    REFERENCE_DIVERGENCE (
+        RELABEL_REFERENCE_GB.out.gb
     )
 
 
@@ -244,6 +261,10 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // across samples in MITOGENOME_ASSEMBLY_SUMMARY's flat collect()), so relabel it
     // to a per-sample `<assembly_prefix>.reference.gb` first.
     ch_summary_files = ch_summary_files.mix(RELABEL_REFERENCE_GB.out.gb.map { _meta, gb -> gb })
+    // Pre-assembly reference-divergence flag (<prefix>.reference_divergence.txt):
+    // the summary strips the suffix to the run prefix and folds a non-congeneric
+    // verdict into the manual_review_reason.
+    ch_summary_files = ch_summary_files.mix(REFERENCE_DIVERGENCE.out.flag.map { _meta, flag -> flag })
     ch_summary_files = ch_summary_files.mix(ch_assembled_stats.map { meta, stats -> stats })
     // The circularity-check evidence is a per-run sidecar: the assembly summary
     // strips its .circularity_check.tsv suffix to the run prefix (so it joins the
@@ -257,6 +278,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_versions = ch_versions.mix(MITOHIFI_MITOHIFI.out.versions.first())
     ch_versions = ch_versions.mix(MITOHIFI_AVERAGE_COVERAGE.out.versions.first())
     ch_versions = ch_versions.mix(MITOHIFI_CHECK_CIRCULARITY.out.versions.first())
+    ch_versions = ch_versions.mix(REFERENCE_DIVERGENCE.out.versions.first())
 
 
     //

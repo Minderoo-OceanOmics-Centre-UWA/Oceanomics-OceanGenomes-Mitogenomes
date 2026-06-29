@@ -25,6 +25,7 @@ COLUMNS = [
     "num_candidate_contigs",
     "num_final_contigs",
     "num_genes",
+    "num_cds",
     "missing_genes",
     "frameshift_flag",
     "mean_coverage",
@@ -47,6 +48,7 @@ class Thresholds:
     min_length: int | None = None
     max_length: int | None = None
     expected_gene_count: int | None = None
+    expected_pcg_count: int | None = None
 
 
 @dataclass
@@ -229,6 +231,7 @@ def strip_known_suffix(name: str) -> str:
         ".getorg_check.tsv",
         ".coverage.tsv",
         ".reference_relevance.txt",
+        ".reference_divergence.txt",
         ".get_org.log.txt",
         ".hifiasm.log",
         ".log",
@@ -373,6 +376,7 @@ def parse_annotation_stats(files: Iterable[Path], prefix: str, sample_id: str) -
 
         return {
             "num_genes": format_number(num_genes),
+            "num_cds": format_number(num_cds),
             "missing_genes": first_value(row, ["missing_genes", "num_missing"]),
             "frameshift_flag": parse_bool(first_value(row, ["frameshift", "frameshift_flag", "frameshifts"])),
         }
@@ -637,6 +641,24 @@ def reference_relevance_for_run(run: "RunFiles") -> str:
     return ""
 
 
+def reference_divergence_for_run(run: "RunFiles") -> str:
+    """Read the REFERENCE_DIVERGENCE tier for this run, or ''.
+
+    The per-sample <prefix>.reference_divergence.txt records, pre-assembly, how
+    closely the resolved reference is related to the sample by taxonomy
+    (CONGENERIC | CONFAMILIAL | DIFFERENT_FAMILY | NON_CONGENERIC | UNKNOWN).
+    Anything other than CONGENERIC means findMitoReference fell back to a
+    non-congeneric reference, a known cause of gene-incomplete MitoHiFi collapses
+    for deep-sea / poorly-sampled taxa.
+    """
+    for path in run.files:
+        if path.name.endswith(".reference_divergence.txt"):
+            text = read_text(path).strip()
+            if text:
+                return text.split("\t", 1)[0].strip().upper()
+    return ""
+
+
 def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
     reasons = []
 
@@ -646,6 +668,7 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
     num_candidate = parse_number(row.get("num_candidate_contigs"))
     num_final = parse_number(row.get("num_final_contigs"))
     num_genes = parse_number(row.get("num_genes"))
+    num_cds = parse_number(row.get("num_cds"))
 
     if not row.get("final_length_bp"):
         reasons.append("missing_final_fasta")
@@ -672,6 +695,11 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
         reasons.append("possible_numt")
     if row.get("reference_relevance") == "MISMATCH":
         reasons.append("reference_mismatch")
+    # Pre-assembly taxonomy guard: a non-congeneric reference is the leading cause
+    # of gene-incomplete MitoHiFi collapses for taxa with no close NCBI relative.
+    # UNKNOWN (unparseable reference / missing taxonomy) is not treated as a defect.
+    if row.get("reference_divergence") in {"CONFAMILIAL", "DIFFERENT_FAMILY", "NON_CONGENERIC"}:
+        reasons.append("no_congeneric_reference")
     # Length / tandem-repeat anomaly from the circularity check. The specific type
     # (concatemer / control_region_repeat / unresolved) is the curation action, so
     # surface it verbatim; fall back to a generic flag if only length_anomaly is set.
@@ -692,6 +720,11 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
         reasons.append("length_outside_expected_range")
     if thresholds.expected_gene_count is not None and num_genes is not None and num_genes < thresholds.expected_gene_count:
         reasons.append("missing_genes")
+    # Protein-coding-gene check. More robust than the total gene count: a collapse
+    # can drop several PCGs while tRNAs keep num_genes near the expected total, so
+    # gate the CDS count directly (e.g. < 13 PCGs for a vertebrate mitogenome).
+    if thresholds.expected_pcg_count is not None and num_cds is not None and num_cds < thresholds.expected_pcg_count:
+        reasons.append("missing_protein_coding_genes")
 
     deduped = []
     for reason in reasons:
@@ -733,6 +766,7 @@ def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterabl
     row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
     row["numt_flag"] = "true" if has_numt_signal(run.files) else "false"
     row["reference_relevance"] = reference_relevance_for_run(run)
+    row["reference_divergence"] = reference_divergence_for_run(run)
     row.update(anomaly_for_run(run))
 
     apply_qc(row, thresholds)
@@ -908,6 +942,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-length", type=int, default=None)
     parser.add_argument("--max-length", type=int, default=None)
     parser.add_argument("--expected-gene-count", type=int, default=None)
+    parser.add_argument("--expected-pcg-count", type=int, default=None,
+                        help="Flag missing_protein_coding_genes when the CDS count is "
+                             "below this (e.g. 13 for a vertebrate mitogenome).")
     return parser.parse_args()
 
 
@@ -919,6 +956,7 @@ def main() -> None:
         min_length=args.min_length,
         max_length=args.max_length,
         expected_gene_count=args.expected_gene_count,
+        expected_pcg_count=args.expected_pcg_count,
     )
     rows = build_summary(args.input, thresholds)
     write_rows(rows, args.output)

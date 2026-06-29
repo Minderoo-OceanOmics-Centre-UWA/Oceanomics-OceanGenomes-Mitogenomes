@@ -22,6 +22,7 @@ process MITOGENOME_ASSEMBLY_SUMMARY {
     def minLength = params.mitogenome_summary_min_length != null ? "--min-length ${params.mitogenome_summary_min_length}" : ''
     def maxLength = params.mitogenome_summary_max_length != null ? "--max-length ${params.mitogenome_summary_max_length}" : ''
     def expectedGenes = params.mitogenome_summary_expected_gene_count != null ? "--expected-gene-count ${params.mitogenome_summary_expected_gene_count}" : ''
+    def expectedPcgs = params.mitogenome_summary_expected_pcg_count != null ? "--expected-pcg-count ${params.mitogenome_summary_expected_pcg_count}" : ''
     """
     mitogenome_assembly_summary.py \\
         --input mitogenome_summary_inputs \\
@@ -30,7 +31,8 @@ process MITOGENOME_ASSEMBLY_SUMMARY {
         ${maxCoverageCv} \\
         ${minLength} \\
         ${maxLength} \\
-        ${expectedGenes}
+        ${expectedGenes} \\
+        ${expectedPcgs}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

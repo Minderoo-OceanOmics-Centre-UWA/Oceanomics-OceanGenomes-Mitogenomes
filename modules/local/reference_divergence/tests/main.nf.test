@@ -1,0 +1,90 @@
+nextflow_process {
+
+    name "Test Process REFERENCE_DIVERGENCE"
+    script "../main.nf"
+    process "REFERENCE_DIVERGENCE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "reference_divergence"
+
+    // Reuse the reference_relevance test reference (organism Testus coralus,
+    // family Testidae) so no new fixture is needed.
+    test("congeneric sample -> CONGENERIC") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_cong', mt_assembly_prefix:'test_cong', nominal_species_id:'Testus reefus', 'class':'Anthozoa' ],
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/ref.gb", checkIfExists: true)
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.flag[0][1] ==~ ".*/test_cong.reference_divergence.txt" },
+                { assert path(process.out.flag[0][1]).text.startsWith("CONGENERIC") }
+            )
+        }
+    }
+
+    test("different genus, no family -> NON_CONGENERIC") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_nc', mt_assembly_prefix:'test_nc', nominal_species_id:'Otherus species', 'class':'Anthozoa' ],
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/ref.gb", checkIfExists: true)
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.flag[0][1]).text.startsWith("NON_CONGENERIC") }
+            )
+        }
+    }
+
+    test("different genus, same family -> CONFAMILIAL") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_cf', mt_assembly_prefix:'test_cf', nominal_species_id:'Otherus species', 'class':'Anthozoa', family:'Testidae' ],
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/ref.gb", checkIfExists: true)
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.flag[0][1]).text.startsWith("CONFAMILIAL") }
+            )
+        }
+    }
+
+    test("stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'test_stub', nominal_species_id:'Testus reefus' ],
+                    file("${projectDir}/modules/local/reference_relevance/tests/data/ref.gb", checkIfExists: true)
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(process.out).match() }
+            )
+        }
+    }
+}

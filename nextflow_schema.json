@@ -310,6 +310,11 @@
                     "default": 37,
                     "description": "Expected mitochondrial gene count used when annotation-derived gene counts are available."
                 },
+                "mitogenome_summary_expected_pcg_count": {
+                    "type": "integer",
+                    "default": 13,
+                    "description": "Expected mitochondrial protein-coding gene (CDS) count. The summary flags missing_protein_coding_genes when the annotation-derived CDS count falls below this, catching collapses that tRNAs mask in the total gene count."
+                },
                 "max_cpus": {
                     "type": "integer",
                     "description": "Maximum CPUs to use for processes."
