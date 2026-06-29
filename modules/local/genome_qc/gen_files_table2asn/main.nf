@@ -11,7 +11,9 @@ process GEN_FILES_TABLE2ASN {
 
     output:
     tuple val(meta), path("*.sqn")    , emit: sqn_file
-    tuple val(meta), path("*.val")    , emit: val_file
+    // A clean validation produces no .val, so it is an optional output; absence
+    // means the sample passed table2asn validation with no findings.
+    tuple val(meta), path("*.val")    , optional: true, emit: val_file
     tuple val(meta), path("*.gbf")    , emit: gbf_file
     tuple val(meta), path("*.qc_flags.tsv"), emit: qc_flags
     tuple val(meta), path("19_table2asn.tool_params_mqcrow.html"), emit: tool_params
@@ -58,7 +60,10 @@ process GEN_FILES_TABLE2ASN {
     # Flag missing-stop-codon (SEQ_FEAT.NoStop) errors from the validation report
     # for manual investigation. These are not blocked here -- they are surfaced in a
     # per-sample TSV (and MultiQC) so the CDS can be reviewed/fixed after the run.
-    val_file=\$(ls *.val 2>/dev/null | head -n1)
+    # A clean validation writes no .val, which is a success, so detect the report
+    # with a glob loop that cannot trip 'set -e -o pipefail' when none exists.
+    val_file=""
+    for f in *.val; do [ -e "\$f" ] && { val_file="\$f"; break; }; done
     flags="${meta.mt_assembly_prefix}.qc_flags.tsv"
     nostop=0
     feats=""
