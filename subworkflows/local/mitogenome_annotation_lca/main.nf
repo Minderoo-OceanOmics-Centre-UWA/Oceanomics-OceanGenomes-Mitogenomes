@@ -243,7 +243,7 @@ workflow MITOGENOME_ANNOTATION {
     //
     // MODULE: Calculate the Lowest Common Ancestor (LCA) from the filtered BLAST results
     //
-    ch_worms = channel.fromPath("https://raw.githubusercontent.com/Minderoo-OceanOmics-Centre-UWA/LCA_With_Fishbase/main/data/worms_species.txt.gz")
+    ch_worms = channel.fromPath("${projectDir}/assets/worms_species.txt.gz", checkIfExists: true)
 
     LCA (
         BLAST_BLASTN.out.filtered,
