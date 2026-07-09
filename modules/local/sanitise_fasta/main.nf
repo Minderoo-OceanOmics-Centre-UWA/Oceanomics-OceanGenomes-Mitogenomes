@@ -12,10 +12,16 @@ process SANITISE_FASTA {
     !params.skip_mitogenome_annotation
 
     script:
-    // Prefer mt_assembly_prefix, fallback to id
-    def prefix = meta.containsKey('mt_assembly_prefix') && meta.mt_assembly_prefix ? meta.mt_assembly_prefix : meta.id
-    def concat_name = prefix + '_concat'
+    // Derive the prefix from the input fasta basename, NOT meta.mt_assembly_prefix:
+    // the reseed pass carries its "reseed" suffix only on the filename (meta keeps the
+    // first-pass "getorg<ver>"), so keying off meta mislabels a reseed concat as
+    // "getorg<ver>_concat" instead of "getorg<ver>reseed_concat". Strip only the FASTA
+    // extension (simpleName would collapse every dot-field down to the OG id). Fall
+    // back to mt_assembly_prefix / id only if the basename somehow comes back empty.
     def input_name = fasta.name
+    def base = input_name.replaceAll(/\.(fa|fasta|fna)$/, '')
+    def prefix = base ?: (meta.containsKey('mt_assembly_prefix') && meta.mt_assembly_prefix ? meta.mt_assembly_prefix : meta.id)
+    def concat_name = prefix + '_concat'
     def extension = input_name.tokenize('.').last()
     def output_concat = "output/${concat_name}.${extension}"
     def output_single = "output/${input_name}"
