@@ -32,8 +32,11 @@ process GETORGANELLE_RESEED {
     tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}reseed.get_org.log.txt")  , emit: log
     path("mtdna/*.selected_graph.gfa")                                               , emit: org_assm_graph,  optional: true
     path("mtdna/*extended_K*.assembly_graph.fastg")                                  , emit: raw_assm_graph,  optional: true
-    path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.fastg")           , emit: simp_assm_graph, optional: true
-    path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.csv")             , emit: contig_label,    optional: true
+    // The reseed pass labels with the custom --genes database, so GetOrganelle
+    // names these "extend-<genedb>" rather than "extend-animal_mt". Glob the
+    // label suffix so both naming schemes are captured.
+    path("mtdna/*extended_K*.assembly_graph.fastg.extend-*.fastg")                    , emit: simp_assm_graph, optional: true
+    path("mtdna/*extended_K*.assembly_graph.fastg.extend-*.csv")                      , emit: contig_label,    optional: true
     tuple val(meta), path("02b_getorganelle_reseed.tool_params_mqcrow.html")         , emit: tool_params
     path "versions.yml"                                                              , emit: versions
 
@@ -84,8 +87,8 @@ process GETORGANELLE_RESEED {
     # Assembly graph outputs may be absent if GetOrganelle bailed out very early.
     for f in $output_dir/*.selected_graph.gfa; do cp "\$f" mtdna/; done
     for f in $output_dir/*extended_K*.assembly_graph.fastg; do cp "\$f" mtdna/; done
-    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-animal_mt.fastg; do cp "\$f" mtdna/; done
-    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-animal_mt.csv; do cp "\$f" mtdna/; done
+    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-*.fastg; do cp "\$f" mtdna/; done
+    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-*.csv; do cp "\$f" mtdna/; done
 
     # The assembled organelle FASTA (`*1.1.*.fasta`) is only produced when
     # GetOrganelle successfully assembled a contig. When the run finishes
