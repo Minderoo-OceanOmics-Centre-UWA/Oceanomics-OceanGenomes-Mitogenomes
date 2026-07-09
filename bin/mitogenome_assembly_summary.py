@@ -229,6 +229,7 @@ def strip_known_suffix(name: str) -> str:
         ".contigs_stats.tsv",
         ".circularity_check.tsv",
         ".getorg_check.tsv",
+        ".scaffold_join.tsv",
         ".coverage.tsv",
         ".reference_relevance.txt",
         ".reference_divergence.txt",

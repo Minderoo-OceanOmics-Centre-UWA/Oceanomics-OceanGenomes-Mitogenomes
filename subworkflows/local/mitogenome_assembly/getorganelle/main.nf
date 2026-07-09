@@ -15,6 +15,7 @@ include { GETORGANELLE_RESEED       } from '../../../../modules/local/getorganel
 include { GETORGANELLE_GENEDB       } from '../../../../modules/local/getorganelle/genedb'
 include { MITOHIFI_FINDMITOREFERENCE } from '../../../../modules/nf-core/mitohifi/findmitoreference'
 include { RELABEL_REFERENCE_GB      } from '../../../../modules/local/relabel_reference_gb'
+include { GETORGANELLE_JOIN         } from '../../../../modules/local/getorganelle/join'
 include { GETORGANELLE_CHECK        } from '../../../../modules/local/getorganelle/check'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
@@ -369,19 +370,67 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // never match. ch_reference_gb is partial (reseed/vertebrate samples only), so
     // remainder + placeholder keeps every fasta sample.
     def no_reference_gb = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
+    // Pair every assembly with its reference (or null), keyed by mt_assembly_prefix
+    // (ch_reference_gb's meta predates the meta.circular enrichment, so a whole-meta
+    // join would never match; it is also partial, so remainder keeps every fasta).
+    // ch_reference_gb is single-use, so this is its only consumer; the reference is
+    // then carried forward (through GETORGANELLE_JOIN's passthrough) rather than
+    // re-joined.
     ch_ref_keyed = ch_reference_gb.map { meta, ref -> [ meta.mt_assembly_prefix, ref ] }
-    ch_getorg_check_in = ch_assembly_fasta
+    ch_fasta_ref = ch_assembly_fasta
         .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
         .join(ch_ref_keyed, by: 0, remainder: true)
         .filter { items -> items[1] != null }   // keep fasta rows; drop reference-only remainder
         .map { items ->
             def ref = items.size() > 3 ? items[3] : null
-            [ items[1], items[2], ref ?: no_reference_gb ]
+            [ items[1], items[2], ref ]          // [meta, fasta, ref-or-null]
         }
+
+    //
+    // MODULE: Reference-guided scaffold join. A multi-scaffold GetOrganelle result
+    //   that still carries the full gene set (a control-region repeat the reseed
+    //   could not span) is ordered/oriented against the related reference and joined
+    //   into one molecule (named "<prefix>_rgj"), so GETORGANELLE_CHECK and the
+    //   annotation see a single record instead of a blind concatenation. Only
+    //   multi-scaffold samples WITH a real reference are joined; single-scaffold
+    //   results and multi-scaffold results without a reference pass through (the
+    //   latter are concatenated downstream by SANITISE_FASTA -> "<prefix>_concat").
+    //
+    ch_join_branched = ch_fasta_ref.branch { _meta, fasta, ref ->
+        def multi = false
+        try { multi = fasta.text.readLines().count { it.startsWith('>') } > 1 } catch (ignored) { multi = false }
+        rgj:    multi && ref != null
+        direct: true
+    }
+
+    GETORGANELLE_JOIN (
+        ch_join_branched.rgj
+    )
+
+    // Re-pair the joined assembly with its (passed-through) reference, mix back the
+    // pass-through samples (substituting the empty placeholder where no reference
+    // exists), and feed the combined channel to the circularity/length check.
+    ch_getorg_check_in = GETORGANELLE_JOIN.out.fasta
+        .join(GETORGANELLE_JOIN.out.reference, by: 0)
+        .map { meta, joined, ref -> [ meta, joined, ref ] }
+        .mix( ch_join_branched.direct.map { meta, fasta, ref -> [ meta, fasta, ref ?: no_reference_gb ] } )
+
+    // The joined assembly replaces the multi-scaffold fasta for every downstream
+    // stage (annotation, LCA, QC, upload), not just the check.
+    ch_assembly_fasta = ch_getorg_check_in.map { meta, fasta, _ref -> [ meta, fasta ] }
 
     GETORGANELLE_CHECK (
         ch_getorg_check_in
     )
+
+    // Join evidence + the joined "_rgj" fasta feed the summary / multiqc alongside
+    // the check evidence. The fasta is what gives the "_rgj" assembly its
+    // final_length_bp / contig count in the assembly summary (the pre-join
+    // scaffolds carry a different prefix); without it the rgj row has no length.
+    ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.fasta.map { _meta, fasta -> fasta })
+    ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.evidence.map { _meta, ev -> ev })
+    ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_JOIN.out.tool_params.collect { it[1] })
+    ch_versions = ch_versions.mix(GETORGANELLE_JOIN.out.versions.first())
 
     // Fold the corrected circular verdict back into meta on BOTH the fasta and log
     // channels (the parent workflow joins them by the whole meta map, so the two
