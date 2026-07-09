@@ -83,14 +83,21 @@ def blast_reference_coverage(seq, ref_fa, ref_len, workdir):
     db = os.path.join(workdir, "refdb")
     run(["makeblastdb", "-in", ref_fa, "-dbtype", "nucl", "-out", db],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # dc-megablast, not the blastn default of megablast: the reference is a *related
+    # species* at ~70-80% identity, and megablast's long exact seeds miss most of
+    # those diverged HSPs -- it reported 1.3% reference coverage on a scaffold that
+    # dc-megablast covers at 93%, which would wrongly leave a complete circle uncalled.
     res = subprocess.run(
-        ["blastn", "-query", q, "-db", db, "-outfmt", "6 sstart send length pident"],
+        ["blastn", "-task", "dc-megablast", "-query", q, "-db", db,
+         "-outfmt", "6 sstart send length pident"],
         check=True, stdout=subprocess.PIPE, universal_newlines=True,
     )
     hsps = []
     for line in res.stdout.splitlines():
         f = line.split("\t")
-        if len(f) >= 4 and int(f[2]) >= 100 and float(f[3]) >= 80:
+        # 70% identity floor: a related-species reference aligns at ~70-80%, so an
+        # 80% floor (with dc-megablast) would still discard most genuine coverage.
+        if len(f) >= 4 and int(f[2]) >= 100 and float(f[3]) >= 70:
             hsps.append((min(int(f[0]), int(f[1])), max(int(f[0]), int(f[1]))))
     if not hsps:
         return 0.0, ref_len
