@@ -87,6 +87,8 @@ workflow OCEANGENOMESMITOGENOMES {
         )
         ch_mitogenome_getorg_assembly_fasta = MITOGENOME_ASSEMBLY_GETORG.out.assembly_fasta
         ch_mitogenome_getorg_assembly_log = MITOGENOME_ASSEMBLY_GETORG.out.assembly_log
+        // Per-variant assembly results (first-pass + reseed + rgj) for the DB upload.
+        ch_mitogenome_getorg_db_results = MITOGENOME_ASSEMBLY_GETORG.out.db_assembly_results
         ch_mitogenome_getorg_reference_gb = MITOGENOME_ASSEMBLY_GETORG.out.reference_gb
         ch_mitogenome_getorg_circularity_evidence = MITOGENOME_ASSEMBLY_GETORG.out.circularity_evidence
     } else if (params.precomputed_mitogenome_assembly_fasta_getorg) {
@@ -123,11 +125,15 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         // No check is re-run for precomputed assemblies -> no circularity evidence.
         ch_mitogenome_getorg_circularity_evidence = Channel.empty()
+        // Precomputed inputs expose only the final assembly, so no per-variant
+        // split is possible: fall back to a single DB row from the final fasta+log.
+        ch_mitogenome_getorg_db_results = ch_mitogenome_getorg_assembly_fasta.join(ch_mitogenome_getorg_assembly_log, by: 0)
     } else {
 
         ch_mitogenome_getorg_assembly_fasta = Channel.empty()
         ch_mitogenome_getorg_assembly_log = Channel.empty()
         ch_mitogenome_getorg_circularity_evidence = Channel.empty()
+        ch_mitogenome_getorg_db_results = Channel.empty()
     }
 
     if (!params.skip_mitogenome_assembly_getorg) {
@@ -314,7 +320,9 @@ workflow OCEANGENOMESMITOGENOMES {
     // Combine outputs for data uploads
     //add in mitohifi stuff too
 
-    ch_mitogenome_getorg_assembly_results = ch_mitogenome_getorg_assembly_fasta.join(ch_mitogenome_getorg_assembly_log, by: 0)
+    // GetOrganelle uploads one DB row PER VARIANT (first-pass + reseed + rgj), each
+    // keyed by its own variant code; HiFi assemblies are already per-prefix.
+    ch_mitogenome_getorg_assembly_results = ch_mitogenome_getorg_db_results
     ch_mitogenome_hifi_assembly_results = ch_mitogenome_hifi_assembly_fasta.join(ch_mitogenome_hifi_assembly_log, by: 0)
 
     ch_mitogenome_assembly_results = ch_mitogenome_getorg_assembly_results.mix(ch_mitogenome_hifi_assembly_results)

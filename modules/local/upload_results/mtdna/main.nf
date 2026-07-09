@@ -22,10 +22,14 @@ process PUSH_MTDNA_ASSM_RESULTS {
     script:
     def args = task.ext.args ?: ''
     def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
-    def effective_args = [args, config, mt_assembly_prefix, out_log, fasta].findAll { it?.toString()?.trim() }.join(' ')
+    // Corrected circular verdict from the assembly subworkflow (GetOrganelle
+    // reference check / MitoHiFi circularity check); null/absent -> no override.
+    def circular = meta.circular == null ? 'null' : meta.circular.toString()
+    def effective_args = [args, "--circular ${circular}", config, mt_assembly_prefix, out_log, fasta].findAll { it?.toString()?.trim() }.join(' ')
     """
     push_mtdna_assm_results.py \\
         $args \\
+        --circular ${circular} \\
         $config \\
         ${mt_assembly_prefix} \\
         $out_log \\

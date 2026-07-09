@@ -77,6 +77,11 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
     ch_summary_files = Channel.empty()
+    // Per-variant assembly inputs for the DB upload. Each GetOrganelle variant
+    // (first-pass, reseed, reference-guided-join) is captured as its own
+    // mitogenome_data row, keyed by its variant prefix (the fasta basename).
+    // Entries are [ variant_prefix, meta, fasta, log ].
+    ch_db_variant_inputs = Channel.empty()
     // Per-sample reference GenBank (findMitoReference, via RELABEL_REFERENCE_GB).
     // Only reseed candidates download one, so this is a partial channel; the
     // annotation subworkflow falls back to a fresh lookup / curated asset for the
@@ -297,6 +302,13 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             .mix(ch_reseed_resolved.map { meta, _fasta, log -> [meta, log] })
             .mix(ch_reseed_seedless_log)
 
+        // Reseed assembly as its own DB variant (keyed by fasta basename).
+        ch_db_variant_inputs = ch_db_variant_inputs.mix(
+            GETORGANELLE_RESEED.out.fasta
+                .join(GETORGANELLE_RESEED.out.log, by: 0)
+                .map { meta, fasta, log -> [ fasta.baseName, meta, fasta, log ] }
+        )
+
         // Reseed-specific files to fold into the collected channels below.
         ch_multiqc_files = ch_multiqc_files
             .mix(GETORGANELLE_RESEED.out.tool_params.collect { it[1] })
@@ -332,6 +344,12 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_summary_files = ch_summary_files.mix(GETORGANELLE_FROMREADS.out.org_assm_graph)
     ch_summary_files = ch_summary_files.mix(GETORGANELLE_FROMREADS.out.raw_assm_graph)
     ch_summary_files = ch_summary_files.mix(GETORGANELLE_FROMREADS.out.simp_assm_graph)
+    // First-pass assembly as its own DB variant (keyed by fasta basename).
+    ch_db_variant_inputs = ch_db_variant_inputs.mix(
+        GETORGANELLE_FROMREADS.out.fasta
+            .join(GETORGANELLE_FROMREADS.out.log, by: 0)
+            .map { meta, fasta, log -> [ fasta.baseName, meta, fasta, log ] }
+    )
     ch_versions = ch_versions.mix(GETORGANELLE_CONFIG.out.versions.first())
     ch_versions = ch_versions.mix(GETORGANELLE_FROMREADS.out.versions.first())
     ch_versions = ch_versions.mix(CAT_FASTQ.out.versions.first())
@@ -432,6 +450,15 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_JOIN.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(GETORGANELLE_JOIN.out.versions.first())
 
+    // RGJ (reference-guided-join) assembly as its own DB variant. It produces no
+    // GetOrganelle log of its own, so reuse the pre-join resolved log (same reads
+    // -> same coverage); ch_assembly_log here is still the pre-check version.
+    ch_db_variant_inputs = ch_db_variant_inputs.mix(
+        GETORGANELLE_JOIN.out.fasta
+            .join(ch_assembly_log, by: 0)
+            .map { meta, fasta, log -> [ fasta.baseName, meta, fasta, log ] }
+    )
+
     // Fold the corrected circular verdict back into meta on BOTH the fasta and log
     // channels (the parent workflow joins them by the whole meta map, so the two
     // must stay identical). null verdict -> leave meta unchanged.
@@ -444,6 +471,27 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_assembly_log = ch_assembly_log
         .join(ch_circular_update, by: 0)
         .map { meta, logf, v -> [ (v == null ? meta : meta + [ circular: v ]), logf ] }
+
+    // Per-variant DB upload results. The corrected circular verdict only applies to
+    // the variant that was actually checked (the final assembly); its evidence file
+    // is named after that variant's prefix, so key the verdict by prefix and attach
+    // it to the matching variant only. Every other variant carries no verdict, so
+    // the DB push falls back to that variant's own GetOrganelle log topology.
+    ch_checked_circ = GETORGANELLE_CHECK.out.evidence
+        .map { _meta, ev -> [ ev.name.replaceAll(/\.getorg_check\.tsv$/, ''), parseFinalVerdictCircular(ev) ] }
+
+    ch_db_assembly_results = ch_db_variant_inputs
+        .map { prefix, meta, fasta, logf -> [ prefix, [ meta, fasta, logf ] ] }
+        .join( ch_checked_circ, by: 0, remainder: true )
+        .filter { it[1] != null }                       // drop check-only remainders
+        .map { items ->
+            def prefix  = items[0]
+            def payload = items[1]
+            def verdict = items.size() > 2 ? items[2] : null
+            def meta    = payload[0] + [ mt_assembly_prefix: prefix ]
+            if (verdict != null) meta = meta + [ circular: verdict ]
+            [ meta, payload[1], payload[2] ]
+        }
 
     // Evidence feeds the assembly summary (anomaly reason + circular override) and
     // is emitted for the QC gate (anomaly block + circular condition).
@@ -459,6 +507,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     emit:
     assembly_fasta  = ch_assembly_fasta
     assembly_log    = ch_assembly_log
+    db_assembly_results = ch_db_assembly_results   // channel: [ meta(per-variant prefix+circular), fasta, log ] -> one DB row per variant
     reference_gb    = ch_reference_gb              // channel: [ meta, reference.gb ] (partial: reseed candidates only)
     circularity_evidence = GETORGANELLE_CHECK.out.evidence  // channel: [ meta, getorg_check.tsv ]
     summary_files   = ch_summary_files

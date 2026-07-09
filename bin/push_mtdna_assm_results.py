@@ -134,6 +134,18 @@ if __name__ == "__main__":
         help="GetOrganelle log OR mitohifi contigs_stats.tsv.",
     )
     parser.add_argument("fasta_path")
+    parser.add_argument(
+        "--circular",
+        default=None,
+        help=(
+            "Corrected circular verdict (true/false/null) from meta.circular, i.e. "
+            "the GetOrganelle reference check / MitoHiFi circularity check. When a "
+            "real (true/false) value is given it overrides the topology parsed from "
+            "the log/contig_stats -- the check is authoritative for reseed/_rgj "
+            "molecules GetOrganelle linearised and could not self-close. 'null' or "
+            "unparseable leaves the log/tsv verdict untouched."
+        ),
+    )
     args = parser.parse_args()
 
     config_file = args.config_file
@@ -184,6 +196,28 @@ if __name__ == "__main__":
 
             stats, avg_coverage, avg_base_coverage = parse_log_for_stats_and_cov(log_text)
             print("ℹ️ Detected log file. Parsed GetOrganelle-style fields.")
+
+        # Apply the corrected circular verdict from meta.circular (the GetOrganelle
+        # reference check). GetOrganelle linearises a closed molecule at an arbitrary
+        # point and reports "N scaffold(s)"; the check confirms full reference
+        # coverage and corrects the topology. This is the only signal carrying the
+        # rgj (reference-guided-join) verdict, so honour it over the stale log.
+        circular_override = coerce_bool(args.circular)
+        if circular_override is not None:
+            # A genuinely multi-scaffold result (GetOrganelle "N scaffold(s)" with
+            # N > 1) is not a single closed molecule, so keep its descriptive
+            # original stat rather than flattening it to a circular/scaffold label.
+            # Only single-scaffold (or unspecified) results take the corrected
+            # verdict -- this is the reseed/_rgj case the check actually closes.
+            scaffold_match = re.search(r"(\d+)\s*scaffold", str(stats or ""), re.IGNORECASE)
+            n_scaffold = int(scaffold_match.group(1)) if scaffold_match else None
+            if n_scaffold is not None and n_scaffold > 1:
+                print(f"ℹ️ Keeping original multi-scaffold stat '{stats}' (>1 scaffold); not applying --circular={args.circular}.")
+            else:
+                corrected = "circular genome" if circular_override else "scaffold"
+                if corrected != stats:
+                    print(f"ℹ️ Overriding stats '{stats}' -> '{corrected}' from --circular={args.circular}.")
+                stats = corrected
 
     print(f"Stats: {stats}")
     print(f"Length: {length}")
