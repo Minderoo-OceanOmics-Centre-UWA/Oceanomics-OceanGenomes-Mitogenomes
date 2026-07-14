@@ -249,6 +249,16 @@
                     "exists": true,
                     "description": "GenBank submission template passed to table2asn."
                 },
+                "ena_webin_validate": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Validate passing ENA EMBL flat files with Webin-CLI. Requires ena_study and the WEBIN_USERNAME/WEBIN_PASSWORD Nextflow secrets."
+                },
+                "ena_study": {
+                    "type": "string",
+                    "default": null,
+                    "description": "ENA study accession or alias used in per-sample targeted-sequence manifests."
+                },
                 "sql_config": {
                     "type": "string",
                     "default": null,

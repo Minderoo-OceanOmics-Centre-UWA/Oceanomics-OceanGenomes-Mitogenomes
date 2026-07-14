@@ -1,0 +1,7 @@
+LOCUS       ena_stub                  1 bp    DNA     circular
+FEATURES             Location/Qualifiers
+     source          1
+                     /organism="Testus organismus"
+ORIGIN
+        1 a
+//

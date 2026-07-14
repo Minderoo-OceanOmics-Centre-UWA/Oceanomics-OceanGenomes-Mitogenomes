@@ -96,6 +96,45 @@ custom_data:
       lca_blast: "LCA / BLAST"
       lca_raw: "LCA raw"
 
+  table2asn_gate:
+    section_name: "Table2ASN submission gate"
+    description: "Per-sample validator severity counts and ENA eligibility. ERROR, REJECT, and fatal discrepancy findings quarantine only the affected sample."
+    plot_type: table
+    data_format: tsv
+    filename_glob: "*.table2asn_status.tsv"
+    headers:
+      sample: "Sample"
+      status: "Status"
+      reject_count: "Rejects"
+      error_count: "Errors"
+      warning_count: "Warnings"
+      info_count: "Info"
+      fatal_discrepancy_count: "Fatal discrepancies"
+      nostop_count: "Missing stops"
+      blocking_codes: "Blocking codes"
+      warning_codes: "Warning codes"
+
+  table2asn_findings:
+    section_name: "Table2ASN findings"
+    description: "Normalised table2asn validator findings and fatal discrepancy-report findings."
+    plot_type: table
+    data_format: tsv
+    filename_glob: "*.table2asn_findings.tsv"
+
+  ena_conversion_gate:
+    section_name: "ENA flat-file conversion"
+    description: "Per-sample GenBank-to-EMBL conversion and annotation-preservation status."
+    plot_type: table
+    data_format: tsv
+    filename_glob: "*.ena_conversion_status.tsv"
+
+  webin_validation_gate:
+    section_name: "ENA Webin validation"
+    description: "Per-sample Webin validation status. Only PASS records are submission-ready."
+    plot_type: table
+    data_format: tsv
+    filename_glob: "*.webin_status.tsv"
+
 custom_content:
   - id: table2asn_validation
     section_name: "Table2ASN Validation"

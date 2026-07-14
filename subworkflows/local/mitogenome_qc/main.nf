@@ -13,6 +13,8 @@ include { EXTRACT_GENES_GFF     } from '../../../modules/local/genome_qc/extract
 include { EXTRACT_GENES_GB      } from '../../../modules/local/genome_qc/extract_genes/gb'
 include { TRANSLATE_GENES       } from '../../../modules/local/genome_qc/translate_genes'
 include { GEN_FILES_TABLE2ASN   } from '../../../modules/local/genome_qc/gen_files_table2asn'
+include { ENA_FLATFILE          } from '../../../modules/local/genome_qc/ena_flatfile'
+include { WEBIN_VALIDATE        } from '../../../modules/local/genome_qc/webin_validate'
 // include { DIAGNOSTICS           } from '../../../modules/local/genome_qc/diagnostics'
 // include { GROUPER               } from '../../../modules/local/genome_qc/grouper'
 // include { SUBMITTER             } from '../../../modules/local/genome_qc/submitter'
@@ -32,6 +34,7 @@ workflow MITOGENOME_QC {
 
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
+    ch_validated_ena_flatfile = channel.empty()
     def sql_config_file = file(params.sql_config, checkIfExists: true)
     def template_sbt_file = file(params.template_sbt, checkIfExists: true)
 
@@ -114,10 +117,44 @@ workflow MITOGENOME_QC {
     )
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(GEN_FILES_TABLE2ASN.out.versions.first())
-    // Feed table2asn validation output into MultiQC inputs (text summary)
+    // Feed raw and normalised table2asn validation output into MultiQC inputs.
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.val_file.collect { it[1] })
-    // Per-sample missing-stop-codon (SEQ_FEAT.NoStop) flags for manual review
+    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.stats_file.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.discrepancy_file.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.validation_findings.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.validation_status.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.qc_flags.collect { it[1] })
+
+    // ERROR/REJECT validator findings and FATAL discrepancy findings quarantine
+    // only that sample. Warnings remain visible but continue to ENA conversion.
+    ch_table2asn_pass = GEN_FILES_TABLE2ASN.out.gbf_file
+        .join(GEN_FILES_TABLE2ASN.out.validation_status, by: 0)
+        .filter { _meta, _gbf, status_file ->
+            def rows = status_file.readLines()
+            rows.size() > 1 && rows[1].split('\\t', -1)[1] == 'PASS'
+        }
+        .map { meta, gbf, _status_file -> tuple(meta, gbf) }
+
+    ENA_FLATFILE(ch_table2asn_pass)
+    ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.status.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.checks.collect { it[1] })
+    ch_versions = ch_versions.mix(ENA_FLATFILE.out.versions.first())
+
+    if (params.ena_webin_validate) {
+        if (!params.ena_study) {
+            error "--ena_study is required when --ena_webin_validate is enabled."
+        }
+        if (!secrets.WEBIN_USERNAME || !secrets.WEBIN_PASSWORD) {
+            error "Nextflow secrets WEBIN_USERNAME and WEBIN_PASSWORD are required when --ena_webin_validate is enabled."
+        }
+
+        WEBIN_VALIDATE(ENA_FLATFILE.out.embl_file, params.ena_study)
+        ch_multiqc_files = ch_multiqc_files.mix(WEBIN_VALIDATE.out.tool_params.collect { it[1] })
+        ch_multiqc_files = ch_multiqc_files.mix(WEBIN_VALIDATE.out.status.collect { it[1] })
+        ch_versions = ch_versions.mix(WEBIN_VALIDATE.out.versions.first())
+        ch_validated_ena_flatfile = WEBIN_VALIDATE.out.validated_flatfile
+    }
     
     //
     // MODULE: Interperate the translation diagnostics from table2asn output
@@ -169,4 +206,6 @@ workflow MITOGENOME_QC {
     emit:
     multiqc_files           = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions                = ch_versions              // channel: [ path(versions.yml) ]
+    ena_flatfile            = ENA_FLATFILE.out.embl_file
+    validated_ena_flatfile  = ch_validated_ena_flatfile
 }

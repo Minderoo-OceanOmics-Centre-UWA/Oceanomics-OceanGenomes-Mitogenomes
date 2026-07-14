@@ -1,0 +1,17 @@
+name: ena_flatfile
+description: Convert a table2asn GenBank flat file to a validated EMBL-Bank flat file for ENA.
+keywords: [ena, embl, genbank, emboss, seqret]
+tools:
+  - name: emboss
+    homepage: https://emboss.sourceforge.net/
+    licence: GPL-2.0-or-later
+input:
+  - meta: { type: map, description: Sample metadata }
+  - gbf: { type: file, description: table2asn GenBank flat file }
+output:
+  - embl_file: { type: files, description: Gzipped EMBL-Bank flat file, pattern: "*.embl.gz" }
+  - status: { type: files, description: Non-fatal conversion gate status, pattern: "*.ena_conversion_status.tsv" }
+  - checks: { type: files, description: Annotation-preservation checks, pattern: "*.ena_conversion_check.tsv" }
+  - log: { type: files, description: EMBOSS conversion log, pattern: "*.ena_conversion.log" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]

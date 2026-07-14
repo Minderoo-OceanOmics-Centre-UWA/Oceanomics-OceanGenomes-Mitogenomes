@@ -1,0 +1,18 @@
+name: webin_validate
+description: Validate a gzipped EMBL-Bank flat file with ENA Webin-CLI without submitting it.
+keywords: [ena, embl, webin, validation]
+tools:
+  - name: webin-cli
+    homepage: https://github.com/enasequence/webin-cli
+    licence: Apache-2.0
+input:
+  - meta: { type: map, description: Sample metadata }
+  - embl_file: { type: file, description: Gzipped EMBL-Bank flat file }
+  - ena_study: { type: string, description: ENA study accession or alias }
+output:
+  - validated_flatfile: { type: files, description: Flat file emitted only after Webin validation passes, pattern: "validated/*.embl.gz" }
+  - manifest: { type: files, description: Submission-ready sequence manifest, pattern: "*.webin_manifest.txt" }
+  - status: { type: files, description: Non-fatal Webin status, pattern: "*.webin_status.tsv" }
+  - reports: { type: directory, description: Webin validation reports, pattern: "webin_output" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]

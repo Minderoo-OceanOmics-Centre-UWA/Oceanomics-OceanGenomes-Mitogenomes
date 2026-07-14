@@ -77,6 +77,8 @@ that matches your container/conda environment.
 | `--blast_db_dir` | ✔ | Directory used to cache the downloaded `taxdb.*` files; re-use between runs to avoid repeated downloads. |
 | `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
 | `--template_sbt` | ✔ | Submission template passed to `table2asn` when packaging GenBank artefacts. |
+| `--ena_webin_validate` | Optional | Run production Webin-CLI validation for ENA flat files that pass table2asn and conversion checks (default `false`). |
+| `--ena_study` | With Webin validation | ENA study accession or alias written to each targeted-sequence manifest. |
 | `--samplesheet_prefix` | Optional | Reserved for generated samplesheet naming in wrapper scripts. |
 | `--getorganelle_genedb_min_genes` | Optional | Minimum genes a reference must yield to build the reseed custom gene database (default `10`). Below this, the sample keeps its first-pass GetOrganelle assembly instead of reseeding. |
 | `--translation_table` | Optional | Mitochondrial genetic code for vertebrate/unresolved samples (default `2`). Invertebrate codes are derived per-sample from the taxonomic `class` column (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4), so this no longer forces a single code across the whole run. |
@@ -84,6 +86,26 @@ that matches your container/conda environment.
 `--input_dir` mode requires `--sql_config` because the enriched samplesheet generator queries
 OceanOmics metadata. When running with `--input`, you can omit `--sql_config`, but upload/QC stages
 are then skipped with a warning.
+
+### ENA Webin validation
+
+ENA conversion runs automatically for samples with no table2asn `ERROR`/`REJECT` or discrepancy-report `FATAL`.
+Warnings remain visible in MultiQC but do not block conversion. To add the credentialed production Webin check:
+
+```bash
+nextflow secrets set WEBIN_USERNAME 'Webin-XXXXXX'
+nextflow secrets set WEBIN_PASSWORD
+
+nextflow run main.nf \
+  ... \
+  --ena_webin_validate true \
+  --ena_study PRJEB12345
+```
+
+The password is stored in Nextflow's secret store rather than a parameter or params file. The pipeline invokes
+Webin with `-validate` only and never submits records. Individual Webin failures are written to the sample's
+`genbank/ena/` directory and do not terminate unrelated jobs. Only files under `ena/validated/` have passed both
+the local table2asn gate and Webin validation.
 
 ## Assembly summary QC thresholds
 

@@ -15,8 +15,10 @@ input:
 output:
   - sqn_file: { type: files, description: Submission file, pattern: "*.sqn" }
   - val_file: { type: files, description: Validation report, pattern: "*.val" }
+  - stats_file: { type: files, description: Validation severity summary, pattern: "*.stats" }
   - gbf_file: { type: files, description: GenBank flat file, pattern: "*.gbf" }
   - dr_file: { type: files, description: Discrepancy report, pattern: "*.dr" }
+  - validation_findings: { type: files, description: Normalised validator and fatal discrepancy findings, pattern: "*.table2asn_findings.tsv" }
+  - validation_status: { type: files, description: Non-fatal per-sample table2asn gate status, pattern: "*.table2asn_status.tsv" }
 authors: ["Tyler Peirce"]
 maintainers: ["Tyler Peirce"]
-
