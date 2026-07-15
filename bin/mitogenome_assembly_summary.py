@@ -732,6 +732,64 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
         if reason not in deduped:
             deduped.append(reason)
     row["manual_review_reason"] = ";".join(deduped)
+    row[BLOCKING_KEY] = ";".join(blocking_reasons(row, deduped, thresholds))
+
+
+# Reasons that describe a *complete* mitogenome rather than a defect: they are
+# retained in manual_review_reason for transparency but, on an assembly that
+# passes the complete-core guard, they no longer force a manual_review status.
+ADVISORY_WHEN_COMPLETE = {"no_congeneric_reference", "low_mean_coverage"}
+# Number of tRNAs a complete-core assembly may be missing (annotation limitation,
+# not an assembly defect) while all 13 PCGs + 2 rRNAs are still present.
+TRNA_TOLERANCE = 2
+# Row key holding the reasons that actually force manual_review. Not a summary
+# column, so it is dropped by the DictWriter (extrasaction="ignore") on write.
+BLOCKING_KEY = "_blocking_reason"
+
+
+def is_complete_core(row: dict[str, str], thresholds: Thresholds) -> bool:
+    """A finished mitogenome: circular, all protein-coding genes present, length
+    in the expected range, and at most TRNA_TOLERANCE tRNAs short. Soft flags on
+    such an assembly are advisory, not blocking."""
+    if row.get("circularised") != "true":
+        return False
+    length = parse_number(row.get("final_length_bp"))
+    num_cds = parse_number(row.get("num_cds"))
+    num_genes = parse_number(row.get("num_genes"))
+    if thresholds.expected_pcg_count is not None:
+        if num_cds is None or num_cds < thresholds.expected_pcg_count:
+            return False
+    if thresholds.min_length is not None and (length is None or length < thresholds.min_length):
+        return False
+    if thresholds.max_length is not None and (length is None or length > thresholds.max_length):
+        return False
+    if thresholds.expected_gene_count is not None and num_genes is not None:
+        if num_genes < thresholds.expected_gene_count - TRNA_TOLERANCE:
+            return False
+    return True
+
+
+def blocking_reasons(row: dict[str, str], reasons: list[str], thresholds: Thresholds) -> list[str]:
+    """Filter the review reasons down to those that should force manual_review.
+
+    On a complete-core assembly, coverage / no-congeneric flags and a tRNA-only
+    gene shortfall are downgraded to advisory. missing_protein_coding_genes and
+    every structural flag (length, contigs, circularity, repeats) always block.
+    """
+    if not is_complete_core(row, thresholds):
+        return list(reasons)
+    num_cds = parse_number(row.get("num_cds"))
+    num_genes = parse_number(row.get("num_genes"))
+    trna_only_shortfall = (
+        thresholds.expected_pcg_count is not None and num_cds is not None
+        and num_cds >= thresholds.expected_pcg_count
+        and thresholds.expected_gene_count is not None and num_genes is not None
+        and 0 < (thresholds.expected_gene_count - num_genes) <= TRNA_TOLERANCE
+    )
+    advisory = set(ADVISORY_WHEN_COMPLETE)
+    if trna_only_shortfall:
+        advisory.add("missing_genes")
+    return [reason for reason in reasons if reason not in advisory]
 
 
 def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterable[Path]) -> dict[str, str]:
@@ -774,7 +832,7 @@ def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterabl
     if not row["final_length_bp"]:
         row["status"] = "failed"
         row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
-    elif row["manual_review_reason"]:
+    elif row.get(BLOCKING_KEY):
         row["status"] = "manual_review"
     else:
         row["status"] = "complete"
@@ -836,19 +894,32 @@ def count_getorganelle_candidates(files: Iterable[Path]) -> int | None:
 
 
 def getorganelle_graph_ambiguous(files: Iterable[Path]) -> bool:
-    selected_graphs = [path for path in files if "selected_graph" in path.name.lower()]
+    """True only when GetOrganelle could not resolve a *unique* mitogenome path.
+
+    The authoritative signal is how many resolved sequences GetOrganelle actually
+    wrote: it emits one ``*.path_sequence.fasta`` per equally-supported path, so
+    more than one distinct path sequence (or more than one selected graph) means a
+    genuine ambiguity a human must arbitrate.
+
+    A single resolved path whose ``selected_graph.gfa`` happens to contain several
+    ``S`` segments is NOT ambiguous: the standard fish mitogenome graph carries
+    3-6 segments (the control-region / tRNA repeats) joined into one circular
+    path. Keying off the raw segment count -- as this function previously did --
+    flagged essentially every clean circular assembly for manual review, which was
+    the single largest source of false-positive review flags in the audit run.
+    """
+    def distinct(names_iter):
+        return {p.name for p in names_iter}
+
+    path_sequences = distinct(
+        path for path in files
+        if path.suffix.lower() in FASTA_EXTENSIONS and "path_sequence" in path.name.lower()
+    )
+    if len(path_sequences) > 1:
+        return True
+    selected_graphs = distinct(path for path in files if "selected_graph" in path.name.lower())
     if len(selected_graphs) > 1:
         return True
-    for path in selected_graphs:
-        text = read_text(path, max_chars=300_000)
-        segment_count = sum(1 for line in text.splitlines() if line.startswith("S\t"))
-        if segment_count > 1:
-            return True
-    for path in files:
-        if path.name.endswith(".get_org.log.txt"):
-            text = read_text(path, max_chars=500_000).lower()
-            if any(term in text for term in ("ambiguous", "multiple path", "path2", "more than one")):
-                return True
     return False
 
 
@@ -897,14 +968,15 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
     apply_qc(row, thresholds)
     if getorganelle_graph_ambiguous(run.files):
         row["manual_review_reason"] = add_reason(row["manual_review_reason"], "ambiguous_getorganelle_graph")
+        row[BLOCKING_KEY] = add_reason(row.get(BLOCKING_KEY, ""), "ambiguous_getorganelle_graph")
     if not row["final_length_bp"]:
         row["status"] = "failed"
         row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
     elif row["status"] == "failed":
         row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
-    elif row["status"] in {"incomplete", "unknown"} and row["manual_review_reason"]:
+    elif row["status"] in {"incomplete", "unknown"} and row.get(BLOCKING_KEY):
         row["status"] = "manual_review"
-    elif row["manual_review_reason"]:
+    elif row.get(BLOCKING_KEY):
         row["status"] = "manual_review"
     elif row["status"] == "unknown":
         row["status"] = "complete"
