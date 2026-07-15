@@ -8,16 +8,23 @@ process OATK {
 
     input:
     tuple val(meta), path(reads)
-    // OatkDB mitochondrial profile-HMM (.fam) for the sample's clade, plus its
-    // pressed nhmmer index files (.h3f/.h3i/.h3m/.h3p) staged alongside it.
+    // OatkDB mitochondrial profile-HMM: the <clade>_mito.fam AND its pressed nhmmer
+    // index files (.h3f/.h3i/.h3m/.h3p). All are staged together (pass the .fam plus
+    // its siblings as a list) because nhmmscan needs the indexes next to the .fam;
+    // the .fam itself is resolved from the staged set at runtime.
     path mito_db
 
     output:
     // Structure-solved MT contigs. optional: Oatk writes nothing when it cannot
     // resolve an organelle contig, so the fallback records a failure rather than
     // crashing the run.
-    tuple val(meta), path("${prefix}.mito.ctg.fasta"), emit: fasta, optional: true
+    // The contig is republished as <prefix>.fasta (the same clean name MitoHiFi /
+    // GetOrganelle use) so the annotation stage derives the prefix consistently;
+    // the native .mito.ctg.fasta and .mito.gfa are kept for provenance and the
+    // summary's circularity read.
+    tuple val(meta), path("${prefix}.fasta"),          emit: fasta, optional: true
     tuple val(meta), path("${prefix}.mito.gfa"),       emit: gfa,   optional: true
+    tuple val(meta), path("${prefix}.mito.ctg.fasta"), emit: ctg,   optional: true
     tuple val(meta), path("${prefix}.oatk.log"),       emit: log
     path "versions.yml",                               emit: versions
 
@@ -35,16 +42,31 @@ process OATK {
     """
     # nhmmscan ships in the Oatk container; resolve its path for the --nhmmscan arg.
     NHMMSCAN=\$(command -v nhmmscan)
+    # The profile-HMM Oatk reads is the .fam; its .h3* index files must be staged
+    # in the same dir (they are, via the module's multi-file db input).
+    MITO_DB=\$(ls -1 *.fam 2>/dev/null | head -n1)
+    if [ -z "\$MITO_DB" ]; then
+        echo "ERROR: no .fam profile-HMM found in the staged Oatk database" >&2
+        exit 1
+    fi
 
     oatk \\
         -k ${kmer} \\
         -c ${cov} \\
         -t ${task.cpus} \\
         --nhmmscan \$NHMMSCAN \\
-        -m ${mito_db} \\
+        -m \$MITO_DB \\
         -o ${prefix} \\
         ${args} \\
         ${reads} > ${prefix}.oatk.log 2>&1 || true
+
+    # Republish the structure-solved contig under the clean <prefix>.fasta name that
+    # the annotation stage expects. Skipped silently when Oatk resolved no contig
+    # (the optional outputs then simply do not exist and the fallback is recorded
+    # as a failed assembly downstream).
+    if [ -s ${prefix}.mito.ctg.fasta ]; then
+        cp ${prefix}.mito.ctg.fasta ${prefix}.fasta
+    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -56,7 +78,10 @@ process OATK {
     stub:
     prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix ?: meta.id}"
     """
-    touch ${prefix}.mito.ctg.fasta ${prefix}.mito.gfa ${prefix}.oatk.log
+    printf ">%s\\nACGT\\n" ${prefix} > ${prefix}.mito.ctg.fasta
+    cp ${prefix}.mito.ctg.fasta ${prefix}.fasta
+    printf "S\\tu0\\tACGT\\nL\\tu0\\t+\\tu0\\t+\\t0M\\n" > ${prefix}.mito.gfa
+    touch ${prefix}.oatk.log
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         oatk: "stub"

@@ -257,6 +257,13 @@ def infer_prefix(path: Path, assembler: str) -> str:
                 return name.split(marker, 1)[0]
         if ".extended_K" in name:
             return name.split(".extended_K", 1)[0]
+    if assembler == "Oatk":
+        # Oatk outputs are <prefix>.mito.ctg.fasta / .mito.gfa / .mito.bed / .oatk.log
+        # plus the shared <prefix>.annotation_stats.csv; the run prefix is the part
+        # before the first oatk-specific suffix.
+        for marker in (".mito.ctg.", ".mito.", ".oatk.", ".annot_mito."):
+            if marker in name:
+                return name.split(marker, 1)[0]
     return strip_known_suffix(name)
 
 
@@ -281,6 +288,12 @@ def classify_file(path: Path) -> str | None:
         return None
     if parts.intersection(ignored_parts) or name.startswith(ignored_prefixes):
         return None
+    # Oatk (reference-free HiFi fallback) writes <prefix>.mito.ctg.fasta / .mito.gfa
+    # / .oatk.log, and its prefix carries the "oatk" assembler tag. Check before
+    # MitoHiFi so an oatk run is never misfiled (its prefix never contains
+    # "mitohifi").
+    if "oatk" in name or ".mito.ctg." in name or name.endswith(".mito.gfa"):
+        return "Oatk"
     if "mitohifi" in name or "hifiasm" in name or "contigs_stats" in name:
         return "MitoHiFi"
     if (
@@ -343,6 +356,13 @@ def choose_final_fasta(files: Iterable[Path], assembler: str, prefix: str) -> Pa
             if "complete" in name:
                 value += 25
             if path.name == f"{prefix}.fasta":
+                value += 40
+        elif assembler == "Oatk":
+            # The module republishes the contig as <prefix>.fasta (annotated); the
+            # native <prefix>.mito.ctg.fasta is the fallback.
+            if path.name == f"{prefix}.fasta":
+                value += 60
+            elif name.endswith(".mito.ctg.fasta"):
                 value += 40
         else:
             if path.name == f"{prefix}.fasta":
@@ -1033,6 +1053,57 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
     return row
 
 
+def oatk_circular_from_gfa(files: Iterable[Path]) -> str:
+    """Oatk marks a circular contig with a self-link in its GFA: an ``L`` line whose
+    from-segment and to-segment are the same unitig. Returns 'true' / 'false' /
+    '' (no GFA / unknown)."""
+    for path in files:
+        if path.name.endswith(".mito.gfa"):
+            saw_segment = False
+            for line in read_text(path, max_chars=5_000_000).splitlines():
+                if line.startswith("S\t"):
+                    saw_segment = True
+                elif line.startswith("L\t"):
+                    parts = line.split("\t")
+                    if len(parts) >= 4 and parts[1] == parts[3]:
+                        return "true"
+            return "false" if saw_segment else ""
+    return ""
+
+
+def parse_oatk_run(run: RunFiles, thresholds: Thresholds, all_files: Iterable[Path]) -> dict[str, str]:
+    row = {column: MISSING for column in COLUMNS}
+    row.update({"sample_id": run.sample_id, "assembly_prefix": run.prefix, "assembler": "Oatk"})
+
+    final_fasta = choose_final_fasta(run.files, "Oatk", run.prefix)
+    if final_fasta:
+        length, count = parse_fasta(final_fasta)
+        row["final_length_bp"] = format_number(length)
+        row["num_final_contigs"] = format_number(count)
+    else:
+        warn(f"No Oatk final FASTA detected for {run.prefix}")
+
+    # Circularity from the Oatk graph self-link; gene counts from the shared
+    # annotation stats (the Oatk contig is annotated by the same EMMA/MITOS2 path).
+    row["circularised"] = oatk_circular_from_gfa(run.files)
+    row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
+    row["numt_flag"] = "false"
+    # Oatk is reference-free: no reference species/accession/divergence, so those
+    # columns and the no_congeneric_reference gate stay empty by construction.
+    row.update(anomaly_for_run(run))
+    apply_collapse_override(row, run)
+
+    apply_qc(row, thresholds)
+    if not row["final_length_bp"]:
+        row["status"] = "failed"
+        row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
+    elif row.get(BLOCKING_KEY):
+        row["status"] = "manual_review"
+    else:
+        row["status"] = "complete"
+    return row
+
+
 def write_rows(rows: list[dict[str, str]], output: Path) -> None:
     with output.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=COLUMNS, delimiter="\t", extrasaction="ignore")
@@ -1053,6 +1124,8 @@ def build_summary(inputs: list[Path], thresholds: Thresholds) -> list[dict[str, 
             rows.append(parse_mitohifi_run(run, thresholds, all_files))
         elif run.assembler == "GetOrganelle":
             rows.append(parse_getorganelle_run(run, thresholds, all_files))
+        elif run.assembler == "Oatk":
+            rows.append(parse_oatk_run(run, thresholds, all_files))
     return rows
 
 

@@ -13,7 +13,7 @@ Source run analysed: `/scratch/pawsey1348/tpeirce/mitogenomes-missing-audit-3`
 | 3.2 | CR-VNTR / tandem repeat kept as review with trim surfaced | Done | trim already in circularity evidence; collapse passes these through |
 | 4 | data_limited tag (low coverage + fragmentation) | Done | tags OG637/OG765/OG829 shallow attempts, leaves OG810 (26x) alone; unit tests |
 | 2.2 | Reference divergence CROSS_ORDER detection | Done | OG1422 cross-order case; pure classify_divergence, 6 unit tests |
-| 2.1 | Oatk reference-free HiFi fallback | Code complete + stub-validated, gated OFF | wiring runs in `-stub-run`; needs container + OatkDB + summary parser branch + a real e2e run |
+| 2.1 | Oatk reference-free HiFi fallback | **Complete + validated**, gated OFF | real Oatk assembly, module run via Nextflow+Singularity, summary parser, full-pipeline stub all pass |
 
 Full unit suite: 29 tests green (`python3 -m unittest discover -s tests/unit`; the
 concatemer tests need blast on PATH, the divergence tests need none).
@@ -31,13 +31,44 @@ concatemer tests need blast on PATH, the divergence tests need none).
 - Note: the repo's config requires Nextflow 25.x; the config parser in 26.04 rejects
   it (unrelated to these changes).
 
-### Remaining to make Phase 2.1 live
-- Provide an Oatk container image (`params.oatk_container`) and an actinopterygian
-  mito OatkDB `.fam` (`params.oatk_mito_db`); set `params.enable_oatk_fallback = true`.
-- Add an `oatk` branch to `bin/mitogenome_assembly_summary.py` (run discovery +
-  stats) and a circularity/coverage assessment for Oatk contigs, so an
-  Oatk-assembled sample is reported like a MitoHiFi/GetOrganelle one.
-- Run on the failed HiFi samples (OG62 / OG109 / OG1422 / OG2093) to validate.
+### Running the Oatk fallback (Phase 2.1)
+Everything is wired; enable it in two steps.
+
+1. Fetch the OatkDB profile-HMM for your clade (ray-finned fish shown), once:
+   ```
+   bash bin/download_oatk_db.sh actinopterygii_mito /scratch/$USER/oatk_db
+   ```
+   This pulls `<clade>_mito.fam` plus its `.h3f/.h3i/.h3m/.h3p` index files.
+
+2. Run the pipeline with the fallback on:
+   ```
+   nextflow run main.nf <your usual opts> -profile singularity \
+       -c conf/oatk.config \
+       --enable_oatk_fallback true \
+       --oatk_mito_db /scratch/$USER/oatk_db/actinopterygii_mito.fam
+   ```
+
+Container: `quay.io/biocontainers/oatk:1.0--h577a1d6_1` (bundles oatk + syncasm +
+nhmmscan/hmmer). Params (`oatk_container`, `oatk_mito_db`, `oatk_syncmer_size`,
+`oatk_syncmer_coverage`, `enable_oatk_fallback`) have defaults in `conf/oatk.config`.
+
+Behaviour: runs only on samples MitoHiFi failed to assemble; Oatk contigs are
+named `<id>.<seqtype>.<date>.v10oatk.fasta`, annotated by the same EMMA/MITOS2
+path, and reported in the assembly summary as `assembler=Oatk` (reference-free, so
+no reference species / no_congeneric flag). Circularity is read from the Oatk GFA
+self-link.
+
+### Validation performed (2026-07-16)
+- Container: oatk 1.0 + nhmmscan (HMMER 3.4) run; actinopterygii_mito.fam readable.
+- Real assembly: simulated fish-mito HiFi reads -> Oatk -> 16,465 bp single circular
+  contig (exact match to the source mitogenome).
+- Module via Nextflow + Singularity (real container + DB): emits `<prefix>.fasta`
+  (16,465 bp) + `.mito.gfa` (circular self-link). Caught + fixed a DB-staging bug
+  (the `.fam` index files must be staged beside the `.fam`).
+- Summary parser: Oatk run -> status=complete, circularised=true, 37/13 genes,
+  reference-free; unit-tested (8 Oatk tests; 37 total green).
+- Full-pipeline `-stub-run` (Oatk enabled): MITOHIFI -> OATK -> SANITISE -> EMMA ->
+  SUMMARY all complete.
 
 Commits: see branch `mitogenome-robustness` (5 commits, one per phase). The
 in-progress ENA work in the tree was left untouched (never staged).

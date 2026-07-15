@@ -228,22 +228,35 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         ch_reads_by_prefix = combined_with_mt_assembly_prefix
             .map { meta, reads, _ref_fasta, _ref_gb -> [meta, reads] }
 
+        // Oatk assembler tag for the run prefix, parsed from the container version
+        // (1.0 -> v10oatk) so the summary files it as an Oatk run distinct from the
+        // failed MitoHiFi attempt. Overwrite mt_assembly_prefix so every downstream
+        // output (Oatk contig, annotation, summary) is named and grouped under it.
+        def oatk_version_stripped = (params.oatk_container ?: 'oatk:1.0')
+            .tokenize(':').last().tokenize('--').first().replaceAll('\\.', '')
+
         ch_oatk_input = ch_mitohifi_fasta_branched.failed
             .join(ch_reads_by_prefix, by: 0)
-            .map { meta, _empty_fasta, reads -> [meta, reads] }
+            .map { meta, _empty_fasta, reads ->
+                def oatk_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${oatk_version_stripped}oatk"
+                [ meta + [ mt_assembly_prefix: oatk_prefix, circular: null, assembler_fallback: 'oatk' ], reads ]
+            }
+
+        // Stage the .fam AND its .h3* nhmmer indexes together (nhmmscan needs them
+        // side by side); params.oatk_mito_db points at the .fam.
+        ch_oatk_db = Channel.fromPath("${params.oatk_mito_db}*", checkIfExists: true).collect()
 
         OATK (
             ch_oatk_input,
-            file(params.oatk_mito_db, checkIfExists: true)
+            ch_oatk_db
         )
 
-        // circular is unknown for an Oatk contig until the downstream check runs;
-        // tag the assembler so the summary / provenance can tell it apart.
         ch_oatk_fasta = OATK.out.fasta
-            .map { meta, fasta -> [ meta + [ circular: null, assembler_fallback: 'oatk' ], fasta ] }
 
         ch_versions = ch_versions.mix(OATK.out.versions.first())
         ch_summary_files = ch_summary_files.mix(OATK.out.log.map { _meta, log -> log })
+        ch_summary_files = ch_summary_files.mix(OATK.out.fasta.map { _meta, fasta -> fasta })
+        ch_summary_files = ch_summary_files.mix(OATK.out.gfa.map { _meta, gfa -> gfa })
     }
 
     //
