@@ -15,6 +15,7 @@ include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_ocea
 include { MITOGENOME_ASSEMBLY_GETORG       } from '../subworkflows/local/mitogenome_assembly/getorganelle'
 include { MITOGENOME_ASSEMBLY_MITOHIFI     } from '../subworkflows/local/mitogenome_assembly/mitohifi'
 include { MITOGENOME_ANNOTATION     } from '../subworkflows/local/mitogenome_annotation_lca'
+include { COLLAPSE_CONCATEMER       } from '../modules/local/collapse_concatemer'
 include { UPLOAD_RESULTS            } from '../subworkflows/local/upload_results_mito'
 include { MITOGENOME_QC             } from '../subworkflows/local/mitogenome_qc'
 include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
@@ -215,6 +216,39 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_annotation_input = ch_mitogenome_hifi_assembly_fasta
         .mix(ch_mitogenome_getorg_assembly_fasta)
         .filter { _meta, fasta -> fasta.size() > 0 }
+
+    // Auto-curation: collapse a clean head-to-tail concatemer (an assembly ~2x
+    // the true length, detected by the circularity check) to a single monomer
+    // before annotation. collapse_concatemer.py re-verifies the multimer by
+    // self-alignment and passes anything it cannot confirm through unchanged, so
+    // this can only ever fix a genuine duplication, never corrupt an assembly.
+    // Assemblies with no circularity evidence (remainder) bypass the step.
+    ch_collapse_branched = ch_annotation_input
+        .join(
+            ch_mitogenome_hifi_circularity_evidence.mix(ch_mitogenome_getorg_circularity_evidence),
+            by: 0, remainder: true
+        )
+        .branch { _meta, fasta, evidence ->
+            with_evidence: evidence != null && fasta != null
+            without_evidence: true
+        }
+
+    COLLAPSE_CONCATEMER(
+        ch_collapse_branched.with_evidence.map { meta, fasta, evidence -> [meta, fasta, evidence] }
+    )
+
+    // The collapse report feeds the assembly summary so a collapsed concatemer is
+    // reported at its monomer length rather than re-flagged as over-length.
+    ch_assembly_summary_files = ch_assembly_summary_files.mix(
+        COLLAPSE_CONCATEMER.out.report.map { _meta, report -> report }
+    )
+    ch_versions = ch_versions.mix(COLLAPSE_CONCATEMER.out.versions.first())
+
+    // Rebuild the annotation input from the (possibly collapsed) FASTAs plus the
+    // assemblies that had no evidence to collapse against.
+    ch_annotation_input = COLLAPSE_CONCATEMER.out.fasta
+        .mix(ch_collapse_branched.without_evidence.map { meta, fasta, _evidence -> [meta, fasta] })
+        .filter { _meta, fasta -> fasta != null && fasta.size() > 0 }
 
     // Sanitise FASTA before annotation to avoid duplicate IDs / multi-contig issues
     SANITISE_FASTA(

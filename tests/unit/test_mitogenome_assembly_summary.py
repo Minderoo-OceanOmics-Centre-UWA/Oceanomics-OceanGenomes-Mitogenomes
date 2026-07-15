@@ -135,5 +135,41 @@ class BlockingAdvisoryTests(unittest.TestCase):
         self.assertIn("multiple_final_contigs", blocking)
 
 
+class CollapseOverrideTests(unittest.TestCase):
+    def make_run(self, report_text):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        rep = root / "OG750.hifi.v323mitohifi.concatemer_collapse.tsv"
+        rep.write_text(report_text)
+        return mas.RunFiles(sample_id="OG750", prefix="OG750.hifi.v323mitohifi",
+                            assembler="MitoHiFi", files=[rep])
+
+    def test_collapsed_report_overrides_length_and_clears_anomaly(self):
+        run = self.make_run(
+            "sample\taction\toriginal_length\tcollapsed_length\treference_length\ttail_identity\treason\n"
+            "OG750\tcollapsed\t32672\t16466\t16703\t1.0\tcollapsed_2.0x_concatemer\n"
+        )
+        row = complete_row(final_length_bp="32672", anomaly_type="concatemer", length_anomaly="yes")
+        mas.apply_collapse_override(row, run)
+        self.assertEqual(row["final_length_bp"], "16466")
+        self.assertEqual(row["anomaly_type"], "none")
+        # And the resolved assembly must no longer be blocked.
+        mas.apply_qc(row, THRESHOLDS)
+        self.assertNotIn("concatemer", row.get(mas.BLOCKING_KEY, ""))
+        self.assertNotIn("length_outside_expected_range", row.get(mas.BLOCKING_KEY, ""))
+
+    def test_passthrough_report_leaves_row_untouched(self):
+        run = self.make_run(
+            "sample\taction\toriginal_length\tcollapsed_length\treference_length\ttail_identity\treason\n"
+            "OGX\tpassthrough\t32000\t32000\t16703\t0.0\ttail_identity_below_threshold\n"
+        )
+        row = complete_row(final_length_bp="32000", anomaly_type="unresolved", length_anomaly="yes")
+        mas.apply_collapse_override(row, run)
+        self.assertEqual(row["final_length_bp"], "32000")
+        self.assertEqual(row["anomaly_type"], "unresolved")
+
+
 if __name__ == "__main__":
     unittest.main()

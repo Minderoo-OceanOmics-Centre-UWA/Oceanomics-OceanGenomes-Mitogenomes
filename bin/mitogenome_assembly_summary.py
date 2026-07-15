@@ -613,6 +613,32 @@ def anomaly_for_run(run: "RunFiles") -> dict[str, str]:
     return {}
 
 
+def collapse_for_run(run: "RunFiles") -> dict[str, str] | None:
+    """Read the concatemer-collapse report (<prefix>.concatemer_collapse.tsv) for
+    this run, if the auto-curation step ran. When action == collapsed, the
+    over-length concatemer has been rewritten to a monomer, so the summary should
+    report the collapsed length and drop the now-resolved length/repeat anomaly."""
+    for path in run.files:
+        if path.name.endswith(".concatemer_collapse.tsv"):
+            rows = read_table(path)
+            if rows:
+                return rows[0]
+    return None
+
+
+def apply_collapse_override(row: dict[str, str], run: "RunFiles") -> None:
+    """If a concatemer was auto-collapsed, use the monomer length and clear the
+    length/anomaly flags so the resolved assembly is not re-flagged as over-length."""
+    collapse = collapse_for_run(run)
+    if not collapse or (collapse.get("action") or "").strip().lower() != "collapsed":
+        return
+    collapsed_length = (collapse.get("collapsed_length") or "").strip()
+    if collapsed_length.isdigit():
+        row["final_length_bp"] = collapsed_length
+    row["anomaly_type"] = "none"
+    row["length_anomaly"] = "no"
+
+
 def getorg_circular_override(run: "RunFiles") -> str:
     """Corrected circular verdict from the GetOrganelle check sidecar
     (<prefix>.getorg_check.tsv -> final_verdict_circular). 'true'/'false' or ''.
@@ -827,6 +853,7 @@ def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterabl
     row["reference_relevance"] = reference_relevance_for_run(run)
     row["reference_divergence"] = reference_divergence_for_run(run)
     row.update(anomaly_for_run(run))
+    apply_collapse_override(row, run)
 
     apply_qc(row, thresholds)
     if not row["final_length_bp"]:
@@ -953,6 +980,7 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
     row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
     row["numt_flag"] = "true" if has_numt_signal(run.files) else "false"
     row.update(anomaly_for_run(run))
+    apply_collapse_override(row, run)
 
     # The GetOrganelle reseed reference (relabelled <prefix>.reference.gb, or the
     # published mtdna/reference_seed/NC_*.gb) is not tied to a run by classify_file,
