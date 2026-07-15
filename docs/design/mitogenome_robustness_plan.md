@@ -1,8 +1,33 @@
 # Mitogenome pipeline robustness plan
 
-Status: in progress
+Status: implemented (Phase 2.1 Oatk needs a validation run)
 Owner: Tyler Peirce
 Source run analysed: `/scratch/pawsey1348/tpeirce/mitogenomes-missing-audit-3`
+
+## Implementation status
+
+| Phase | Change | State | Verification |
+|---|---|---|---|
+| 1 | Blocking-vs-advisory split + ambiguous-graph rewrite | Done | 15 samples manual_review -> done on the audit data, 0 regressions; 16 unit tests |
+| 3.1 | Concatemer auto-collapse (script + module + summary + wiring) | Done | dimer collapses, non-concatemer + chimera pass through; 3 blast tests + summary tests. Nextflow wiring not run e2e |
+| 3.2 | CR-VNTR / tandem repeat kept as review with trim surfaced | Done | trim already in circularity evidence; collapse passes these through |
+| 4 | data_limited tag (low coverage + fragmentation) | Done | tags OG637/OG765/OG829 shallow attempts, leaves OG810 (26x) alone; unit tests |
+| 2.2 | Reference divergence CROSS_ORDER detection | Done | OG1422 cross-order case; pure classify_divergence, 6 unit tests |
+| 2.1 | Oatk reference-free HiFi fallback | Code complete, gated OFF | needs container + OatkDB + summary parser branch + an e2e run |
+
+Full unit suite: 29 tests green (`python3 -m unittest discover -s tests/unit`; the
+concatemer tests need blast on PATH, the divergence tests need none).
+
+### Remaining to make Phase 2.1 live
+- Provide an Oatk container image (`params.oatk_container`) and an actinopterygian
+  mito OatkDB `.fam` (`params.oatk_mito_db`); set `params.enable_oatk_fallback = true`.
+- Add an `oatk` branch to `bin/mitogenome_assembly_summary.py` (run discovery +
+  stats) and a circularity/coverage assessment for Oatk contigs, so an
+  Oatk-assembled sample is reported like a MitoHiFi/GetOrganelle one.
+- Run on the failed HiFi samples (OG62 / OG109 / OG1422 / OG2093) to validate.
+
+Commits: see branch `mitogenome-robustness` (5 commits, one per phase). The
+in-progress ENA work in the tree was left untouched (never staged).
 
 ## Baseline
 
