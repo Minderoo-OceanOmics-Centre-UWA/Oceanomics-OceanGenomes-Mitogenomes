@@ -157,6 +157,9 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_hifi_assembly_log = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_log
         ch_mitogenome_hifi_reference_gb = MITOGENOME_ASSEMBLY_MITOHIFI.out.reference_gb
         ch_mitogenome_hifi_circularity_evidence = MITOGENOME_ASSEMBLY_MITOHIFI.out.circularity_evidence
+        // Reference-free Oatk fallback contigs (empty channel unless the fallback is
+        // enabled); folded into the annotation input below alongside the assemblies.
+        ch_mitogenome_hifi_oatk_fasta = MITOGENOME_ASSEMBLY_MITOHIFI.out.oatk_fasta
     } else if (params.precomputed_mitogenome_assembly_fasta_hifi) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_hifi, checkIfExists: false)
@@ -192,11 +195,13 @@ workflow OCEANGENOMESMITOGENOMES {
         // No circularity check is re-run for precomputed assemblies, so no anomaly
         // gate is applied (samples proceed on the other QC conditions as before).
         ch_mitogenome_hifi_circularity_evidence = Channel.empty()
+        ch_mitogenome_hifi_oatk_fasta = Channel.empty()
     } else {
 
         ch_mitogenome_hifi_assembly_fasta = Channel.empty()
         ch_mitogenome_hifi_assembly_log = Channel.empty()
         ch_mitogenome_hifi_circularity_evidence = Channel.empty()
+        ch_mitogenome_hifi_oatk_fasta = Channel.empty()
     }
 
     if (!params.skip_mitogenome_assembly_hifi) {
@@ -215,6 +220,7 @@ workflow OCEANGENOMESMITOGENOMES {
     // failure in the database.
     ch_annotation_input = ch_mitogenome_hifi_assembly_fasta
         .mix(ch_mitogenome_getorg_assembly_fasta)
+        .mix(ch_mitogenome_hifi_oatk_fasta)
         .filter { _meta, fasta -> fasta.size() > 0 }
 
     // Auto-curation: collapse a clean head-to-tail concatemer (an assembly ~2x

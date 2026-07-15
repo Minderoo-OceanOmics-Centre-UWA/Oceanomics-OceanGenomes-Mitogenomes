@@ -14,6 +14,7 @@ include { MITOHIFI_AVERAGE_COVERAGE        } from '../../../../modules/local/mit
 include { MITOHIFI_CHECK_CIRCULARITY       } from '../../../../modules/local/mitohifi/check_circularity'
 include { RELABEL_REFERENCE_GB             } from '../../../../modules/local/relabel_reference_gb'
 include { REFERENCE_DIVERGENCE             } from '../../../../modules/local/reference_divergence'
+include { OATK                             } from '../../../../modules/local/oatk'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
 // Read the circularity verdict from a MITOHIFI_CHECK_CIRCULARITY evidence TSV.
@@ -209,6 +210,43 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_assembly_log = ch_assembled_stats.mix(ch_failed_assembly_log)
 
     //
+    // MODULE: OATK reference-free fallback (gated by params.enable_oatk_fallback).
+    //   MitoHiFi recruits reads by mapping to a related-species reference; for taxa
+    //   with no close NCBI relative (a divergent / cross-order reference) that maps
+    //   ~zero reads and hifiasm produces no contig. Oatk instead identifies the
+    //   mitogenome by profile-HMM over a de-novo HiFi assembly, so it needs no
+    //   species reference and recovers exactly these divergent-reference failures.
+    //   Runs only on samples MitoHiFi failed to assemble; emits a FASTA that the
+    //   parent workflow feeds into annotation. Off by default (needs an Oatk
+    //   container + an OatkDB mito profile for the sample clade).
+    //
+    ch_oatk_fasta = Channel.empty()
+    if (params.enable_oatk_fallback) {
+        // Reads keyed by the SAME enriched meta (with mt_assembly_prefix) the failed
+        // branch carries, so the join matches. combined_with_mt_assembly_prefix holds
+        // [meta_ext, reads, ref_fasta, ref_gb]; take meta + reads.
+        ch_reads_by_prefix = combined_with_mt_assembly_prefix
+            .map { meta, reads, _ref_fasta, _ref_gb -> [meta, reads] }
+
+        ch_oatk_input = ch_mitohifi_fasta_branched.failed
+            .join(ch_reads_by_prefix, by: 0)
+            .map { meta, _empty_fasta, reads -> [meta, reads] }
+
+        OATK (
+            ch_oatk_input,
+            file(params.oatk_mito_db, checkIfExists: true)
+        )
+
+        // circular is unknown for an Oatk contig until the downstream check runs;
+        // tag the assembler so the summary / provenance can tell it apart.
+        ch_oatk_fasta = OATK.out.fasta
+            .map { meta, fasta -> [ meta + [ circular: null, assembler_fallback: 'oatk' ], fasta ] }
+
+        ch_versions = ch_versions.mix(OATK.out.versions.first())
+        ch_summary_files = ch_summary_files.mix(OATK.out.log.map { _meta, log -> log })
+    }
+
+    //
     // Fold the circularity verdict into meta.circular.
     //   The verdict comes from the check-circularity evidence (final_verdict_circular);
     //   failed assemblies have no evidence and carry circular=null (unknown). Every
@@ -287,6 +325,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
     emit:
     assembly_fasta  = ch_assembly_fasta            // channel: [ meta(+circular), assembly.fasta ]
+    oatk_fasta      = ch_oatk_fasta                // channel: [ meta(+circular), oatk.mito.ctg.fasta ] (empty unless fallback enabled)
     assembly_log    = ch_assembly_log              // channel: [ meta(+circular), contigs_stats.tsv ]
     coverage_stats  = MITOHIFI_AVERAGE_COVERAGE.out.coverage
     reference_gb    = ch_reference_gb              // channel: [ meta(+circular), reference.gb ]
