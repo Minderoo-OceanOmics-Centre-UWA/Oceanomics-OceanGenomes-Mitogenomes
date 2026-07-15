@@ -134,6 +134,26 @@ class BlockingAdvisoryTests(unittest.TestCase):
         _, blocking = self.apply(complete_row(num_final_contigs="3", circularised="true"))
         self.assertIn("multiple_final_contigs", blocking)
 
+    def test_low_coverage_fragmented_tagged_data_limited(self):
+        # OG765-like: shallow HiC, non-circular, out-of-range length.
+        reason, _ = self.apply(complete_row(
+            circularised="false", final_length_bp="3407", num_final_contigs="2",
+            mean_coverage="9", num_genes="", num_cds="", missing_genes=""))
+        self.assertIn("data_limited", reason)
+
+    def test_adequate_coverage_not_tagged_data_limited(self):
+        # OG810-like: fragmented but coverage 26 (above 0.75*20=15) -> not data_limited.
+        reason, _ = self.apply(complete_row(
+            circularised="false", final_length_bp="9856", num_final_contigs="6",
+            mean_coverage="26", num_genes="37", num_cds="13"))
+        self.assertNotIn("data_limited", reason)
+
+    def test_complete_low_coverage_not_data_limited(self):
+        # A complete circular assembly at low coverage is advisory, never data_limited
+        # (no fragmentation reason present).
+        reason, _ = self.apply(complete_row(mean_coverage="12"))
+        self.assertNotIn("data_limited", reason)
+
 
 class CollapseOverrideTests(unittest.TestCase):
     def make_run(self, report_text):

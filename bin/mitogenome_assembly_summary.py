@@ -753,6 +753,18 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
     if thresholds.expected_pcg_count is not None and num_cds is not None and num_cds < thresholds.expected_pcg_count:
         reasons.append("missing_protein_coding_genes")
 
+    # Data-limited tag: a fragmented / non-circular assembly at coverage well below
+    # the minimum is a sequencing-depth problem (low mito content, e.g. HiC or
+    # low-yield libraries), not something the pipeline can assemble its way out of.
+    # Tagging it lets triage separate data-limited samples from ones the pipeline
+    # could still improve. It never changes status on its own.
+    if (
+        thresholds.min_mean_coverage is not None and mean_cov is not None
+        and mean_cov < thresholds.min_mean_coverage * DATA_LIMITED_COVERAGE_FRACTION
+        and any(reason in FRAGMENTATION_REASONS for reason in reasons)
+    ):
+        reasons.append("data_limited")
+
     deduped = []
     for reason in reasons:
         if reason not in deduped:
@@ -768,6 +780,16 @@ ADVISORY_WHEN_COMPLETE = {"no_congeneric_reference", "low_mean_coverage"}
 # Number of tRNAs a complete-core assembly may be missing (annotation limitation,
 # not an assembly defect) while all 13 PCGs + 2 rRNAs are still present.
 TRNA_TOLERANCE = 2
+# A fragmented / non-circular assembly whose mean coverage is below this fraction
+# of the minimum coverage threshold is treated as sequencing-depth limited rather
+# than a pipeline defect, and tagged data_limited for triage.
+DATA_LIMITED_COVERAGE_FRACTION = 0.75
+# Reasons that are symptoms of shallow / low-mito-content data rather than a
+# pipeline shortcoming.
+FRAGMENTATION_REASONS = {
+    "not_circularised", "multiple_final_contigs", "multiple_candidate_contigs",
+    "length_outside_expected_range",
+}
 # Row key holding the reasons that actually force manual_review. Not a summary
 # column, so it is dropped by the DictWriter (extrasaction="ignore") on write.
 BLOCKING_KEY = "_blocking_reason"
