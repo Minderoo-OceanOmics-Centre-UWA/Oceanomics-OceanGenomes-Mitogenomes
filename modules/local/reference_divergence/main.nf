@@ -35,14 +35,19 @@ process REFERENCE_DIVERGENCE {
     def species = (meta.nominal_species_id ?: meta.reference_species_id ?: '').toString().trim()
     def klass = (meta.class ?: '').toString().trim()
     def family = (meta.family ?: '').toString().trim()
+    def taxon_order = (meta.order ?: '').toString().trim()
     def class_arg = klass ? "--sample-class '${klass}'" : ''
     def family_arg = family ? "--sample-family '${family}'" : ''
+    // Enables the CROSS_ORDER tier when the samplesheet supplies an order; absent
+    // on older samplesheets, in which case grading falls back to genus/family.
+    def order_arg = taxon_order ? "--sample-order '${taxon_order}'" : ''
     """
     reference_divergence_check.py \\
         --reference-gb ${reference_gb} \\
         --sample-species '${species}' \\
         ${class_arg} \\
         ${family_arg} \\
+        ${order_arg} \\
         --out ${meta.mt_assembly_prefix}.reference_divergence.txt \\
         ${args}
 

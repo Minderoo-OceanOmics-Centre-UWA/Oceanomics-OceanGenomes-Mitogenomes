@@ -725,7 +725,7 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
     # Pre-assembly taxonomy guard: a non-congeneric reference is the leading cause
     # of gene-incomplete MitoHiFi collapses for taxa with no close NCBI relative.
     # UNKNOWN (unparseable reference / missing taxonomy) is not treated as a defect.
-    if row.get("reference_divergence") in {"CONFAMILIAL", "DIFFERENT_FAMILY", "NON_CONGENERIC"}:
+    if row.get("reference_divergence") in {"CONFAMILIAL", "DIFFERENT_FAMILY", "NON_CONGENERIC", "CROSS_ORDER"}:
         reasons.append("no_congeneric_reference")
     # Length / tandem-repeat anomaly from the circularity check. The specific type
     # (concatemer / control_region_repeat / unresolved) is the curation action, so
