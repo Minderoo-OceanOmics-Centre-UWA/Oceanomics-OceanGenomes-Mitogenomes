@@ -13,10 +13,23 @@ Source run analysed: `/scratch/pawsey1348/tpeirce/mitogenomes-missing-audit-3`
 | 3.2 | CR-VNTR / tandem repeat kept as review with trim surfaced | Done | trim already in circularity evidence; collapse passes these through |
 | 4 | data_limited tag (low coverage + fragmentation) | Done | tags OG637/OG765/OG829 shallow attempts, leaves OG810 (26x) alone; unit tests |
 | 2.2 | Reference divergence CROSS_ORDER detection | Done | OG1422 cross-order case; pure classify_divergence, 6 unit tests |
-| 2.1 | Oatk reference-free HiFi fallback | Code complete, gated OFF | needs container + OatkDB + summary parser branch + an e2e run |
+| 2.1 | Oatk reference-free HiFi fallback | Code complete + stub-validated, gated OFF | wiring runs in `-stub-run`; needs container + OatkDB + summary parser branch + a real e2e run |
 
 Full unit suite: 29 tests green (`python3 -m unittest discover -s tests/unit`; the
 concatemer tests need blast on PATH, the divergence tests need none).
+
+### Nextflow validation (run 2026-07-16, Nextflow 25.04.6)
+- `nextflow run main.nf -preview`: full DAG builds with COLLAPSE_CONCATEMER, OATK
+  (fallback enabled) and REFERENCE_DIVERGENCE wired in; "completed successfully".
+- Standalone `-stub-run` of COLLAPSE_CONCATEMER and OATK: both execute, emitting
+  the expected `.fasta` / `.concatemer_collapse.tsv` / `.mito.ctg.fasta` / `.oatk.log`.
+- Full-pipeline `-stub-run` (mitohifi path, Oatk fallback enabled): MITOHIFI_MITOHIFI,
+  REFERENCE_DIVERGENCE, OATK and MITOGENOME_ASSEMBLY_SUMMARY all COMPLETED; the
+  assembly-summary MultiQC table was produced. The only FAILED tasks were the two
+  DB-download stubs (DOWNLOAD_BLAST_DB / DOWNLOAD_TAXONKIT_DB, exit 127 in stub),
+  which the pipeline error-ignores and which are unrelated to these changes.
+- Note: the repo's config requires Nextflow 25.x; the config parser in 26.04 rejects
+  it (unrelated to these changes).
 
 ### Remaining to make Phase 2.1 live
 - Provide an Oatk container image (`params.oatk_container`) and an actinopterygian
