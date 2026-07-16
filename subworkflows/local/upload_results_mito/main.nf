@@ -10,6 +10,7 @@ include { SPECIES_VALIDATION            } from '../../../modules/local/species_v
 include { PUSH_MTDNA_ANNOTATION_RESULTS } from '../../../modules/local/upload_results/emma'
 include { PUSH_LCA_BLAST_RESULTS        } from '../../../modules/local/upload_results/lca'
 include { PUSH_LCA_RAW_RESULTS          } from '../../../modules/local/upload_results/lca_raw'
+include { PUSH_ENA_VALIDATION_RESULTS   } from '../../../modules/local/upload_results/ena_validation'
 include { UPLOAD_RESULTS_SUMMARY        } from '../../../modules/local/upload_results/summary'
 include { EVALUATE_QC_CONDITIONS        } from '../../../modules/local/evaluate_qc_conditions'
 include { QC_SUMMARY                    } from '../../../modules/local/multiqc/qc_summary'
@@ -214,10 +215,6 @@ workflow UPLOAD_RESULTS {
         .mix(PUSH_LCA_BLAST_RESULTS.out.upload)
         .mix(PUSH_LCA_RAW_RESULTS.out.upload)
 
-    UPLOAD_RESULTS_SUMMARY (
-        ch_upload_status_files.collect()
-    )
-
     //
     // Subworkflow finishing steps.
     //
@@ -236,15 +233,12 @@ workflow UPLOAD_RESULTS {
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_LCA_BLAST_RESULTS.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_LCA_RAW_RESULTS.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(EVALUATE_QC_CONDITIONS.out.tool_params.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS_SUMMARY.out.summary)
-    ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS_SUMMARY.out.tool_params)
     ch_versions = ch_versions.mix(PUSH_MTDNA_ASSM_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(SPECIES_VALIDATION.out.versions.first())
     ch_versions = ch_versions.mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(PUSH_LCA_BLAST_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(PUSH_LCA_RAW_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(EVALUATE_QC_CONDITIONS.out.versions)
-    ch_versions = ch_versions.mix(UPLOAD_RESULTS_SUMMARY.out.versions)
 
 
 
@@ -255,8 +249,45 @@ workflow UPLOAD_RESULTS {
     emit:
     qc_ready    = ch_qc_ready                   // channel: [ val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false) ]
     assembly_summary_files = PUSH_MTDNA_ANNOTATION_RESULTS.out.stats.map { meta, stats -> stats }
-    upload_summary = UPLOAD_RESULTS_SUMMARY.out.summary    // channel: path(upload_results_summary.tsv)
-    upload_appendix = UPLOAD_RESULTS_SUMMARY.out.appendix  // channel: path(upload_results_appendix.txt)
+    upload_status_files = ch_upload_status_files
     multiqc_files = ch_multiqc_files            // channel: [ path(multiqc_files) ]
     versions = ch_versions             // channel: [ path(versions.yml) ]
+}
+
+/*
+ * Upload the post-QC ENA validation records and compile the final SQL upload
+ * report only after all biological and submission-readiness gates have run.
+ */
+workflow UPLOAD_ENA_RESULTS {
+
+    take:
+    ena_validation_records // tuple val(meta), path(*.ena_validation_result.tsv)
+    prior_upload_status_files
+    sql_config
+
+    main:
+    ch_versions = Channel.empty()
+    ch_multiqc_files = Channel.empty()
+
+    PUSH_ENA_VALIDATION_RESULTS(ena_validation_records, sql_config)
+
+    ch_all_upload_status_files = prior_upload_status_files
+        .mix(PUSH_ENA_VALIDATION_RESULTS.out.upload.map { _meta, upload -> upload })
+
+    UPLOAD_RESULTS_SUMMARY(ch_all_upload_status_files.collect())
+
+    ch_multiqc_files = ch_multiqc_files
+        .mix(PUSH_ENA_VALIDATION_RESULTS.out.tool_params.collect { it[1] })
+        .mix(UPLOAD_RESULTS_SUMMARY.out.summary)
+        .mix(UPLOAD_RESULTS_SUMMARY.out.tool_params)
+    ch_versions = ch_versions
+        .mix(PUSH_ENA_VALIDATION_RESULTS.out.versions.first())
+        .mix(UPLOAD_RESULTS_SUMMARY.out.versions)
+
+    emit:
+    upload_logs = PUSH_ENA_VALIDATION_RESULTS.out.upload
+    upload_summary = UPLOAD_RESULTS_SUMMARY.out.summary
+    upload_appendix = UPLOAD_RESULTS_SUMMARY.out.appendix
+    multiqc_files = ch_multiqc_files
+    versions = ch_versions
 }

@@ -15,6 +15,8 @@ include { TRANSLATE_GENES       } from '../../../modules/local/genome_qc/transla
 include { GEN_FILES_TABLE2ASN   } from '../../../modules/local/genome_qc/gen_files_table2asn'
 include { ENA_FLATFILE          } from '../../../modules/local/genome_qc/ena_flatfile'
 include { WEBIN_VALIDATE        } from '../../../modules/local/genome_qc/webin_validate'
+include { ENA_VALIDATION_RESULT } from '../../../modules/local/genome_qc/ena_validation_result'
+include { ENA_VALIDATION_SUMMARY} from '../../../modules/local/genome_qc/ena_validation_summary'
 // include { DIAGNOSTICS           } from '../../../modules/local/genome_qc/diagnostics'
 // include { GROUPER               } from '../../../modules/local/genome_qc/grouper'
 // include { SUBMITTER             } from '../../../modules/local/genome_qc/submitter'
@@ -155,6 +157,41 @@ workflow MITOGENOME_QC {
         ch_versions = ch_versions.mix(WEBIN_VALIDATE.out.versions.first())
         ch_validated_ena_flatfile = WEBIN_VALIDATE.out.validated_flatfile
     }
+
+    // Collate every reached gate into one durable record per assembly. Missing
+    // downstream files become explicit NOT_RUN/NOT_REQUESTED values rather than
+    // silently dropping a quarantined sample.
+    ch_ena_validation_files = GEN_FILES_TABLE2ASN.out.validation_status
+        .mix(ENA_FLATFILE.out.status)
+        .mix(ENA_FLATFILE.out.checks)
+        .mix(ENA_FLATFILE.out.embl_file)
+    if (params.ena_webin_validate) {
+        ch_ena_validation_files = ch_ena_validation_files
+            .mix(WEBIN_VALIDATE.out.status)
+            .mix(WEBIN_VALIDATE.out.manifest)
+    }
+
+    ch_ena_validation_inputs = ch_ena_validation_files
+        .map { meta, validation_file -> tuple(meta.mt_assembly_prefix, meta, validation_file) }
+        .groupTuple(by: 0)
+        .map { _prefix, metas, validation_files -> tuple(metas[0], validation_files.flatten()) }
+
+    ena_validation_settings = [
+        ena_study: params.ena_study ?: '',
+        validation_mode: 'pipeline',
+        validation_attempt: params.ena_validation_attempt,
+        webin_requested: params.ena_webin_validate as boolean,
+        workflow_run_name: workflow.runName ?: '',
+        workflow_session_id: workflow.sessionId?.toString() ?: '',
+        pipeline_revision: workflow.revision ?: workflow.commitId ?: ''
+    ]
+    ENA_VALIDATION_RESULT(ch_ena_validation_inputs, ena_validation_settings)
+    ENA_VALIDATION_SUMMARY(ENA_VALIDATION_RESULT.out.record.map { _meta, record -> record }.collect())
+
+    ch_multiqc_files = ch_multiqc_files.mix(ENA_VALIDATION_SUMMARY.out.multiqc)
+    ch_versions = ch_versions
+        .mix(ENA_VALIDATION_RESULT.out.versions.first())
+        .mix(ENA_VALIDATION_SUMMARY.out.versions)
     
     //
     // MODULE: Interperate the translation diagnostics from table2asn output
@@ -208,4 +245,7 @@ workflow MITOGENOME_QC {
     versions                = ch_versions              // channel: [ path(versions.yml) ]
     ena_flatfile            = ENA_FLATFILE.out.embl_file
     validated_ena_flatfile  = ch_validated_ena_flatfile
+    ena_validation_records = ENA_VALIDATION_RESULT.out.record
+    ena_validation_summary = ENA_VALIDATION_SUMMARY.out.multiqc
+    ena_run_summary         = ENA_VALIDATION_SUMMARY.out.run_summary
 }

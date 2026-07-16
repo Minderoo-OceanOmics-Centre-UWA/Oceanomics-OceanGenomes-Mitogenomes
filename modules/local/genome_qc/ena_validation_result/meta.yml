@@ -1,0 +1,12 @@
+name: ena_validation_result
+description: Normalize table2asn, ENA conversion/preflight, and Webin results per assembly.
+keywords: [ena, webin, validation, multiqc]
+input:
+  - meta: { type: map, description: Sample metadata }
+  - validation_files: { type: files, description: Status and ENA artefact files for one assembly }
+  - settings: { type: map, description: Validation context and workflow provenance }
+output:
+  - record: { type: file, description: Normalized per-assembly validation record, pattern: "*.ena_validation_result.tsv" }
+  - versions: { type: file, description: Tool versions, pattern: "versions.yml" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]

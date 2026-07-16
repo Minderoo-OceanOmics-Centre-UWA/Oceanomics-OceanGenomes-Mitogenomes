@@ -16,7 +16,7 @@ include { MITOGENOME_ASSEMBLY_GETORG       } from '../subworkflows/local/mitogen
 include { MITOGENOME_ASSEMBLY_MITOHIFI     } from '../subworkflows/local/mitogenome_assembly/mitohifi'
 include { MITOGENOME_ANNOTATION     } from '../subworkflows/local/mitogenome_annotation_lca'
 include { COLLAPSE_CONCATEMER       } from '../modules/local/collapse_concatemer'
-include { UPLOAD_RESULTS            } from '../subworkflows/local/upload_results_mito'
+include { UPLOAD_RESULTS; UPLOAD_ENA_RESULTS } from '../subworkflows/local/upload_results_mito'
 include { MITOGENOME_QC             } from '../subworkflows/local/mitogenome_qc'
 include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
 include { MITOGENOME_ASSEMBLY_SUMMARY } from '../modules/local/multiqc/mitogenome_assembly_summary'
@@ -399,6 +399,11 @@ workflow OCEANGENOMESMITOGENOMES {
         MITOGENOME_QC (
             ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false), path(annotation/*)
         )
+        UPLOAD_ENA_RESULTS (
+            MITOGENOME_QC.out.ena_validation_records,
+            UPLOAD_RESULTS.out.upload_status_files,
+            sql_config
+        )
         ch_assembly_summary_files = ch_assembly_summary_files.mix(UPLOAD_RESULTS.out.assembly_summary_files)
     } else if (!params.skip_upload_results && !params.sql_config) {
         log.warn "Skipping upload/QC because --sql_config not provided"
@@ -428,6 +433,7 @@ workflow OCEANGENOMESMITOGENOMES {
     if (!params.skip_mitogenome_annotation) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ANNOTATION.out.multiqc_files)}
     if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS.out.multiqc_files)}
     if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)}
+    if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_ENA_RESULTS.out.multiqc_files)}
 
     // 
     // Collect all versions from subworkflows
@@ -453,6 +459,9 @@ workflow OCEANGENOMESMITOGENOMES {
     // Run of MITOGENOME_QC depends on upstream evaluation; include if present
     if (!params.skip_upload_results && params.sql_config) {
         ch_versions = ch_versions.mix(MITOGENOME_QC.out.versions)
+    }
+    if (!params.skip_upload_results && params.sql_config) {
+        ch_versions = ch_versions.mix(UPLOAD_ENA_RESULTS.out.versions)
     }
 
 

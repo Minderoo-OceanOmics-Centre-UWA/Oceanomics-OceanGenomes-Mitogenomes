@@ -132,6 +132,18 @@ nextflow run ena.nf \
   --outdir results
 ```
 
+Add `--sql_config /path/to/postgres.cfg` to either standalone command to append the normalized
+validation attempt to PostgreSQL after Webin finishes. Use `--skip_upload_results true` for an
+explicitly file-only run. The database schema is never created by Nextflow; apply the migration
+deliberately before enabling this upload, for example:
+
+```bash
+psql --dbname oceanomics --file sql/001_create_ena_validation_attempts.sql
+```
+
+The PostgreSQL password remains in the protected SQL configuration file and is not written to ENA
+manifests or normalized result records. Webin credentials continue to come only from Nextflow secrets.
+
 To rerun Webin alone against existing compressed EMBL flat files, use:
 
 ```csv
@@ -162,7 +174,8 @@ nextflow run ena.nf -resume \
 ```
 
 The attempt token accepts letters, numbers, dots, underscores, and hyphens. It is recorded in each Webin status and
-the combined `ena/ena_run_summary.tsv`.
+the combined `ena/ena_run_summary.tsv`. Standalone runs also create a MultiQC report containing the detailed gate
+tables and the combined **ENA submission readiness** section.
 
 ## Assembly summary QC thresholds
 

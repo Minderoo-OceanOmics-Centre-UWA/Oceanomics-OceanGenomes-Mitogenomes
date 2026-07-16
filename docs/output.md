@@ -225,6 +225,11 @@ this entire stage is skipped.
   - `ena/validated/<assembly_prefix>.embl.gz`, `ena/<assembly_prefix>.webin_manifest.txt`,
     `ena/<assembly_prefix>.webin_status.tsv`, `ena/webin_output/`: Submission-ready bundle and reports when
     `--ena_webin_validate` is enabled and Webin validation passes.
+  - `ena/<assembly_prefix>.ena_validation_result.tsv`: normalized result for every submission gate, including
+    explicit `NOT_RUN`, `NOT_REQUESTED`, and `NOT_APPLICABLE` states and artefact checksums.
+- `ena/ena_validation_results_mqc.tsv`: batch-level ENA submission-readiness table included in MultiQC.
+- `sql_uploaded_data/<assembly_prefix>.ena_validation.upload.txt`: non-fatal PostgreSQL upload result.
+- `sql_uploaded_data/upload_results_summary_mqc.tsv`: final summary across pre-QC and ENA validation uploads.
 
 </details>
 
@@ -236,10 +241,17 @@ When `ena.nf` is used independently, it publishes the same per-sample `genbank/e
 
 - `ena/ena_run_summary.tsv`: one row per requested sample showing the table2asn gate or EMBL preflight result,
   conversion status, Webin status, submission-ready decision, and validation-attempt token.
+- `ena/ena_validation_results_mqc.tsv` and the standalone MultiQC report: the same normalized results in a
+  reviewable batch table.
 - `mitogenomes/<sample>/<assembly_prefix>/genbank/ena/<assembly_prefix>.ena_preflight_status.tsv`: Webin-only input
   gzip and structural status.
 - `mitogenomes/<sample>/<assembly_prefix>/genbank/ena/<assembly_prefix>.ena_preflight_check.tsv`: EMBL record,
   source-feature, organism, terminator, and sequence counts.
+
+When `--sql_config` is supplied and uploads are not skipped, the standalone runner uses the same append-only
+uploader and emits the same `*.ena_validation.upload.txt` log. Exact re-uploads are reported as `preserved`;
+changed outcomes create another history row. The explicit SQL migration creates `ena_validation_attempts` and
+the `ena_validation_latest` view. It is not run automatically by the pipeline.
 
 ### Standalone QC-only workflow (`qc_only_from_annotations.nf`)
 

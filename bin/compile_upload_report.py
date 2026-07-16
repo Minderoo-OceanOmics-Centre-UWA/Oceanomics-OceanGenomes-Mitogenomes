@@ -8,6 +8,7 @@ Inputs are the ``*.upload.txt`` files produced by:
   * ``PUSH_MTDNA_ANNOTATION_RESULTS``  -> ``<og_id>.annotation.upload.txt``
   * ``SPECIES_VALIDATION``             -> ``<og_id>.species_validation.upload.txt``
   * ``PUSH_LCA_BLAST_RESULTS``         -> ``<og_id>.lca_blast.upload.txt``
+  * ``PUSH_ENA_VALIDATION_RESULTS``    -> ``<assembly_prefix>.ena_validation.upload.txt``
 
 The script writes two output files:
 
@@ -33,10 +34,14 @@ STEP_FROM_SUFFIX = {
     "species_validation": "species_validation",
     "lca_blast": "lca_blast",
     "lca_raw": "lca_raw",
+    "ena_validation": "ena_validation",
 }
 
 # Column order in the summary TSV.
-STEP_ORDER = ["assembly", "annotation", "species_validation", "lca_blast", "lca_raw"]
+STEP_ORDER = [
+    "assembly", "annotation", "species_validation", "lca_blast", "lca_raw",
+    "ena_validation",
+]
 
 
 def parse_filename(path):
@@ -165,6 +170,18 @@ def classify_status(step, text):
             return "success"
         if has_db_error:
             return "failed"
+        if has_failure_marker:
+            return "failed"
+        return "unknown"
+
+    if step == "ena_validation":
+        exit_match = re.search(r"^UPLOAD_EXIT(?:=|\t)(\d+)\s*$", body, re.MULTILINE)
+        if has_db_error or (exit_match and int(exit_match.group(1)) != 0):
+            return "failed"
+        if "✅ Success: inserted ENA validation attempt" in body:
+            return "success"
+        if "⚠️ Exact ENA validation result already recorded" in body:
+            return "preserved"
         if has_failure_marker:
             return "failed"
         return "unknown"

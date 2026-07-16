@@ -1,0 +1,11 @@
+name: ena_validation_summary
+description: Combine normalized ENA validation records into MultiQC and standalone summaries.
+keywords: [ena, webin, multiqc]
+input:
+  - records: { type: files, description: Per-assembly normalized ENA validation records }
+output:
+  - multiqc: { type: file, description: MultiQC-compatible ENA submission-readiness table, pattern: "ena_validation_results_mqc.tsv" }
+  - run_summary: { type: file, description: Standalone ENA run summary, pattern: "ena_run_summary.tsv" }
+  - versions: { type: file, description: Tool versions, pattern: "versions.yml" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]

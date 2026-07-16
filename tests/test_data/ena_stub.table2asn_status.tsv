@@ -1,2 +1,2 @@
-sample	status	reject_count	error_count	warning_count	info_count	discrepancy_fatal_count	blocking_codes	warning_codes
-ena_stub	PASS	0	0	0	0	0
+sample	status	reject_count	error_count	warning_count	info_count	fatal_discrepancy_count	nostop_count	blocking_codes	warning_codes
+ena_stub	PASS	0	0	0	0	0	0	""	""

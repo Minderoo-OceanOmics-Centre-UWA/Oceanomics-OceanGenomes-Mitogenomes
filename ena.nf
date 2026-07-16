@@ -5,6 +5,10 @@ nextflow.enable.dsl = 2
 include { ENA_FLATFILE       } from './modules/local/genome_qc/ena_flatfile'
 include { ENA_EMBL_PREFLIGHT } from './modules/local/genome_qc/ena_embl_preflight'
 include { WEBIN_VALIDATE     } from './modules/local/genome_qc/webin_validate'
+include { ENA_VALIDATION_RESULT  } from './modules/local/genome_qc/ena_validation_result'
+include { ENA_VALIDATION_SUMMARY } from './modules/local/genome_qc/ena_validation_summary'
+include { UPLOAD_ENA_RESULTS     } from './subworkflows/local/upload_results_mito'
+include { MULTIQC                } from './modules/nf-core/multiqc/main'
 
 def requiredValue(row, String column, rowLabel) {
     def value = row[column]?.toString()?.trim()
@@ -59,26 +63,6 @@ def table2asnGate(statusFile) {
     return [status: 'SKIP_TABLE2ASN', reason: "table2asn_${parsed.status}".toLowerCase()]
 }
 
-process ENA_RUN_SUMMARY {
-    tag "${mode}:${validation_attempt}"
-    label 'process_single'
-
-    input:
-    val rows
-    val mode
-    val validation_attempt
-
-    output:
-    path 'ena_run_summary.tsv', emit: summary
-
-    script:
-    def body = rows.sort().join('\n')
-    """
-    printf '%s\n' 'sample\tmt_assembly_prefix\tmode\ttable2asn_gate\tpreflight_status\tconversion_status\twebin_status\twebin_reason\tsubmission_ready\tvalidation_attempt' > ena_run_summary.tsv
-    printf '%s\n' '${body}' >> ena_run_summary.tsv
-    """
-}
-
 workflow {
     if (!(params.ena_mode in ['convert_validate', 'validate'])) {
         error "--ena_mode must be either 'convert_validate' or 'validate'."
@@ -125,15 +109,12 @@ workflow {
             def gbf = resolveInputPath(input_sheet, gbfValue, 'gbf', 0)
             def table2asnStatus = resolveInputPath(input_sheet, statusValue, 'table2asn_status', 0)
             def gate = table2asnGate(table2asnStatus)
-            tuple(meta, gbf, gate.status, gate.reason)
+            tuple(meta, gbf, table2asnStatus, gate.status, gate.reason)
         }
 
-        ch_gate_events = ch_prepared.map { meta, _gbf, gateStatus, reason ->
-            tuple(meta.mt_assembly_prefix, meta.id, 'table2asn', gateStatus, reason)
-        }
         ch_conversion_input = ch_prepared
-            .filter { _meta, _gbf, gateStatus, _reason -> gateStatus == 'PASS' }
-            .map { meta, gbf, _gateStatus, _reason -> tuple(meta, gbf) }
+            .filter { _meta, _gbf, _statusFile, gateStatus, _reason -> gateStatus == 'PASS' }
+            .map { meta, gbf, _statusFile, _gateStatus, _reason -> tuple(meta, gbf) }
 
         ENA_FLATFILE(ch_conversion_input)
         WEBIN_VALIDATE(
@@ -142,15 +123,17 @@ workflow {
             params.ena_validation_attempt.toString()
         )
 
-        ch_conversion_events = ENA_FLATFILE.out.status.map { meta, statusFile ->
-            def parsed = readNamedStatus(statusFile)
-            tuple(meta.mt_assembly_prefix, meta.id, 'conversion', parsed.status, parsed.reason)
-        }
-        ch_webin_events = WEBIN_VALIDATE.out.status.map { meta, statusFile ->
-            def parsed = readNamedStatus(statusFile)
-            tuple(meta.mt_assembly_prefix, meta.id, 'webin', parsed.status, parsed.reason)
-        }
-        ch_events = ch_gate_events.mix(ch_conversion_events, ch_webin_events)
+        ch_validation_files = ch_prepared
+            .map { meta, _gbf, statusFile, _gateStatus, _reason -> tuple(meta, statusFile) }
+            .mix(ENA_FLATFILE.out.status)
+            .mix(ENA_FLATFILE.out.checks)
+            .mix(ENA_FLATFILE.out.embl_file)
+            .mix(WEBIN_VALIDATE.out.status)
+            .mix(WEBIN_VALIDATE.out.manifest)
+        ch_multiqc_files = ch_prepared
+            .map { _meta, _gbf, statusFile, _gateStatus, _reason -> statusFile }
+            .mix(ENA_FLATFILE.out.status.map { _meta, statusFile -> statusFile })
+            .mix(WEBIN_VALIDATE.out.status.map { _meta, statusFile -> statusFile })
     }
     else {
         ch_preflight_input = ch_rows.map { row, meta ->
@@ -161,10 +144,6 @@ workflow {
             def embl = resolveInputPath(input_sheet, emblValue, 'embl', 0)
             tuple(meta, embl)
         }
-        ch_input_events = ch_preflight_input.map { meta, _embl ->
-            tuple(meta.mt_assembly_prefix, meta.id, 'input', 'PASS', 'provided_embl')
-        }
-
         ENA_EMBL_PREFLIGHT(ch_preflight_input)
         WEBIN_VALIDATE(
             ENA_EMBL_PREFLIGHT.out.embl_file,
@@ -172,35 +151,59 @@ workflow {
             params.ena_validation_attempt.toString()
         )
 
-        ch_preflight_events = ENA_EMBL_PREFLIGHT.out.status.map { meta, statusFile ->
-            def parsed = readNamedStatus(statusFile)
-            tuple(meta.mt_assembly_prefix, meta.id, 'preflight', parsed.status, parsed.reason)
-        }
-        ch_webin_events = WEBIN_VALIDATE.out.status.map { meta, statusFile ->
-            def parsed = readNamedStatus(statusFile)
-            tuple(meta.mt_assembly_prefix, meta.id, 'webin', parsed.status, parsed.reason)
-        }
-        ch_events = ch_input_events.mix(ch_preflight_events, ch_webin_events)
+        ch_validation_files = ENA_EMBL_PREFLIGHT.out.status
+            .mix(ENA_EMBL_PREFLIGHT.out.checks)
+            .mix(ENA_EMBL_PREFLIGHT.out.embl_file)
+            .mix(WEBIN_VALIDATE.out.status)
+            .mix(WEBIN_VALIDATE.out.manifest)
+        ch_multiqc_files = ENA_EMBL_PREFLIGHT.out.status
+            .map { _meta, statusFile -> statusFile }
+            .mix(WEBIN_VALIDATE.out.status.map { _meta, statusFile -> statusFile })
     }
 
-    ch_summary_rows = ch_events
-        .groupTuple(by: [0, 1])
-        .map { prefix, sample, stages, statuses, reasons ->
-            def events = [:]
-            stages.eachWithIndex { stage, index ->
-                events[stage] = [status: statuses[index], reason: reasons[index]]
-            }
-            def gate = params.ena_mode == 'convert_validate' ? (events.table2asn?.status ?: 'NOT_RUN') : 'NOT_APPLICABLE'
-            def preflight = params.ena_mode == 'validate' ? (events.preflight?.status ?: 'NOT_RUN') : 'NOT_APPLICABLE'
-            def conversion = params.ena_mode == 'convert_validate' ?
-                (events.conversion?.status ?: (gate == 'PASS' ? 'NOT_RUN' : 'SKIPPED_TABLE2ASN')) :
-                'NOT_APPLICABLE'
-            def webin = events.webin?.status ?: 'NOT_RUN'
-            def webinReason = events.webin?.reason ?: 'not_run'
-            def ready = webin == 'PASS' ? 'true' : 'false'
-            [sample, prefix, params.ena_mode, gate, preflight, conversion, webin, webinReason, ready, params.ena_validation_attempt].join('\t')
-        }
+    ch_validation_inputs = ch_validation_files
+        .map { meta, validationFile -> tuple(meta.mt_assembly_prefix, meta, validationFile) }
+        .groupTuple(by: 0)
+        .map { _prefix, metas, validationFiles -> tuple(metas[0], validationFiles.flatten()) }
 
-    ENA_RUN_SUMMARY(ch_summary_rows.collect(), params.ena_mode, params.ena_validation_attempt)
+    validation_settings = [
+        ena_study: params.ena_study.toString().trim(),
+        validation_mode: params.ena_mode,
+        validation_attempt: params.ena_validation_attempt,
+        webin_requested: true,
+        workflow_run_name: workflow.runName ?: '',
+        workflow_session_id: workflow.sessionId?.toString() ?: '',
+        pipeline_revision: workflow.revision ?: workflow.commitId ?: ''
+    ]
+    ENA_VALIDATION_RESULT(ch_validation_inputs, validation_settings)
+    ENA_VALIDATION_SUMMARY(ENA_VALIDATION_RESULT.out.record.map { _meta, record -> record }.collect())
+    ch_multiqc_files = ch_multiqc_files.mix(ENA_VALIDATION_SUMMARY.out.multiqc)
+
+    if (!params.skip_upload_results && params.sql_config) {
+        sql_config = file(params.sql_config, checkIfExists: true)
+        UPLOAD_ENA_RESULTS(
+            ENA_VALIDATION_RESULT.out.record,
+            Channel.empty(),
+            sql_config
+        )
+        ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_ENA_RESULTS.out.multiqc_files)
+    }
+    else if (!params.skip_upload_results && !params.sql_config) {
+        log.warn 'ENA validation results were not uploaded: provide --sql_config or set --skip_upload_results true for file-only operation.'
+    }
+
+    ch_multiqc_config = Channel.fromPath("$projectDir/assets/multiqc_config.yml", checkIfExists: true).toList()
+    ch_multiqc_custom_config = params.multiqc_config ?
+        Channel.fromPath(params.multiqc_config, checkIfExists: true).toList() : Channel.empty().toList()
+    ch_multiqc_logo = params.multiqc_logo ?
+        Channel.fromPath(params.multiqc_logo, checkIfExists: true).toList() : Channel.empty().toList()
+    MULTIQC(
+        ch_multiqc_files.collect(),
+        ch_multiqc_config,
+        ch_multiqc_custom_config,
+        ch_multiqc_logo,
+        [],
+        []
+    )
 
 }
