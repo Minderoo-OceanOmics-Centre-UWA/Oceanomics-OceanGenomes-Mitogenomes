@@ -258,9 +258,9 @@ def infer_prefix(path: Path, assembler: str) -> str:
         if ".extended_K" in name:
             return name.split(".extended_K", 1)[0]
     if assembler == "Oatk":
-        # Oatk outputs are <prefix>.mito.ctg.fasta / .mito.gfa / .mito.bed / .oatk.log
-        # plus the shared <prefix>.annotation_stats.csv; the run prefix is the part
-        # before the first oatk-specific suffix.
+        # Oatk outputs are <prefix>.fasta / <prefix>.gfa / <prefix>.mito.ctg.fasta /
+        # <prefix>.oatk.log plus the shared <prefix>.annotation_stats.csv; the run
+        # prefix is the part before the first oatk-specific suffix.
         for marker in (".mito.ctg.", ".mito.", ".oatk.", ".annot_mito."):
             if marker in name:
                 return name.split(marker, 1)[0]
@@ -288,11 +288,11 @@ def classify_file(path: Path) -> str | None:
         return None
     if parts.intersection(ignored_parts) or name.startswith(ignored_prefixes):
         return None
-    # Oatk (reference-free HiFi fallback) writes <prefix>.mito.ctg.fasta / .mito.gfa
-    # / .oatk.log, and its prefix carries the "oatk" assembler tag. Check before
-    # MitoHiFi so an oatk run is never misfiled (its prefix never contains
-    # "mitohifi").
-    if "oatk" in name or ".mito.ctg." in name or name.endswith(".mito.gfa"):
+    # Oatk (reference-free HiFi fallback) emits <prefix>.fasta / <prefix>.gfa /
+    # <prefix>.mito.ctg.fasta / <prefix>.oatk.log, and its prefix carries the "oatk"
+    # assembler tag. Check before MitoHiFi so an oatk run is never misfiled (its
+    # prefix never contains "mitohifi").
+    if "oatk" in name or ".mito.ctg." in name:
         return "Oatk"
     if "mitohifi" in name or "hifiasm" in name or "contigs_stats" in name:
         return "MitoHiFi"
@@ -1054,11 +1054,11 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
 
 
 def oatk_circular_from_gfa(files: Iterable[Path]) -> str:
-    """Oatk marks a circular contig with a self-link in its GFA: an ``L`` line whose
-    from-segment and to-segment are the same unitig. Returns 'true' / 'false' /
-    '' (no GFA / unknown)."""
+    """Oatk marks a circular contig with a self-link in its GFA (<prefix>.gfa): an
+    ``L`` line whose from-segment and to-segment are the same unitig. Returns
+    'true' / 'false' / '' (no GFA / unknown)."""
     for path in files:
-        if path.name.endswith(".mito.gfa"):
+        if path.name.endswith(".gfa"):
             saw_segment = False
             for line in read_text(path, max_chars=5_000_000).splitlines():
                 if line.startswith("S\t"):

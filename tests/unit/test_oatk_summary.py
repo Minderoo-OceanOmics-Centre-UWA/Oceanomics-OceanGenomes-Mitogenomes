@@ -23,7 +23,7 @@ class OatkClassificationTests(unittest.TestCase):
     def test_classify_oatk_files(self):
         self.assertEqual(mas.classify_file(Path(f"x/{PFX}.fasta")), "Oatk")
         self.assertEqual(mas.classify_file(Path(f"x/{PFX}.mito.ctg.fasta")), "Oatk")
-        self.assertEqual(mas.classify_file(Path(f"x/{PFX}.mito.gfa")), "Oatk")
+        self.assertEqual(mas.classify_file(Path(f"x/{PFX}.gfa")), "Oatk")
         self.assertEqual(mas.classify_file(Path(f"x/{PFX}.oatk.log")), "Oatk")
 
     def test_oatk_not_confused_with_mitohifi(self):
@@ -31,7 +31,7 @@ class OatkClassificationTests(unittest.TestCase):
         self.assertEqual(mas.classify_file(Path("x/OG1.hifi.260101.v323mitohifi.fasta")), "MitoHiFi")
 
     def test_infer_prefix_consistent_across_oatk_files(self):
-        for name in (f"{PFX}.fasta", f"{PFX}.mito.ctg.fasta", f"{PFX}.mito.gfa", f"{PFX}.oatk.log"):
+        for name in (f"{PFX}.fasta", f"{PFX}.mito.ctg.fasta", f"{PFX}.gfa", f"{PFX}.oatk.log"):
             self.assertEqual(mas.infer_prefix(Path(name), "Oatk"), PFX, name)
 
 
@@ -39,7 +39,7 @@ class OatkGfaCircularityTests(unittest.TestCase):
     def _gfa(self, text):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        p = Path(tmp.name) / f"{PFX}.mito.gfa"
+        p = Path(tmp.name) / f"{PFX}.gfa"
         p.write_text(text)
         return [p]
 
@@ -65,7 +65,7 @@ class OatkParseRunTests(unittest.TestCase):
         run.mkdir(parents=True); ann.mkdir(parents=True)
         (run / f"{PFX}.fasta").write_text(">c\n" + "ACGT" * 4116 + "A\n")  # 16465 bp
         link = "L\tu0\t+\tu0\t+\t985M\n" if circular else "L\tu0\t+\tu1\t+\t0M\n"
-        (run / f"{PFX}.mito.gfa").write_text("S\tu0\tACGT\n" + link)
+        (run / f"{PFX}.gfa").write_text("S\tu0\tACGT\n" + link)
         (run / f"{PFX}.oatk.log").write_text("oatk log\n")
         (ann / f"{PFX}.annotation_stats.csv").write_text(
             f"sample,num_genes,num_cds,missing_genes,frameshift_flag\n{PFX},{genes},{cds},no,false\n"

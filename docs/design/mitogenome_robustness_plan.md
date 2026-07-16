@@ -43,14 +43,15 @@ Everything is wired; enable it in two steps.
 2. Run the pipeline with the fallback on:
    ```
    nextflow run main.nf <your usual opts> -profile singularity \
-       -c conf/oatk.config \
        --enable_oatk_fallback true \
-       --oatk_mito_db /scratch/$USER/oatk_db/actinopterygii_mito.fam
+       --oatk_mito_db /software/projects/pawsey0964/oatk_db/actinopterygii_mito.fam
    ```
 
 Container: `quay.io/biocontainers/oatk:1.0--h577a1d6_1` (bundles oatk + syncasm +
-nhmmscan/hmmer). Params (`oatk_container`, `oatk_mito_db`, `oatk_syncmer_size`,
-`oatk_syncmer_coverage`, `enable_oatk_fallback`) have defaults in `conf/oatk.config`.
+nhmmscan/hmmer). Params (`enable_oatk_fallback`, `oatk_container`, `oatk_mito_db`,
+`oatk_syncmer_size`, `oatk_syncmer_coverage`) default in `nextflow.config`'s `params`
+block; the OATK resource request lives in `conf/modules.config` alongside every other
+process. No dedicated `-c` config: the feature is gated by `enable_oatk_fallback`.
 
 Behaviour: runs only on samples MitoHiFi failed to assemble; Oatk contigs are
 named `<id>.<seqtype>.<date>.v10oatk.fasta`, annotated by the same EMMA/MITOS2
@@ -63,7 +64,7 @@ self-link.
 - Real assembly: simulated fish-mito HiFi reads -> Oatk -> 16,465 bp single circular
   contig (exact match to the source mitogenome).
 - Module via Nextflow + Singularity (real container + DB): emits `<prefix>.fasta`
-  (16,465 bp) + `.mito.gfa` (circular self-link). Caught + fixed a DB-staging bug
+  (16,465 bp) + `<prefix>.gfa` (circular self-link). Caught + fixed a DB-staging bug
   (the `.fam` index files must be staged beside the `.fam`).
 - Summary parser: Oatk run -> status=complete, circularised=true, 37/13 genes,
   reference-free; unit-tested (8 Oatk tests; 37 total green).

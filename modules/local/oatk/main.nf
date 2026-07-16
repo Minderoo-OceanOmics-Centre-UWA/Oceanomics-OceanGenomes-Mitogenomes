@@ -19,11 +19,12 @@ process OATK {
     // resolve an organelle contig, so the fallback records a failure rather than
     // crashing the run.
     // The contig is republished as <prefix>.fasta (the same clean name MitoHiFi /
-    // GetOrganelle use) so the annotation stage derives the prefix consistently;
-    // the native .mito.ctg.fasta and .mito.gfa are kept for provenance and the
-    // summary's circularity read.
+    // GetOrganelle use) so the annotation stage derives the prefix consistently, and
+    // the graph as <prefix>.gfa (matching the other assemblers' output names). The
+    // native .mito.ctg.fasta is kept for provenance; the .gfa carries the summary's
+    // circularity read.
     tuple val(meta), path("${prefix}.fasta"),          emit: fasta, optional: true
-    tuple val(meta), path("${prefix}.mito.gfa"),       emit: gfa,   optional: true
+    tuple val(meta), path("${prefix}.gfa"),            emit: gfa,   optional: true
     tuple val(meta), path("${prefix}.mito.ctg.fasta"), emit: ctg,   optional: true
     tuple val(meta), path("${prefix}.oatk.log"),       emit: log
     path "versions.yml",                               emit: versions
@@ -68,6 +69,12 @@ process OATK {
         cp ${prefix}.mito.ctg.fasta ${prefix}.fasta
     fi
 
+    # Republish Oatk's native <prefix>.mito.gfa under the clean <prefix>.gfa name the
+    # other assemblers use. Skipped silently when no graph was produced.
+    if [ -s ${prefix}.mito.gfa ]; then
+        cp ${prefix}.mito.gfa ${prefix}.gfa
+    fi
+
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         oatk: \$(oatk --version 2>&1 | head -n1 | sed 's/^oatk //' || echo "unknown")
@@ -80,7 +87,7 @@ process OATK {
     """
     printf ">%s\\nACGT\\n" ${prefix} > ${prefix}.mito.ctg.fasta
     cp ${prefix}.mito.ctg.fasta ${prefix}.fasta
-    printf "S\\tu0\\tACGT\\nL\\tu0\\t+\\tu0\\t+\\t0M\\n" > ${prefix}.mito.gfa
+    printf "S\\tu0\\tACGT\\nL\\tu0\\t+\\tu0\\t+\\t0M\\n" > ${prefix}.gfa
     touch ${prefix}.oatk.log
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

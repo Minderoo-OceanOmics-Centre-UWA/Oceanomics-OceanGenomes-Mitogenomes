@@ -1,14 +1,26 @@
 module load nextflow/25.04.6
 module load singularity/4.1.0-nompi
 
-nextflow \
-    run main.nf \
-    -c pawsey_profile.config \
+# Get the absolute path to the current directory
+RUN_DIR="$(pwd -P)"
+BASE="/scratch/pawsey1348/$USER"
+OUT_DIR="$BASE/mitogenomes-missing-audit-3"
+
+mkdir -p "$OUT_DIR"
+
+OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
+# Change to output directory to run Nextflow there
+cd $OUT_DIR
+
+nextflow -log $OUT_DIR/nextflow.log \
+    run $RUN_DIR/main.nf \
+    -work-dir ./work \
+    -c $RUN_DIR/pawsey_profile.config \
     -resume \
     -profile singularity \
     -with-report \
     --input_dir "/scratch/pawsey1348/$USER/path/to/fastp/*.fastq.gz" \
-    --outdir "$(realpath ../_outdir)" \
+    --outdir "$OUT_DIR" \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \
     --curated_blast_db /software/projects/pawsey0964/curated_db/OceanGenomes.CuratedNT.NBDLTranche1and2and3.CuratedBOLD.NoDuplicate.fasta \
@@ -19,6 +31,8 @@ nextflow \
     --kvalue "21" \
     --bs_config ~/.basespace/default.cfg \
     --sql_config ~/postgresql_details/oceanomics.cfg \
+    --enable_oatk_fallback true \
+    --oatk_mito_db /software/projects/pawsey0964/oatk_db/actinopterygii_mito.fam \
     --binddir /scratch \
     --tempdir /scratch/pawsey0964/$USER/tmp \
     --refresh-modules \
@@ -29,7 +43,10 @@ nextflow \
     --samplesheet_prefix "samplesheet" \
     --template_sbt "bin/template.sbt" \
     --force_db_overwrite false \
-    --translation_table "2" 
+    --translation_table "2" \
+    --ena_webin_validate true \
+    --ena_study "PRJEB110568" \
+    --ena_validation_attempt "initial"
     
     # --getorganelle_fromreads_args "-R 20 -w 75 -k 21,45,65,85,105 --max-extending-len inf --max-n-words 1000000000 --continue" ## Include this line if you want to customise the getorganelle fromreads args.
     # nextflow -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core
