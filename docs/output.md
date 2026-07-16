@@ -232,6 +232,15 @@ These artefacts provide the material required to submit validated mitogenomes to
 findings do not stop a large batch: the affected sample is reported and omitted from the corresponding downstream
 submission-ready channel.
 
+When `ena.nf` is used independently, it publishes the same per-sample `genbank/ena/` bundle and also writes:
+
+- `ena/ena_run_summary.tsv`: one row per requested sample showing the table2asn gate or EMBL preflight result,
+  conversion status, Webin status, submission-ready decision, and validation-attempt token.
+- `mitogenomes/<sample>/<assembly_prefix>/genbank/ena/<assembly_prefix>.ena_preflight_status.tsv`: Webin-only input
+  gzip and structural status.
+- `mitogenomes/<sample>/<assembly_prefix>/genbank/ena/<assembly_prefix>.ena_preflight_check.tsv`: EMBL record,
+  source-feature, organism, terminator, and sequence counts.
+
 ### Standalone QC-only workflow (`qc_only_from_annotations.nf`)
 
 When you run `qc_only_from_annotations.nf`, the pipeline skips assembly, annotation, BLAST/LCA, and

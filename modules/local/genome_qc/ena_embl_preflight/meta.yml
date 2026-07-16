@@ -1,0 +1,13 @@
+name: ena_embl_preflight
+description: Perform lightweight structural checks on externally supplied compressed EMBL flat files.
+keywords: [ena, embl, validation]
+input:
+  - meta: { type: map, description: Sample metadata containing id and mt_assembly_prefix }
+  - embl_file: { type: file, description: Gzip-compressed EMBL flat file }
+output:
+  - embl_file: { type: files, description: Input EMBL file emitted only when preflight checks pass, pattern: "preflight/*.embl.gz" }
+  - status: { type: files, description: Per-sample preflight status, pattern: "*.ena_preflight_status.tsv" }
+  - checks: { type: files, description: Structural check counts, pattern: "*.ena_preflight_check.tsv" }
+  - versions: { type: file, description: Tool versions, pattern: "versions.yml" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]

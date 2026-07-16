@@ -1,0 +1,3 @@
+sample,mt_assembly_prefix,gbf,table2asn_status
+ena_stub,ena_stub,ena_stub.gbf,ena_stub.table2asn_status.tsv
+ena_fail,ena_fail,ena_stub.gbf,ena_stub_fail.table2asn_status.tsv

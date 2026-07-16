@@ -16,5 +16,5 @@ workflow {
     table2asn_input = channel.of(tuple(meta, fa, tbl, cmt, src, true))
     GEN_FILES_TABLE2ASN(table2asn_input, sbt)
     ENA_FLATFILE(channel.of(tuple(meta, gbf)))
-    WEBIN_VALIDATE(ENA_FLATFILE.out.embl_file, 'PRJEB000000')
+    WEBIN_VALIDATE(ENA_FLATFILE.out.embl_file, 'PRJEB000000', 'stub-attempt')
 }

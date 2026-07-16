@@ -107,6 +107,63 @@ Webin with `-validate` only and never submits records. Individual Webin failures
 `genbank/ena/` directory and do not terminate unrelated jobs. Only files under `ena/validated/` have passed both
 the local table2asn gate and Webin validation.
 
+### Standalone ENA conversion and validation
+
+Use `ena.nf` when table2asn or EMBL outputs already exist and the assembly, annotation, and QC stages should not run.
+The runner always performs Webin validation and therefore requires `--ena_study` and the two Webin secrets described
+above.
+
+To convert table2asn `.gbf` files and then validate them, create a CSV with these columns:
+
+```csv
+sample,mt_assembly_prefix,gbf,table2asn_status
+OG1234,OG1234.mitohifi,/path/OG1234.mitohifi.gbf,/path/OG1234.mitohifi.table2asn_status.tsv
+```
+
+The status file is mandatory. Only an exact table2asn `PASS` proceeds to conversion; failed or malformed statuses are
+reported as `SKIP_TABLE2ASN` and do not stop other samples.
+
+```bash
+nextflow run ena.nf \
+  -profile singularity \
+  --ena_mode convert_validate \
+  --ena_input ena_gbf_inputs.csv \
+  --ena_study PRJEB123456 \
+  --outdir results
+```
+
+To rerun Webin alone against existing compressed EMBL flat files, use:
+
+```csv
+sample,mt_assembly_prefix,embl
+OG1234,OG1234.mitohifi,/path/OG1234.mitohifi.embl.gz
+```
+
+```bash
+nextflow run ena.nf \
+  -profile singularity \
+  --ena_mode validate \
+  --ena_input ena_embl_inputs.csv \
+  --ena_study PRJEB123456 \
+  --outdir results
+```
+
+Relative input paths are resolved relative to the CSV location. Webin-only inputs first undergo gzip and EMBL
+structure checks; only preflight-passing files reach Webin. Example CSVs are provided in
+`assets/ena_gbf_samplesheet.csv` and `assets/ena_embl_samplesheet.csv`.
+
+Webin failures are non-fatal and consequently cacheable. When using `-resume`, change the validation attempt token to
+force Webin to check unchanged input again after a transient failure or credential change:
+
+```bash
+nextflow run ena.nf -resume \
+  ... \
+  --ena_validation_attempt 2026-07-15-retry1
+```
+
+The attempt token accepts letters, numbers, dots, underscores, and hyphens. It is recorded in each Webin status and
+the combined `ena/ena_run_summary.tsv`.
+
 ## Assembly summary QC thresholds
 
 The pipeline writes `multiqc/mitogenome_assembly_summary_mqc.tsv` and includes it in MultiQC as

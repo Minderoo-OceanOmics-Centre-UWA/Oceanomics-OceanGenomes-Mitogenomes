@@ -9,6 +9,7 @@ input:
   - meta: { type: map, description: Sample metadata }
   - embl_file: { type: file, description: Gzipped EMBL-Bank flat file }
   - ena_study: { type: string, description: ENA study accession or alias }
+  - validation_attempt: { type: string, description: User-controlled token included in the task hash for deliberate revalidation }
 output:
   - validated_flatfile: { type: files, description: Flat file emitted only after Webin validation passes, pattern: "validated/*.embl.gz" }
   - manifest: { type: files, description: Submission-ready sequence manifest, pattern: "*.webin_manifest.txt" }

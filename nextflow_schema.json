@@ -259,6 +259,28 @@
                     "default": null,
                     "description": "ENA study accession or alias used in per-sample targeted-sequence manifests."
                 },
+                "ena_mode": {
+                    "type": "string",
+                    "default": null,
+                    "enum": [
+                        "convert_validate",
+                        "validate"
+                    ],
+                    "description": "Mode for the standalone ena.nf runner: convert table2asn GBF files then validate, or validate existing EMBL files only."
+                },
+                "ena_input": {
+                    "type": "string",
+                    "default": null,
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Mode-specific CSV input for the standalone ena.nf runner."
+                },
+                "ena_validation_attempt": {
+                    "type": "string",
+                    "default": "default",
+                    "pattern": "^[A-Za-z0-9._-]+$",
+                    "description": "Cache key for Webin validation. Change it to deliberately revalidate unchanged files when using -resume."
+                },
                 "sql_config": {
                     "type": "string",
                     "default": null,

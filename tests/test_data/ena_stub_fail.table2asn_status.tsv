@@ -1,0 +1,2 @@
+sample	status	reject_count	error_count	warning_count	info_count	discrepancy_fatal_count	blocking_codes	warning_codes
+ena_fail	FAIL_TABLE2ASN	0	1	0	0	0	SEQ_FEAT.NoStop

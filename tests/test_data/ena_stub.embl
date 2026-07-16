@@ -1,0 +1,10 @@
+ID   ena_stub; SV 1; circular; genomic DNA; STD; UNC; 1 BP.
+XX
+FH   Key             Location/Qualifiers
+FH
+FT   source          1
+FT                   /organism="Testus organismus"
+XX
+SQ   Sequence 1 BP; 1 A; 0 C; 0 G; 0 T; 0 other;
+     a                                                                    1
+//

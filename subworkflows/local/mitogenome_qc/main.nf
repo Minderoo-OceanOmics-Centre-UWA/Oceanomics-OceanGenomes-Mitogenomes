@@ -149,7 +149,7 @@ workflow MITOGENOME_QC {
             error "Nextflow secrets WEBIN_USERNAME and WEBIN_PASSWORD are required when --ena_webin_validate is enabled."
         }
 
-        WEBIN_VALIDATE(ENA_FLATFILE.out.embl_file, params.ena_study)
+        WEBIN_VALIDATE(ENA_FLATFILE.out.embl_file, params.ena_study, params.ena_validation_attempt)
         ch_multiqc_files = ch_multiqc_files.mix(WEBIN_VALIDATE.out.tool_params.collect { it[1] })
         ch_multiqc_files = ch_multiqc_files.mix(WEBIN_VALIDATE.out.status.collect { it[1] })
         ch_versions = ch_versions.mix(WEBIN_VALIDATE.out.versions.first())
