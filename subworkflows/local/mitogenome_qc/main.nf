@@ -13,6 +13,7 @@ include { EXTRACT_GENES_GFF     } from '../../../modules/local/genome_qc/extract
 include { EXTRACT_GENES_GB      } from '../../../modules/local/genome_qc/extract_genes/gb'
 include { TRANSLATE_GENES       } from '../../../modules/local/genome_qc/translate_genes'
 include { GEN_FILES_TABLE2ASN   } from '../../../modules/local/genome_qc/gen_files_table2asn'
+include { PARSE_TABLE2ASN_VALIDATION } from '../../../modules/local/genome_qc/parse_table2asn_validation'
 include { ENA_FLATFILE          } from '../../../modules/local/genome_qc/ena_flatfile'
 include { WEBIN_VALIDATE        } from '../../../modules/local/genome_qc/webin_validate'
 include { ENA_VALIDATION_RESULT } from '../../../modules/local/genome_qc/ena_validation_result'
@@ -117,20 +118,25 @@ workflow MITOGENOME_QC {
         ch_processed_files, // tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), path("*.src"), val(circular)
         template_sbt_file // sbt template generated from genbank, specific for OceanOmics
     )
+    ch_table2asn_parser_input = GEN_FILES_TABLE2ASN.out.val_file
+        .join(GEN_FILES_TABLE2ASN.out.discrepancy_file, by: 0)
+        .join(ch_circular, by: 0)
+    PARSE_TABLE2ASN_VALIDATION(ch_table2asn_parser_input)
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(GEN_FILES_TABLE2ASN.out.versions.first())
     // Feed raw and normalised table2asn validation output into MultiQC inputs.
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.val_file.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.stats_file.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.discrepancy_file.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.validation_findings.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.validation_status.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.qc_flags.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(PARSE_TABLE2ASN_VALIDATION.out.findings.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(PARSE_TABLE2ASN_VALIDATION.out.status.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(PARSE_TABLE2ASN_VALIDATION.out.qc_flags.collect { it[1] })
+    ch_versions = ch_versions.mix(PARSE_TABLE2ASN_VALIDATION.out.versions.first())
 
     // ERROR/REJECT validator findings and FATAL discrepancy findings quarantine
     // only that sample. Warnings remain visible but continue to ENA conversion.
     ch_table2asn_pass = GEN_FILES_TABLE2ASN.out.gbf_file
-        .join(GEN_FILES_TABLE2ASN.out.validation_status, by: 0)
+        .join(PARSE_TABLE2ASN_VALIDATION.out.status, by: 0)
         .filter { _meta, _gbf, status_file ->
             def rows = status_file.readLines()
             rows.size() > 1 && rows[1].split('\\t', -1)[1] == 'PASS'
@@ -161,7 +167,7 @@ workflow MITOGENOME_QC {
     // Collate every reached gate into one durable record per assembly. Missing
     // downstream files become explicit NOT_RUN/NOT_REQUESTED values rather than
     // silently dropping a quarantined sample.
-    ch_ena_validation_files = GEN_FILES_TABLE2ASN.out.validation_status
+    ch_ena_validation_files = PARSE_TABLE2ASN_VALIDATION.out.status
         .mix(ENA_FLATFILE.out.status)
         .mix(ENA_FLATFILE.out.checks)
         .mix(ENA_FLATFILE.out.embl_file)

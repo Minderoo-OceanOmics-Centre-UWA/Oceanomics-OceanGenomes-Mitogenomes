@@ -11,13 +11,10 @@ process GEN_FILES_TABLE2ASN {
 
     output:
     tuple val(meta), path("*.sqn")    , emit: sqn_file
-    tuple val(meta), path("*.val")    , optional: true, emit: val_file
+    tuple val(meta), path("*.val"), emit: val_file
     tuple val(meta), path("*.stats")  , optional: true, emit: stats_file
-    tuple val(meta), path("*.dr")     , optional: true, emit: discrepancy_file
+    tuple val(meta), path("*.dr"), emit: discrepancy_file
     tuple val(meta), path("*.gbf")    , emit: gbf_file
-    tuple val(meta), path("*.qc_flags.tsv"), emit: qc_flags
-    tuple val(meta), path("*.table2asn_findings.tsv"), emit: validation_findings
-    tuple val(meta), path("*.table2asn_status.tsv")  , emit: validation_status
     tuple val(meta), path("19_table2asn.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
@@ -47,22 +44,15 @@ process GEN_FILES_TABLE2ASN {
         -Z \\
         -W
 
-    # Normalise validator and discrepancy findings. Findings are data rather
-    # than a process failure: the subworkflow quarantines only this sample.
+    # Normalise optional files to stable required names for the Python parser.
     val_file=""
     for f in *.val; do [ -e "\$f" ] && { val_file="\$f"; break; }; done
     dr_file=""
     for f in *.dr; do [ -e "\$f" ] && { dr_file="\$f"; break; }; done
-    parser_args=(
-        --sample "${meta.mt_assembly_prefix}"
-        --circular "${circular}"
-        --findings "${meta.mt_assembly_prefix}.table2asn_findings.tsv"
-        --status "${meta.mt_assembly_prefix}.table2asn_status.tsv"
-        --qc-flags "${meta.mt_assembly_prefix}.qc_flags.tsv"
-    )
-    [ -n "\${val_file}" ] && parser_args+=(--val "\${val_file}")
-    [ -n "\${dr_file}" ] && parser_args+=(--dr "\${dr_file}")
-    parse_table2asn_validation.py "\${parser_args[@]}"
+    [ -n "\${val_file}" ] && [ "\${val_file}" != "${meta.mt_assembly_prefix}.val" ] && cp "\${val_file}" "${meta.mt_assembly_prefix}.val"
+    [ -e "${meta.mt_assembly_prefix}.val" ] || touch "${meta.mt_assembly_prefix}.val"
+    [ -n "\${dr_file}" ] && [ "\${dr_file}" != "${meta.mt_assembly_prefix}.dr" ] && cp "\${dr_file}" "${meta.mt_assembly_prefix}.dr"
+    [ -e "${meta.mt_assembly_prefix}.dr" ] || touch "${meta.mt_assembly_prefix}.dr"
 
     printf '%s\n' '<tr><td>Table2ASN</td><td><samp>${effective_args}</samp></td><td>Generates GenBank files and non-fatal per-sample validation reports for ${meta.id}.</td></tr>' > 19_table2asn.tool_params_mqcrow.html
     table2asn_version=\$(table2asn -version 2>&1 | head -1 | sed 's/.* //')
@@ -81,9 +71,6 @@ process GEN_FILES_TABLE2ASN {
     : > \${prefix}.stats
     : > \${prefix}.dr
     : > \${prefix}.gbf
-    printf 'sample\tsource\tseverity\tcode\tmessage\n' > \${prefix}.table2asn_findings.tsv
-    printf 'sample\tstatus\treject_count\terror_count\twarning_count\tinfo_count\tfatal_discrepancy_count\tnostop_count\tblocking_codes\twarning_codes\n%s\tPASS\t0\t0\t0\t0\t0\t0\t\t\n' "\${prefix}" > \${prefix}.table2asn_status.tsv
-    printf 'sample\tcircular\tstatus\treject_count\terror_count\twarning_count\tfatal_discrepancy_count\tnostop_count\tnostop_features\n%s\t%s\tPASS\t0\t0\t0\t0\t0\t\n' "\${prefix}" "${circular}" > \${prefix}.qc_flags.tsv
     printf '%s\n' '<tr><td>Table2ASN</td><td><samp>${effective_args}</samp></td><td>Generates GenBank files and non-fatal per-sample validation reports for ${meta.id}.</td></tr>' > 19_table2asn.tool_params_mqcrow.html
     printf '"%s":\n    table2asn: "stub"\n' "${task.process}" > versions.yml
     """
