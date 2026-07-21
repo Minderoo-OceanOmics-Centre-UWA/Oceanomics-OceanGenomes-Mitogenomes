@@ -35,6 +35,6 @@ process DOWNLOAD_BLAST_DB {
     
     stub:
     """
-    touch taxdb.btd taxdb.bti
+    touch taxdb.btd taxdb.bti taxonomy4blast.sqlite3
     """
 }

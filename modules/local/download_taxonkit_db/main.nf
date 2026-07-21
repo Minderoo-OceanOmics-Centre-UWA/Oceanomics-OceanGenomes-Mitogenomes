@@ -40,16 +40,15 @@ process DOWNLOAD_TAXONKIT_DB {
     
     stub:
     """
-    mkdir -p ${params.taxonkit_db_dir}/taxonkit_db1s/
-
-    taxonkit_dir = ${params.taxonkit_db_dir}/taxonkit_db1s/
-    touch \$taxonkit_dir/citations.dmp \\
-        \$taxonkit_dir/delnodes.dmp \\
-        \$taxonkit_dir/division.dmp \\
-        \$taxonkit_dir/gencode.dmp \\
-        \$taxonkit_dir/images.dmp \\
-        \$taxonkit_dir/merged.dmp \\
-        \$taxonkit_dir/names.dmp \\
-        \$taxonkit_dir/nodes.dmp gc.prt
+    mkdir -p taxonkit_dbs
+    touch taxonkit_dbs/citations.dmp \\
+        taxonkit_dbs/delnodes.dmp \\
+        taxonkit_dbs/division.dmp \\
+        taxonkit_dbs/gencode.dmp \\
+        taxonkit_dbs/images.dmp \\
+        taxonkit_dbs/merged.dmp \\
+        taxonkit_dbs/names.dmp \\
+        taxonkit_dbs/nodes.dmp \\
+        taxonkit_dbs/gc.prt
     """
 }

@@ -1,0 +1,93 @@
+nextflow_workflow {
+
+    name "Test cohort-safe process failure policy"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "SAMPLE_POLICY"
+
+    test("deterministic sample failure is ignored while other samples complete") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['good', 'success'],
+                    ['bad', 'deterministic_failure']
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.succeeded().size() == 1 },
+                { assert workflow.trace.failed().size() == 1 },
+                { assert workflow.out.results.size() == 1 }
+            )
+        }
+    }
+
+    test("transient sample failure retries and succeeds") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(['retry', 'transient_then_success'])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.failed().size() == 1 },
+                { assert workflow.trace.succeeded().size() == 1 },
+                { assert workflow.out.results.size() == 1 }
+            )
+        }
+    }
+
+    test("exhausted transient sample failure is ignored") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['good', 'success'],
+                    ['exhausted', 'transient_failure']
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.failed().size() == 3 },
+                { assert workflow.trace.succeeded().size() == 1 },
+                { assert workflow.out.results.size() == 1 }
+            )
+        }
+    }
+
+}
+
+nextflow_workflow {
+
+    name "Test shared-prerequisite failure policy"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "SHARED_POLICY"
+
+    test("shared prerequisite failure terminates the workflow") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value('failure')
+                """
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+}
