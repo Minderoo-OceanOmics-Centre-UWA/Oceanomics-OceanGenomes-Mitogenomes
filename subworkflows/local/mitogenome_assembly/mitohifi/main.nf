@@ -15,6 +15,7 @@ include { MITOHIFI_CHECK_CIRCULARITY       } from '../../../../modules/local/mit
 include { RELABEL_REFERENCE_GB             } from '../../../../modules/local/relabel_reference_gb'
 include { REFERENCE_DIVERGENCE             } from '../../../../modules/local/reference_divergence'
 include { OATK                             } from '../../../../modules/local/oatk'
+include { ASSEMBLY_NO_RESULT               } from '../../../../modules/local/assembly_no_result'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
 // Read the circularity verdict from a MITOHIFI_CHECK_CIRCULARITY evidence TSV.
@@ -38,6 +39,27 @@ def parseFinalVerdictCircular(tsv) {
     }
 }
 
+def parseReferenceTier(tsv) {
+    try {
+        return tsv.text.readLines().find { it?.trim() }?.split('\t', -1)?.first()?.trim()?.toUpperCase() ?: 'UNKNOWN'
+    } catch (ignored) {
+        return 'UNKNOWN'
+    }
+}
+
+def parseReferenceStatus(tsv) {
+    try {
+        def rows = tsv.text.readLines()
+        if (rows.size() < 2) return 'lookup_error'
+        def header = rows[0].split('\t', -1)
+        def idx = header.findIndexOf { it.trim() == 'status' }
+        def values = rows[1].split('\t', -1)
+        return idx >= 0 && idx < values.size() ? values[idx].trim().toLowerCase() : 'lookup_error'
+    } catch (ignored) {
+        return 'lookup_error'
+    }
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MITOGENOME ASSEMBLY WORKFLOW
@@ -55,12 +77,18 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_multiqc_files = Channel.empty()
     ch_summary_files = Channel.empty()
 
+    def mitohifi_version = params.mitohifi_container.tokenize(':').last()
+    def mitohifi_version_stripped = mitohifi_version.replaceAll('\\.', '')
+
     //
     // map just the meta for the species query
     //
 
     ch_species_reference = fastp_reads
-    .map { meta, _files -> meta }
+    .map { meta, _files ->
+        def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${mitohifi_version_stripped}mitohifi"
+        meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+    }
     // .view()
     
     //
@@ -96,25 +124,29 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // Combine fastp files with the mito reference output
     //
 
-    combined_ch = final_reads.join(MITOHIFI_FINDMITOREFERENCE.out.reference, by: 0)
-
-    //
-    // Embed the assembly prefix into meta. The MitoHiFi version is parsed from the
+    // Embed the assembly prefix before the reference join so reads remain routable
+    // when findMitoReference emits a no-reference placeholder. The version is parsed from the
     // pinned container tag (params.mitohifi_container) rather than `mitohifi.py
     // --version`, because the 3.2.3 release ships a stale self-reported version
     // (3.2.1). The tag is the single source of truth: bump it in nextflow.config and
     // the version in every assembly name follows automatically.
     //
 
-    def mitohifi_version = params.mitohifi_container.tokenize(':').last()
-    def mitohifi_version_stripped = mitohifi_version.replaceAll('\\.', '')
-
-    combined_with_mt_assembly_prefix = combined_ch
-    .map { meta, fasta, ref_fasta, ref_gb ->
+    ch_reads_by_prefix = final_reads.map { meta, reads ->
         def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${mitohifi_version_stripped}mitohifi"
         def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
-        [meta_ext, fasta, ref_fasta, ref_gb]
+        [meta_ext, reads]
     }
+
+    ch_reference_outcomes = MITOHIFI_FINDMITOREFERENCE.out.reference
+        .join(MITOHIFI_FINDMITOREFERENCE.out.status, by: 0)
+    ch_reference_joined = ch_reads_by_prefix.join(ch_reference_outcomes, by: 0)
+    ch_reference_branched = ch_reference_joined.branch { _meta, _reads, ref_fasta, ref_gb, _status ->
+        found: ref_fasta.size() > 0 && ref_gb.size() > 0
+        missing: true
+    }
+    combined_with_mt_assembly_prefix = ch_reference_branched.found
+        .map { meta, reads, ref_fasta, ref_gb, _status -> [meta, reads, ref_fasta, ref_gb] }
 
     //
     // MODULE: Relabel the reference GenBank to a per-sample name so it can be fed
@@ -142,13 +174,20 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         RELABEL_REFERENCE_GB.out.gb
     )
 
+    ch_reference_route = combined_with_mt_assembly_prefix
+        .join(REFERENCE_DIVERGENCE.out.flag, by: 0)
+        .branch { _meta, _reads, _ref_fasta, _ref_gb, flag ->
+            oatk_direct: parseReferenceTier(flag) == 'CROSS_ORDER'
+            mitohifi: true
+        }
+
 
     //
     // MODULE: Run assembly using MitoHifi from reads
     //
 
     MITOHIFI_MITOHIFI (
-        combined_with_mt_assembly_prefix,
+        ch_reference_route.mitohifi.map { meta, reads, ref_fasta, ref_gb, _flag -> [meta, reads, ref_fasta, ref_gb] },
         "r",
         "2"  // Fallback genetic code only: the module prefers meta.genetic_code (derived per-sample from taxonomic class in PREPARE_SAMPLESHEET). 2 = vertebrate mitochondrial.
     )
@@ -221,13 +260,22 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     //   container + an OatkDB mito profile for the sample clade).
     //
     ch_oatk_fasta = Channel.empty()
+    ch_oatk_log = Channel.empty()
+    ch_routed_failure_fasta = Channel.empty()
+    ch_routed_failure_log = Channel.empty()
+
+    ch_direct_oatk_reads = ch_reference_branched.missing
+        .map { meta, reads, _ref_fasta, _ref_gb, status ->
+            def outcome = parseReferenceStatus(status)
+            def reason = outcome == 'lookup_error' ? 'reference_lookup_error' : 'no_reference'
+            [meta, reads, reason]
+        }
+        .mix(ch_reference_route.oatk_direct
+            .map { meta, reads, _ref_fasta, _ref_gb, _flag -> [meta, reads, 'cross_order_reference'] })
     if (params.enable_oatk_fallback) {
         // Reads keyed by the SAME enriched meta (with mt_assembly_prefix) the failed
         // branch carries, so the join matches. combined_with_mt_assembly_prefix holds
         // [meta_ext, reads, ref_fasta, ref_gb]; take meta + reads.
-        ch_reads_by_prefix = combined_with_mt_assembly_prefix
-            .map { meta, reads, _ref_fasta, _ref_gb -> [meta, reads] }
-
         // Oatk assembler tag for the run prefix, parsed from the container version
         // (1.0 -> v10oatk) so the summary files it as an Oatk run distinct from the
         // failed MitoHiFi attempt. Overwrite mt_assembly_prefix so every downstream
@@ -235,11 +283,14 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         def oatk_version_stripped = (params.oatk_container ?: 'oatk:1.0')
             .tokenize(':').last().tokenize('--').first().replaceAll('\\.', '')
 
-        ch_oatk_input = ch_mitohifi_fasta_branched.failed
+        ch_failed_oatk_reads = ch_mitohifi_fasta_branched.failed
             .join(ch_reads_by_prefix, by: 0)
-            .map { meta, _empty_fasta, reads ->
+            .map { meta, _empty_fasta, reads -> [meta, reads, 'empty_mitohifi'] }
+
+        ch_oatk_input = ch_direct_oatk_reads.mix(ch_failed_oatk_reads)
+            .map { meta, reads, reason ->
                 def oatk_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${oatk_version_stripped}oatk"
-                [ meta + [ mt_assembly_prefix: oatk_prefix, circular: null, assembler_fallback: 'oatk' ], reads ]
+                [ meta + [ mt_assembly_prefix: oatk_prefix, circular: null, assembler_fallback: 'oatk', fallback_reason: reason ], reads ]
             }
 
         // Stage the .fam AND its .h3* nhmmer indexes together (nhmmscan needs them
@@ -252,11 +303,23 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         )
 
         ch_oatk_fasta = OATK.out.fasta
+        ch_oatk_log = OATK.out.log
+        // Non-zero OATK exits are propagated by the process itself so Nextflow's
+        // retry/error strategy remains effective. This channel therefore contains
+        // only structured successful outcomes: assembled or a valid no-contig result.
+        ch_oatk_status = OATK.out.status
 
         ch_versions = ch_versions.mix(OATK.out.versions.first())
         ch_summary_files = ch_summary_files.mix(OATK.out.log.map { _meta, log -> log })
         ch_summary_files = ch_summary_files.mix(OATK.out.fasta.map { _meta, fasta -> fasta })
         ch_summary_files = ch_summary_files.mix(OATK.out.gfa.map { _meta, gfa -> gfa })
+        ch_summary_files = ch_summary_files.mix(ch_oatk_status.map { _meta, status -> status })
+    } else {
+        ASSEMBLY_NO_RESULT(ch_direct_oatk_reads.map { meta, _reads, reason -> [meta, reason] })
+        ch_routed_failure_fasta = ASSEMBLY_NO_RESULT.out.fasta
+        ch_routed_failure_log = ASSEMBLY_NO_RESULT.out.status
+        ch_summary_files = ch_summary_files.mix(ASSEMBLY_NO_RESULT.out.status.map { _meta, status -> status })
+        ch_versions = ch_versions.mix(ASSEMBLY_NO_RESULT.out.versions.first())
     }
 
     //
@@ -271,11 +334,11 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_circ_verdict = MITOHIFI_CHECK_CIRCULARITY.out.evidence
         .map { meta, tsv -> [ meta, parseFinalVerdictCircular(tsv) ] }
 
-    ch_assembly_fasta = MITOHIFI_MITOHIFI.out.fasta
+    ch_assembly_fasta = MITOHIFI_MITOHIFI.out.fasta.mix(ch_routed_failure_fasta)
         .join(ch_circ_verdict, by: 0, remainder: true)
         .map { meta, fasta, circ -> [ meta + [ circular: circ ], fasta ] }
 
-    ch_assembly_log = ch_assembly_log
+    ch_assembly_log = ch_assembly_log.mix(ch_routed_failure_log)
         .join(ch_circ_verdict, by: 0, remainder: true)
         .map { meta, log, circ -> [ meta + [ circular: circ ], log ] }
 
@@ -299,6 +362,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.logs.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.command_logs.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_FINDMITOREFERENCE.out.tool_params.collect { it[1] })
+    ch_summary_files = ch_summary_files.mix(MITOHIFI_FINDMITOREFERENCE.out.status.map { _meta, status -> status })
     ch_multiqc_files = ch_multiqc_files.mix(CAT_FASTQ.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_MITOHIFI.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(MITOHIFI_AVERAGE_COVERAGE.out.tool_params.collect { it[1] })
@@ -339,6 +403,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     emit:
     assembly_fasta  = ch_assembly_fasta            // channel: [ meta(+circular), assembly.fasta ]
     oatk_fasta      = ch_oatk_fasta                // channel: [ meta(+circular), oatk.mito.ctg.fasta ] (empty unless fallback enabled)
+    oatk_log        = ch_oatk_log                  // channel: [ meta, oatk.log ]
     assembly_log    = ch_assembly_log              // channel: [ meta(+circular), contigs_stats.tsv ]
     coverage_stats  = MITOHIFI_AVERAGE_COVERAGE.out.coverage
     reference_gb    = ch_reference_gb              // channel: [ meta(+circular), reference.gb ]

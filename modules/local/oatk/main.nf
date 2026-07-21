@@ -23,10 +23,11 @@ process OATK {
     // the graph as <prefix>.gfa (matching the other assemblers' output names). The
     // native .mito.ctg.fasta is kept for provenance; the .gfa carries the summary's
     // circularity read.
-    tuple val(meta), path("${prefix}.fasta"),          emit: fasta, optional: true
+    tuple val(meta), path("${prefix}.fasta"),          emit: fasta
     tuple val(meta), path("${prefix}.gfa"),            emit: gfa,   optional: true
     tuple val(meta), path("${prefix}.mito.ctg.fasta"), emit: ctg,   optional: true
     tuple val(meta), path("${prefix}.oatk.log"),       emit: log
+    tuple val(meta), path("${prefix}.oatk_status.tsv"), emit: status
     path "versions.yml",                               emit: versions
 
     when:
@@ -51,6 +52,7 @@ process OATK {
         exit 1
     fi
 
+    set +e
     oatk \\
         -k ${kmer} \\
         -c ${cov} \\
@@ -59,7 +61,22 @@ process OATK {
         -m \$MITO_DB \\
         -o ${prefix} \\
         ${args} \\
-        ${reads} > ${prefix}.oatk.log 2>&1 || true
+        ${reads} > ${prefix}.oatk.log 2>&1
+    oatk_exit=\$?
+    set -e
+
+    if [ "\$oatk_exit" -ne 0 ]; then
+        printf 'sample\tstatus\texit_code\n%s\ttool_error\t%s\n' '${prefix}' "\$oatk_exit" > ${prefix}.oatk_status.tsv
+        # Preserve the native exit code so Nextflow can retry resource failures
+        # and report exhausted/tool failures as failed processes.  Do not emit an
+        # empty canonical FASTA for infrastructure or tool errors.
+        exit "\$oatk_exit"
+    elif [ -s ${prefix}.mito.ctg.fasta ]; then
+        printf 'sample\tstatus\texit_code\n%s\tassembled\t0\n' '${prefix}' > ${prefix}.oatk_status.tsv
+    else
+        printf 'sample\tstatus\texit_code\n%s\tno_contig\t0\n' '${prefix}' > ${prefix}.oatk_status.tsv
+        : > ${prefix}.fasta
+    fi
 
     # Republish the structure-solved contig under the clean <prefix>.fasta name that
     # the annotation stage expects. Skipped silently when Oatk resolved no contig
@@ -67,6 +84,7 @@ process OATK {
     # as a failed assembly downstream).
     if [ -s ${prefix}.mito.ctg.fasta ]; then
         cp ${prefix}.mito.ctg.fasta ${prefix}.fasta
+        sed -i "/^>/s/.*/>${prefix}/g" ${prefix}.fasta
     fi
 
     # Republish Oatk's native <prefix>.mito.gfa under the clean <prefix>.gfa name the
@@ -75,11 +93,12 @@ process OATK {
         cp ${prefix}.mito.gfa ${prefix}.gfa
     fi
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        oatk: \$(oatk --version 2>&1 | head -n1 | sed 's/^oatk //' || echo "unknown")
-        nhmmscan: \$(nhmmscan -h 2>&1 | grep -oiE 'HMMER [0-9.]+' | head -n1 | sed 's/HMMER //' || echo "unknown")
-    END_VERSIONS
+    oatk_version=\$(oatk --version 2>&1 | head -n1 | sed 's/^oatk //' || true)
+    nhmmscan_version=\$(nhmmscan -h 2>&1 | grep -oiE 'HMMER [0-9.]+' | head -n1 | sed 's/HMMER //' || true)
+    printf '"%s":\n    oatk: "%s"\n    nhmmscan: "%s"\n' \\
+        '${task.process}' \\
+        "\${oatk_version:-unknown}" \\
+        "\${nhmmscan_version:-unknown}" > versions.yml
     """
 
     stub:
@@ -89,9 +108,7 @@ process OATK {
     cp ${prefix}.mito.ctg.fasta ${prefix}.fasta
     printf "S\\tu0\\tACGT\\nL\\tu0\\t+\\tu0\\t+\\t0M\\n" > ${prefix}.gfa
     touch ${prefix}.oatk.log
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        oatk: "stub"
-    END_VERSIONS
+    printf 'sample\tstatus\texit_code\n${prefix}\tassembled\t0\n' > ${prefix}.oatk_status.tsv
+    printf '"%s":\n    oatk: "stub"\n' '${task.process}' > versions.yml
     """
 }

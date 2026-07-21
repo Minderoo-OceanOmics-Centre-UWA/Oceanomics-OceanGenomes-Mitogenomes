@@ -219,8 +219,10 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             ch_reseed_branched.vert.map { meta, _fasta, _log, _reads -> meta }
         )
         ch_vert_seed = MITOHIFI_FINDMITOREFERENCE.out.reference
+            .filter { _meta, ref_fasta, ref_gb -> ref_fasta.size() > 0 && ref_gb.size() > 0 }
             .map { meta, ref_fasta, _ref_gb -> [meta, ref_fasta] }   // [meta, seed]
         ch_vert_ref_gb = MITOHIFI_FINDMITOREFERENCE.out.reference
+            .filter { _meta, ref_fasta, ref_gb -> ref_fasta.size() > 0 && ref_gb.size() > 0 }
             .map { meta, _ref_fasta, ref_gb -> [meta, ref_gb] }      // [meta, ref_gb]
 
         // Custom label database from the reference GenBank (disentangles contigs for

@@ -23,6 +23,42 @@ include { MITOGENOME_ASSEMBLY_SUMMARY } from '../modules/local/multiqc/mitogenom
 
 // Using local module SANITISE_FASTA (see modules/local/sanitise_fasta)
 
+def evidenceAnomalyType(tsv) {
+    try {
+        def rows = tsv.text.readLines()
+        if (rows.size() < 2) return ''
+        def header = rows[0].split('\t', -1)
+        def idx = header.findIndexOf { it.trim() == 'anomaly_type' }
+        def values = rows[1].split('\t', -1)
+        return idx >= 0 && idx < values.size() ? values[idx].trim().toLowerCase() : ''
+    } catch (ignored) {
+        return ''
+    }
+}
+
+def fastaSequenceLength(fasta) {
+    try {
+        return fasta.text.readLines().findAll { !it.startsWith('>') }.sum { it.trim().size() } ?: 0
+    } catch (ignored) {
+        return 0
+    }
+}
+
+def evidenceFinalVerdictCircular(tsv) {
+    try {
+        def rows = tsv.text.readLines()
+        if (rows.size() < 2) return null
+        def header = rows[0].split('\t', -1)
+        def idx = header.findIndexOf { it.trim() == 'final_verdict_circular' }
+        def values = rows[1].split('\t', -1)
+        if (idx < 0 || idx >= values.size()) return null
+        def value = values[idx].trim().toLowerCase()
+        return value == 'true' ? true : (value == 'false' ? false : null)
+    } catch (ignored) {
+        return null
+    }
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MAIN WORKFLOW
@@ -160,6 +196,7 @@ workflow OCEANGENOMESMITOGENOMES {
         // Reference-free Oatk fallback contigs (empty channel unless the fallback is
         // enabled); folded into the annotation input below alongside the assemblies.
         ch_mitogenome_hifi_oatk_fasta = MITOGENOME_ASSEMBLY_MITOHIFI.out.oatk_fasta
+        ch_mitogenome_hifi_oatk_log = MITOGENOME_ASSEMBLY_MITOHIFI.out.oatk_log
     } else if (params.precomputed_mitogenome_assembly_fasta_hifi) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_hifi, checkIfExists: false)
@@ -196,12 +233,14 @@ workflow OCEANGENOMESMITOGENOMES {
         // gate is applied (samples proceed on the other QC conditions as before).
         ch_mitogenome_hifi_circularity_evidence = Channel.empty()
         ch_mitogenome_hifi_oatk_fasta = Channel.empty()
+        ch_mitogenome_hifi_oatk_log = Channel.empty()
     } else {
 
         ch_mitogenome_hifi_assembly_fasta = Channel.empty()
         ch_mitogenome_hifi_assembly_log = Channel.empty()
         ch_mitogenome_hifi_circularity_evidence = Channel.empty()
         ch_mitogenome_hifi_oatk_fasta = Channel.empty()
+        ch_mitogenome_hifi_oatk_log = Channel.empty()
     }
 
     if (!params.skip_mitogenome_assembly_hifi) {
@@ -218,9 +257,12 @@ workflow OCEANGENOMESMITOGENOMES {
     // empty placeholder FASTA. Filter those out so annotation / LCA / QC only
     // run on real assemblies; PUSH_MTDNA_ASSM_RESULTS below still records the
     // failure in the database.
-    ch_annotation_input = ch_mitogenome_hifi_assembly_fasta
+    ch_all_assembly_fasta = ch_mitogenome_hifi_assembly_fasta
         .mix(ch_mitogenome_getorg_assembly_fasta)
         .mix(ch_mitogenome_hifi_oatk_fasta)
+    ch_failed_assembly_fasta = ch_all_assembly_fasta
+        .filter { _meta, fasta -> fasta.size() == 0 }
+    ch_annotation_input = ch_all_assembly_fasta
         .filter { _meta, fasta -> fasta.size() > 0 }
 
     // Auto-curation: collapse a clean head-to-tail concatemer (an assembly ~2x
@@ -235,12 +277,12 @@ workflow OCEANGENOMESMITOGENOMES {
             by: 0, remainder: true
         )
         .branch { _meta, fasta, evidence ->
-            with_evidence: evidence != null && fasta != null
-            without_evidence: true
+            concatemer: evidence != null && fasta != null && evidenceAnomalyType(evidence) == 'concatemer'
+            bypass: true
         }
 
     COLLAPSE_CONCATEMER(
-        ch_collapse_branched.with_evidence.map { meta, fasta, evidence -> [meta, fasta, evidence] }
+        ch_collapse_branched.concatemer.map { meta, fasta, evidence -> [meta, fasta, evidence] }
     )
 
     // The collapse report feeds the assembly summary so a collapsed concatemer is
@@ -252,9 +294,25 @@ workflow OCEANGENOMESMITOGENOMES {
 
     // Rebuild the annotation input from the (possibly collapsed) FASTAs plus the
     // assemblies that had no evidence to collapse against.
-    ch_annotation_input = COLLAPSE_CONCATEMER.out.fasta
-        .mix(ch_collapse_branched.without_evidence.map { meta, fasta, _evidence -> [meta, fasta] })
+    ch_collapsed_canonical_fasta = COLLAPSE_CONCATEMER.out.fasta
+        .join(COLLAPSE_CONCATEMER.out.evidence, by: 0)
+        .map { meta, fasta, evidence ->
+            def circular = evidenceFinalVerdictCircular(evidence)
+            [ circular == null ? meta : meta + [ circular: circular ], fasta ]
+        }
+    ch_canonical_assembly_fasta = ch_collapsed_canonical_fasta
+        .mix(ch_collapse_branched.bypass.map { meta, fasta, _evidence -> [meta, fasta] })
         .filter { _meta, fasta -> fasta != null && fasta.size() > 0 }
+
+    ch_canonical_circularity_evidence = COLLAPSE_CONCATEMER.out.evidence
+        .mix(ch_collapse_branched.bypass
+            .filter { _meta, _fasta, evidence -> evidence != null }
+            .map { meta, _fasta, evidence -> [meta, evidence] })
+
+    // Assemblies below the configured biological minimum are retained for SQL
+    // and summary reporting, but do not enter EMMA/MITOS/table2asn.
+    ch_annotation_input = ch_canonical_assembly_fasta
+        .filter { _meta, fasta -> fastaSequenceLength(fasta) >= params.mitogenome_summary_min_length }
 
     // Sanitise FASTA before annotation to avoid duplicate IDs / multi-contig issues
     SANITISE_FASTA(
@@ -360,12 +418,35 @@ workflow OCEANGENOMESMITOGENOMES {
     // Combine outputs for data uploads
     //add in mitohifi stuff too
 
-    // GetOrganelle uploads one DB row PER VARIANT (first-pass + reseed + rgj), each
-    // keyed by its own variant code; HiFi assemblies are already per-prefix.
-    ch_mitogenome_getorg_assembly_results = ch_mitogenome_getorg_db_results
-    ch_mitogenome_hifi_assembly_results = ch_mitogenome_hifi_assembly_fasta.join(ch_mitogenome_hifi_assembly_log, by: 0)
+    // Preserve every GetOrganelle variant in SQL, while replacing the selected
+    // final variant (same mt_assembly_prefix) with its canonical post-curation
+    // FASTA/meta. MitoHiFi/Oatk canonical results have no raw GetOrg variant and
+    // are therefore added normally. Grouping by prefix prevents duplicate rows.
+    ch_canonical_assembly_logs = ch_mitogenome_getorg_assembly_log
+        .mix(ch_mitogenome_hifi_assembly_log)
+        .mix(ch_mitogenome_hifi_oatk_log)
+        .map { meta, log -> [ meta.mt_assembly_prefix, log ] }
 
-    ch_mitogenome_assembly_results = ch_mitogenome_getorg_assembly_results.mix(ch_mitogenome_hifi_assembly_results)
+    ch_canonical_upload_candidates = ch_canonical_assembly_fasta
+        .mix(ch_failed_assembly_fasta)
+        .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+        .join(ch_canonical_assembly_logs, by: 0)
+        .map { prefix, meta, fasta, log ->
+            [ prefix, [ priority: 1, meta: meta, fasta: fasta, log: log ] ]
+        }
+
+    ch_raw_getorg_upload_candidates = ch_mitogenome_getorg_db_results
+        .map { meta, fasta, log ->
+            [ meta.mt_assembly_prefix, [ priority: 0, meta: meta, fasta: fasta, log: log ] ]
+        }
+
+    ch_mitogenome_assembly_results = ch_raw_getorg_upload_candidates
+        .mix(ch_canonical_upload_candidates)
+        .groupTuple(by: 0)
+        .map { _prefix, candidates ->
+            def selected = candidates.max { it.priority }
+            [ selected.meta, selected.fasta, selected.log ]
+        }
 
     //
     // SUBWORKFLOW: UPLOAD_RESULTS
@@ -376,8 +457,7 @@ workflow OCEANGENOMESMITOGENOMES {
     if (!params.skip_upload_results && params.sql_config) {
         // Per-sample circularity-check evidence from both assemblers feeds the QC
         // gate (anomaly block; the circular condition itself comes via meta.circular).
-        ch_mitogenome_circularity_evidence = ch_mitogenome_hifi_circularity_evidence
-            .mix(ch_mitogenome_getorg_circularity_evidence)
+        ch_mitogenome_circularity_evidence = ch_canonical_circularity_evidence
 
         UPLOAD_RESULTS (
             ch_mitogenome_assembly_results,

@@ -37,19 +37,23 @@ class CollapseConcatemerTests(unittest.TestCase):
         ev.write_text(HDR + "\n" + evidence_line + "\n")
         out = root / "out.fa"
         rep = root / "rep.tsv"
+        corrected = root / "corrected.tsv"
         subprocess.run(
             ["python3", str(SCRIPT), "--fasta", str(fasta), "--evidence", str(ev),
-             "--sample", sample, "--out-fasta", str(out), "--out-report", str(rep)],
+             "--sample", sample, "--out-fasta", str(out), "--out-report", str(rep),
+             "--out-evidence", str(corrected)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         out_seq = "".join(l.strip() for l in out.read_text().splitlines() if not l.startswith(">"))
         with rep.open(newline="") as fh:
             report = list(csv.DictReader(fh, delimiter="\t"))[0]
-        return out_seq, report
+        with corrected.open(newline="") as fh:
+            corrected_row = list(csv.DictReader(fh, delimiter="\t"))[0]
+        return out_seq, report, corrected_row
 
     def test_genuine_dimer_collapses(self):
         mono = monomer()
-        seq, report = self.run_collapse(
+        seq, report, corrected = self.run_collapse(
             mono + mono,
             f"OG750\tconcatemer\t{len(mono)+1}-{2*len(mono)}\t16703\tTrue",
             sample="OG750",
@@ -57,23 +61,42 @@ class CollapseConcatemerTests(unittest.TestCase):
         self.assertEqual(report["action"], "collapsed")
         self.assertEqual(len(seq), len(mono))
         self.assertEqual(seq, mono)
+        self.assertEqual(report["inferred_monomer_period"], str(len(mono)))
+        self.assertEqual(corrected["anomaly_type"], "none")
+        self.assertEqual(corrected["pre_curation_anomaly_type"], "concatemer")
+        self.assertEqual(corrected["pre_curation_suggested_trim_region"], f"{len(mono)+1}-{2*len(mono)}")
 
     def test_non_concatemer_passthrough(self):
         mono = monomer()
-        seq, report = self.run_collapse(mono + mono, "OGY\tnone\tNA\t16703\tTrue", sample="OGY")
+        seq, report, corrected = self.run_collapse(mono + mono, "OGY\tnone\tNA\t16703\tTrue", sample="OGY")
         self.assertEqual(report["action"], "passthrough")
         self.assertEqual(len(seq), 2 * len(mono))
+        self.assertEqual(corrected["curation_action"], "passthrough")
 
     def test_chimera_mislabelled_concatemer_fails_closed(self):
         mono = monomer()
         junk = "".join(random.Random(2).choice("ACGT") for _ in range(16000))
-        seq, report = self.run_collapse(
+        seq, report, _corrected = self.run_collapse(
             mono + junk,
             f"OGX\tconcatemer\t{len(mono)+1}-{len(mono)+len(junk)}\t16703\tTrue",
             sample="OGX",
         )
         self.assertEqual(report["action"], "passthrough")   # not corrupted
         self.assertEqual(len(seq), len(mono) + len(junk))
+
+    def test_og750_shifted_breakpoint_regression(self):
+        # OG750 was 32,672 bp against a 16,703 bp reference. Its actual tandem
+        # period is 16,336 bp, so cutting at the reference length cannot work.
+        mono = monomer(16336, seed=750)
+        seq, report, corrected = self.run_collapse(
+            mono + mono,
+            "OG750\tconcatemer\t16704-32672\t16703\tTrue",
+            sample="OG750",
+        )
+        self.assertEqual(report["action"], "collapsed")
+        self.assertEqual(report["inferred_monomer_period"], "16336")
+        self.assertEqual(seq, mono)
+        self.assertEqual(corrected["anomaly_type"], "none")
 
 
 if __name__ == "__main__":

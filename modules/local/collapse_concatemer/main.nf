@@ -19,6 +19,7 @@ process COLLAPSE_CONCATEMER {
     // input of the same name.
     tuple val(meta), path("collapsed/${prefix}.fasta"), emit: fasta
     tuple val(meta), path("${prefix}.concatemer_collapse.tsv"), emit: report
+    tuple val(meta), path("${prefix}.post_curation_check.tsv"), emit: evidence
     path "versions.yml", emit: versions
 
     when:
@@ -36,6 +37,7 @@ process COLLAPSE_CONCATEMER {
         --sample ${prefix} \\
         --out-fasta collapsed/${prefix}.fasta \\
         --out-report ${prefix}.concatemer_collapse.tsv \\
+        --out-evidence ${prefix}.post_curation_check.tsv \\
         ${args}
 
     cat <<-END_VERSIONS > versions.yml
@@ -51,7 +53,8 @@ process COLLAPSE_CONCATEMER {
     """
     mkdir -p collapsed
     cp ${fasta} collapsed/${prefix}.fasta
-    printf "sample\\taction\\toriginal_length\\tcollapsed_length\\treference_length\\ttail_identity\\treason\\n${prefix}\\tpassthrough\\tNA\\tNA\\tNA\\tNA\\tstub\\n" > ${prefix}.concatemer_collapse.tsv
+    printf "sample\\taction\\toriginal_length\\tcollapsed_length\\treference_length\\tinferred_monomer_period\\ttail_identity\\treason\\n${prefix}\\tpassthrough\\tNA\\tNA\\tNA\\tNA\\tNA\\tstub\\n" > ${prefix}.concatemer_collapse.tsv
+    cp ${evidence} ${prefix}.post_curation_check.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

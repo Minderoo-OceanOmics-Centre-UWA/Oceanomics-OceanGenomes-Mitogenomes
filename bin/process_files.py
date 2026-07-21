@@ -94,6 +94,8 @@ def derive_assembly_method(seqid: str) -> str:
         asm_prog = "GetOrganelle"
     elif letters.startswith("mitohifi"):
         asm_prog = "MitoHifi"
+    elif letters.startswith("oatk"):
+        asm_prog = "Oatk"
     else:
         raise SystemExit(f"❌  Unknown assembler code in '{seqid}' (field '{field4}')")
     return f"{asm_prog} v.{version}" if version else asm_prog

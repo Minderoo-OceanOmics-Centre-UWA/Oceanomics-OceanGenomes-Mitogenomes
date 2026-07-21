@@ -1,0 +1,114 @@
+nextflow_workflow {
+    name "Reference lookup outcomes remain cohort-safe"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "REFERENCE_POLICY"
+
+    test("successful lookup emits found") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value([id: 'success', species_id: 'success', nominal_species_id: 'success', mt_assembly_prefix: 'success'])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.succeeded().size() == 1 },
+                { assert workflow.out.status[0][1].text.contains('\tfound\t0\t') }
+            )
+        }
+    }
+
+    test("zero exit without files emits no_reference") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value([id: 'no_reference', species_id: 'no_reference', nominal_species_id: 'no_reference', mt_assembly_prefix: 'no_reference'])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.status[0][1].text.contains('\tno_reference\t0\t') },
+                { assert workflow.out.reference[0][1].size() == 0 },
+                { assert workflow.out.reference[0][2].size() == 0 }
+            )
+        }
+    }
+
+    test("transient lookup retries and succeeds") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value([id: 'transient_then_success', species_id: 'transient_then_success', nominal_species_id: 'transient_then_success', mt_assembly_prefix: 'transient_then_success'])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.failed().size() == 1 },
+                { assert workflow.out.status[0][1].text.contains('\tfound\t0\t') }
+            )
+        }
+    }
+
+    test("exhausted lookup emits lookup_error on fourth attempt") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value([id: 'exhausted', species_id: 'exhausted', nominal_species_id: 'exhausted', mt_assembly_prefix: 'exhausted'])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.failed().size() == 3 },
+                { assert workflow.trace.succeeded().size() == 1 },
+                { assert workflow.out.status[0][1].text.contains('\tlookup_error\t137\t') }
+            )
+        }
+    }
+}
+
+nextflow_workflow {
+    name "Canonical upload selection"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "UPLOAD_SELECTION"
+
+    test("canonical final replaces one raw variant without dropping history") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.first'], 'raw-first.fa', 'first.log'],
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.reseed'], 'raw-reseed.fa', 'reseed.log'],
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.rgj'], 'raw-rgj.fa', 'rgj.log']
+                )
+                input[1] = Channel.of(
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.rgj', circular: true], 'curated-rgj.fa', 'rgj.log'],
+                    [[id: 'OG2', mt_assembly_prefix: 'OG2.oatk'], 'oatk.fa', 'oatk.log']
+                )
+                """
+            }
+        }
+        then {
+            def results = workflow.out.results
+            assertAll(
+                { assert workflow.success },
+                { assert results.size() == 4 },
+                { assert results.count { it[0].mt_assembly_prefix == 'OG1.rgj' } == 1 },
+                { assert results.find { it[0].mt_assembly_prefix == 'OG1.rgj' }[1] == 'curated-rgj.fa' },
+                { assert results.find { it[0].mt_assembly_prefix == 'OG1.rgj' }[0].circular },
+                { assert results.any { it[0].mt_assembly_prefix == 'OG1.first' && it[1] == 'raw-first.fa' } },
+                { assert results.any { it[0].mt_assembly_prefix == 'OG1.reseed' && it[1] == 'raw-reseed.fa' } },
+                { assert results.any { it[0].mt_assembly_prefix == 'OG2.oatk' } }
+            )
+        }
+    }
+}
