@@ -73,6 +73,8 @@ that matches your container/conda environment.
 | `--organelle_type` | ✔ | Organelle label passed to GetOrganelle (e.g. `animal_mt`). |
 | `--curated_blast_db` | ✔ | NCBI-format BLAST database used for species validation. Provide an absolute path. |
 | `--nt_blast_db` | Conditional | NCBI nt BLAST database used when samples are marked `invertebrates=true`. |
+| `--mitos_refdb` | Conditional | MITOS2 RefSeq reference data directory (parent of the version dir), downloaded from Zenodo. Required whenever invertebrate samples (annotated with MITOS2) are present. |
+| `--mitos_refseq_ver` | Optional | MITOS2 reference version subdir name passed to `runmitos.py -r` (default `refseq89m`). |
 | `--sql_config` | Conditional | INI file with `[postgres] dbname,user,password,host,port`. Required for `--input_dir`; optional for `--input` if upload/QC is skipped. |
 | `--blast_db_dir` | ✔ | Directory used to cache the downloaded `taxdb.*` files; re-use between runs to avoid repeated downloads. |
 | `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
@@ -81,11 +83,39 @@ that matches your container/conda environment.
 | `--ena_study` | With Webin validation | ENA study accession or alias written to each targeted-sequence manifest. |
 | `--samplesheet_prefix` | Optional | Reserved for generated samplesheet naming in wrapper scripts. |
 | `--getorganelle_genedb_min_genes` | Optional | Minimum genes a reference must yield to build the reseed custom gene database (default `10`). Below this, the sample keeps its first-pass GetOrganelle assembly instead of reseeding. |
+| `--getorganelle_fromreads_args` | Optional | Override the default GetOrganelle from-reads arguments (default `-R 20 -w 95 --continue`). |
+| `--enable_oatk_fallback` | Optional | Enable the reference-free Oatk HiFi fallback (default `false`). See [Reference-free Oatk fallback](#reference-free-oatk-fallback). |
+| `--oatk_mito_db` | With Oatk fallback | Path to the OatkDB `<clade>_mito.fam` profile-HMM (index files staged beside it). Required when `--enable_oatk_fallback true`. |
+| `--oatk_syncmer_size`, `--oatk_syncmer_coverage` | Optional | Syncmer size (`-k`, default `1001`) and coverage (`-c`, default `30`) passed to Oatk/syncasm. |
+| `--skip_getorganelle_reseed` | Optional | Disable the automatic GetOrganelle reseed pass on failed/fragmented first passes (default `false`). |
+| `--skip_hic_fastp` | Optional | Skip fastp trimming of raw Hi-C reads before GetOrganelle (default `false`). Override the fastp arguments with `--hic_fastp_args`. |
+| `--force_db_overwrite` | Optional | Overwrite existing `mitogenome_data` rows on SQL upload instead of the default insert-only behaviour (default `false`). |
 | `--translation_table` | Optional | Mitochondrial genetic code for vertebrate/unresolved samples (default `2`). Invertebrate codes are derived per-sample from the taxonomic `class` column (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4), so this no longer forces a single code across the whole run. |
 
 `--input_dir` mode requires `--sql_config` because the enriched samplesheet generator queries
 OceanOmics metadata. When running with `--input`, you can omit `--sql_config`, but upload/QC stages
 are then skipped with a warning.
+
+### Reference-free Oatk fallback
+
+MitoHiFi recruits reads by mapping to the closest NCBI reference returned by `findMitoReference`. For lineages with
+no close reference, it can recruit ~zero reads and produce nothing. The optional Oatk fallback (`--enable_oatk_fallback
+true`) instead assembles the HiFi reads de novo and locates the mitogenome by profile-HMM search, so it needs no
+species reference. It runs when no usable reference is found, a technical lookup still fails after three retries,
+the selected reference is cross-order, or MitoHiFi emits no assembly. These outcomes remain distinct in the status
+TSVs so a biological reference gap is not confused with an infrastructure failure.
+
+When enabled, `--oatk_mito_db` is **required**: point it at the OatkDB `<clade>_mito.fam` profile-HMM for the sample's
+clade, with its `.h3f/.h3i/.h3m/.h3p` index files staged in the same directory. Fetch a database once with the bundled
+helper:
+
+```bash
+bash bin/download_oatk_db.sh actinopterygii_mito /scratch/$USER/oatk_db
+# then: --enable_oatk_fallback true --oatk_mito_db /scratch/$USER/oatk_db/actinopterygii_mito.fam
+```
+
+Browse available clade databases at <https://github.com/c-zhou/OatkDB>. The Oatk container bundles `oatk`, `syncasm`,
+and `nhmmscan`.
 
 ### ENA Webin validation
 
@@ -189,6 +219,7 @@ The pipeline writes `multiqc/mitogenome_assembly_summary_mqc.tsv` and includes i
 | `--mitogenome_summary_min_length` | `10000` | `length_outside_expected_range` |
 | `--mitogenome_summary_max_length` | `25000` | `length_outside_expected_range` |
 | `--mitogenome_summary_expected_gene_count` | `37` | `missing_genes` when annotation-derived counts are lower |
+| `--mitogenome_summary_expected_pcg_count` | `13` | `missing_protein_coding_genes` when the annotation-derived CDS count is lower (catches collapses that tRNAs mask in the total gene count) |
 
 These thresholds are deliberately broad defaults for animal mitochondrial assemblies. Override them in
 the command line or a params file when processing taxa with known compact, expanded, or unusual
@@ -270,9 +301,17 @@ The pipeline orchestrates several helper modules that all require absolute file 
 - **NCBI nt BLAST database (`--nt_blast_db`)** – Provide the `core_nt` (or equivalent) database
   prefix used for invertebrate samples. The pipeline selects this automatically when
   `invertebrates=true` in the samplesheet.
-- **Taxonomy caches (`--blast_db_dir`, `--taxonkit_db_dir`)** – Large downloads (`taxdb.*`, NCBI
-  `taxdump.tar.gz`) are stored under these directories using `storeDir`. Point them to a shared or
-  persistent filesystem to avoid repeated downloads.
+- **MITOS2 reference data (`--mitos_refdb`)** – RefSeq reference directory (parent of the version
+  subdir named by `--mitos_refseq_ver`, default `refseq89m`) downloaded from Zenodo. Required to
+  annotate invertebrate samples with MITOS2.
+- **OatkDB profile-HMM (`--oatk_mito_db`)** – Only required when `--enable_oatk_fallback true`. The
+  `<clade>_mito.fam` database plus its `.h3f/.h3i/.h3m/.h3p` index files; fetch with
+  `bin/download_oatk_db.sh`.
+- **Taxonomy caches (`--blast_db_dir`, `--taxonkit_db_dir`)** – Point these at a shared persistent
+  filesystem. LCA prepares FishBase v24.07 and the NCBI taxdump once under
+  `<taxonkit_db_dir>/lca_cache`, using a filesystem lock and atomic writes, and emits a checksum
+  manifest before any per-gene LCA task can start. LCA tasks read that shared directory directly;
+  the database is not copied or staged per task.
 - **Submission template (`--template_sbt`)** – The `.sbt` template used by `table2asn` when
   packaging GenBank submission bundles.
 
@@ -289,11 +328,15 @@ The main workflow supports coarse-grained skipping and reuse of pre-computed art
   `--precomputed_mitogenome_assembly_log_getorg`,
   `--precomputed_mitogenome_assembly_fasta_hifi`,
   `--precomputed_mitogenome_assembly_log_hifi`.
+- `--skip_getorganelle_reseed` – disable the automatic reseed pass so GetOrganelle only runs its
+  first pass.
 - `--skip_mitogenome_annotation` – skip EMMA / BLAST / LCA; optional inputs
   `--precomputed_mitogenome_annotation_results`, `--precomputed_mitogenome_blast_results`, and
   `--precomputed_mitogenome_lca_results` allow you to feed downstream modules.
 - `--skip_upload_results` – disable SQL upload modules and QC gating. Use when working offline or on
   staging environments without database access.
+- `--skip_hic_fastp` – skip fastp trimming of raw Hi-C reads (they are trimmed by default before
+  GetOrganelle; Illumina reads bypass fastp because the draft-genome pipeline already trims them).
 
 For precomputed assembly channels to map correctly back onto metadata, file basenames should encode
 `<sample>.<sequencing_type>.<date>...` (for example:

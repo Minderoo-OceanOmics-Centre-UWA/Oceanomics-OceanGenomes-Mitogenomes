@@ -16,8 +16,9 @@ results:
 - [Samplesheet preparation](#samplesheet-preparation) – optional creation of a harmonised samplesheet.
 - [Mitogenome assembly (GetOrganelle)](#mitogenome-assembly-getorganelle) – short-read assemblies and logs.
 - [Mitogenome assembly (MitoHiFi)](#mitogenome-assembly-mitohifi) – HiFi assemblies, stats and plots.
+- [Mitogenome assembly (Oatk fallback)](#mitogenome-assembly-oatk-fallback) – reference-free HiFi assembly (optional).
 - [Mitogenome assembly summary](#mitogenome-assembly-summary) – MultiQC-compatible table comparing assembly QC across tools.
-- [FASTA sanitisation](#fasta-sanitisation) – internal preparation step before annotation.
+- [Concatemer collapse and FASTA sanitisation](#concatemer-collapse-and-fasta-sanitisation) – internal preparation steps before annotation.
 - [Mitogenome annotation](#mitogenome-annotation) – EMMA (vertebrate) / MITOS2 (invertebrate) annotations and per-gene FASTA exports.
 - [BLAST filtering and LCA calls](#blast-filtering-and-lca) – gene-level hits and lowest common ancestor tables.
 - [Species validation and SQL uploads](#species-validation-and-sql-uploads) – QA summaries plus database upload logs.
@@ -89,6 +90,27 @@ These files form the short-read reference for later annotation and validation st
 The assembly prefix encodes sample metadata and MitoHiFi version so that downstream artefacts retain the provenance
 of the HiFi run. The MultiQC report links to the tabular and graphical summaries stored in this directory.
 
+### Mitogenome assembly (Oatk fallback)
+
+<details markdown="1">
+<summary>Output files</summary>
+
+- `mitogenomes/<sample>/<assembly_prefix>/mtdna/`
+  - `<assembly_prefix>.fasta`: Structure-solved Oatk contig republished under the clean prefix name (the same
+    convention MitoHiFi uses), so it flows into annotation like any other assembly.
+  - `<assembly_prefix>.mito.ctg.fasta`: Native Oatk mitochondrial contig, kept for provenance.
+  - `<assembly_prefix>.gfa`: Oatk assembly graph.
+  - `<assembly_prefix>.oatk.log`: Oatk run log.
+
+</details>
+
+These files are produced **only** when `--enable_oatk_fallback true` and the reference-based MitoHiFi path cannot be
+used or fails to assemble the sample. Routing reasons include no usable NCBI reference, an exhausted technical lookup,
+a cross-order reference, or an empty MitoHiFi assembly. Oatk assembles the HiFi reads de novo and
+locates the mitogenome by profile-HMM search against the `--oatk_mito_db` clade database, so it needs no species
+reference. The selected Oatk outcome is carried forward under its own assembly prefix. See
+[usage.md](usage.md#reference-free-oatk-fallback) for setup.
+
 ### Mitogenome assembly summary
 
 <details markdown="1">
@@ -112,14 +134,19 @@ The table columns are:
 `reference_species`, `reference_accession`, `numt_flag`, and `manual_review_reason`.
 
 Manual review reasons are semicolon-separated and can include `missing_final_fasta`, `not_circularised`,
-`multiple_candidate_contigs`, `multiple_final_contigs`, `missing_genes`, `frameshift_detected`,
-`low_mean_coverage`, `high_coverage_variability`, `possible_numt`, `ambiguous_getorganelle_graph`,
-`failed_run`, and `length_outside_expected_range`.
+`multiple_candidate_contigs`, `multiple_final_contigs`, `missing_genes`, `missing_protein_coding_genes`,
+`frameshift_detected`, `low_mean_coverage`, `high_coverage_variability`, `possible_numt`,
+`ambiguous_getorganelle_graph`, `failed_run`, `length_anomaly`, `length_outside_expected_range`,
+`reference_mismatch`, `no_congeneric_reference`, and `data_limited`. The reference-related reasons come from
+the pre-assembly reference-divergence guard and the reference-relevance check (a wrong-family reference is
+surfaced rather than silently used); `data_limited` marks assemblies limited by input data rather than a
+pipeline defect. `missing_protein_coding_genes` fires when the annotation-derived CDS count falls below
+`--mitogenome_summary_expected_pcg_count`, catching collapses that tRNA counts mask in the total gene count.
 
 QC thresholds are configurable with:
 `--mitogenome_summary_min_mean_coverage`, `--mitogenome_summary_max_coverage_cv`,
-`--mitogenome_summary_min_length`, `--mitogenome_summary_max_length`, and
-`--mitogenome_summary_expected_gene_count`.
+`--mitogenome_summary_min_length`, `--mitogenome_summary_max_length`,
+`--mitogenome_summary_expected_gene_count`, and `--mitogenome_summary_expected_pcg_count`.
 
 The parser can also be run manually on an existing result tree:
 
@@ -132,15 +159,23 @@ mitogenome_assembly_summary.py \
 `assets/multiqc_config.yml` registers this TSV as a section titled `Mitogenome assembly summary`, so it appears in
 the final MultiQC report without a separate user-supplied config.
 
-### FASTA sanitisation
+### Concatemer collapse and FASTA sanitisation
 
-The `SANITISE_FASTA` process runs between assembly and annotation:
+Two internal steps run between assembly and annotation. Neither publishes intermediate FASTAs to `--outdir`.
+
+**`COLLAPSE_CONCATEMER`** runs first, only on assemblies whose circularity evidence has
+`anomaly_type=concatemer`. When the circularity check
+flags a clean head-to-tail concatemer (an assembly roughly 2x the true length), `collapse_concatemer.py` re-verifies
+the multimer by self-alignment and rewrites it to a single monomer; anything it cannot confirm is passed through
+unchanged, so the step can only ever fix a genuine duplication. Its per-sample report
+(`<assembly_prefix>.concatemer_collapse.tsv`) feeds the assembly summary so a collapsed concatemer is reported at its
+monomer length rather than re-flagged as over-length. Assemblies with no circularity evidence bypass this step.
+
+**`SANITISE_FASTA`** then normalises the (possibly collapsed) FASTA before annotation:
 
 - For single-contig assemblies, FASTA files are passed through unchanged.
 - For multi-contig assemblies, contigs are concatenated into one sequence (`*_concat`) to support
   downstream species validation and annotation tooling.
-
-This is an internal step (`publishDir` disabled), so intermediate files are not written to `--outdir`.
 
 ### Mitogenome annotation
 

@@ -170,7 +170,6 @@
                 },
                 "skip_per_sample_multiqc": {
                     "type": "boolean",
-                    "default": false,
                     "description": "Skip generation of one MultiQC report per sample.",
                     "fa_icon": "fas fa-file-alt"
                 },
@@ -251,7 +250,6 @@
                 },
                 "ena_webin_validate": {
                     "type": "boolean",
-                    "default": false,
                     "description": "Validate passing ENA EMBL flat files with Webin-CLI. Requires ena_study and the WEBIN_USERNAME/WEBIN_PASSWORD Nextflow secrets."
                 },
                 "ena_study": {
@@ -315,7 +313,8 @@
                 },
                 "translation_table": {
                     "type": "integer",
-                    "description": "NCBI translation table (e.g. 2)."
+                    "default": 2,
+                    "description": "Mitochondrial genetic code for vertebrate/unresolved samples. Invertebrate codes are derived per-sample from taxonomic class."
                 },
                 "mitogenome_summary_min_mean_coverage": {
                     "type": "number",
@@ -358,6 +357,115 @@
                 "refreshModules": {
                     "type": "boolean",
                     "description": "Force module cache refresh when running on HPC systems."
+                },
+                "getorganelle_fromreads_args": {
+                    "type": "string",
+                    "description": "Override the default GetOrganelle from-reads arguments (default '-R 20 -w 95 --continue')."
+                },
+                "getorganelle_genedb_min_genes": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Minimum number of genes a reference must yield to build the reseed custom gene (label) database. References below this keep the first-pass GetOrganelle assembly instead of reseeding."
+                },
+                "hic_fastp_args": {
+                    "type": "string",
+                    "description": "Override the fastp arguments used to trim raw Hi-C reads before GetOrganelle."
+                },
+                "force_db_overwrite": {
+                    "type": "boolean",
+                    "description": "Overwrite existing mitogenome_data rows on SQL upload. By default the PUSH_* modules are insert-only and preserve existing rows."
+                },
+                "mitohifi_container": {
+                    "type": "string",
+                    "default": "ghcr.io/marcelauliano/mitohifi:3.2.3",
+                    "description": "MitoHiFi container image. The version embedded in mt_assembly_prefix and versions.yml is parsed from this tag."
+                },
+                "enable_oatk_fallback": {
+                    "type": "boolean",
+                    "description": "Enable the reference-free Oatk HiFi fallback. Runs only on samples MitoHiFi failed to assemble (no close NCBI reference). Requires oatk_mito_db when enabled."
+                },
+                "oatk_mito_db": {
+                    "type": "string",
+                    "description": "Path to the OatkDB <clade>_mito.fam profile-HMM (with its .h3f/.h3i/.h3m/.h3p index files staged beside it). Required when enable_oatk_fallback is true. Fetch with bin/download_oatk_db.sh."
+                },
+                "oatk_container": {
+                    "type": "string",
+                    "default": "quay.io/biocontainers/oatk:1.0--h577a1d6_1",
+                    "description": "Container image bundling oatk, syncasm and nhmmscan for the Oatk fallback."
+                },
+                "oatk_syncmer_size": {
+                    "type": "integer",
+                    "default": 1001,
+                    "description": "Syncmer size (-k) passed to Oatk/syncasm."
+                },
+                "oatk_syncmer_coverage": {
+                    "type": "integer",
+                    "default": 30,
+                    "description": "Syncmer coverage threshold (-c) passed to Oatk/syncasm."
+                }
+            }
+        },
+        "skip_and_reuse_options": {
+            "title": "Skip and reuse options",
+            "type": "object",
+            "fa_icon": "fas fa-forward",
+            "description": "Skip pipeline stages and reuse precomputed artefacts for staged re-runs.",
+            "properties": {
+                "skip_mitogenome_assembly_getorg": {
+                    "type": "boolean",
+                    "description": "Skip the GetOrganelle (short-read/Hi-C) assembly branch."
+                },
+                "skip_getorganelle_reseed": {
+                    "type": "boolean",
+                    "description": "Skip the automatic GetOrganelle reseed pass on failed/fragmented first-pass assemblies."
+                },
+                "skip_mitogenome_assembly_hifi": {
+                    "type": "boolean",
+                    "description": "Skip the MitoHiFi (HiFi) assembly branch."
+                },
+                "skip_mitogenome_annotation": {
+                    "type": "boolean",
+                    "description": "Skip annotation, BLAST and LCA."
+                },
+                "skip_upload_results": {
+                    "type": "boolean",
+                    "description": "Skip SQL upload modules and QC gating."
+                },
+                "skip_hic_fastp": {
+                    "type": "boolean",
+                    "description": "Skip fastp trimming of raw Hi-C reads before GetOrganelle."
+                },
+                "precomputed_mitogenome_assembly_fasta_getorg": {
+                    "type": "string",
+                    "description": "Glob of precomputed GetOrganelle assembly FASTA files used when the GetOrganelle branch is skipped."
+                },
+                "precomputed_mitogenome_assembly_log_getorg": {
+                    "type": "string",
+                    "description": "Glob of precomputed GetOrganelle logs used when the GetOrganelle branch is skipped."
+                },
+                "precomputed_mitogenome_assembly_fasta_hifi": {
+                    "type": "string",
+                    "description": "Glob of precomputed MitoHiFi assembly FASTA files used when the HiFi branch is skipped."
+                },
+                "precomputed_mitogenome_assembly_log_hifi": {
+                    "type": "string",
+                    "description": "Glob of precomputed MitoHiFi logs used when the HiFi branch is skipped."
+                },
+                "precomputed_mitogenome_annotation_results": {
+                    "type": "string",
+                    "description": "Glob of precomputed annotation GFF files used when annotation is skipped."
+                },
+                "precomputed_mitogenome_blast_results": {
+                    "type": "string",
+                    "description": "Glob of precomputed filtered BLAST TSV files used when annotation is skipped."
+                },
+                "precomputed_mitogenome_lca_results": {
+                    "type": "string",
+                    "description": "Glob of precomputed LCA TSV files used when annotation is skipped."
+                },
+                "precomputed_mitogenome_lca_raw_results": {
+                    "type": "string",
+                    "description": "Glob of precomputed raw LCA TSV files used when annotation is skipped."
                 }
             }
         }
@@ -374,6 +482,9 @@
         },
         {
             "$ref": "#/$defs/pipeline_options"
+        },
+        {
+            "$ref": "#/$defs/skip_and_reuse_options"
         }
     ]
 }
