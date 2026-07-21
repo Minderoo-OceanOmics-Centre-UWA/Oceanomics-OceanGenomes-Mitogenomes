@@ -8,6 +8,9 @@ process LCA {
     input:
     tuple val(meta), path(blast), val(gene_type), val(annotation_name)
     path(worms)
+    val(lca_cache_dir)
+    val(lca_cache_signature)
+    path(lca_script)
 
     output:
     // calculateLCA.py writes no output files when the region has no valid BLAST
@@ -20,12 +23,13 @@ process LCA {
     path "versions_LCA.yml", emit: versions
 
     script:
-    def effective_args = "--file ${blast} --output lca_short.${gene_type}.${annotation_name}.tsv --worms_file ${worms} --raw_output lca_raw.${gene_type}.${annotation_name}.tsv --final_output lca.${gene_type}.${annotation_name}.tsv --seq_type ${gene_type}"
+    def effective_args = "--file ${blast} --output lca_short.${gene_type}.${annotation_name}.tsv --worms_file ${worms} --cache_dir ${lca_cache_dir} --raw_output lca_raw.${gene_type}.${annotation_name}.tsv --final_output lca.${gene_type}.${annotation_name}.tsv --seq_type ${gene_type}"
     """          
-    calculateLCA.py \\
+    python ${lca_script} \\
         --file $blast \\
         --output lca_short.${gene_type}.${annotation_name}.tsv \\
         --worms_file $worms \\
+        --cache_dir '${lca_cache_dir}' \\
         --raw_output lca_raw.${gene_type}.${annotation_name}.tsv \\
         --final_output lca.${gene_type}.${annotation_name}.tsv \\
         --seq_type ${gene_type}
@@ -42,7 +46,7 @@ process LCA {
     """
 
     stub:
-    def effective_args = "--file ${blast} --output lca_short.${gene_type}.${annotation_name}.tsv --worms_file ${worms} --raw_output lca_raw.${gene_type}.${annotation_name}.tsv --final_output lca.${gene_type}.${annotation_name}.tsv --seq_type ${gene_type}"
+    def effective_args = "--file ${blast} --output lca_short.${gene_type}.${annotation_name}.tsv --worms_file ${worms} --cache_dir ${lca_cache_dir} --raw_output lca_raw.${gene_type}.${annotation_name}.tsv --final_output lca.${gene_type}.${annotation_name}.tsv --seq_type ${gene_type}"
     """
     touch lca.${gene_type}.${annotation_name}.tsv
 

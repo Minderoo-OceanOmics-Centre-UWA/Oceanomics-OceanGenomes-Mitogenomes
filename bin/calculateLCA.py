@@ -22,8 +22,19 @@ from urllib.error import URLError
 from urllib.request import urlretrieve
 import pandas as pd
 import datetime
+import time
+import os
+import shutil
+import tempfile
 #import ssl
 #ssl._create_default_https_context = ssl._create_unverified_context
+
+FISHBASE_DATABASES = {
+    "fishbase_species.parquet": "https://huggingface.co/datasets/cboettig/fishbase/resolve/main/data/fb/v24.07/parquet/species.parquet?download=true",
+    "fishbase_families.parquet": "https://huggingface.co/datasets/cboettig/fishbase/resolve/main/data/fb/v24.07/parquet/families.parquet?download=true",
+    "fishbase_synonyms.parquet": "https://huggingface.co/datasets/cboettig/fishbase/resolve/main/data/fb/v24.07/parquet/synonyms.parquet?download=true",
+}
+
 
 @dataclass
 class Config:
@@ -123,18 +134,42 @@ class NCBITaxdumpParser:
 
         if not taxdump_tar.exists():
             self.logger.info("Downloading NCBI taxdump...")
+            temporary_tar = taxdump_tar.with_name(f".{taxdump_tar.name}.{os.getpid()}.part")
             try:
-                urlretrieve(Config.NCBI_TAXDUMP_URL, taxdump_tar)
-                self.logger.info(f"Downloaded taxdump to: {taxdump_tar}")
+                for attempt in range(1, 4):
+                    try:
+                        urlretrieve(Config.NCBI_TAXDUMP_URL, temporary_tar)
+                        with tarfile.open(temporary_tar, 'r:gz') as archive:
+                            archive.getmembers()
+                        os.replace(temporary_tar, taxdump_tar)
+                        self.logger.info(f"Downloaded taxdump to: {taxdump_tar}")
+                        break
+                    except Exception:
+                        if attempt == 3:
+                            raise
+                        time.sleep(2 ** attempt)
             except Exception as e:
                 self.logger.error(f"Failed to download taxdump: {e}")
                 raise
+            finally:
+                temporary_tar.unlink(missing_ok=True)
 
         self.logger.info("Extracting taxdump...")
-        taxdump_dir.mkdir(exist_ok=True)
-
-        with tarfile.open(taxdump_tar, 'r:gz') as tar:
-            tar.extractall(taxdump_dir)
+        temporary_dir = Path(tempfile.mkdtemp(prefix=".taxdump.", dir=self.cache_dir))
+        try:
+            with tarfile.open(taxdump_tar, 'r:gz') as archive:
+                root = temporary_dir.resolve()
+                for member in archive.getmembers():
+                    destination = (temporary_dir / member.name).resolve()
+                    if destination != root and root not in destination.parents:
+                        raise RuntimeError(f"Unsafe path in taxdump archive: {member.name}")
+                archive.extractall(temporary_dir)
+            if taxdump_dir.exists():
+                shutil.rmtree(taxdump_dir)
+            os.replace(temporary_dir, taxdump_dir)
+        finally:
+            if temporary_dir.exists():
+                shutil.rmtree(temporary_dir)
 
         self.logger.info(f"Extracted taxdump to: {taxdump_dir}")
         return taxdump_dir
@@ -255,12 +290,29 @@ class DatabaseManager:
 
         if cache_path.exists():
             self.logger.info(f"Loading cached file: {cache_path}")
-            return pd.read_parquet(cache_path)
+            try:
+                return pd.read_parquet(cache_path)
+            except Exception:
+                self.logger.warning(f"Removing invalid cached parquet: {cache_path}")
+                cache_path.unlink()
 
         try:
             self.logger.info(f"Downloading: {url}")
-            df = pd.read_parquet(url)
-            df.to_parquet(cache_path)
+            for attempt in range(1, 4):
+                try:
+                    df = pd.read_parquet(url)
+                    break
+                except Exception:
+                    if attempt == 3:
+                        raise
+                    time.sleep(2 ** attempt)
+            temporary_path = cache_path.with_name(f".{cache_path.name}.{os.getpid()}.part")
+            try:
+                df.to_parquet(temporary_path)
+                pd.read_parquet(temporary_path)
+                os.replace(temporary_path, cache_path)
+            finally:
+                temporary_path.unlink(missing_ok=True)
             self.logger.info(f"Cached to: {cache_path}")
             return df
         except (URLError, Exception) as e:
@@ -274,21 +326,15 @@ class DatabaseManager:
         self.logger.info("Loading Fishbase data...")
 
         species_df = self._download_with_cache(
-            #"https://fishbase.ropensci.org/fishbase/species.parquet",
-            "https://huggingface.co/datasets/cboettig/fishbase/resolve/main/data/fb/v24.07/parquet/species.parquet?download=true",
-            "fishbase_species.parquet"
+            FISHBASE_DATABASES["fishbase_species.parquet"], "fishbase_species.parquet"
         )
 
         families_df = self._download_with_cache(
-            #"https://fishbase.ropensci.org/fishbase/families.parquet",
-            "https://huggingface.co/datasets/cboettig/fishbase/resolve/main/data/fb/v24.07/parquet/families.parquet?download=true",
-            "fishbase_families.parquet"
+            FISHBASE_DATABASES["fishbase_families.parquet"], "fishbase_families.parquet"
         )
 
         synonyms_df = self._download_with_cache(
-            #"https://fishbase.ropensci.org/fishbase/synonyms.parquet",
-            "https://huggingface.co/datasets/cboettig/fishbase/resolve/main/data/fb/v24.07/parquet/synonyms.parquet?download=true",
-            "fishbase_synonyms.parquet"
+            FISHBASE_DATABASES["fishbase_synonyms.parquet"], "fishbase_synonyms.parquet"
         )
 
         self.logger.debug(f"Species columns: {species_df.columns.tolist()}")
@@ -626,10 +672,10 @@ class LCACalculator:
 class BLASTLCAAnalyzer:
     """Main analyzer class."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, cache_dir: Optional[Path] = None):
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self.db_manager = DatabaseManager()
+        self.db_manager = DatabaseManager(cache_dir)
         self.corrector = SpeciesNameCorrector()
         self.lca_calculator = LCACalculator(config.DEFAULT_CUTOFF)
 
@@ -1153,6 +1199,12 @@ def main():
         description='Parses BLAST-tabular output and produces LCAs using Fishbase and WoRMS APIs'
     )
     parser.add_argument(
+        '--cache_dir',
+        type=Path,
+        default=None,
+        help='Prepared local FishBase/NCBI cache directory.'
+    )
+    parser.add_argument(
         '-f', '--file',
         type=Path,
         help='Input file of BLAST results',
@@ -1246,7 +1298,7 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.missing_out.parent.mkdir(parents=True, exist_ok=True)
 
-    analyzer = BLASTLCAAnalyzer(config)
+    analyzer = BLASTLCAAnalyzer(config, args.cache_dir)
     analyzer.setup_logging(args.log_level)
 
     analyzer.run_analysis(

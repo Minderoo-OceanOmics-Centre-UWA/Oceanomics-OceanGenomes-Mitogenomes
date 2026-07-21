@@ -16,6 +16,7 @@ include { REFERENCE_RELEVANCE    } from '../../../modules/local/reference_releva
 include { SELECT_CORAL_REFERENCE } from '../../../modules/local/select_coral_reference'
 include { BLAST_BLASTN           } from '../../../modules/nf-core/blast/blastn'
 include { LCA                    } from '../../../modules/local/LCA'
+include { PREPARE_LCA_DATABASES  } from '../../../modules/local/lca/prepare_databases'
 
 // Helper functions
 include { softwareVersionsToYAML } from '../../nf-core/utils_nfcore_pipeline'
@@ -244,10 +245,33 @@ workflow MITOGENOME_ANNOTATION {
     // MODULE: Calculate the Lowest Common Ancestor (LCA) from the filtered BLAST results
     //
     ch_worms = channel.fromPath("${projectDir}/assets/worms_species.txt.gz", checkIfExists: true)
+    if (!params.taxonkit_db_dir) {
+        error "--taxonkit_db_dir is required for the persistent LCA taxonomy cache"
+    }
+    ch_lca_cache_dir = Channel.value("${params.taxonkit_db_dir}/lca_cache")
+    ch_lca_prepare_script = Channel.value(file("${projectDir}/bin/prepare_lca_databases.py", checkIfExists: true))
+    ch_lca_script = Channel.value(file("${projectDir}/bin/calculateLCA.py", checkIfExists: true))
+    PREPARE_LCA_DATABASES(ch_lca_cache_dir, ch_lca_prepare_script)
+    // PREPARE_LCA_DATABASES deliberately runs on every launch, but its audit
+    // manifest contains a fresh verified_at timestamp and lives in a new work
+    // directory. Convert it to the deterministic content signature before using
+    // it as the LCA dependency, so unchanged databases preserve task hashes.
+    ch_lca_cache_signature = PREPARE_LCA_DATABASES.out.manifest
+        .map { manifest ->
+            def payload = new groovy.json.JsonSlurper().parse(manifest.toFile())
+            def signature = payload.cache_signature?.toString()
+            if (!(signature ==~ /[0-9a-f]{64}/)) {
+                throw new IllegalStateException("Invalid or missing cache_signature in ${manifest}")
+            }
+            signature
+        }
 
     LCA (
         BLAST_BLASTN.out.filtered,
-        ch_worms.first()
+        ch_worms.first(),
+        ch_lca_cache_dir,
+        ch_lca_cache_signature,
+        ch_lca_script
         // valid_blast_results, // tuple val(meta), path(blast_filtered), val(gene_type), val(annotation_name)
         // DOWNLOAD_TAXONKIT_DB.out.db_files // path(db)
     )
@@ -266,6 +290,7 @@ workflow MITOGENOME_ANNOTATION {
     ch_versions = ch_versions.mix(ch_annot_versions.first())
     ch_versions = ch_versions.mix(BLAST_BLASTN.out.versions.first())
     ch_versions = ch_versions.mix(LCA.out.versions.first())
+    ch_versions = ch_versions.mix(PREPARE_LCA_DATABASES.out.versions)
     ch_versions = ch_versions.mix(REFERENCE_RELEVANCE.out.versions.first())
 
 
