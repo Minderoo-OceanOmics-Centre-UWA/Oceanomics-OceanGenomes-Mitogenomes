@@ -443,6 +443,10 @@
                     "type": "string",
                     "description": "Glob of precomputed GetOrganelle logs used when the GetOrganelle branch is skipped."
                 },
+                "precomputed_mitogenome_circularity_evidence_getorg": {
+                    "type": "string",
+                    "description": "Glob of precomputed GetOrganelle circularity-check TSVs (*.getorg_check.tsv) used when the GetOrganelle branch is skipped, so meta.circular is still resolved from the original run's verdict instead of defaulting to unknown/linear."
+                },
                 "precomputed_mitogenome_assembly_fasta_hifi": {
                     "type": "string",
                     "description": "Glob of precomputed MitoHiFi assembly FASTA files used when the HiFi branch is skipped."
@@ -451,9 +455,13 @@
                     "type": "string",
                     "description": "Glob of precomputed MitoHiFi logs used when the HiFi branch is skipped."
                 },
+                "precomputed_mitogenome_circularity_evidence_hifi": {
+                    "type": "string",
+                    "description": "Glob of precomputed MitoHiFi circularity-check TSVs (*.circularity_check.tsv) used when the HiFi branch is skipped, so meta.circular is still resolved from the original run's verdict instead of defaulting to unknown/linear."
+                },
                 "precomputed_mitogenome_annotation_results": {
                     "type": "string",
-                    "description": "Glob of precomputed annotation GFF files used when annotation is skipped."
+                    "description": "Glob of precomputed annotation files (fasta, gff, tbl/gb) used when annotation is skipped. FORMAT_FILES needs the whole per-assembly bundle, not just the GFF."
                 },
                 "precomputed_mitogenome_blast_results": {
                     "type": "string",

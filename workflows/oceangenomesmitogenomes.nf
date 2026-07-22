@@ -160,8 +160,24 @@ workflow OCEANGENOMESMITOGENOMES {
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
-        // No check is re-run for precomputed assemblies -> no circularity evidence.
-        ch_mitogenome_getorg_circularity_evidence = Channel.empty()
+        // No check is re-run for precomputed assemblies, but the original run's
+        // verdict is still on disk (*.getorg_check.tsv) -> reload it instead of
+        // discarding it, so meta.circular doesn't silently regress to unknown.
+        ch_mitogenome_getorg_circularity_evidence = Channel.fromPath(params.precomputed_mitogenome_circularity_evidence_getorg, checkIfExists: false)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
+            def date = parts.length > 2 ? parts[2] : null
+            def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .combine(ch_samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
+        }
         // Precomputed inputs expose only the final assembly, so no per-variant
         // split is possible: fall back to a single DB row from the final fasta+log.
         ch_mitogenome_getorg_db_results = ch_mitogenome_getorg_assembly_fasta.join(ch_mitogenome_getorg_assembly_log, by: 0)
@@ -229,9 +245,25 @@ workflow OCEANGENOMESMITOGENOMES {
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
-        // No circularity check is re-run for precomputed assemblies, so no anomaly
-        // gate is applied (samples proceed on the other QC conditions as before).
-        ch_mitogenome_hifi_circularity_evidence = Channel.empty()
+        // No circularity check is re-run for precomputed assemblies, but the
+        // original run's verdict is still on disk (*.circularity_check.tsv) ->
+        // reload it instead of discarding it, so meta.circular doesn't silently
+        // regress to unknown.
+        ch_mitogenome_hifi_circularity_evidence = Channel.fromPath(params.precomputed_mitogenome_circularity_evidence_hifi, checkIfExists: false)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
+            def date = parts.length > 2 ? parts[2] : null
+            def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .combine(ch_samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
+        }
         ch_mitogenome_hifi_oatk_fasta = Channel.empty()
         ch_mitogenome_hifi_oatk_log = Channel.empty()
     } else {
@@ -355,16 +387,25 @@ workflow OCEANGENOMESMITOGENOMES {
             def sequencing_type = parts.length > 1 ? parts[1] : null
             def date = parts.length > 2 ? parts[2] : null
             // Reconstruct the assembly prefix (id.tech.date.assembler) from the
-            // GFF name so downstream naming (e.g. <prefix>.annotation_stats.csv)
+            // annotation filename so downstream naming (e.g. <prefix>.annotation_stats.csv)
             // stays per-assembly. Without this, meta.mt_assembly_prefix is null
             // on the upload-only path and CSVs collide as null.annotation_stats.csv.
             def mt_assembly_prefix = parts.length > 3 ? parts[0..3].join('.') : filename
-            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+            return [ mt_assembly_prefix, [meta_id, sequencing_type, date], file ]
         }
+        // FORMAT_FILES needs the whole per-assembly annotation bundle (fasta, gff,
+        // tbl/gb) staged together -- glob matches every one of those files
+        // individually, so group them back into one list per assembly prefix,
+        // mirroring the path("annotation/*") bundle that
+        // MITOGENOME_ANNOTATION.out.annotation_results emits when annotation isn't
+        // skipped. Without this, only the last-matched file (e.g. the GFF) reaches
+        // FORMAT_FILES and it fails with "Missing in .: FASTA".
+        .groupTuple(by: 0)
+        .map { mt_assembly_prefix, sample_keys, files -> [ sample_keys[0], mt_assembly_prefix, files ] }
         .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, mt_assembly_prefix, file, meta ->
+        .map { sample_key, mt_assembly_prefix, files, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
-            return tuple(meta_ext, file)
+            return tuple(meta_ext, files)
         }
         ch_mitogenome_blast_results = Channel.fromPath(params.precomputed_mitogenome_blast_results)
         .map { file ->
