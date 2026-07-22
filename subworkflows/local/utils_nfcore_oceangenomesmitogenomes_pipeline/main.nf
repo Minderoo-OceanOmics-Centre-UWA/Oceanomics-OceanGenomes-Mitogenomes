@@ -177,6 +177,54 @@ workflow PIPELINE_COMPLETION {
             log.warn "=================================================================="
         }
 
+        // Memory hints: attempt-scaled processes (OATK, GETORGANELLE_RESEED,
+        // GETORGANELLE_FROMREADS, see conf/base.config) request more memory on
+        // each retry via task.attempt. task.attempt is scoped to this session,
+        // so a later -resume restarts a sample's counter at 1 and re-fails the
+        // default low tier before climbing back to the tier that worked last
+        // time -- its hash never matches the cached success. Record which
+        // tier actually succeeded per sample here, from this run's own trace,
+        // so conf/base.config's hintedMemory() can request it directly next
+        // time. Purely additive: a missing/unreadable trace is a no-op.
+        def hinted_processes = ['OATK', 'GETORGANELLE_RESEED', 'GETORGANELLE_FROMREADS']
+        def hints_trace_file = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
+        if (hints_trace_file.exists()) {
+            def trace_lines  = hints_trace_file.readLines()
+            def trace_header = trace_lines ? trace_lines[0].split('\t') : []
+            def name_idx     = trace_header.findIndexOf { it == 'name' }
+            def status_idx   = trace_header.findIndexOf { it == 'status' }
+            def attempt_idx  = trace_header.findIndexOf { it == 'attempt' }
+            def memory_idx   = trace_header.findIndexOf { it == 'memory' }
+            if ([name_idx, status_idx, attempt_idx, memory_idx].every { it >= 0 }) {
+                def hints_file = file("${outdir}/pipeline_info/memory_hints.json")
+                def hints = hints_file.exists() ? new groovy.json.JsonSlurper().parse(hints_file) : [:]
+                def hints_updated = false
+                trace_lines.drop(1).each { line ->
+                    def cols = line.split('\t')
+                    if (cols.size() <= memory_idx) { return }
+                    if (cols[status_idx] != 'COMPLETED') { return }
+                    def attempt = cols[attempt_idx].isInteger() ? cols[attempt_idx].toInteger() : 1
+                    if (attempt <= 1) { return }
+                    def name_matcher = (cols[name_idx] =~ /:(\w+) \(([^)]+)\)\s*$/)
+                    if (!name_matcher.find()) { return }
+                    def process_name = name_matcher.group(1)
+                    if (!(process_name in hinted_processes)) { return }
+                    def sample_id = name_matcher.group(2)
+                    def memory_gb = parseTraceMemoryToGb(cols[memory_idx])
+                    if (memory_gb == null) { return }
+                    if (!hints.containsKey(process_name)) { hints[process_name] = [:] }
+                    if (hints[process_name][sample_id] != memory_gb) {
+                        hints[process_name][sample_id] = memory_gb
+                        hints_updated = true
+                    }
+                }
+                if (hints_updated) {
+                    hints_file.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(hints))
+                    log.info "Updated memory hints for -resume: ${hints_file}"
+                }
+            }
+        }
+
         if (hook_url) {
             imNotification(summary_params, hook_url)
         }
@@ -192,6 +240,25 @@ workflow PIPELINE_COMPLETION {
     FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
+//
+// Parse a Nextflow trace `memory` field value (e.g. "200 GB", "6144 MB") into
+// whole gigabytes, rounding up so a recorded memory hint never under-provisions
+// the next run. Returns null if the value can't be parsed.
+//
+def parseTraceMemoryToGb(String value) {
+    if (!value) { return null }
+    def matcher = value.trim() =~ /(?i)^([\d.]+)\s*(B|KB|MB|GB|TB)$/
+    if (!matcher.matches()) { return null }
+    def amount = matcher.group(1) as Double
+    def unit = matcher.group(2).toUpperCase()
+    def gb = amount
+    if (unit == 'TB')      { gb = amount * 1024 }
+    else if (unit == 'MB') { gb = amount / 1024 }
+    else if (unit == 'KB') { gb = amount / 1024 / 1024 }
+    else if (unit == 'B')  { gb = amount / 1024 / 1024 / 1024 }
+    return Math.ceil(gb) as Integer
+}
+
 //
 // Check and validate pipeline parameters
 //
