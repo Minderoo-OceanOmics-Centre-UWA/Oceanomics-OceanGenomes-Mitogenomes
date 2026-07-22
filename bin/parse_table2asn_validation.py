@@ -11,6 +11,12 @@ VALIDATOR_RE = re.compile(r"^(REJECT|ERROR|WARNING|INFO):\s*[^[]*\[([^]]+)]\s*(.
 FATAL_RE = re.compile(r"(?:^|\s)FATAL(?::|\s|$)")
 FATAL_CODE_RE = re.compile(r"FATAL[:\s]+([^:\s]+)")
 
+# Discrepancy-report FATAL codes that are expected for organelle-only
+# submissions and shouldn't quarantine a sample. NO_LOCUS_TAGS fires for any
+# submission without a registered NCBI locus-tag prefix; GenBank/ENA do not
+# require locus tags on organelle genomes, so it's downgraded to advisory.
+ADVISORY_DISCREPANCY_CODES = {"NO_LOCUS_TAGS"}
+
 
 def unique_join(values):
     return ",".join(dict.fromkeys(values))
@@ -40,7 +46,8 @@ def parse_discrepancy(path):
         if FATAL_RE.search(raw):
             code_match = FATAL_CODE_RE.search(raw)
             code = code_match.group(1) if code_match else "DISCREPANCY_FATAL"
-            findings.append((path.name, "FATAL", code, raw.replace("\t", " ")))
+            severity = "WARNING" if code in ADVISORY_DISCREPANCY_CODES else "FATAL"
+            findings.append((path.name, severity, code, raw.replace("\t", " ")))
     return findings
 
 

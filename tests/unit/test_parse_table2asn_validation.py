@@ -81,6 +81,17 @@ class ParseTable2AsnValidationTests(unittest.TestCase):
         self.assertEqual(status["fatal_discrepancy_count"], "1")
         self.assertEqual(findings[0]["severity"], "FATAL")
 
+    def test_no_locus_tags_discrepancy_is_advisory(self):
+        tmp, findings, status, _ = self.run_parser(
+            dr_text="FATAL: NO_LOCUS_TAGS: None of 37 genes has locus tag.\n"
+        )
+        self.addCleanup(tmp.cleanup)
+        self.assertEqual(status["status"], "PASS")
+        self.assertEqual(status["fatal_discrepancy_count"], "0")
+        self.assertEqual(status["warning_count"], "1")
+        self.assertEqual(status["warning_codes"], "NO_LOCUS_TAGS")
+        self.assertEqual(findings[0]["severity"], "WARNING")
+
 
 if __name__ == "__main__":
     unittest.main()
