@@ -237,6 +237,13 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
                     out.append(f"\t\t\ttransl_except\t(pos:{pos},aa:TERM)")
                     added += 1
             for q in qual:
+                # EMMA's protein_id is an internal placeholder UUID
+                # (gnl|Emma|<uuid>), not a real INSDC accession. ENA/GenBank
+                # assign the real protein_id at accessioning time, so a
+                # submitter-supplied value here is invalid and gets rejected
+                # (EMBOSS demotes it to a stray /note on EMBL conversion).
+                if '\tprotein_id\t' in q:
+                    continue
                 out.append(clean(q))
             i = j
             continue

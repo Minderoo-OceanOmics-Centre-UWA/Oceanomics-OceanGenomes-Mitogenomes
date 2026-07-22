@@ -1,6 +1,7 @@
 """Unit tests for filename-derived metadata in process_files.py."""
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -35,6 +36,30 @@ class AssemblyMethodTests(unittest.TestCase):
     def test_unknown_assembler_is_rejected(self):
         with self.assertRaisesRegex(SystemExit, "Unknown assembler code"):
             process_files.derive_assembly_method("OG1.hifi.260101.v10unknown.emma102")
+
+
+class ProcessTblFileTests(unittest.TestCase):
+    TBL = (
+        ">Feature OG1.hic.260101.v177getorg\n"
+        "2847\t3821\tgene\n"
+        "\t\t\tgene\tMT-ND1\n"
+        "2847\t3821\tCDS\n"
+        "\t\t\tproduct\tNADH dehydrogenase subunit 1\n"
+        "\t\t\ttransl_table\t2\n"
+        "\t\t\tprotein_id\tgnl|Emma|69ef424b-9f7c-5045-9ab9-9c90d1db603a\n"
+    )
+
+    def test_protein_id_placeholder_is_stripped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tbl_in = Path(tmp) / "in.tbl"
+            tbl_out = Path(tmp) / "out.tbl"
+            tbl_in.write_text(self.TBL)
+
+            process_files.process_tbl_gb_file(tbl_in, tbl_out, "OG1.hic.260101.v177getorg")
+
+            out_text = tbl_out.read_text()
+            self.assertNotIn("protein_id", out_text)
+            self.assertIn("NADH dehydrogenase subunit 1", out_text)
 
 
 if __name__ == "__main__":
