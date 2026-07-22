@@ -3,8 +3,8 @@ process ENA_VALIDATION_SUMMARY {
     label 'process_single'
 
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/python:3.11--1' :
-        'biocontainers/python:3.11--1' }"
+        'https://depot.galaxyproject.org/singularity/python:3.9--1' :
+        'biocontainers/python:3.9--1' }"
 
     input:
     path records, stageAs: "records/*"
