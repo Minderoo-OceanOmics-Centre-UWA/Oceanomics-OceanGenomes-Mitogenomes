@@ -370,41 +370,55 @@ workflow OCEANGENOMESMITOGENOMES {
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
+            // blast.<gene_type>.<og_id>.<tech>.<date>.<assembler>[.<annot_version>].filtered
             def meta_id = parts[2]
             def sequencing_type = parts.length > 1 ? parts[3] : null
             def date = parts.length > 2 ? parts[4] : null
-            return [ [meta_id, sequencing_type, date], file ]
+            // Reconstruct the assembly prefix (id.tech.date.assembler) so downstream
+            // naming (e.g. <prefix>.lca_blast.upload.txt) stays per-assembly. Without
+            // this, meta.mt_assembly_prefix is null on the upload-only path and
+            // multiple assembly attempts for one OG collide on the same filename.
+            def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
         }
         .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, file, meta ->
-            return tuple(meta, file)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
         }
         ch_mitogenome_lca_results = Channel.fromPath(params.precomputed_mitogenome_lca_results)
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
+            // lca.<gene_type>.<og_id>.<tech>.<date>.<assembler>[.<annot_version>]
             def meta_id = parts[2]
             def sequencing_type = parts.length > 3 ? parts[3] : null
             def date = parts.length > 4 ? parts[4] : null
-            return [ [meta_id, sequencing_type, date], file ]
+            def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
         }
         .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, file, meta ->
-            return tuple(meta, file)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
         }
         ch_mitogenome_lca_raw_results = params.precomputed_mitogenome_lca_raw_results
             ? Channel.fromPath(params.precomputed_mitogenome_lca_raw_results)
                 .map { file ->
                     def filename = file.baseName
                     def parts = filename.split('\\.')
-                    // lca_raw.<region>.<og_id>.<tech>.<date>...
+                    // lca_raw.<region>.<og_id>.<tech>.<date>.<assembler>[.<annot_version>]
                     def meta_id = parts[2]
                     def sequencing_type = parts.length > 3 ? parts[3] : null
                     def date = parts.length > 4 ? parts[4] : null
-                    return [ [meta_id, sequencing_type, date], file ]
+                    def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
+                    return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
                 }
                 .combine(ch_samplesheet_meta, by: 0)
-                .map { sample_key, file, meta -> tuple(meta, file) }
+                .map { sample_key, mt_assembly_prefix, file, meta ->
+                    def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+                    return tuple(meta_ext, file)
+                }
             : Channel.empty()
     } else {
 
