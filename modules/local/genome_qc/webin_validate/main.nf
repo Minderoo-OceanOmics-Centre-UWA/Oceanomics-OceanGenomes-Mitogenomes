@@ -41,7 +41,7 @@ process WEBIN_VALIDATE {
         printf 'FLATFILE\t%s\n' "${embl_file.name}"
     } > "\${manifest}"
 
-    webin-cli \\
+    ena-webin-cli \\
         -context sequence \\
         -manifest "\${manifest}" \\
         -inputDir . \\
@@ -68,7 +68,7 @@ process WEBIN_VALIDATE {
     fi
     printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\n%s\t%s\t%s\t%s\t%s\n' "\${prefix}" "\${webin_status}" "\${reason}" "\${webin_rc}" "${validation_attempt}" > "\${status_file}"
 
-    printf '%s\n' '<tr><td>ENA Webin validation</td><td><samp>webin-cli -context sequence -validate</samp></td><td>Validates the ENA flat file without submitting it for ${meta.id}.</td></tr>' > 21_webin_validate.tool_params_mqcrow.html
+    printf '%s\n' '<tr><td>ENA Webin validation</td><td><samp>ena-webin-cli -context sequence -validate</samp></td><td>Validates the ENA flat file without submitting it for ${meta.id}.</td></tr>' > 21_webin_validate.tool_params_mqcrow.html
     printf '"%s":\n    webin-cli: "9.0.3"\n' "${task.process}" > versions.yml
     exit 0
     """
