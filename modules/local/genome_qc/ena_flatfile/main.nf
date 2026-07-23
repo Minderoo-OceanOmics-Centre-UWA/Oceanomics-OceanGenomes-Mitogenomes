@@ -10,6 +10,7 @@ process ENA_FLATFILE {
 
     output:
     tuple val(meta), path("*.embl.gz"), optional: true, emit: embl_file
+    tuple val(meta), path("*.embl"), optional: true, emit: embl_file_plain
     tuple val(meta), path("*.ena_conversion_status.tsv"), emit: status
     tuple val(meta), path("*.ena_conversion_check.tsv"), emit: checks
     tuple val(meta), path("*.ena_conversion.log"), emit: log
@@ -32,6 +33,27 @@ process ENA_FLATFILE {
 
     seqret -auto -feature -sformat genbank -osformat embl -sequence "$gbf" -outseq "\${raw}" > "\${log}" 2>&1
     seqret_rc=\$?
+
+    # seqret's GenBank->EMBL conversion has two known gaps for pre-accession
+    # organelle submissions, both of which ENA's flatfile validator rejects:
+    if [ -e "\${raw}" ]; then
+        # 1. It never writes an AC line when the source GenBank ACCESSION field
+        # is blank (true for anything not yet accessioned), but ENA requires the
+        # AC block to appear exactly once regardless. Insert the standard
+        # not-yet-accessioned placeholder right after the ID block.
+        if ! grep -q '^AC ' "\${raw}"; then
+            awk '/^ID   /{print; print "XX"; print "AC   ;"; next} {print}' "\${raw}" > "\${raw}.tmp" && mv "\${raw}.tmp" "\${raw}"
+        fi
+
+        # 2. It defaults the ID line's molecule-type token to "unassigned DNA"
+        # instead of deriving it from the source feature, leaving it
+        # inconsistent with the preserved /mol_type qualifier. Sync the ID
+        # line to whatever /mol_type the source feature actually carries.
+        mol_type=\$(grep -m1 '/mol_type=' "\${raw}" | sed -E 's#.*/mol_type="([^"]*)".*#\\1#')
+        if [ -n "\${mol_type}" ]; then
+            sed -i -E "s/(^ID   [^;]+; SV [0-9]+; [a-z]+;) [^;]+;/\\1 \${mol_type};/" "\${raw}"
+        fi
+    fi
 
     input_records=\$(grep -c '^LOCUS[[:space:]]' "$gbf" || true)
     output_records=\$(grep -c '^ID[[:space:]]' "\${raw}" 2>/dev/null || true)
@@ -86,7 +108,7 @@ process ENA_FLATFILE {
     } > "\${checks_file}"
 
     if [ "\${conversion_status}" = "PASS" ]; then
-        gzip -n "\${raw}"
+        gzip -n -k "\${raw}"
     else
         rm -f "\${raw}" "\${compressed}"
     fi
@@ -100,7 +122,8 @@ process ENA_FLATFILE {
     stub:
     def prefix = meta.mt_assembly_prefix ?: meta.id ?: 'stub'
     """
-    : | gzip -n > ${prefix}.embl.gz
+    : > ${prefix}.embl
+    gzip -n -k ${prefix}.embl
     printf 'sample\tstatus\treason\tseqret_exit\n%s\tPASS\tok\t0\n' "${prefix}" > ${prefix}.ena_conversion_status.tsv
     printf 'sample\tinput_records\toutput_records\tterminators\tinput_length\toutput_length\tinput_features\toutput_features\tsource_ok\torganism_ok\ttopology_ok\tmissing_qualifiers\n%s\t1\t1\t1\t1\t1\t1\t1\t1\t1\t1\t\n' "${prefix}" > ${prefix}.ena_conversion_check.tsv
     printf 'Stub EMBOSS conversion passed\n' > ${prefix}.ena_conversion.log
