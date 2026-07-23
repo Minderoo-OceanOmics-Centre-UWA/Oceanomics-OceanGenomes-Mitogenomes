@@ -85,9 +85,19 @@ workflow MITOGENOME_ANNOTATION {
     // record a PASS/MISMATCH review flag for every sample that has one. Label- and
     // taxonomy-DB-free; always exits 0.
     //
+    // Key the reference reuse on the ORIGINAL assembly prefix (meta.mt_assembly_prefix
+    // on mito_assembly, before the fasta-basename overwrite above), not the whole meta
+    // map: a curated FASTA basename (<prefix>_collapsed / <prefix>_concat) no longer
+    // equals reference_gb's original-prefix meta, so a whole-meta join would silently
+    // drop those samples from the relevance check. The output still carries the new
+    // (fasta basename) prefix so it publishes into the same dir as the annotation.
+    ch_reference_gb_keyed = reference_gb.map { meta, ref -> [ meta.mt_assembly_prefix, ref ] }
+
     REFERENCE_RELEVANCE (
-        fasta_with_mt_assembly_prefix.join(reference_gb)
-            .map { meta, fasta, ref -> [meta, fasta, ref] }
+        mito_assembly
+            .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+            .join(ch_reference_gb_keyed, by: 0)
+            .map { _key, meta, fasta, ref -> [ meta + [ mt_assembly_prefix: fasta.baseName ], fasta, ref ] }
     )
     ch_reference_relevance = REFERENCE_RELEVANCE.out.flag
 

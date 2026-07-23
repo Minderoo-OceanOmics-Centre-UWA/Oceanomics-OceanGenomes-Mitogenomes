@@ -16,6 +16,7 @@ include { MITOGENOME_ASSEMBLY_GETORG       } from '../subworkflows/local/mitogen
 include { MITOGENOME_ASSEMBLY_MITOHIFI     } from '../subworkflows/local/mitogenome_assembly/mitohifi'
 include { MITOGENOME_ANNOTATION     } from '../subworkflows/local/mitogenome_annotation_lca'
 include { COLLAPSE_CONCATEMER       } from '../modules/local/collapse_concatemer'
+include { MIRROR_MTDNA_TO_COLLAPSED } from '../modules/local/mirror_mtdna_to_collapsed'
 include { UPLOAD_RESULTS; UPLOAD_ENA_RESULTS } from '../subworkflows/local/upload_results_mito'
 include { MITOGENOME_QC             } from '../subworkflows/local/mitogenome_qc'
 include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
@@ -56,6 +57,22 @@ def evidenceFinalVerdictCircular(tsv) {
         return value == 'true' ? true : (value == 'false' ? false : null)
     } catch (ignored) {
         return null
+    }
+}
+
+// Read the 'action' column from a COLLAPSE_CONCATEMER report (concatemer_collapse.tsv).
+// 'collapsed' means the assembly was genuinely rewritten to its monomer; anything
+// else (e.g. 'passthrough') means it was left unchanged.
+def collapseAction(tsv) {
+    try {
+        def rows = tsv.text.readLines()
+        if (rows.size() < 2) return ''
+        def header = rows[0].split('\t', -1)
+        def idx = header.findIndexOf { it.trim() == 'action' }
+        def values = rows[1].split('\t', -1)
+        return idx >= 0 && idx < values.size() ? values[idx].trim().toLowerCase() : ''
+    } catch (ignored) {
+        return ''
     }
 }
 
@@ -113,6 +130,13 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_mitogenome_getorg_reference_gb = Channel.empty()
     ch_mitogenome_hifi_reference_gb   = Channel.empty()
 
+    // Per-sample bundles of the assembly-stage mtdna files (keyed by assembly
+    // prefix), used to mirror the whole mtdna folder into <prefix>_collapsed/mtdna
+    // for genuinely collapsed samples. Empty on precomputed / skip paths (nothing
+    // was assembled this run to mirror).
+    ch_mitogenome_getorg_mtdna_files = Channel.empty()
+    ch_mitogenome_hifi_mtdna_files   = Channel.empty()
+
     //
     // SUBWORKFLOW: MITOGENOME_ASSEMBLY_GETORG
     //
@@ -128,6 +152,7 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_getorg_db_results = MITOGENOME_ASSEMBLY_GETORG.out.db_assembly_results
         ch_mitogenome_getorg_reference_gb = MITOGENOME_ASSEMBLY_GETORG.out.reference_gb
         ch_mitogenome_getorg_circularity_evidence = MITOGENOME_ASSEMBLY_GETORG.out.circularity_evidence
+        ch_mitogenome_getorg_mtdna_files = MITOGENOME_ASSEMBLY_GETORG.out.mtdna_files
     } else if (params.precomputed_mitogenome_assembly_fasta_getorg) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: false)
@@ -209,6 +234,7 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_hifi_assembly_log = MITOGENOME_ASSEMBLY_MITOHIFI.out.assembly_log
         ch_mitogenome_hifi_reference_gb = MITOGENOME_ASSEMBLY_MITOHIFI.out.reference_gb
         ch_mitogenome_hifi_circularity_evidence = MITOGENOME_ASSEMBLY_MITOHIFI.out.circularity_evidence
+        ch_mitogenome_hifi_mtdna_files = MITOGENOME_ASSEMBLY_MITOHIFI.out.mtdna_files
         // Reference-free Oatk fallback contigs (empty channel unless the fallback is
         // enabled); folded into the annotation input below alongside the assemblies.
         ch_mitogenome_hifi_oatk_fasta = MITOGENOME_ASSEMBLY_MITOHIFI.out.oatk_fasta
@@ -323,6 +349,37 @@ workflow OCEANGENOMESMITOGENOMES {
         COLLAPSE_CONCATEMER.out.report.map { _meta, report -> report }
     )
     ch_versions = ch_versions.mix(COLLAPSE_CONCATEMER.out.versions.first())
+
+    // Provenance mirror. For a GENUINELY collapsed sample (action == collapsed in
+    // the report), restage the whole assembly-stage mtdna folder (original assembly
+    // + circularity check + collapse artefacts) into the <prefix>_collapsed/mtdna
+    // dir that downstream annotation forks into (via the _collapsed FASTA basename),
+    // so the curated variant directory carries the full provenance in one place.
+    // Passthrough samples are untouched and keep only their original mtdna dir.
+    // Keyed on the original assembly prefix (mt_assembly_prefix), which is stable
+    // across the collapse -- the _collapsed suffix lives only in the FASTA basename.
+    ch_collapse_bundle = COLLAPSE_CONCATEMER.out.fasta
+        .join(COLLAPSE_CONCATEMER.out.report, by: 0)
+        .join(COLLAPSE_CONCATEMER.out.evidence, by: 0)
+        .filter { _meta, _fasta, report, _evidence -> collapseAction(report) == 'collapsed' }
+        .map { meta, fasta, report, evidence -> [ meta.mt_assembly_prefix, meta, fasta, report, evidence ] }
+
+    ch_mtdna_bundle = ch_mitogenome_hifi_mtdna_files.mix(ch_mitogenome_getorg_mtdna_files)
+
+    ch_mirror_input = ch_collapse_bundle
+        .join(ch_mtdna_bundle, by: 0, remainder: true)
+        .filter { items -> items[1] != null }   // keep collapse rows; drop bundle-only remainder
+        .map { items ->
+            def meta      = items[1]
+            def fasta     = items[2]   // <prefix>_collapsed.fasta (renamed by COLLAPSE_CONCATEMER)
+            def report    = items[3]
+            def evidence  = items[4]
+            def bundle    = (items.size() > 5 && items[5] != null) ? items[5] : []
+            def newPrefix = fasta.baseName   // <prefix>_collapsed -> drives the mirror's publish dir
+            [ meta + [ mt_assembly_prefix: newPrefix ], [ fasta, report, evidence ] + bundle ]
+        }
+
+    MIRROR_MTDNA_TO_COLLAPSED( ch_mirror_input )
 
     // Rebuild the annotation input from the (possibly collapsed) FASTAs plus the
     // assemblies that had no evidence to collapse against.

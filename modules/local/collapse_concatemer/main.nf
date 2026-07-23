@@ -16,8 +16,11 @@ process COLLAPSE_CONCATEMER {
     // Collapsed FASTA is a drop-in replacement for the assembly FASTA (a genuine
     // concatemer is rewritten to its monomer; everything else is passed through
     // byte-for-byte), written under collapsed/ to avoid clashing with the staged
-    // input of the same name.
-    tuple val(meta), path("collapsed/${prefix}.fasta"), emit: fasta
+    // input of the same name. When the assembly is genuinely collapsed the file is
+    // renamed <prefix>_collapsed.fasta (glob output picks up either name), so every
+    // downstream stage -- which derives its publish dir from the FASTA basename --
+    // forks into a <prefix>_collapsed/ directory; a passthrough keeps <prefix>.fasta.
+    tuple val(meta), path("collapsed/*.fasta"), emit: fasta
     tuple val(meta), path("${prefix}.concatemer_collapse.tsv"), emit: report
     tuple val(meta), path("${prefix}.post_curation_check.tsv"), emit: evidence
     path "versions.yml", emit: versions
@@ -39,6 +42,15 @@ process COLLAPSE_CONCATEMER {
         --out-report ${prefix}.concatemer_collapse.tsv \\
         --out-evidence ${prefix}.post_curation_check.tsv \\
         ${args}
+
+    # Tag a genuinely collapsed assembly (action == collapsed in the report) with a
+    # _collapsed suffix so downstream naming/publish dirs fork; passthroughs keep the
+    # original name so the assembly is reused unchanged. The report's second row,
+    # second column is the action (see write_report in collapse_concatemer.py).
+    action=\$(awk -F'\\t' 'NR==2 {print \$2}' ${prefix}.concatemer_collapse.tsv)
+    if [ "\$action" = "collapsed" ]; then
+        mv collapsed/${prefix}.fasta collapsed/${prefix}_collapsed.fasta
+    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

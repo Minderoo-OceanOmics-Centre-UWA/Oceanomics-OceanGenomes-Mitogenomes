@@ -395,12 +395,30 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_versions = ch_versions.mix(MITOHIFI_CHECK_CIRCULARITY.out.versions.first())
     ch_versions = ch_versions.mix(REFERENCE_DIVERGENCE.out.versions.first())
 
+    // Per-sample bundle of everything this stage publishes into <prefix>/mtdna,
+    // keyed by the (original) assembly prefix so the collapse mirror can restage the
+    // whole folder into <prefix>_collapsed/mtdna for genuinely collapsed samples.
+    // Excludes MITOHIFI_AVERAGE_COVERAGE.out.stats: it shares a basename with the
+    // corrected CHECK_CIRCULARITY stats, which overwrites it in the real mtdna dir.
+    ch_mtdna_files = MITOHIFI_MITOHIFI.out.fasta
+        .mix( MITOHIFI_MITOHIFI.out.stats,
+              MITOHIFI_MITOHIFI.out.gb,
+              MITOHIFI_MITOHIFI.out.logs,
+              MITOHIFI_MITOHIFI.out.command_logs,
+              MITOHIFI_AVERAGE_COVERAGE.out.coverage,
+              MITOHIFI_CHECK_CIRCULARITY.out.stats,
+              MITOHIFI_CHECK_CIRCULARITY.out.evidence,
+              REFERENCE_DIVERGENCE.out.flag )
+        .map { meta, f -> [ meta.mt_assembly_prefix, f ] }
+        .groupTuple()
+
 
     //
     // Emit outputs
     //
 
     emit:
+    mtdna_files     = ch_mtdna_files               // channel: [ mt_assembly_prefix, [ mtdna files ] ]
     assembly_fasta  = ch_assembly_fasta            // channel: [ meta(+circular), assembly.fasta ]
     oatk_fasta      = ch_oatk_fasta                // channel: [ meta(+circular), oatk.mito.ctg.fasta ] (empty unless fallback enabled)
     oatk_log        = ch_oatk_log                  // channel: [ meta, oatk.log ]

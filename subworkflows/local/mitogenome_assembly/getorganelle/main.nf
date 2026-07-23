@@ -502,11 +502,22 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_CHECK.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(GETORGANELLE_CHECK.out.versions.first())
 
+    // Per-sample bundle of everything this stage publishes into <prefix>/mtdna
+    // (final assembly + its GetOrganelle log + the circularity/anomaly check),
+    // keyed by the (original) assembly prefix so the collapse mirror can restage the
+    // whole folder into <prefix>_collapsed/mtdna for genuinely collapsed samples.
+    ch_mtdna_files = ch_assembly_fasta
+        .mix( ch_assembly_log,
+              GETORGANELLE_CHECK.out.evidence )
+        .map { meta, f -> [ meta.mt_assembly_prefix, f ] }
+        .groupTuple()
+
     //
     // Emit outputs
     //
 
     emit:
+    mtdna_files     = ch_mtdna_files               // channel: [ mt_assembly_prefix, [ mtdna files ] ]
     assembly_fasta  = ch_assembly_fasta
     assembly_log    = ch_assembly_log
     db_assembly_results = ch_db_assembly_results   // channel: [ meta(per-variant prefix+circular), fasta, log ] -> one DB row per variant

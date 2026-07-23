@@ -1,0 +1,71 @@
+nextflow_process {
+
+    name "Test Process MIRROR_MTDNA_TO_COLLAPSED"
+    script "../main.nf"
+    process "MIRROR_MTDNA_TO_COLLAPSED"
+
+    tag "modules"
+    tag "modules_local"
+    tag "mirror_mtdna_to_collapsed"
+
+    // A genuinely collapsed sample: the whole assembly-stage mtdna set (original
+    // assembly + stats + circularity check) plus the collapse artefacts (the
+    // _collapsed FASTA + report) are restaged into one dir. Every input file must
+    // come out, with no basename collisions.
+    test("mirrors the full mtdna file set") {
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', mt_assembly_prefix:'test.hifi.d.v1mitohifi_collapsed' ],
+                    [
+                        file("${projectDir}/modules/local/mirror_mtdna_to_collapsed/tests/data/assembly_collapsed.fasta", checkIfExists: true),
+                        file("${projectDir}/modules/local/mirror_mtdna_to_collapsed/tests/data/concatemer_collapse.tsv", checkIfExists: true),
+                        file("${projectDir}/modules/local/mirror_mtdna_to_collapsed/tests/data/assembly.fasta", checkIfExists: true),
+                        file("${projectDir}/modules/local/mirror_mtdna_to_collapsed/tests/data/contigs_stats.tsv", checkIfExists: true),
+                        file("${projectDir}/modules/local/mirror_mtdna_to_collapsed/tests/data/circularity_check.tsv", checkIfExists: true)
+                    ]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.files[0][1].size() == 5 },
+                { assert process.out.files[0][1].collect { file(it).name }.sort() == [
+                    'assembly.fasta', 'assembly_collapsed.fasta', 'circularity_check.tsv',
+                    'concatemer_collapse.tsv', 'contigs_stats.tsv'
+                ] }
+            )
+        }
+    }
+
+    test("stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'test_stub.hifi.d.v1mitohifi_collapsed' ],
+                    [
+                        file("${projectDir}/modules/local/mirror_mtdna_to_collapsed/tests/data/assembly_collapsed.fasta", checkIfExists: true),
+                        file("${projectDir}/modules/local/mirror_mtdna_to_collapsed/tests/data/assembly.fasta", checkIfExists: true)
+                    ]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.files[0][1].size() == 2 }
+            )
+        }
+    }
+}

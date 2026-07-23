@@ -1,0 +1,45 @@
+nextflow_process {
+
+    name "Test Process COLLAPSE_CONCATEMER"
+    script "../main.nf"
+    process "COLLAPSE_CONCATEMER"
+
+    tag "modules"
+    tag "modules_local"
+    tag "collapse_concatemer"
+
+    // Stub only exercises the passthrough path (no blastn in CI): the corrected
+    // FASTA keeps the original <prefix>.fasta name so downstream reuses the
+    // assembly unchanged and does NOT fork into a <prefix>_collapsed dir. The
+    // genuine-collapse rename (mv -> <prefix>_collapsed.fasta) is covered by the
+    // Python unit test tests/unit/test_collapse_concatemer.py, which runs the real
+    // script against a synthetic dimer.
+    test("stub passthrough keeps the original assembly name") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'test_stub.hifi.d.v1mitohifi' ],
+                    file("${projectDir}/modules/local/collapse_concatemer/tests/data/assembly.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/collapse_concatemer/tests/data/evidence.tsv", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // passthrough -> NOT suffixed with _collapsed
+                { assert process.out.fasta[0][1] ==~ ".*/test_stub.hifi.d.v1mitohifi.fasta" },
+                { assert !(process.out.fasta[0][1].toString().contains("_collapsed")) },
+                { assert process.out.report[0][1] ==~ ".*/test_stub.hifi.d.v1mitohifi.concatemer_collapse.tsv" },
+                { assert process.out.evidence[0][1] ==~ ".*/test_stub.hifi.d.v1mitohifi.post_curation_check.tsv" },
+                { assert path(process.out.report[0][1]).text.contains("passthrough") }
+            )
+        }
+    }
+}
