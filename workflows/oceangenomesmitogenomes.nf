@@ -156,6 +156,12 @@ workflow OCEANGENOMESMITOGENOMES {
     } else if (params.precomputed_mitogenome_assembly_fasta_getorg) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: false)
+        // Keep each assembly FASTA only from the variant directory it belongs to
+        // (<prefix>/mtdna/<prefix>.fasta). A genuinely collapsed sample also publishes
+        // its <prefix>_collapsed.fasta back into the original <prefix>/mtdna dir for
+        // provenance, so the greedy re-glob would otherwise pick the same basename up
+        // from two mtdna dirs and collide in MITOGENOME_ASSEMBLY_SUMMARY's flat stageAs.
+        .filter { it.baseName == it.parent.parent.name }
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
@@ -242,6 +248,13 @@ workflow OCEANGENOMESMITOGENOMES {
     } else if (params.precomputed_mitogenome_assembly_fasta_hifi) {
         // Use precomputed results if analysis is skipped
         ch_mitogenome_hifi_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_hifi, checkIfExists: false)
+        // Keep each assembly FASTA only from the variant directory it belongs to
+        // (<prefix>/mtdna/<prefix>.fasta). A genuinely collapsed sample also publishes
+        // its <prefix>_collapsed.fasta back into the original <prefix>/mtdna dir for
+        // provenance, so the greedy re-glob would otherwise pick the same basename up
+        // from two mtdna dirs and collide in MITOGENOME_ASSEMBLY_SUMMARY's flat stageAs.
+        // Also covers the oatk fallback FASTAs, which ride this same hifi precomputed path.
+        .filter { it.baseName == it.parent.parent.name }
         .map { file ->
             def filename = file.baseName
             def parts = filename.split('\\.')
@@ -290,8 +303,44 @@ workflow OCEANGENOMESMITOGENOMES {
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
-        ch_mitogenome_hifi_oatk_fasta = Channel.empty()
-        ch_mitogenome_hifi_oatk_log = Channel.empty()
+        // Oatk fallback assemblies are published beside the MitoHiFi results, so a
+        // skipped/precomputed run must reload them too, otherwise every oatk-rescued
+        // sample silently drops out of annotation, the canonical logs and the upload.
+        // Empty (no matches) when the fallback never ran. Same variant-dir filter as
+        // the hifi fasta above: the *oatk*.fasta glob also matches the native
+        // <prefix>.mito.ctg.fasta provenance copy, which this excludes so only the
+        // canonical <prefix>.fasta rides through.
+        ch_mitogenome_hifi_oatk_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_oatk, checkIfExists: false)
+        .filter { it.baseName == it.parent.parent.name }
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
+            def date = parts.length > 2 ? parts[2] : null
+            def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .combine(ch_samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
+        }
+        ch_mitogenome_hifi_oatk_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_oatk, checkIfExists: false)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
+            def date = parts.length > 2 ? parts[2] : null
+            def mt_assembly_prefix = parts.length > 2 ? parts[0..3].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .combine(ch_samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
+        }
     } else {
 
         ch_mitogenome_hifi_assembly_fasta = Channel.empty()
@@ -306,6 +355,11 @@ workflow OCEANGENOMESMITOGENOMES {
     } else {
         ch_assembly_summary_files = ch_assembly_summary_files.mix(ch_mitogenome_hifi_assembly_fasta.map { meta, fasta -> fasta })
         ch_assembly_summary_files = ch_assembly_summary_files.mix(ch_mitogenome_hifi_assembly_log.map { meta, log -> log })
+        // Oatk fallbacks are part of the live subworkflow's summary_files, so include
+        // the reloaded oatk fasta + log here too, or skipped runs would summarise every
+        // sample except the oatk-rescued ones.
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(ch_mitogenome_hifi_oatk_fasta.map { meta, fasta -> fasta })
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(ch_mitogenome_hifi_oatk_log.map { meta, log -> log })
     }
 
     //
