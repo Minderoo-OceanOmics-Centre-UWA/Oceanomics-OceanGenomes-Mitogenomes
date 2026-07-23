@@ -80,31 +80,53 @@ def read_record(path: Union[str, Path]) -> dict[str, object]:
     return record
 
 
+KEY_COLUMNS = {"assembly_prefix", "ena_study", "validation_attempt"}
+
+
 def upload_record(record: dict[str, object], db_config: dict[str, object], connect=None) -> str:
+    """Insert or overwrite the row for this (assembly_prefix, ena_study, validation_attempt).
+
+    A rerun under the same key overwrites the previous attempt so failed
+    attempts don't pile up history rows. Once a row's submission_ready is
+    true it is frozen: the WHERE clause on the DO UPDATE skips the overwrite,
+    so a later failing rerun can never clobber a recorded success.
+
+    Returns "inserted" (first row for this key), "updated" (overwrote a
+    not-yet-ready attempt), or "locked" (a submission-ready row already
+    exists and was left untouched).
+    """
     connect = connect or (psycopg2.connect if psycopg2 is not None else None)
     if connect is None:
         raise RuntimeError("psycopg2 is required for PostgreSQL upload")
+    update_columns = [column for column in INSERT_COLUMNS if column not in KEY_COLUMNS]
+    set_clause = ", ".join(f"{column} = EXCLUDED.{column}" for column in update_columns)
     placeholders = ", ".join(f"%({column})s" for column in INSERT_COLUMNS)
     columns = ", ".join(INSERT_COLUMNS)
     query = f"""
         INSERT INTO ena_validation_attempts ({columns})
         VALUES ({placeholders})
-        ON CONFLICT (assembly_prefix, ena_study, validation_attempt, result_digest)
-        DO NOTHING
-        RETURNING id
+        ON CONFLICT (assembly_prefix, ena_study, validation_attempt)
+        DO UPDATE SET
+            {set_clause},
+            recorded_at = CURRENT_TIMESTAMP,
+            attempt_count = ena_validation_attempts.attempt_count + 1
+        WHERE ena_validation_attempts.submission_ready = FALSE
+        RETURNING id, (xmax = 0) AS inserted
     """
     connection = connect(**db_config)
     try:
         with connection.cursor() as cursor:
             cursor.execute(query, record)
-            inserted = cursor.fetchone()
+            row = cursor.fetchone()
         connection.commit()
     except Exception:
         connection.rollback()
         raise
     finally:
         connection.close()
-    return "inserted" if inserted else "preserved"
+    if row is None:
+        return "locked"
+    return "inserted" if row[1] else "updated"
 
 
 def main() -> int:
@@ -117,8 +139,16 @@ def main() -> int:
         result = upload_record(record, load_db_config(args.config_file))
         if result == "inserted":
             print(f"✅ Success: inserted ENA validation attempt for {record['assembly_prefix']}")
+        elif result == "updated":
+            print(
+                f"🔁 Updated ENA validation attempt for {record['assembly_prefix']} "
+                "(previous attempt was not submission-ready)"
+            )
         else:
-            print(f"⚠️ Exact ENA validation result already recorded for {record['assembly_prefix']}")
+            print(
+                f"🔒 Submission-ready record already exists for {record['assembly_prefix']}; "
+                "new attempt not recorded"
+            )
         return 0
     except Exception as error:
         print(f"❌ Database error: {error}")

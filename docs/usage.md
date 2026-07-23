@@ -162,14 +162,21 @@ nextflow run ena.nf \
   --outdir results
 ```
 
-Add `--sql_config /path/to/postgres.cfg` to either standalone command to append the normalized
+Add `--sql_config /path/to/postgres.cfg` to either standalone command to upload the normalized
 validation attempt to PostgreSQL after Webin finishes. Use `--skip_upload_results true` for an
-explicitly file-only run. The database schema is never created by Nextflow; apply the migration
-deliberately before enabling this upload, for example:
+explicitly file-only run. The database schema is never created by Nextflow; apply the migrations
+deliberately before enabling this upload, in order:
 
 ```bash
 psql --dbname oceanomics --file sql/001_create_ena_validation_attempts.sql
+psql --dbname oceanomics --file sql/002_ena_validation_attempts_single_row_per_attempt.sql
 ```
+
+`ena_validation_attempts` keeps one row per `(assembly_prefix, ena_study, validation_attempt)`.
+Rerunning under the same attempt token overwrites that row rather than adding a new one, so retrying
+a failed submission doesn't pile up history. Once a row's `submission_ready` becomes true it is
+frozen — later reruns under that same token are reported as `locked` and no longer change it. Bump
+`--ena_validation_attempt` (see below) when you want a genuinely separate, independently tracked attempt.
 
 The PostgreSQL password remains in the protected SQL configuration file and is not written to ENA
 manifests or normalized result records. Webin credentials continue to come only from Nextflow secrets.

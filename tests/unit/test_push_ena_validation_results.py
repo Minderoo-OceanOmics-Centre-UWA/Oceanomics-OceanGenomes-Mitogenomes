@@ -14,8 +14,8 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FakeCursor:
-    def __init__(self, inserted):
-        self.inserted = inserted
+    def __init__(self, row):
+        self.row = row
         self.query = None
         self.params = None
 
@@ -30,12 +30,12 @@ class FakeCursor:
         self.params = params
 
     def fetchone(self):
-        return (1,) if self.inserted else None
+        return self.row
 
 
 class FakeConnection:
-    def __init__(self, inserted=True, fail=False):
-        self.cursor_instance = FakeCursor(inserted)
+    def __init__(self, row=(1, True), fail=False):
+        self.cursor_instance = FakeCursor(row)
         self.fail = fail
         self.committed = self.rolled_back = self.closed = False
 
@@ -75,19 +75,29 @@ class PushEnaValidationTests(unittest.TestCase):
             record = MODULE.read_record(self.make_record(Path(tmp)))
         self.assertTrue(record["submission_ready"])
         self.assertEqual(record["reject_count"], 0)
-        connection = FakeConnection(inserted=True)
+        connection = FakeConnection(row=(1, True))
         result = MODULE.upload_record(record, {"dbname": "test"}, connect=lambda **_kw: connection)
         self.assertEqual(result, "inserted")
         self.assertTrue(connection.committed)
         self.assertIn("ON CONFLICT", connection.cursor_instance.query)
+        self.assertIn("DO UPDATE", connection.cursor_instance.query)
+        self.assertNotIn("validation_attempt = EXCLUDED", connection.cursor_instance.query)
         self.assertEqual(connection.cursor_instance.params["assembly_prefix"], record["assembly_prefix"])
 
-    def test_exact_result_is_preserved(self):
+    def test_conflict_on_unready_attempt_is_updated(self):
         with tempfile.TemporaryDirectory() as tmp:
             record = MODULE.read_record(self.make_record(Path(tmp)))
-        connection = FakeConnection(inserted=False)
+        connection = FakeConnection(row=(1, False))
         self.assertEqual(
-            MODULE.upload_record(record, {}, connect=lambda **_kw: connection), "preserved"
+            MODULE.upload_record(record, {}, connect=lambda **_kw: connection), "updated"
+        )
+
+    def test_conflict_on_submission_ready_attempt_is_locked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            record = MODULE.read_record(self.make_record(Path(tmp)))
+        connection = FakeConnection(row=None)
+        self.assertEqual(
+            MODULE.upload_record(record, {}, connect=lambda **_kw: connection), "locked"
         )
 
     def test_database_failure_rolls_back_and_closes(self):

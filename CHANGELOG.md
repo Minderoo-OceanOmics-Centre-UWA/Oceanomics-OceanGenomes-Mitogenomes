@@ -60,6 +60,14 @@ Initial release of nf-core/oceangenomesmitogenomes, created with the [nf-core](h
 - MITOS2 no longer hardcoded to genetic code 5: removed the `ext.code = 5` override that ignored per-sample taxonomy,
   so invertebrate (e.g. coral) annotations use the correct code.
 - `--translation_table` is now the vertebrate/default fallback rather than a global override across all samples.
+- `ena_validation_attempts` no longer grows a new row on every pipeline rerun. It previously deduplicated only on an
+  exact `result_digest` match, so any rerun that changed so much as an error count or the flatfile hash (which most
+  do) appended another history row under the same `--ena_validation_attempt` token. `push_ena_validation_results.py`
+  now upserts on `(assembly_prefix, ena_study, validation_attempt)`: a rerun overwrites the previous attempt
+  (`attempt_count` increments) as long as it hadn't reached `submission_ready`; once a row is submission-ready it is
+  frozen, and a later rerun under the same token is reported as `locked` rather than overwriting the recorded
+  success. `sql/002_ena_validation_attempts_single_row_per_attempt.sql` migrates existing tables (dedup down to one
+  row per key, preferring a submission-ready row, then add `attempt_count`).
 
 ### `Dependencies`
 

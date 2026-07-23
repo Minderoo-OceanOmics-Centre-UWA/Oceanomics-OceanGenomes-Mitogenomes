@@ -283,10 +283,15 @@ When `ena.nf` is used independently, it publishes the same per-sample `genbank/e
 - `mitogenomes/<sample>/<assembly_prefix>/genbank/ena/<assembly_prefix>.ena_preflight_check.tsv`: EMBL record,
   source-feature, organism, terminator, and sequence counts.
 
-When `--sql_config` is supplied and uploads are not skipped, the standalone runner uses the same append-only
-uploader and emits the same `*.ena_validation.upload.txt` log. Exact re-uploads are reported as `preserved`;
-changed outcomes create another history row. The explicit SQL migration creates `ena_validation_attempts` and
-the `ena_validation_latest` view. It is not run automatically by the pipeline.
+When `--sql_config` is supplied and uploads are not skipped, the standalone runner uses the same uploader and
+emits the same `*.ena_validation.upload.txt` log. `ena_validation_attempts` holds one row per
+`(assembly_prefix, ena_study, validation_attempt)`: a rerun under the same key overwrites that row (`updated`,
+with `attempt_count` incremented) instead of adding history, until the row's `submission_ready` becomes true, at
+which point it is frozen and reported as `locked` on any later rerun so a flaky retry can never clobber a recorded
+success. Use a new `--ena_validation_attempt` token for a deliberately separate, independently tracked attempt.
+The explicit SQL migrations (`sql/001_create_ena_validation_attempts.sql`, then
+`sql/002_ena_validation_attempts_single_row_per_attempt.sql`) create `ena_validation_attempts` and the
+`ena_validation_latest` view. Neither is run automatically by the pipeline.
 
 ### Standalone QC-only workflow (`qc_only_from_annotations.nf`)
 
