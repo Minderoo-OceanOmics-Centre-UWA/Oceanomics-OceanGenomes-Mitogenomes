@@ -25,9 +25,10 @@ except ImportError:  # pragma: no cover - exercised on minimal login Python inst
 
 SUMMARY_NAME = "mitogenome_assembly_summary_mqc.tsv"
 UPLOAD_SUMMARY_NAME = "upload_results_summary_mqc.tsv"
+ENA_VALIDATION_SUMMARY_NAME = "ena_validation_results_mqc.tsv"
 # Global MultiQC tables that carry one row per assembly/sample and must be
 # filtered down to the current target before they enter a per-sample report.
-FILTERED_SUMMARY_NAMES = {SUMMARY_NAME, UPLOAD_SUMMARY_NAME}
+FILTERED_SUMMARY_NAMES = {SUMMARY_NAME, UPLOAD_SUMMARY_NAME, ENA_VALIDATION_SUMMARY_NAME}
 # Column names that hold the sample/OG id across the different summary tables.
 SAMPLE_ID_FIELDS = ("sample_id", "og_id")
 SAMPLE_RE = re.compile(r"(?<![A-Za-z0-9_-])(OG[0-9][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])")
