@@ -536,8 +536,13 @@ def main():
         error_note = "bam_missing"
         log("No usable BAM; relying on hifiasm flag only.")
 
-    # Verdict: circular if either independent signal is positive.
-    verdict = bool(read_span_circ) or bool(hifiasm_circ)
+    # Verdict: circular if MitoHiFi already closed it, or either independent
+    # signal is positive. MitoHiFi's own verdict must be carried through here:
+    # when it reports circular the read-spanning test is skipped (read_span_circ
+    # stays None) and a hifiasm '...l' unitig gives hifiasm_circ=False, so
+    # without this the verdict would collapse to False for a genuinely circular
+    # genome and propagate a linear topology downstream (meta.circular).
+    verdict = (mitohifi_circ is True) or bool(read_span_circ) or bool(hifiasm_circ)
     corrected = bool(mitohifi_circ is not True and verdict)
 
     if corrected:
