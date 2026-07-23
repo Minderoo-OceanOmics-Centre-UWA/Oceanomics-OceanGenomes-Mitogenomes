@@ -15,7 +15,10 @@ FATAL_CODE_RE = re.compile(r"FATAL[:\s]+([^:\s]+)")
 # submissions and shouldn't quarantine a sample. NO_LOCUS_TAGS fires for any
 # submission without a registered NCBI locus-tag prefix; GenBank/ENA do not
 # require locus tags on organelle genomes, so it's downgraded to advisory.
-ADVISORY_DISCREPANCY_CODES = {"NO_LOCUS_TAGS"}
+# MISSING_PROTEIN_ID fires on every sample because we deliberately omit
+# protein_id (EMMA's placeholder UUID isn't a real accession; ENA/GenBank
+# assign the real one at accessioning time), so it's expected, not an error.
+ADVISORY_DISCREPANCY_CODES = {"NO_LOCUS_TAGS", "MISSING_PROTEIN_ID"}
 
 
 def unique_join(values):

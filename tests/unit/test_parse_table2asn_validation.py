@@ -92,6 +92,17 @@ class ParseTable2AsnValidationTests(unittest.TestCase):
         self.assertEqual(status["warning_codes"], "NO_LOCUS_TAGS")
         self.assertEqual(findings[0]["severity"], "WARNING")
 
+    def test_missing_protein_id_discrepancy_is_advisory(self):
+        tmp, findings, status, _ = self.run_parser(
+            dr_text="FATAL: MISSING_PROTEIN_ID: 13 proteins have invalid IDs.\n"
+        )
+        self.addCleanup(tmp.cleanup)
+        self.assertEqual(status["status"], "PASS")
+        self.assertEqual(status["fatal_discrepancy_count"], "0")
+        self.assertEqual(status["warning_count"], "1")
+        self.assertEqual(status["warning_codes"], "MISSING_PROTEIN_ID")
+        self.assertEqual(findings[0]["severity"], "WARNING")
+
 
 if __name__ == "__main__":
     unittest.main()
