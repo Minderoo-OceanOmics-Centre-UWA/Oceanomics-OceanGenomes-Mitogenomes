@@ -31,11 +31,16 @@ custom_data:
     data_format: tsv
     filename_glob: "*.qc_summary.tsv"
     headers:
-      sample: "Sample"
-      species: "Species"
-      proceed_qc: "Proceed QC"
-      annotation_passed: "Annotation Passed"
-      missing_genes: "Missing Genes"
+      sample:
+        title: "Sample"
+      species:
+        title: "Species"
+      proceed_qc:
+        title: "Proceed QC"
+      annotation_passed:
+        title: "Annotation Passed"
+      missing_genes:
+        title: "Missing Genes"
 
   mitogenome_assembly_summary:
     section_name: "Mitogenome assembly summary"
@@ -44,23 +49,40 @@ custom_data:
     data_format: tsv
     filename_glob: "mitogenome_assembly_summary_mqc.tsv"
     headers:
-      assembly_prefix: "Assembly ID"
-      sample_id: "Sample"
-      assembler: "Assembler"
-      status: "Status"
-      final_length_bp: "Final length (bp)"
-      circularised: "Circularised"
-      num_candidate_contigs: "Candidate contigs"
-      num_final_contigs: "Final contigs"
-      num_genes: "Genes"
-      missing_genes: "Missing genes"
-      frameshift_flag: "Frameshift"
-      mean_coverage: "Mean coverage"
-      coverage_cv: "Coverage CV"
-      reference_species: "Reference species"
-      reference_accession: "Reference accession"
-      numt_flag: "Possible NUMT"
-      manual_review_reason: "Manual review reason"
+      assembly_prefix:
+        title: "Assembly ID"
+      sample_id:
+        title: "Sample"
+      assembler:
+        title: "Assembler"
+      status:
+        title: "Status"
+      final_length_bp:
+        title: "Final length (bp)"
+      circularised:
+        title: "Circularised"
+      num_candidate_contigs:
+        title: "Candidate contigs"
+      num_final_contigs:
+        title: "Final contigs"
+      num_genes:
+        title: "Genes"
+      missing_genes:
+        title: "Missing genes"
+      frameshift_flag:
+        title: "Frameshift"
+      mean_coverage:
+        title: "Mean coverage"
+      coverage_cv:
+        title: "Coverage CV"
+      reference_species:
+        title: "Reference species"
+      reference_accession:
+        title: "Reference accession"
+      numt_flag:
+        title: "Possible NUMT"
+      manual_review_reason:
+        title: "Manual review reason"
 
   mitohifi_stats:
     section_name: "MitoHiFi Contig Stats"
@@ -90,14 +112,22 @@ custom_data:
     data_format: tsv
     filename_glob: "upload_results_summary_mqc.tsv"
     headers:
-      assembly_prefix: "Assembly ID"
-      og_id: "Sample"
-      assembly: "Assembly"
-      annotation: "Annotation"
-      species_validation: "Species validation"
-      lca_blast: "LCA / BLAST"
-      lca_raw: "LCA raw"
-      ena_validation: "ENA validation"
+      assembly_prefix:
+        title: "Assembly ID"
+      og_id:
+        title: "Sample"
+      assembly:
+        title: "Assembly"
+      annotation:
+        title: "Annotation"
+      species_validation:
+        title: "Species validation"
+      lca_blast:
+        title: "LCA / BLAST"
+      lca_raw:
+        title: "LCA raw"
+      ena_validation:
+        title: "ENA validation"
 
   ena_validation_results:
     section_name: "ENA submission readiness"
@@ -106,17 +136,28 @@ custom_data:
     data_format: tsv
     filename_glob: "ena_validation_results_mqc.tsv"
     headers:
-      assembly_prefix: "Assembly ID"
-      og_id: "Sample"
-      validation_mode: "Mode"
-      ena_study: "ENA study"
-      table2asn_status: "Table2ASN"
-      conversion_status: "Conversion"
-      preflight_status: "Preflight"
-      webin_status: "Webin"
-      webin_reason: "Webin reason"
-      submission_ready: "Submission ready"
-      validation_attempt: "Attempt"
+      assembly_prefix:
+        title: "Assembly ID"
+      og_id:
+        title: "Sample"
+      validation_mode:
+        title: "Mode"
+      ena_study:
+        title: "ENA study"
+      table2asn_status:
+        title: "Table2ASN"
+      conversion_status:
+        title: "Conversion"
+      preflight_status:
+        title: "Preflight"
+      webin_status:
+        title: "Webin"
+      webin_reason:
+        title: "Webin reason"
+      submission_ready:
+        title: "Submission ready"
+      validation_attempt:
+        title: "Attempt"
 
   table2asn_gate:
     section_name: "Table2ASN submission gate"
@@ -125,16 +166,26 @@ custom_data:
     data_format: tsv
     filename_glob: "*.table2asn_status.tsv"
     headers:
-      sample: "Sample"
-      status: "Status"
-      reject_count: "Rejects"
-      error_count: "Errors"
-      warning_count: "Warnings"
-      info_count: "Info"
-      fatal_discrepancy_count: "Fatal discrepancies"
-      nostop_count: "Missing stops"
-      blocking_codes: "Blocking codes"
-      warning_codes: "Warning codes"
+      sample:
+        title: "Sample"
+      status:
+        title: "Status"
+      reject_count:
+        title: "Rejects"
+      error_count:
+        title: "Errors"
+      warning_count:
+        title: "Warnings"
+      info_count:
+        title: "Info"
+      fatal_discrepancy_count:
+        title: "Fatal discrepancies"
+      nostop_count:
+        title: "Missing stops"
+      blocking_codes:
+        title: "Blocking codes"
+      warning_codes:
+        title: "Warning codes"
 
   table2asn_findings:
     section_name: "Table2ASN findings"
