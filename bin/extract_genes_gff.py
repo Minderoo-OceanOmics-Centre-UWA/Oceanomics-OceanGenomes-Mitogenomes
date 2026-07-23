@@ -82,22 +82,13 @@ def main():
                 name2product[name] = attr["Product"]
 
             if ftype == "gene":
-                genes[name] = dict(
-                    start=start, end=end, strand=strand,
-                    id=attr.get("ID", "unk_id").split("|")[-1], product=""
-                )
+                genes[name] = dict(start=start, end=end, strand=strand, product="")
             elif ftype == "CDS":
                 genes_with_cds.add(name)
                 # ensure gene exists even if 'gene' line is missing
-                genes.setdefault(name, dict(
-                    start=start, end=end, strand=strand,
-                    id=attr.get("ID", "unk_id").split("|")[-1], product=""
-                ))
+                genes.setdefault(name, dict(start=start, end=end, strand=strand, product=""))
             elif ftype in RNA_TYPES:
-                genes.setdefault(name, dict(
-                    start=start, end=end, strand=strand,
-                    id=attr.get("ID", "unk_id").split("|")[-1], product=""
-                ))
+                genes.setdefault(name, dict(start=start, end=end, strand=strand, product=""))
 
     # fill products
     for name, info in genes.items():
@@ -109,14 +100,14 @@ def main():
     concat_path = gene_dir / f"{assembly}.genes.fa"
     with concat_path.open("w") as concat_fh:
         for name, info in ordered:
-            s, e, strand, gene_id, product = info["start"], info["end"], info["strand"], info["id"], info["product"]
+            s, e, strand, product = info["start"], info["end"], info["strand"], info["product"]
             seq = (genome_record.seq[s-1:e] if strand == "+"
                    else genome_record.seq[s-1:e].reverse_complement())
             coord = f"{s}-{e}"
             header = (
                 f">{assembly}|{coord}|{strand}|{name} "
                 f"[organism={species}] [mgcode=2] [topology=linear] "
-                f"[geneid={gene_id}] [gene-coordinates={coord}({strand})] "
+                f"[gene-coordinates={coord}({strand})] "
                 f"{species} mitochondrially encoded {product}"
             )
             wrapped = "\n".join(str(seq)[i:i+70] for i in range(0, len(seq), 70))

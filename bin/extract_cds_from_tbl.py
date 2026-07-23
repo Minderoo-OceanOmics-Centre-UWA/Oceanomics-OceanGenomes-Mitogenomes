@@ -68,18 +68,12 @@ def main():
                     "This light parser expects simple 'start\\tend\\tCDS' rows."
                 )
 
-            # Look ahead a few lines for qualifiers
+            # Look ahead a few lines for the product qualifier
             product_name = "unknown_product"
-            gene_id      = "unknown_protein_id"
             for j in range(i + 1, min(i + 6, len(lines))):
                 nxt = lines[j].strip()
                 if "\tproduct\t" in nxt:
                     product_name = nxt.split("\t")[-1].strip()
-                elif "\tprotein_id\t" in nxt:
-                    raw_gene_id = nxt.split("\t")[-1].strip()   # e.g. gnl|Emma|7ccb…
-                    gene_id = raw_gene_id.split("|")[-1]        # keep the last token
-                # break early if we have both
-                if product_name != "unknown_product" and gene_id != "unknown_protein_id":
                     break
 
             # Extract sequence with strand logic
@@ -96,7 +90,7 @@ def main():
             header = (
                 f">{assembly}|{coord_str}|{direction}|MT-{gene_name} "
                 f"[organism={species}] [mgcode=2] "
-                f"[geneid={gene_id}] [gene-coordinates={coord_str}({direction})] "
+                f"[gene-coordinates={coord_str}({direction})] "
                 f"{species} mitochondrially encoded {product_name}"
             )
 
