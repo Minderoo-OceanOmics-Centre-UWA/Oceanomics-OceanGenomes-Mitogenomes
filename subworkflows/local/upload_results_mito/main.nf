@@ -101,7 +101,7 @@ workflow UPLOAD_RESULTS {
     //
 
     PUSH_LCA_BLAST_RESULTS (
-        SPECIES_VALIDATION.out.full, // tuple path ("lca_combined.${meta.id}.tsv"), path ("blast_combined.${meta.id}.txt"),
+        SPECIES_VALIDATION.out.full, // tuple path ("lca_combined.${mt_assembly_prefix}.tsv"), path ("blast_combined.${mt_assembly_prefix}.tsv"),
         sql_config // params.sql_config
     )
 

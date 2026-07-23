@@ -11,8 +11,8 @@ input:
   - lca_files: { type: files, description: LCA results list }
   - config: { type: file, description: SQL/DB configuration file }
 output:
-  - summary: { type: file, description: Per-sample LCA summary TSV, pattern: "lca_results.*.tsv" }
-  - full: { type: files, description: Combined LCA and BLAST tables, pattern: "lca_combined.*.tsv, blast_combined.*.tsv" }
+  - summary: { type: file, description: "Per-assembly LCA summary TSV, named lca_results.<mt_assembly_prefix>.tsv", pattern: "lca_results.*.tsv" }
+  - full: { type: files, description: "Combined LCA and BLAST tables, named lca_combined.<mt_assembly_prefix>.tsv and blast_combined.<mt_assembly_prefix>.tsv", pattern: "lca_combined.*.tsv, blast_combined.*.tsv" }
 authors: ["Tyler Peirce"]
 maintainers: ["Tyler Peirce"]
 

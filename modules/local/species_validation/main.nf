@@ -12,8 +12,12 @@ process SPECIES_VALIDATION {
     path config
 
     output:
-    tuple val(meta), path("lca_results.${meta.id}.tsv"), emit: summary
-    tuple val(meta), path("lca_combined.${meta.id}.tsv"), path("blast_combined.${meta.id}.tsv"), emit: full
+    // Qualify these with mt_assembly_prefix (not just meta.id): an OG can have
+    // multiple assembly attempts (e.g. hifi + hic + getorg reseed), and id-only
+    // names collide (silent last-write-wins overwrite) when collected flat into
+    // the shared species_validation/ output directory.
+    tuple val(meta), path("lca_results.${meta.mt_assembly_prefix ?: meta.id}.tsv"), emit: summary
+    tuple val(meta), path("lca_combined.${meta.mt_assembly_prefix ?: meta.id}.tsv"), path("blast_combined.${meta.mt_assembly_prefix ?: meta.id}.tsv"), emit: full
     tuple val(meta), path("${meta.mt_assembly_prefix ?: meta.id}.species_validation.upload.txt"), emit: upload
     tuple val(meta), path("11_species_validation.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
@@ -26,10 +30,11 @@ process SPECIES_VALIDATION {
     def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
     def lca_files_str = lca_files instanceof List ? lca_files.join(',') : lca_files
     def blast_files_str = blast_files instanceof List ? blast_files.join(',') : blast_files
-    def effective_args = [args, config, meta.id, lca_files_str, blast_files_str].findAll { it?.toString()?.trim() }.join(' ')
+    def effective_args = [args, "--assembly-prefix ${mt_assembly_prefix}", config, meta.id, lca_files_str, blast_files_str].findAll { it?.toString()?.trim() }.join(' ')
     """
     species_validation.py \\
         $args \\
+        --assembly-prefix ${mt_assembly_prefix} \\
         $config \\
         ${meta.id} \\
         "${lca_files_str}" \\
@@ -52,11 +57,11 @@ process SPECIES_VALIDATION {
     def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
     def lca_files_str = lca_files instanceof List ? lca_files.join(',') : lca_files
     def blast_files_str = blast_files instanceof List ? blast_files.join(',') : blast_files
-    def effective_args = [args, config, meta.id, lca_files_str, blast_files_str].findAll { it?.toString()?.trim() }.join(' ')
+    def effective_args = [args, "--assembly-prefix ${mt_assembly_prefix}", config, meta.id, lca_files_str, blast_files_str].findAll { it?.toString()?.trim() }.join(' ')
     """
-    touch lca_results.${meta.id}.tsv
-    touch lca_combined.${meta.id}.tsv
-    touch blast_combined.${meta.id}.tsv
+    touch lca_results.${mt_assembly_prefix}.tsv
+    touch lca_combined.${mt_assembly_prefix}.tsv
+    touch blast_combined.${mt_assembly_prefix}.tsv
     touch ${mt_assembly_prefix}.species_validation.upload.txt
 
     cat <<-END_TOOL_PARAMS > 11_species_validation.tool_params_mqcrow.html

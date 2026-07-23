@@ -192,12 +192,18 @@ def upsert_lca_validation(
             conn.close()
 
 
-def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_file, force=False):
+def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_file, assembly_prefix=None, force=False):
     db_params = load_db_config(config_path)
+    # File-naming prefix only: an OG can have multiple assembly attempts, so
+    # combined/summary filenames must be qualified with the unique per-assembly
+    # prefix (meta.mt_assembly_prefix) to avoid colliding with other attempts
+    # for the same OG. The DB lookups and output row content still use the
+    # real og_id.
+    prefix = assembly_prefix or og_id
 
     # Combine files
-    concatenate_lca_files(lca_files, f"lca_combined.{og_id}.tsv")
-    concatenate_files(blast_files, f"blast_combined.{og_id}.tsv")
+    concatenate_lca_files(lca_files, f"lca_combined.{prefix}.tsv")
+    concatenate_files(blast_files, f"blast_combined.{prefix}.tsv")
 
     # Get nominal_species_id from DB
     db_species = get_species_for_ogid(db_params, og_id)
@@ -209,12 +215,12 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
     db_species_norm = normalise_name(db_species)
 
     # Load BLAST results
-    blast_blob = load_blast_species_set(f"blast_combined.{og_id}.tsv")
+    blast_blob = load_blast_species_set(f"blast_combined.{prefix}.tsv")
 
     sample_validated = False
 
     # Process LCA and compare
-    with open(f"lca_combined.{og_id}.tsv", newline='') as tsvfile, open(output_file, "w", newline='') as out:
+    with open(f"lca_combined.{prefix}.tsv", newline='') as tsvfile, open(output_file, "w", newline='') as out:
         # Use DictReader so we can refer to columns by name
         reader = csv.DictReader(tsvfile, delimiter='\t')
         writer = csv.writer(out, delimiter='\t')
@@ -254,11 +260,11 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
     # row when the sample is validated (Found_in_blast_YN = Yes for at least
     # one region) so unvalidated samples leave the existing DB row untouched.
     if sample_validated:
-        key = parse_assembly_key_from_blast(f"blast_combined.{og_id}.tsv")
+        key = parse_assembly_key_from_blast(f"blast_combined.{prefix}.tsv")
         if key is None:
             print(
                 "❌ Could not derive (og_id, tech, seq_date, code, annotation) from "
-                f"blast_combined.{og_id}.tsv — skipping lca_validation upsert."
+                f"blast_combined.{prefix}.tsv — skipping lca_validation upsert."
             )
         else:
             upsert_lca_validation(db_params, key, db_species, validator="nf-core", force=force)
@@ -289,6 +295,16 @@ if __name__ == "__main__":
             "by default."
         ),
     )
+    parser.add_argument(
+        "--assembly-prefix",
+        default=None,
+        help=(
+            "Unique per-assembly filename prefix (meta.mt_assembly_prefix). "
+            "Used only to name the combined/summary output files so multiple "
+            "assembly attempts for the same OG don't collide; defaults to "
+            "og_id when omitted."
+        ),
+    )
     parser.add_argument("config_file")
     parser.add_argument("og_id")
     parser.add_argument(
@@ -304,12 +320,14 @@ if __name__ == "__main__":
     lca_files = args.lca_files.split(',')
     blast_files = args.blast_files.split(',')
 
-    output_file = f"lca_results.{args.og_id}.tsv"
+    prefix = args.assembly_prefix or args.og_id
+    output_file = f"lca_results.{prefix}.tsv"
     compare_lca_and_blast(
         args.config_file,
         args.og_id,
         lca_files,
         blast_files,
         output_file,
+        assembly_prefix=args.assembly_prefix,
         force=args.force,
     )
