@@ -15,6 +15,7 @@ include { MITOHIFI_CHECK_CIRCULARITY       } from '../../../../modules/local/mit
 include { RELABEL_REFERENCE_GB             } from '../../../../modules/local/relabel_reference_gb'
 include { REFERENCE_DIVERGENCE             } from '../../../../modules/local/reference_divergence'
 include { OATK                             } from '../../../../modules/local/oatk'
+include { OATK_CHECK                       } from '../../../../modules/local/oatk/check_circularity'
 include { ASSEMBLY_NO_RESULT               } from '../../../../modules/local/assembly_no_result'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
@@ -261,6 +262,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     //
     ch_oatk_fasta = Channel.empty()
     ch_oatk_log = Channel.empty()
+    ch_oatk_circularity_evidence = Channel.empty()
     ch_routed_failure_fasta = Channel.empty()
     ch_routed_failure_log = Channel.empty()
 
@@ -302,18 +304,71 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
             ch_oatk_db
         )
 
+        // Run the same FASTA-vs-reference circularity/anomaly check the other assemblers
+        // get, on assembled oatk contigs only (skip the no-contig empties). Without it the
+        // oatk contig carries no circularity evidence, so in the parent workflow it can
+        // only leave the collapse-concatemer join via the (channel-close) remainder path,
+        // i.e. it reaches annotation as a delayed end-of-run batch instead of incrementally
+        // like MitoHiFi/GetOrganelle. Emitting matching evidence (identical meta) makes it a
+        // matched join item that flows straight through, and gives it a real meta.circular
+        // for MITOS2 and the GenBank QC gate.
+        ch_oatk_assembled = OATK.out.fasta.filter { _meta, fasta -> fasta.size() > 0 }
+
+        // Assembled oatk contigs always emit a GFA; pair them for the self-link
+        // circularity read.
+        ch_oatk_fa_gfa = ch_oatk_assembled.join(OATK.out.gfa, by: 0)   // [meta, fasta, gfa]
+
+        // Attach the per-sample reference GenBank. RELABEL_REFERENCE_GB.out.gb carries the
+        // MitoHiFi-prefixed meta (not the oatk one), so key on [id, sequencing_type, date].
+        // The true no-reference oatk path (ch_reference_branched.missing) has no relabelled
+        // reference, so remainder + the NO_REFERENCE placeholder keeps every oatk contig
+        // (check_getorganelle.py treats a zero-length reference as absent).
+        def no_reference_gb_oatk = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
+        ch_oatk_ref_keyed = RELABEL_REFERENCE_GB.out.gb
+            .map { m, gb -> [ [m.id, m.sequencing_type, m.date], gb ] }
+        ch_oatk_check_in = ch_oatk_fa_gfa
+            .map { m, fasta, gfa -> [ [m.id, m.sequencing_type, m.date], m, fasta, gfa ] }
+            .join(ch_oatk_ref_keyed, by: 0, remainder: true)
+            .filter { it[1] != null }   // keep oatk rows; drop reference-only remainder
+            .map { items ->
+                def ref = (items.size() > 4 && items[4] != null) ? items[4] : no_reference_gb_oatk
+                [ items[1], items[2], items[3], ref ]   // [meta, fasta, gfa, ref]
+            }
+
+        OATK_CHECK ( ch_oatk_check_in )
+
+        // Fold the corrected circular verdict into meta on every oatk channel that is later
+        // joined by the whole meta map (fasta <-> evidence in the parent collapse join; the
+        // QC-gate evidence). All three must carry the SAME meta, so fold the identical
+        // verdict into each. remainder:true keeps the no-contig oatk (no evidence ->
+        // circular:null, empty FASTA filtered out of annotation downstream).
+        ch_oatk_circ_verdict = OATK_CHECK.out.evidence
+            .map { m, tsv -> [ m, parseFinalVerdictCircular(tsv) ] }
+
         ch_oatk_fasta = OATK.out.fasta
+            .join(ch_oatk_circ_verdict, by: 0, remainder: true)
+            .map { m, fasta, circ -> [ m + [ circular: circ ], fasta ] }
         ch_oatk_log = OATK.out.log
+            .join(ch_oatk_circ_verdict, by: 0, remainder: true)
+            .map { m, log, circ -> [ m + [ circular: circ ], log ] }
+        ch_oatk_circularity_evidence = OATK_CHECK.out.evidence
+            .map { m, ev -> [ m + [ circular: parseFinalVerdictCircular(ev) ], ev ] }
+
         // Non-zero OATK exits are propagated by the process itself so Nextflow's
         // retry/error strategy remains effective. This channel therefore contains
         // only structured successful outcomes: assembled or a valid no-contig result.
         ch_oatk_status = OATK.out.status
 
         ch_versions = ch_versions.mix(OATK.out.versions.first())
+        ch_versions = ch_versions.mix(OATK_CHECK.out.versions.first())
         ch_summary_files = ch_summary_files.mix(OATK.out.log.map { _meta, log -> log })
         ch_summary_files = ch_summary_files.mix(OATK.out.fasta.map { _meta, fasta -> fasta })
         ch_summary_files = ch_summary_files.mix(OATK.out.gfa.map { _meta, gfa -> gfa })
         ch_summary_files = ch_summary_files.mix(ch_oatk_status.map { _meta, status -> status })
+        // Oatk check evidence feeds the assembly summary (circularised override +
+        // anomaly/length review reason), same as the GetOrganelle/MitoHiFi check evidence.
+        ch_summary_files = ch_summary_files.mix(OATK_CHECK.out.evidence.map { _meta, ev -> ev })
+        ch_multiqc_files = ch_multiqc_files.mix(OATK_CHECK.out.tool_params.collect { it[1] })
     } else {
         ASSEMBLY_NO_RESULT(ch_direct_oatk_reads.map { meta, _reads, reason -> [meta, reason] })
         ch_routed_failure_fasta = ASSEMBLY_NO_RESULT.out.fasta
@@ -412,6 +467,16 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         .map { meta, f -> [ meta.mt_assembly_prefix, f ] }
         .groupTuple()
 
+    // Fold the oatk fallback's mtdna files (assembly + circularity check) into the same
+    // bundle, keyed by the oatk assembly prefix, so a genuinely collapsed oatk concatemer
+    // gets its full provenance mirrored into <prefix>_collapsed/mtdna like the other
+    // assemblers. Empty (no oatk fallback ran, or the fallback is disabled).
+    ch_oatk_mtdna_files = ch_oatk_fasta
+        .mix(ch_oatk_circularity_evidence)
+        .map { meta, f -> [ meta.mt_assembly_prefix, f ] }
+        .groupTuple()
+    ch_mtdna_files = ch_mtdna_files.mix(ch_oatk_mtdna_files)
+
 
     //
     // Emit outputs
@@ -425,7 +490,11 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     assembly_log    = ch_assembly_log              // channel: [ meta(+circular), contigs_stats.tsv ]
     coverage_stats  = MITOHIFI_AVERAGE_COVERAGE.out.coverage
     reference_gb    = ch_reference_gb              // channel: [ meta(+circular), reference.gb ]
-    circularity_evidence = ch_circularity_evidence // channel: [ meta(+circular), circularity_check.tsv ]
+    // Fold the oatk fallback's circularity evidence into the same channel so the parent
+    // workflow's collapse-concatemer join, QC gate and assembly summary treat oatk exactly
+    // like MitoHiFi (matched join item -> flows to annotation incrementally). Empty unless
+    // the fallback ran.
+    circularity_evidence = ch_circularity_evidence.mix(ch_oatk_circularity_evidence) // channel: [ meta(+circular), *_check.tsv ]
     summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]

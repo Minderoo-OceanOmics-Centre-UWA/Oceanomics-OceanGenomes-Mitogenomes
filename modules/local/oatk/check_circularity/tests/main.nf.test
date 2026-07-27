@@ -1,0 +1,45 @@
+nextflow_process {
+
+    name "Test Process OATK_CHECK"
+    script "../main.nf"
+    process "OATK_CHECK"
+
+    tag "modules"
+    tag "modules_local"
+    tag "oatk_check"
+
+    // Stub only (no blastn in CI): the stub exercises the module's output naming and
+    // meta passthrough. The stub emits a <prefix>.getorg_check.tsv with
+    // final_verdict_circular=true so the parent workflow / assembly summary attach it to
+    // the oatk assembly row. The real check_getorganelle.py engine (reference coverage +
+    // self-align length/repeat screen) is shared with GetOrganelle_CHECK, and the GFA
+    // self-link -> circular read is covered end-to-end by the pipeline assembly-routing test.
+    test("stub emits getorg_check evidence named for the oatk assembly prefix") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', sequencing_type:'hifi', date:'d', mt_assembly_prefix:'test_stub.hifi.d.v10oatk', assembler_fallback:'oatk', fallback_reason:'no_reference', circular:null ],
+                    file("${projectDir}/modules/local/oatk/check_circularity/tests/data/oatk.fasta", checkIfExists: true),
+                    file("${projectDir}/modules/local/oatk/check_circularity/tests/data/oatk.gfa", checkIfExists: true),
+                    file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.evidence[0][1] ==~ ".*/test_stub.hifi.d.v10oatk.getorg_check.tsv" },
+                { assert path(process.out.evidence[0][1]).text.contains("final_verdict_circular") },
+                // meta is passed through unchanged so the parent join matches the oatk FASTA
+                { assert process.out.evidence[0][0].mt_assembly_prefix == 'test_stub.hifi.d.v10oatk' },
+                { assert process.out.evidence[0][0].assembler_fallback == 'oatk' }
+            )
+        }
+    }
+}
