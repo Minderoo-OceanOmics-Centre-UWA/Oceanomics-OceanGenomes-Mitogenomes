@@ -191,5 +191,260 @@ class CollapseOverrideTests(unittest.TestCase):
         self.assertEqual(row["anomaly_type"], "unresolved")
 
 
+class GetOrganelleEvidenceTests(unittest.TestCase):
+    """GetOrganelle's log verdict must yield the same circularity evidence the
+    other assemblers are judged on. It writes either "circular genome" or
+    "N scaffold(s)"; only the former is a closed molecule."""
+
+    def log(self, *lines):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "OG5.hic.getorg1770.get_org.log.txt"
+        path.write_text("\n".join(lines) + "\n")
+        return [path]
+
+    def test_circular_genome_is_circularised(self):
+        circ, _, failed = mas.getorganelle_evidence_from_log(
+            self.log("2026-07-27 10:54:00 - INFO: Result status of animal_mt: circular genome"))
+        self.assertEqual(circ, "true")
+        self.assertFalse(failed)
+
+    def test_scaffold_count_is_not_circularised(self):
+        # The audit-5 OG5 / OG64 / OG869 case: previously left blank, which let the
+        # row skip not_circularised entirely.
+        for verdict in ("1 scaffold(s)", "2 scaffold(s)", "8 scaffold(s)"):
+            with self.subTest(verdict=verdict):
+                circ, _, _ = mas.getorganelle_evidence_from_log(
+                    self.log(f"2026-07-27 10:54:00 - INFO: Result status of animal_mt: {verdict}"))
+                self.assertEqual(circ, "false")
+
+    def test_incomplete_is_not_read_as_complete(self):
+        # Regression: "complete" is a substring of "incomplete", and the old parser
+        # tested for it first, so an incomplete result resolved as complete.
+        circ, _, _ = mas.getorganelle_evidence_from_log(
+            self.log("2026-07-27 10:54:00 - INFO: Result status of animal_mt: incomplete genome"))
+        self.assertEqual(circ, "false")
+
+    def test_last_verdict_wins(self):
+        circ, _, _ = mas.getorganelle_evidence_from_log(self.log(
+            "INFO: Result status of animal_mt: 3 scaffold(s)",
+            "INFO: Disentangling failed: retrying",
+            "INFO: Result status of animal_mt: circular genome",
+        ))
+        self.assertEqual(circ, "true")
+
+    def test_missing_verdict_leaves_circularity_unknown(self):
+        # A truncated log means unknown topology, not "not circular" -- the same
+        # state a MitoHiFi row with no contig-stats sidecar is left in.
+        circ, _, failed = mas.getorganelle_evidence_from_log(
+            self.log("2026-07-27 10:54:00 - INFO: Assembling reads"))
+        self.assertEqual(circ, "")
+        self.assertFalse(failed)
+
+    def test_error_line_is_a_failure_but_disentangling_is_not(self):
+        _, _, failed = mas.getorganelle_evidence_from_log(
+            self.log("2026-07-27 10:54:00 - ERROR: No animal_mt seed reads found!"))
+        self.assertTrue(failed)
+        _, _, failed = mas.getorganelle_evidence_from_log(self.log(
+            "INFO: Disentangling failed: cannot resolve, retrying",
+            "INFO: Result status of animal_mt: circular genome",
+        ))
+        self.assertFalse(failed)
+
+    def test_base_coverage_parsed(self):
+        _, cov, _ = mas.getorganelle_evidence_from_log(self.log(
+            "INFO: Average animal_mt base-coverage = 335.9",
+            "INFO: Result status of animal_mt: circular genome",
+        ))
+        self.assertAlmostEqual(cov, 335.9)
+
+
+class StatusVocabularyTests(unittest.TestCase):
+    """`status` must mean the same thing whichever assembler produced the row."""
+
+    VALUES = {"complete", "manual_review", "failed"}
+
+    def finalise(self, row, failed=False):
+        mas.apply_qc(row, THRESHOLDS)
+        mas.finalise_status(row, failed=failed)
+        return row["status"]
+
+    def test_clean_row_is_complete(self):
+        self.assertEqual(self.finalise(complete_row()), "complete")
+
+    def test_blocking_reason_is_manual_review(self):
+        self.assertEqual(self.finalise(complete_row(num_final_contigs="3")), "manual_review")
+
+    def test_no_final_assembly_is_failed(self):
+        self.assertEqual(self.finalise(complete_row(final_length_bp="")), "failed")
+
+    def test_assembler_failure_beats_other_evidence(self):
+        row = complete_row()
+        self.assertEqual(self.finalise(row, failed=True), "failed")
+        self.assertIn("failed_run", row["manual_review_reason"])
+
+    def test_advisory_flags_do_not_block(self):
+        # A complete-core assembly at low coverage stays complete, with the flag
+        # retained in manual_review_reason for transparency.
+        row = complete_row(mean_coverage="12")
+        self.assertEqual(self.finalise(row), "complete")
+        self.assertIn("low_mean_coverage", row["manual_review_reason"])
+
+    def test_vocabulary_is_closed_and_has_no_circular(self):
+        rows = [
+            complete_row(),
+            complete_row(circularised="false"),
+            complete_row(num_final_contigs="3"),
+            complete_row(final_length_bp=""),
+            complete_row(num_cds="7", missing_genes="CO2;CO3"),
+        ]
+        produced = {self.finalise(row) for row in rows}
+        self.assertTrue(produced <= self.VALUES, f"unexpected status values: {produced - self.VALUES}")
+        self.assertNotIn("circular", produced)
+
+
+class CrossAssemblerStatusTests(unittest.TestCase):
+    """The point of the change: equivalent assemblies get the same status whichever
+    assembler produced them. Goes through the real per-assembler parsers, since that
+    is where the two vocabularies and the two evidence rules used to diverge."""
+
+    SEQ = "ACGT" * 4200   # 16800 bp, inside the expected range
+
+    def root(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        return Path(tmp.name)
+
+    def getorganelle_row(self, circular):
+        root = self.root()
+        prefix = "OG1.hic.getorg1770"
+        fasta = root / f"{prefix}.fasta"
+        fasta.write_text(f">OG1\n{self.SEQ}\n")
+        log = root / f"{prefix}.get_org.log.txt"
+        verdict = "circular genome" if circular else "1 scaffold(s)"
+        log.write_text(f"INFO: Result status of animal_mt: {verdict}\n")
+        files = [fasta, log]
+        run = mas.RunFiles(sample_id="OG1", prefix=prefix, assembler="GetOrganelle", files=files)
+        return mas.parse_getorganelle_run(run, THRESHOLDS, files)
+
+    def mitohifi_row(self, circular):
+        root = self.root()
+        prefix = "OG1.hifi.v323mitohifi"
+        fasta = root / f"{prefix}.fasta"
+        fasta.write_text(f">OG1\n{self.SEQ}\n")
+        stats = root / f"{prefix}.contigs_stats.tsv"
+        stats.write_text(
+            "contig_id\tlength_bp\twas_circular\tselected\n"
+            f"OG1\t16800\t{'True' if circular else 'False'}\tTrue\n"
+        )
+        files = [fasta, stats]
+        run = mas.RunFiles(sample_id="OG1", prefix=prefix, assembler="MitoHiFi", files=files)
+        return mas.parse_mitohifi_run(run, THRESHOLDS, files)
+
+    def oatk_row(self, circular):
+        root = self.root()
+        prefix = "OG1.hifi.oatk"
+        fasta = root / f"{prefix}.fasta"
+        fasta.write_text(f">OG1\n{self.SEQ}\n")
+        gfa = root / f"{prefix}.gfa"
+        # A self-link (from-segment == to-segment) is oatk's circularity marker.
+        gfa.write_text(
+            "S\tu1\t*\n" + ("L\tu1\t+\tu1\t+\t0M\n" if circular else "L\tu1\t+\tu2\t+\t0M\n")
+        )
+        files = [fasta, gfa]
+        run = mas.RunFiles(sample_id="OG1", prefix=prefix, assembler="Oatk", files=files)
+        return mas.parse_oatk_run(run, THRESHOLDS, files)
+
+    def rows(self, circular):
+        return {
+            "GetOrganelle": self.getorganelle_row(circular),
+            "MitoHiFi": self.mitohifi_row(circular),
+            "Oatk": self.oatk_row(circular),
+        }
+
+    def test_circular_assemblies_agree(self):
+        rows = self.rows(circular=True)
+        self.assertEqual({name: row["circularised"] for name, row in rows.items()},
+                         {"GetOrganelle": "true", "MitoHiFi": "true", "Oatk": "true"})
+        self.assertEqual({row["status"] for row in rows.values()}, {"complete"})
+
+    def test_non_circular_assemblies_agree(self):
+        # Before the change GetOrganelle reported "complete" here (blank circularity
+        # skipped not_circularised) while MitoHiFi reported manual_review.
+        rows = self.rows(circular=False)
+        self.assertEqual({name: row["circularised"] for name, row in rows.items()},
+                         {"GetOrganelle": "false", "MitoHiFi": "false", "Oatk": "false"})
+        self.assertEqual({row["status"] for row in rows.values()}, {"manual_review"})
+        for name, row in rows.items():
+            self.assertIn("not_circularised", row["manual_review_reason"], name)
+
+    def test_no_assembler_emits_a_private_status_value(self):
+        for circular in (True, False):
+            for name, row in self.rows(circular).items():
+                with self.subTest(assembler=name, circular=circular):
+                    self.assertIn(row["status"], StatusVocabularyTests.VALUES)
+
+
+class GetOrganelleRowStatusTests(unittest.TestCase):
+    """End-to-end over parse_getorganelle_run, covering the audit-5 cases."""
+
+    def make_run(self, verdict, check_row=None):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        prefix = "OG1161.hic.250624.getorg1770reseed"
+        files = []
+
+        fasta = root / f"{prefix}.fasta"
+        fasta.write_text(">OG1161\n" + ("ACGT" * 4200) + "\n")   # 16800 bp, in range
+        files.append(fasta)
+
+        log = root / f"{prefix}.get_org.log.txt"
+        log.write_text(
+            "INFO: Average animal_mt base-coverage = 451.7\n"
+            f"INFO: Result status of animal_mt: {verdict}\n"
+        )
+        files.append(log)
+
+        if check_row is not None:
+            check = root / f"{prefix}.getorg_check.tsv"
+            check.write_text(
+                "sample\tgetorg_circular\tfinal_verdict_circular\n"
+                f"{prefix}\tFalse\t{check_row}\n"
+            )
+            files.append(check)
+
+        run = mas.RunFiles(sample_id="OG1161", prefix=prefix, assembler="GetOrganelle", files=files)
+        return mas.parse_getorganelle_run(run, THRESHOLDS, files)
+
+    def test_circular_log_is_complete(self):
+        row = self.make_run("circular genome")
+        self.assertEqual(row["circularised"], "true")
+        self.assertEqual(row["status"], "complete")
+
+    def test_scaffold_log_without_check_is_manual_review(self):
+        # OG5 / OG64 / OG869-like: never circularity-checked, so it must not sit at
+        # the same status as a confirmed MitoHiFi assembly.
+        row = self.make_run("1 scaffold(s)")
+        self.assertEqual(row["circularised"], "false")
+        self.assertEqual(row["status"], "manual_review")
+        self.assertIn("not_circularised", row["manual_review_reason"])
+
+    def test_check_sidecar_overrides_scaffold_verdict(self):
+        # OG1161-like: the reference test confirms the scaffold is a linearised circle.
+        row = self.make_run("1 scaffold(s)", check_row="True")
+        self.assertEqual(row["circularised"], "true")
+        self.assertEqual(row["status"], "complete")
+        self.assertNotIn("not_circularised", row["manual_review_reason"])
+
+    def test_no_row_reports_circular_status(self):
+        for verdict in ("circular genome", "1 scaffold(s)"):
+            with self.subTest(verdict=verdict):
+                self.assertNotEqual(self.make_run(verdict)["status"], "circular")
+
+
 if __name__ == "__main__":
     unittest.main()

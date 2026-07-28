@@ -865,6 +865,28 @@ def blocking_reasons(row: dict[str, str], reasons: list[str], thresholds: Thresh
     return [reason for reason in reasons if reason not in advisory]
 
 
+def finalise_status(row: dict[str, str], failed: bool = False) -> None:
+    """Terminal QC verdict. Identical for every assembler so the column can be
+    sorted / filtered / counted across a mixed cohort:
+
+      failed         - the assembler errored, or produced no final assembly
+      manual_review  - a final assembly exists but a blocking reason stands
+      complete       - a final assembly exists and nothing blocking survived QC
+
+    Topology is deliberately NOT encoded here (an earlier GetOrganelle-only
+    "circular" status made the column incomparable); read `circularised` for it.
+
+    Must run after apply_qc, which is what populates BLOCKING_KEY.
+    """
+    if failed or not row["final_length_bp"]:
+        row["status"] = "failed"
+        row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
+    elif row.get(BLOCKING_KEY):
+        row["status"] = "manual_review"
+    else:
+        row["status"] = "complete"
+
+
 def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterable[Path]) -> dict[str, str]:
     row = {column: MISSING for column in COLUMNS}
     row.update({"sample_id": run.sample_id, "assembly_prefix": run.prefix, "assembler": "MitoHiFi"})
@@ -903,13 +925,7 @@ def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterabl
     apply_collapse_override(row, run)
 
     apply_qc(row, thresholds)
-    if not row["final_length_bp"]:
-        row["status"] = "failed"
-        row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
-    elif row.get(BLOCKING_KEY):
-        row["status"] = "manual_review"
-    else:
-        row["status"] = "complete"
+    finalise_status(row)
     return row
 
 
@@ -920,10 +936,26 @@ def add_reason(existing: str, reason: str) -> str:
     return ";".join(reasons)
 
 
-def getorganelle_status_from_log(files: Iterable[Path]) -> tuple[str, str, float | None]:
-    status = "unknown"
+def getorganelle_evidence_from_log(files: Iterable[Path]) -> tuple[str, float | None, bool]:
+    """Circularity, coverage and failure evidence from the GetOrganelle log.
+
+    Returns (circularised, mean_coverage, failed). GetOrganelle states its verdict
+    on a "Result status of animal_mt: ..." line, and in practice writes one of two
+    forms: "circular genome" or "N scaffold(s)". Only the circular form is
+    evidence of a closed molecule; every other parseable verdict (a scaffold
+    count, "incomplete", a bare "complete genome") means GetOrganelle did not
+    close the circle, so it records circularised="false" and the row picks up the
+    same not_circularised flag a MitoHiFi row would. Previously a scaffold count
+    matched no branch and left circularised blank, which let GetOrganelle rows
+    reach "complete" on weaker evidence than any other assembler needed.
+
+    A missing or truncated log (no result-status line at all) leaves circularised
+    blank -- unknown topology, which is exactly what MitoHiFi rows with no
+    contig-stats / circularity-check sidecar do.
+    """
     circularised = MISSING
     mean_coverage = None
+    failed = False
     for path in files:
         if not path.name.endswith(".get_org.log.txt"):
             continue
@@ -931,25 +963,19 @@ def getorganelle_status_from_log(files: Iterable[Path]) -> tuple[str, str, float
         coverage_match = re.search(r"average [a-z_ -]*base-coverage\s*=\s*([0-9.]+)", text)
         if coverage_match:
             mean_coverage = parse_number(coverage_match.group(1))
-        if "result status" in text:
-            status_lines = [line for line in text.splitlines() if "result status" in line]
-            status_text = " ".join(status_lines)
-            if "circular" in status_text:
-                status = "circular"
-                circularised = "true"
-            elif "complete" in status_text:
-                status = "complete"
-            elif "incomplete" in status_text:
-                status = "incomplete"
-                circularised = "false"
+        # Last verdict wins: GetOrganelle restates the result status as it retries
+        # disentangling strategies, and only the final line reflects what it wrote.
+        status_lines = [line for line in text.splitlines() if "result status" in line]
+        if status_lines:
+            circularised = "true" if "circular" in status_lines[-1] else "false"
         # GetOrganelle emits benign INFO-level "Disentangling failed:" messages
         # while it tries successive disentangling strategies before succeeding;
         # those are not run failures. Only genuine ERROR-level log lines (e.g.
         # "ERROR: Assembling failed.", "ERROR: No animal_mt seed reads found!")
         # or a Python traceback indicate an actual failure.
         if " - error:" in text or "traceback (most recent call last)" in text:
-            status = "failed"
-    return status, circularised, mean_coverage
+            failed = True
+    return circularised, mean_coverage, failed
 
 
 def count_getorganelle_candidates(files: Iterable[Path]) -> int | None:
@@ -1013,8 +1039,7 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
     if candidate_count is not None:
         row["num_candidate_contigs"] = str(candidate_count)
 
-    status, circularised, mean_coverage = getorganelle_status_from_log(run.files)
-    row["status"] = status
+    circularised, mean_coverage, getorg_failed = getorganelle_evidence_from_log(run.files)
     row["circularised"] = circularised
     # A single scaffold the reference test confirms circular is recorded as
     # circularised even though GetOrganelle's log said "N scaffold(s)".
@@ -1044,17 +1069,7 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
     if getorganelle_graph_ambiguous(run.files):
         row["manual_review_reason"] = add_reason(row["manual_review_reason"], "ambiguous_getorganelle_graph")
         row[BLOCKING_KEY] = add_reason(row.get(BLOCKING_KEY, ""), "ambiguous_getorganelle_graph")
-    if not row["final_length_bp"]:
-        row["status"] = "failed"
-        row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
-    elif row["status"] == "failed":
-        row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
-    elif row["status"] in {"incomplete", "unknown"} and row.get(BLOCKING_KEY):
-        row["status"] = "manual_review"
-    elif row.get(BLOCKING_KEY):
-        row["status"] = "manual_review"
-    elif row["status"] == "unknown":
-        row["status"] = "complete"
+    finalise_status(row, failed=getorg_failed)
     return row
 
 
@@ -1099,13 +1114,7 @@ def parse_oatk_run(run: RunFiles, thresholds: Thresholds, all_files: Iterable[Pa
     apply_collapse_override(row, run)
 
     apply_qc(row, thresholds)
-    if not row["final_length_bp"]:
-        row["status"] = "failed"
-        row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
-    elif row.get(BLOCKING_KEY):
-        row["status"] = "manual_review"
-    else:
-        row["status"] = "complete"
+    finalise_status(row)
     return row
 
 

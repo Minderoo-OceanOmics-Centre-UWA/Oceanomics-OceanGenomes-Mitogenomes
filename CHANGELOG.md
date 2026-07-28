@@ -68,6 +68,22 @@ Initial release of nf-core/oceangenomesmitogenomes, created with the [nf-core](h
   frozen, and a later rerun under the same token is reported as `locked` rather than overwriting the recorded
   success. `sql/002_ena_validation_attempts_single_row_per_attempt.sql` migrates existing tables (dedup down to one
   row per key, preferring a submission-ready row, then add `attempt_count`).
+- The assembly summary's `status` column now means the same thing for every assembler, so it can be sorted,
+  filtered and counted across a mixed cohort. MitoHiFi and Oatk rows already carried a computed QC verdict
+  (`complete` / `manual_review` / `failed`), but GetOrganelle rows started from the tool's own log verdict and
+  could terminate on `circular`, a value no other assembler could produce. All three now share one
+  `finalise_status()` helper and one three-value vocabulary; topology stays in the `circularised` column
+  rather than being encoded twice.
+- GetOrganelle rows no longer reach `complete` on weaker evidence than the other assemblers. GetOrganelle
+  reports either "circular genome" or "N scaffold(s)", and the scaffold form matched none of the parser's
+  branches: `circularised` was left blank, so `not_circularised` never fired, nothing blocked, and an
+  `unknown -> complete` promotion labelled the row `complete` despite the assembly never having been shown to
+  be circular (8 rows in the `mitogenomes-missing-audit-5` cohort). `getorganelle_status_from_log` is
+  replaced by `getorganelle_evidence_from_log`, which records `circularised=false` for any non-circular
+  verdict; a `getorg_check.tsv` whose `final_verdict_circular` confirms circularity still wins over the log.
+  This also removes a latent bug where `elif "complete" in status_text` was tested before
+  `elif "incomplete" in status_text`: `"complete"` is a substring of `"incomplete"`, so a genuinely
+  incomplete result would have been reported as complete.
 
 ### `Dependencies`
 

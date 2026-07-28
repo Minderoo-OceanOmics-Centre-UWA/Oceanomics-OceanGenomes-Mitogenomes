@@ -57,6 +57,7 @@ custom_data:
         title: "Assembler"
       status:
         title: "Status"
+        description: "QC verdict, identical across assemblers: complete (no blocking QC reason), manual_review (see Manual review reason), failed (no assembly produced). Topology is in the Circularised column, not here."
       final_length_bp:
         title: "Final length (bp)"
       circularised:

@@ -133,6 +133,15 @@ The table columns are:
 `num_final_contigs`, `num_genes`, `missing_genes`, `frameshift_flag`, `mean_coverage`, `coverage_cv`,
 `reference_species`, `reference_accession`, `numt_flag`, and `manual_review_reason`.
 
+`status` is the QC verdict and means the same thing for every assembler, so the column can be sorted,
+filtered and counted across a mixed cohort. It takes exactly three values: `complete` (a final assembly
+exists and no blocking QC reason survived), `manual_review` (a final assembly exists but a blocking
+reason stands, listed in `manual_review_reason`) and `failed` (the assembler errored or produced no final
+assembly). It deliberately says nothing about topology; read `circularised` for that. A `complete` status
+is likewise not a statement about gene content; the 37-gene / 13-PCG check only decides whether soft flags
+(`low_mean_coverage`, `no_congeneric_reference`, a tRNA-only shortfall) are downgraded from blocking to
+advisory, which is why some `complete` rows still carry text in `manual_review_reason`.
+
 Manual review reasons are semicolon-separated and can include `missing_final_fasta`, `not_circularised`,
 `multiple_candidate_contigs`, `multiple_final_contigs`, `missing_genes`, `missing_protein_coding_genes`,
 `frameshift_detected`, `low_mean_coverage`, `high_coverage_variability`, `possible_numt`,
