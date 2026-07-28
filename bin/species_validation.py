@@ -5,6 +5,8 @@ import csv
 import configparser
 import sys
 
+from species_name_utils import normalise_open_nomenclature
+
 SPECIES_IN_LCA_COLUMN = "species_in_LCA"   # <--- NEW
 
 def load_db_config(config_file):
@@ -210,6 +212,16 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
     if db_species is None:
         print(f"[WARN] OG ID '{og_id}' nominal species not found in database.")
         return
+
+    # This value becomes the /organism= in the ENA flatfile (via lca_results.tsv
+    # -> evaluate_qc_conditions.py -> FORMAT_FILES --species -> process_files.py),
+    # and is also what gets stored in lca_validation.validated_species_name. ENA
+    # rejects 'Genus sp' and 'Genus spp.' as not submittable, so normalise to the
+    # 'Genus sp.' form here rather than at the point of use.
+    normalised_species = normalise_open_nomenclature(db_species)
+    if normalised_species != db_species:
+        print(f"[INFO] Normalised nominal species '{db_species}' -> '{normalised_species}'")
+        db_species = normalised_species
 
     # Normalise once
     db_species_norm = normalise_name(db_species)

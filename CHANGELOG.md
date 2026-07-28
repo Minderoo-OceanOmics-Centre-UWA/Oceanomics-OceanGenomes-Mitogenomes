@@ -57,6 +57,23 @@ Initial release of nf-core/oceangenomesmitogenomes, created with the [nf-core](h
 
 ### `Fixed`
 
+- Open-nomenclature species names are normalised to the ENA-submittable `Genus sp.` form, fixing
+  `ERROR: Organism is not Submittable` rejections at webin-cli validation. ENA/NCBI only recognise `Genus sp.`
+  for an undescribed species; `Genus sp` (no period) and `Genus spp.` are not taxa, and the flatfile's
+  `/organism=` is taken verbatim from the nominal species name (e.g. `OG1834` was rejected on `"Chaunax sp"`,
+  where `Chaunax sp.` is taxId 3041296 and submittable). New shared helper `bin/species_name_utils.py`
+  (`normalise_open_nomenclature`) is applied in `bin/species_validation.py` — the path that actually reaches
+  the flatfile, via `lca_results.tsv` → `evaluate_qc_conditions.py` → `FORMAT_FILES --species` → `process_files.py`,
+  and which also populates `lca_validation.validated_species_name` — and in `bin/create_samplesheet.py` so the
+  emitted `nominal_species_id` column agrees. `modules/local/validated_species_query/main.nf` inlines the same
+  rule (its heredoc can't import from `bin/`) so the qc-only rerun path doesn't reuse a stale unnormalised name.
+  Normalisation runs after the species/genus/family matching in `query_species_info()`, leaving
+  `reference_species_id` (the MitoHiFi `findMitoReference` query) unchanged. Two intended knock-on effects in
+  the QC gate: the `Found_in_blast_YN` substring test gets stricter (`chaunax sp` previously also matched
+  `Chaunax spinosus`-style names), and `Genus spp.` samples — which never matched, since NCBI writes `sp.` —
+  now pass the gate and proceed to QC. Postgres `sample.nominal_species_id` is left untouched as source of
+  truth. Names needing a judgement call (`Centrodraco sp 2`, ``Nesogobius sp. `groove cheek` ``,
+  `Synodus macrops cf`) are deliberately passed through unchanged.
 - MITOS2 no longer hardcoded to genetic code 5: removed the `ext.code = 5` override that ignored per-sample taxonomy,
   so invertebrate (e.g. coral) annotations use the correct code.
 - `--translation_table` is now the vertebrate/default fallback rather than a global override across all samples.

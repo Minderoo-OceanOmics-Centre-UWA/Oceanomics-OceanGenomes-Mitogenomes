@@ -18,6 +18,7 @@ process VALIDATED_SPECIES_QUERY {
     #!/usr/bin/env python3
 
     import psycopg2
+    import re
     import sys
     import configparser
     from pathlib import Path
@@ -83,6 +84,16 @@ process VALIDATED_SPECIES_QUERY {
             cursor.close()
         if conn is not None:
             conn.close()
+
+    # Normalise open nomenclature to the ENA-submittable 'Genus sp.' form. This
+    # value becomes the /organism= in the flatfile on the qc-only path, and rows
+    # stored before the normalisation existed still hold 'Genus sp' / 'Genus spp.',
+    # which webin-cli rejects. Canonical implementation is
+    # bin/species_name_utils.py -- it can't be imported here because this heredoc
+    # runs from the task work dir rather than bin/, so keep the two in step.
+    match = re.fullmatch(r"([A-Za-z][A-Za-z-]*)\\s+spp?\\.?", species.strip())
+    if match:
+        species = match.group(1) + " sp."
 
     print(species, end='')
 

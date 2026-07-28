@@ -12,6 +12,8 @@ from pathlib import Path
 
 import psycopg2
 
+from species_name_utils import normalise_open_nomenclature
+
 
 # NCBI classes treated as invertebrates for downstream BLAST DB selection and
 # EMMA's --invertebrates flag. Extend as new sample classes are encountered.
@@ -375,6 +377,10 @@ def query_species_info(cursor, sample_id):
     # Fall back to a cleaned form of the nominal name when the species table has
     # no usable match, so findMitoReference still gets a plausible query string.
     reference_species_id = ref_name or clean_species_name(nominal_species_id)
+    # Normalise open nomenclature ('Chaunax sp' / 'Blachea spp.' -> 'Genus sp.')
+    # only after the matching above has run, so reference_species_id resolution
+    # still sees the raw DB string and is unaffected.
+    nominal_species_id = normalise_open_nomenclature(nominal_species_id)
     return (
         nominal_species_id if nominal_species_id else "unknown",
         tax_class if tax_class else "unknown",
