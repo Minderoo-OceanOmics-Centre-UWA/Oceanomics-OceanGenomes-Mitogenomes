@@ -52,4 +52,17 @@ nextflow -log $OUT_DIR/nextflow.log \
     # nextflow -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core
     # -work-dir /scratch/pawsey0964/$USER/directory \. ### include work dir if you want to run this nf-core on multiple occasions and keep the work files separate.
     # --input assets/samplesheet.csv \  # include a samplesheet if you are not downloading sample.
-    
+
+# --- Per-genome compute cost (best-effort, self-contained) -----------------
+# Repo-local script: writes pipeline_info/cost_per_sample.csv (SU per OG sample)
+# for this run. Skipped when the poller runs this (it records cost, incl. the
+# central ledger, via post_mito.py). The `|| echo` keeps a cost failure from
+# affecting the run's exit status. Inherits this script's NXF_HOME + modules.
+if [ -z "${OCEANOMICS_SKIP_COST:-}" ]; then
+    COST_SCRIPT="$RUN_DIR/compute-audit/nf_workflow_cost.sh"
+    if [ -f "$COST_SCRIPT" ]; then
+        mkdir -p "$OUT_DIR/pipeline_info"
+        bash "$COST_SCRIPT" "$OUT_DIR" "$OUT_DIR/pipeline_info/compute_usage.csv" \
+            || echo "compute cost: accounting failed (non-fatal)"
+    fi
+fi
