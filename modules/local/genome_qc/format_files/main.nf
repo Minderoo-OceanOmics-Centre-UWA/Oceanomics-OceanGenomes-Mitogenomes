@@ -55,7 +55,7 @@ process FORMAT_FILES {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python --version | sed 's/Python //')
-        process_files: "1.0.0"
+        process_files: "1.0.1"
     END_VERSIONS
     """
 
@@ -77,7 +77,7 @@ process FORMAT_FILES {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: "3.9.0"
-        process_files: "1.0.0"
+        process_files: "1.0.1"
     END_VERSIONS
     """
 }

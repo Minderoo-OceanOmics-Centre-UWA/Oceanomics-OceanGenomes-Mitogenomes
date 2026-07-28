@@ -260,41 +260,33 @@ def process_gff_file(input_file, output_file, assembly):
         original_lines = f.readlines()
 
     new_lines = []
-    in_header_block = True
 
     for line in original_lines:
-        if in_header_block and line.startswith('##'):
-            if line.startswith('##sequence-region'):
-                cols = line.rstrip('\n').split('\t')
-                if len(cols) >= 2:
-                    cols[1] = assembly
-                line = '\t'.join(cols) + '\n'
+        if line.startswith('##sequence-region'):
+            cols = line.rstrip('\r\n').split('\t')
+            if len(cols) >= 2:
+                cols[1] = assembly
+            line = '\t'.join(cols) + '\n'
             new_lines.append(line)
             continue
 
-        if in_header_block:
-            new_lines.append(line)
-            in_header_block = False
-            continue
-
-        if line.startswith('#'):
+        if line.startswith('#') or not line.strip():
             new_lines.append(line)
             continue
 
-        fields = line.rstrip('\n').split('\t')
-        if fields:
+        fields = line.rstrip('\r\n').split('\t')
+        if len(fields) == 9:
             fields[0] = assembly
-            if len(fields) > 8:
-                attrs = fields[8]
-                for old, new in NAME_MAP.items():
-                    attrs = attrs.replace(old, new)
-                attrs = re.sub(r';{2,}', ';', attrs).strip(';')
-                fields[8] = attrs
+            attrs = fields[8]
+            for old, new in NAME_MAP.items():
+                attrs = attrs.replace(old, new)
+            attrs = re.sub(r';{2,}', ';', attrs).strip(';')
+            fields[8] = attrs
 
-            processed_line = '\t'.join(fields)
-            processed_line = re.sub(r'(?i)\bputative\b[\s;,:]*', '', processed_line)
-            processed_line = processed_line.replace('MT-', '')
-            new_lines.append(processed_line + '\n')
+        processed_line = '\t'.join(fields)
+        processed_line = re.sub(r'(?i)\bputative\b[\s;,:]*', '', processed_line)
+        processed_line = processed_line.replace('MT-', '')
+        new_lines.append(processed_line + '\n')
 
     with open(output_file, 'w') as f:
         for line in new_lines:

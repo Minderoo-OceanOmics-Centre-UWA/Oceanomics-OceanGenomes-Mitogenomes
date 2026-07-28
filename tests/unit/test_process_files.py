@@ -62,5 +62,45 @@ class ProcessTblFileTests(unittest.TestCase):
             self.assertIn("NADH dehydrogenase subunit 1", out_text)
 
 
+class ProcessGffFileTests(unittest.TestCase):
+    GFF = (
+        "##gff-version 3\n"
+        "##sequence-region\tOG1.hifi.260101.v323mitohifi\t1\t100\n"
+        "# retain this comment\n"
+        "\n"
+        "OG1.hifi.260101.v323mitohifi\tEmma\tregion\t1\t100\t.\t+\t0\tIs_circular=true\n"
+        "OG1.hifi.260101.v323mitohifi\tEmma\tgene\t1\t68\t.\t+\t.\t"
+        "ID=gene-1;Name=12srna;Note=putative mitochondrial gene\n"
+    )
+
+    def test_all_sequence_ids_use_annotation_prefix(self):
+        annotation_prefix = "OG1.hifi.260101.v323mitohifi.emma102"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            gff_in = Path(tmp) / f"{annotation_prefix}.gff"
+            gff_out = Path(tmp) / "processed.gff"
+            gff_in.write_text(self.GFF)
+
+            process_files.process_gff_file(gff_in, gff_out, annotation_prefix)
+
+            lines = gff_out.read_text().splitlines()
+            self.assertEqual(
+                lines[1],
+                f"##sequence-region\t{annotation_prefix}\t1\t100",
+            )
+            self.assertEqual(lines[2], "# retain this comment")
+            self.assertEqual(lines[3], "")
+
+            feature_lines = [
+                line.split("\t")
+                for line in lines
+                if line and not line.startswith("#")
+            ]
+            self.assertEqual({fields[0] for fields in feature_lines}, {annotation_prefix})
+            self.assertEqual(feature_lines[0][2], "region")
+            self.assertIn("Name=RNR1", feature_lines[1][8])
+            self.assertNotIn("putative", feature_lines[1][8])
+
+
 if __name__ == "__main__":
     unittest.main()
