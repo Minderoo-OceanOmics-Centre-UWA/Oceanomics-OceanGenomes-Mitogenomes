@@ -14,6 +14,8 @@ include { MITOHIFI_AVERAGE_COVERAGE        } from '../../../../modules/local/mit
 include { MITOHIFI_CHECK_CIRCULARITY       } from '../../../../modules/local/mitohifi/check_circularity'
 include { RELABEL_REFERENCE_GB             } from '../../../../modules/local/relabel_reference_gb'
 include { REFERENCE_DIVERGENCE             } from '../../../../modules/local/reference_divergence'
+include { REFERENCE_CANDIDATES             } from '../../../../modules/local/reference_candidates'
+include { REFERENCE_RANK                   } from '../../../../modules/local/reference_rank'
 include { OATK                             } from '../../../../modules/local/oatk'
 include { OATK_CHECK                       } from '../../../../modules/local/oatk/check_circularity'
 include { ASSEMBLY_NO_RESULT               } from '../../../../modules/local/assembly_no_result'
@@ -35,6 +37,29 @@ def parseFinalVerdictCircular(tsv) {
         if (idx >= cells.size()) return null
         def v = cells[idx].trim().toLowerCase()
         return (v == 'true') ? true : (v == 'false' ? false : null)
+    } catch (ignored) {
+        return null
+    }
+}
+
+// Is this divergence tier worth re-selecting a reference for? CONGENERIC is not (a
+// same-genus reference is already the best obtainable), CROSS_ORDER is routed to
+// reference-free assembly instead, and UNKNOWN carries no evidence that the
+// reference is poor -- so only the explicitly non-congeneric tiers qualify.
+def shouldReselectReference(tier) {
+    return tier in ['CONFAMILIAL', 'DIFFERENT_FAMILY', 'NON_CONGENERIC']
+}
+
+// Count CDS features in MitoHiFi's own final_mitogenome.gb. MitoHiFi annotates the
+// assembly it produces, so the protein-coding-gene count is available here, inside
+// the assembly subworkflow -- no dependency on the downstream annotation
+// subworkflow, and therefore no dataflow cycle when the count is used to route.
+// Returns null when the file is missing/unparseable, which routing treats as "no
+// evidence of a collapse" so an odd GenBank never diverts a good assembly.
+def countGenbankCds(gb) {
+    try {
+        if (!gb || !gb.exists() || gb.size() == 0) return null
+        return gb.text.readLines().count { it.startsWith('     CDS ') }
     } catch (ignored) {
         return null
     }
@@ -150,16 +175,6 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         .map { meta, reads, ref_fasta, ref_gb, _status -> [meta, reads, ref_fasta, ref_gb] }
 
     //
-    // MODULE: Relabel the reference GenBank to a per-sample name so it can be fed
-    // (collision-free) to the assembly summary, which reads the reference species
-    // and accession from it.
-    //
-
-    RELABEL_REFERENCE_GB (
-        combined_with_mt_assembly_prefix.map { meta, _fasta, _ref_fasta, ref_gb -> [meta, ref_gb] }
-    )
-
-    //
     // MODULE: Pre-assembly reference divergence guard.
     // findMitoReference walks the sample's NCBI lineage and grabs the first
     // complete mitogenome, so a species with no congeneric record (deep-sea / poorly
@@ -170,17 +185,77 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // assembly summary turns anything non-congeneric into a manual_review reason.
     // Taxonomy-only, always exits 0.
     //
+    // Runs on the raw reference GenBank rather than the relabelled one: relabelling
+    // now happens *after* re-selection, so that the name (and everything downstream
+    // that reads species/accession from it) describes the reference actually used.
+    //
 
     REFERENCE_DIVERGENCE (
-        RELABEL_REFERENCE_GB.out.gb
+        combined_with_mt_assembly_prefix.map { meta, _reads, _ref_fasta, ref_gb -> [meta, ref_gb] }
     )
 
+    //
+    // Route on the divergence tier.
+    //   CROSS_ORDER      -> skip MitoHiFi entirely; recruitment against a reference
+    //                       from another order maps almost nothing. Reference-free.
+    //   not congeneric   -> re-select: fetch several candidates and keep the one the
+    //                       sample's own reads map to best.
+    //   congeneric       -> keep it. A same-genus reference is the best obtainable,
+    //                       so there is nothing to re-select and no call to spend.
+    // UNKNOWN (unparseable taxonomy) is deliberately left on the keep path: without a
+    // reliable tier there is no evidence the reference is poor, and re-selecting on a
+    // guess would churn NCBI for every sample with a thin lineage.
+    //
     ch_reference_route = combined_with_mt_assembly_prefix
         .join(REFERENCE_DIVERGENCE.out.flag, by: 0)
         .branch { _meta, _reads, _ref_fasta, _ref_gb, flag ->
             oatk_direct: parseReferenceTier(flag) == 'CROSS_ORDER'
-            mitohifi: true
+            reselect: params.enable_reference_reselection &&
+                      shouldReselectReference(parseReferenceTier(flag))
+            keep: true
         }
+
+    //
+    // MODULE: Reference re-selection (REFERENCE_CANDIDATES -> REFERENCE_RANK).
+    // Replaces findMitoReference's first-hit reference with the candidate that
+    // recruits the most of this sample's reads. See modules/local/reference_rank.
+    //
+    REFERENCE_CANDIDATES (
+        ch_reference_route.reselect.map { meta, _reads, _ref_fasta, _ref_gb, _flag -> meta }
+    )
+
+    REFERENCE_RANK (
+        ch_reference_route.reselect
+            .map { meta, reads, _ref_fasta, _ref_gb, _flag -> [meta, reads] }
+            .join(REFERENCE_CANDIDATES.out.candidates, by: 0)
+    )
+
+    // Substitute the chosen reference. remainder:true keeps samples that produced no
+    // candidates (NCBI lookup failed, or nothing usable came back) on their original
+    // reference, so re-selection can only ever improve on the previous behaviour.
+    ch_reselected = ch_reference_route.reselect
+        .join(REFERENCE_RANK.out.reference, by: 0, remainder: true)
+        .filter { it[1] != null }   // drop any right-only remainder
+        .map { items ->
+            def chosen_fasta = items.size() > 5 ? items[5] : null
+            def chosen_gb    = items.size() > 6 ? items[6] : null
+            (chosen_fasta && chosen_gb)
+                ? [ items[0], items[1], chosen_fasta, chosen_gb, items[4] ]
+                : [ items[0], items[1], items[2], items[3], items[4] ]
+        }
+
+    ch_reference_resolved = ch_reference_route.keep.mix(ch_reselected)
+
+    //
+    // MODULE: Relabel the reference GenBank to a per-sample name so it can be fed
+    // (collision-free) to the assembly summary, which reads the reference species
+    // and accession from it. Runs on the resolved reference, so the summary and the
+    // relevance check report the reference the assembly was actually built from.
+    //
+
+    RELABEL_REFERENCE_GB (
+        ch_reference_resolved.map { meta, _reads, _ref_fasta, ref_gb, _flag -> [meta, ref_gb] }
+    )
 
 
     //
@@ -188,7 +263,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     //
 
     MITOHIFI_MITOHIFI (
-        ch_reference_route.mitohifi.map { meta, reads, ref_fasta, ref_gb, _flag -> [meta, reads, ref_fasta, ref_gb] },
+        ch_reference_resolved.map { meta, reads, ref_fasta, ref_gb, _flag -> [meta, reads, ref_fasta, ref_gb] },
         "r",
         "2"  // Fallback genetic code only: the module prefers meta.genetic_code (derived per-sample from taxonomic class in PREPARE_SAMPLESHEET). 2 = vertebrate mitochondrial.
     )
@@ -256,15 +331,22 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     //   ~zero reads and hifiasm produces no contig. Oatk instead identifies the
     //   mitogenome by profile-HMM over a de-novo HiFi assembly, so it needs no
     //   species reference and recovers exactly these divergent-reference failures.
-    //   Runs only on samples MitoHiFi failed to assemble; emits a FASTA that the
-    //   parent workflow feeds into annotation. Off by default (needs an Oatk
-    //   container + an OatkDB mito profile for the sample clade).
+    //   Runs on the three ways a reference can fail a sample: no reference resolved
+    //   at all, a cross-order reference (routed before assembly), and a reference
+    //   distant enough that MitoHiFi returned a gene-incomplete collapse rather than
+    //   nothing. Emits a FASTA that the parent workflow feeds into annotation. Off by
+    //   default (needs an Oatk container + an OatkDB mito profile for the sample clade).
     //
     ch_oatk_fasta = Channel.empty()
     ch_oatk_log = Channel.empty()
     ch_oatk_circularity_evidence = Channel.empty()
     ch_routed_failure_fasta = Channel.empty()
     ch_routed_failure_log = Channel.empty()
+    // Oatk's reads keyed by the OATK assembly prefix. Kept separate from
+    // ch_reads_by_prefix because ch_oatk_input below OVERWRITES mt_assembly_prefix
+    // with the oatk prefix, so a prefix-keyed join against ch_reads_by_prefix would
+    // match nothing and silently drop every oatk sample from the depth measurement.
+    ch_oatk_reads = Channel.empty()
 
     ch_direct_oatk_reads = ch_reference_branched.missing
         .map { meta, reads, _ref_fasta, _ref_gb, status ->
@@ -289,11 +371,36 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
             .join(ch_reads_by_prefix, by: 0)
             .map { meta, _empty_fasta, reads -> [meta, reads, 'empty_mitohifi'] }
 
-        ch_oatk_input = ch_direct_oatk_reads.mix(ch_failed_oatk_reads)
+        // An empty FASTA is not the only way a divergent reference ruins an assembly.
+        // When the reference is too distant, MitoHiFi's reference-guided read
+        // recruitment drops the most divergent gene blocks and returns a clean-looking
+        // but gene-incomplete molecule: OG2102 (Rouleina attrita, non-congeneric
+        // Alepocephalus reference) came back as a plausible 15.6 kb contig carrying
+        // 7 of 13 protein-coding genes, so it never reached the empty-FASTA fallback.
+        // Route those to Oatk too -- it needs no reference, so it is exactly the tool
+        // for a collapse the reference caused. The PCG count comes from MitoHiFi's own
+        // final_mitogenome.gb (inner join: an assembly with no GenBank yields no
+        // evidence and is left alone).
+        def expected_pcg_count = (params.mitogenome_summary_expected_pcg_count ?: 13) as int
+        ch_gene_incomplete_oatk_reads = ch_mitohifi_fasta_branched.assembled
+            .join(MITOHIFI_MITOHIFI.out.gb, by: 0)
+            .map { meta, _fasta, gb -> [meta, countGenbankCds(gb)] }
+            .filter { _meta, cds -> cds != null && cds < expected_pcg_count }
+            .join(ch_reads_by_prefix, by: 0)
+            .map { meta, _cds, reads -> [meta, reads, 'gene_incomplete_mitohifi'] }
+
+        // The MitoHiFi assembly is deliberately NOT withdrawn when this fires: it stays
+        // published alongside the Oatk attempt (distinct v10oatk prefix), so the summary
+        // shows both and curation picks. Discarding it would lose information.
+        ch_oatk_input = ch_direct_oatk_reads
+            .mix(ch_failed_oatk_reads, ch_gene_incomplete_oatk_reads)
             .map { meta, reads, reason ->
                 def oatk_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${oatk_version_stripped}oatk"
                 [ meta + [ mt_assembly_prefix: oatk_prefix, circular: null, assembler_fallback: 'oatk', fallback_reason: reason ], reads ]
             }
+
+        // Same reads, now carrying the oatk prefix, for the uniform depth measurement.
+        ch_oatk_reads = ch_oatk_input
 
         // Stage the .fam AND its .h3* nhmmer indexes together (nhmmscan needs them
         // side by side); params.oatk_mito_db points at the .fam.
@@ -435,6 +542,10 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // the summary strips the suffix to the run prefix and folds a non-congeneric
     // verdict into the manual_review_reason.
     ch_summary_files = ch_summary_files.mix(REFERENCE_DIVERGENCE.out.flag.map { _meta, flag -> flag })
+    // Re-selection audit trail: which candidates were considered and why one won,
+    // plus the candidate-lookup outcome for samples that produced none.
+    ch_summary_files = ch_summary_files.mix(REFERENCE_RANK.out.ranking.map { _meta, ranking -> ranking })
+    ch_summary_files = ch_summary_files.mix(REFERENCE_CANDIDATES.out.status.map { _meta, status -> status })
     ch_summary_files = ch_summary_files.mix(ch_assembled_stats.map { meta, stats -> stats })
     // The circularity-check evidence is a per-run sidecar: the assembly summary
     // strips its .circularity_check.tsv suffix to the run prefix (so it joins the
@@ -449,6 +560,8 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_versions = ch_versions.mix(MITOHIFI_AVERAGE_COVERAGE.out.versions.first())
     ch_versions = ch_versions.mix(MITOHIFI_CHECK_CIRCULARITY.out.versions.first())
     ch_versions = ch_versions.mix(REFERENCE_DIVERGENCE.out.versions.first())
+    ch_versions = ch_versions.mix(REFERENCE_CANDIDATES.out.versions.first())
+    ch_versions = ch_versions.mix(REFERENCE_RANK.out.versions.first())
 
     // Per-sample bundle of everything this stage publishes into <prefix>/mtdna,
     // keyed by the (original) assembly prefix so the collapse mirror can restage the
@@ -488,8 +601,14 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     oatk_fasta      = ch_oatk_fasta                // channel: [ meta(+circular), oatk.mito.ctg.fasta ] (empty unless fallback enabled)
     oatk_log        = ch_oatk_log                  // channel: [ meta, oatk.log ]
     assembly_log    = ch_assembly_log              // channel: [ meta(+circular), contigs_stats.tsv ]
-    coverage_stats  = MITOHIFI_AVERAGE_COVERAGE.out.coverage
     reference_gb    = ch_reference_gb              // channel: [ meta(+circular), reference.gb ]
+    // Full merged HiFi reads keyed by assembly prefix, for MITOGENOME_COVERAGE in the
+    // parent workflow. Keyed rather than meta-joined because meta gains `circular`
+    // downstream, so a whole-meta join would never match. Oatk is mixed in from its own
+    // channel: ch_oatk_input rewrites mt_assembly_prefix, so its reads are not reachable
+    // through ch_reads_by_prefix.
+    depth_reads     = ch_reads_by_prefix.map { m, r -> [ m.mt_assembly_prefix, r ] }
+                        .mix(ch_oatk_reads.map { m, r -> [ m.mt_assembly_prefix, r ] })
     // Fold the oatk fallback's circularity evidence into the same channel so the parent
     // workflow's collapse-concatemer join, QC gate and assembly summary treat oatk exactly
     // like MitoHiFi (matched join item -> flows to annotation incrementally). Empty unless

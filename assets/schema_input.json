@@ -93,6 +93,16 @@
                 "meta": ["class"],
                 "description": "NCBI taxonomic class resolved from nominal_species_id (e.g. Actinopteri, Anthozoa). Used to select downstream resources."
             },
+            "family": {
+                "type": "string",
+                "meta": ["family"],
+                "description": "Taxonomic family resolved from nominal_species_id (e.g. Labridae). Optional. Lets the reference-divergence guard distinguish a same-family reference from one that fell back past family level."
+            },
+            "order": {
+                "type": "string",
+                "meta": ["order"],
+                "description": "Taxonomic order resolved from nominal_species_id (e.g. Labriformes). Optional. Enables the CROSS_ORDER tier, which routes HiFi samples whose reference came from a different order to reference-free assembly instead of MitoHiFi."
+            },
             "invertebrates": {
                 "anyOf": [
                     { "type": "boolean" },

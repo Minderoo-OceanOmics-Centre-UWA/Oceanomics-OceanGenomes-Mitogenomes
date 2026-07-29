@@ -235,6 +235,7 @@ def strip_known_suffix(name: str) -> str:
         ".assembly_status.tsv",
         ".findmitoreference_status.tsv",
         ".scaffold_join.tsv",
+        ".mito_depth.tsv",
         ".coverage.tsv",
         ".reference_relevance.txt",
         ".reference_divergence.txt",
@@ -409,35 +410,86 @@ def parse_annotation_stats(files: Iterable[Path], prefix: str, sample_id: str) -
     return {}
 
 
+def _coverage_from_row(row: dict[str, str]) -> tuple[float | None, float | None]:
+    mean = first_numeric(row, ["mean_depth", "mean_coverage", "avg_coverage", "average_coverage", "coverage"])
+    cv = first_numeric(row, ["depth_cv", "coverage_cv", "cv"])
+    return mean, cv
+
+
+def _raw_depth_stream(path: Path) -> tuple[float | None, float | None]:
+    """Last-ditch: treat the file as raw `samtools depth` output."""
+    depths = []
+    try:
+        with path.open() as handle:
+            for line in handle:
+                if line.startswith("#") or not line.strip():
+                    continue
+                parts = re.split(r"[\t, ]+", line.strip())
+                if len(parts) >= 3 and parts[1].isdigit():
+                    depth = parse_number(parts[2])
+                    if depth is not None:
+                        depths.append(depth)
+    except OSError:
+        return None, None
+    if depths:
+        mean = statistics.fmean(depths)
+        return mean, (statistics.pstdev(depths) / mean if mean else None)
+    return None, None
+
+
 def parse_coverage(files: Iterable[Path]) -> tuple[float | None, float | None]:
+    """Mean depth and its CV for a run, most trustworthy source first.
+
+    Ordered explicitly rather than by a substring match. The previous predicate
+    (`endswith(".coverage.tsv") or "coverage" in name and suffix == ".tsv"`) also
+    matched `.contigs_stats.with_coverage.tsv` through its second clause -- note
+    that file does NOT end in ".coverage.tsv", the character before "coverage" is
+    an underscore -- so whichever of the two happened to come first in `files`
+    won, non-deterministically.
+
+    Precedence:
+      1. <prefix>.mito_depth.tsv  -- the uniform remap-based measurement. Same
+         definition for every assembler and platform, so it is authoritative
+         wherever it exists.
+      2. <prefix>.coverage.tsv    -- MitoHiFi's depth over reference-recruited
+         reads only. Legacy; kept so reruns of old output still report something.
+      3. <prefix>.contigs_stats.with_coverage.tsv -- the same number joined into
+         the contig table, read from the final_mitogenome row rather than row 0.
+    """
+    files = list(files)
+
     for path in files:
-        name = path.name.lower()
-        if not (name.endswith(".coverage.tsv") or "coverage" in name and path.suffix.lower() in {".tsv", ".txt", ".csv"}):
-            continue
-        rows = read_table(path)
-        if rows:
-            mean = first_numeric(rows[0], ["mean_coverage", "avg_coverage", "average_coverage", "coverage"])
-            cv = first_numeric(rows[0], ["coverage_cv", "cv"])
-            if mean is not None or cv is not None:
+        if path.name.endswith(".mito_depth.tsv"):
+            rows = read_table(path)
+            if rows:
+                mean, cv = _coverage_from_row(rows[0])
+                if mean is not None or cv is not None:
+                    return mean, cv
+
+    for path in files:
+        if path.name.endswith(".coverage.tsv"):
+            rows = read_table(path)
+            if rows:
+                mean, cv = _coverage_from_row(rows[0])
+                if mean is not None or cv is not None:
+                    return mean, cv
+            mean, cv = _raw_depth_stream(path)
+            if mean is not None:
                 return mean, cv
 
-        depths = []
-        try:
-            with path.open() as handle:
-                for line in handle:
-                    if line.startswith("#") or not line.strip():
-                        continue
-                    parts = re.split(r"[\t, ]+", line.strip())
-                    if len(parts) >= 3 and parts[1].isdigit():
-                        depth = parse_number(parts[2])
-                        if depth is not None:
-                            depths.append(depth)
-        except OSError:
-            continue
-        if depths:
-            mean = statistics.fmean(depths)
-            cv = statistics.pstdev(depths) / mean if mean else None
-            return mean, cv
+    for path in files:
+        if path.name.endswith(".contigs_stats.with_coverage.tsv"):
+            rows = read_table(path)
+            # Prefer the final_mitogenome row; row 0 is only a coincidence.
+            target = next(
+                (row for row in rows if str(row.get("contig_id", "")).strip() == "final_mitogenome"),
+                rows[0] if rows else None,
+            )
+            if target:
+                mean, cv = _coverage_from_row(target)
+                if mean is not None or cv is not None:
+                    return mean, cv
+
     return None, None
 
 
@@ -678,12 +730,15 @@ def getorg_circular_override(run: "RunFiles") -> str:
 
 
 def reference_relevance_for_run(run: "RunFiles") -> str:
-    """Read the REFERENCE_RELEVANCE flag (PASS|MISMATCH|UNKNOWN) for this run, or ''.
+    """Read the REFERENCE_RELEVANCE flag for this run, or ''.
 
-    The per-sample <prefix>.reference_relevance.txt records whether the resolved
-    reference actually aligns to the assembly; a MISMATCH means the species label
-    most likely pointed findMitoReference at a wrong-family reference, degrading
-    seeding and the coral annotation fix.
+    PASS | DIVERGENT | MISMATCH | UNKNOWN. The per-sample
+    <prefix>.reference_relevance.txt records how well the resolved reference
+    corresponds to the assembly: MISMATCH means the reference neither covers nor
+    matches it, so the species label most likely pointed findMitoReference at a
+    wrong-family reference; DIVERGENT means it is the right molecule but a distant
+    relative, which degrades seeding and annotation transfer without making the
+    assembly wrong.
     """
     for path in run.files:
         if path.name.endswith(".reference_relevance.txt"):
@@ -747,6 +802,8 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
         reasons.append("possible_numt")
     if row.get("reference_relevance") == "MISMATCH":
         reasons.append("reference_mismatch")
+    elif row.get("reference_relevance") == "DIVERGENT":
+        reasons.append("reference_divergent")
     # Pre-assembly taxonomy guard: a non-congeneric reference is the leading cause
     # of gene-incomplete MitoHiFi collapses for taxa with no close NCBI relative.
     # UNKNOWN (unparseable reference / missing taxonomy) is not treated as a defect.
@@ -801,7 +858,31 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
 # Reasons that describe a *complete* mitogenome rather than a defect: they are
 # retained in manual_review_reason for transparency but, on an assembly that
 # passes the complete-core guard, they no longer force a manual_review status.
-ADVISORY_WHEN_COMPLETE = {"no_congeneric_reference", "low_mean_coverage"}
+#
+# The reference reasons are here because they describe the *reference*, not the
+# assembly. A circular molecule of the expected length carrying all 13 PCGs and
+# both rRNAs is a finished mitogenome whatever reference was used to build it, so
+# the reference verdict is provenance metadata for curation (and a signal that a
+# closer reference would help on a rerun), not evidence of an assembly defect.
+# Anything that does describe the assembly -- missing_protein_coding_genes and
+# every structural flag -- still blocks, so a genuinely bad reference that damaged
+# the assembly is still caught, by the damage rather than by the reference.
+#
+# high_coverage_variability belongs here for the same reason as low_mean_coverage:
+# depth variability describes the library, not the assembly. It was previously
+# blocking only because it could not fire in practice -- coverage_cv was populated
+# for MitoHiFi alone, and even there it was measured on a LINEAR reference, so
+# 15-20 kb HiFi reads produced a triangular depth profile whose CV was mostly an
+# artefact of linearisation. The uniform remap folds circular molecules, which
+# removes that artefact and switches the metric on for GetOrganelle and Oatk as
+# well. Leaving it blocking would mean measuring coverage properly caused
+# previously-passing finished mitogenomes to start failing, which inverts the
+# intent. It remains visible in manual_review_reason, and still blocks on anything
+# that is not a complete-core assembly.
+ADVISORY_WHEN_COMPLETE = {
+    "no_congeneric_reference", "low_mean_coverage", "high_coverage_variability",
+    "reference_mismatch", "reference_divergent",
+}
 # Number of tRNAs a complete-core assembly may be missing (annotation limitation,
 # not an assembly defect) while all 13 PCGs + 2 rRNAs are still present.
 TRNA_TOLERANCE = 2
@@ -1048,6 +1129,15 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
         row["circularised"] = circ_override
     if mean_coverage is not None:
         row["mean_coverage"] = format_number(mean_coverage)
+    # The uniform remap depth supersedes GetOrganelle's own log figure wherever it
+    # exists. The log value stays as the fallback for runs that predate the remap:
+    # it is graph base-coverage over the reduced read set GetOrganelle selected, so
+    # it is not comparable to the other assemblers the way mean_depth is.
+    remap_cov, remap_cv = parse_coverage(run.files)
+    if remap_cov is not None:
+        row["mean_coverage"] = format_number(remap_cov)
+    if remap_cv is not None:
+        row["coverage_cv"] = format_number(remap_cv)
 
     row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
     row["numt_flag"] = "true" if has_numt_signal(run.files) else "false"
@@ -1106,6 +1196,14 @@ def parse_oatk_run(run: RunFiles, thresholds: Thresholds, all_files: Iterable[Pa
     # Circularity from the Oatk graph self-link; gene counts from the shared
     # annotation stats (the Oatk contig is annotated by the same EMMA/MITOS2 path).
     row["circularised"] = oatk_circular_from_gfa(run.files)
+    # Oatk emitted no coverage of any kind before the uniform remap, so this is the
+    # first time an oatk row can carry one. It is the same measurement the other two
+    # assemblers now get, so the QC thresholds apply to it on equal terms.
+    mean_cov, cov_cv = parse_coverage(run.files)
+    if mean_cov is not None:
+        row["mean_coverage"] = format_number(mean_cov)
+    if cov_cv is not None:
+        row["coverage_cv"] = format_number(cov_cv)
     row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
     row["numt_flag"] = "false"
     # Oatk is reference-free: no reference species/accession/divergence, so those

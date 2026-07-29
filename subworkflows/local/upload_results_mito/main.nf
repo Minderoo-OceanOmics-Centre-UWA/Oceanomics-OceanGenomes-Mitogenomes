@@ -34,7 +34,7 @@ include { softwareVersionsToYAML        } from '../../nf-core/utils_nfcore_pipel
 workflow UPLOAD_RESULTS {
 
     take:
-    assembly_results
+    assembly_results // tuple val(meta), path(fasta), path(assembly_log), path(mito_depth.tsv)
     annotation_results
     blast_filtered_results
     lca_results

@@ -52,10 +52,10 @@ import argparse
 import sys
 from pathlib import Path
 
-
-def first_token(name):
-    """Genus = first whitespace-delimited token of a taxon name, else ''."""
-    return (name or "").strip().split(" ")[0] if (name or "").strip() else ""
+# Shared with reference_relevance_check.py so the taxonomy grader and the BLAST
+# grader decide "congeneric" identically. Dependency-free; resolves via sys.path[0]
+# because Nextflow puts the whole bin/ directory on PATH in the task container.
+from species_name_utils import genus_of as first_token
 
 
 def order_from_lineage(lineage):

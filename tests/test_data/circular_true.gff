@@ -1,0 +1,4 @@
+##gff-version 3
+##sequence-region	OG1.true	1	100
+OG1.true	Emma	region	1	100	.	+	0	Is_circular=true
+OG1.true	Emma	gene	1	20	.	+	.	ID=gene-1;Name=MT-TF

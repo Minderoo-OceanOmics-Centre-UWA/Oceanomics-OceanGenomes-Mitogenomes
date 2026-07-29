@@ -132,6 +132,11 @@ def scan_local(input_dir: Path) -> Tuple[Dict[str, Dict[str, str]], List[Tuple[s
 
     for p in input_dir.rglob("*.fastq.gz"):
         name = p.name
+        # Never list "unassigned" reads (failed HiFi barcode demux; may belong to
+        # any specimen on the SMRT cell) so they can't be assembled into a sample.
+        if "unassigned" in name.lower():
+            logging.warning("Skipping unassigned read file: %s", p)
+            continue
         m = ILMN_RE.match(name)
         if m:
             d = m.groupdict()

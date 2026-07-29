@@ -272,7 +272,8 @@ def clean_species_name(name):
 
 def query_species_info(cursor, sample_id):
     """
-    Resolve (nominal_species_id, tax_class, reference_species_id) for a sample by
+    Resolve (nominal_species_id, tax_class, family, order, reference_species_id)
+    for a sample by
     joining the sample table's nominal_species_id against the species table via
     species/genus/family/order matches (exact, then trigram fuzzy). Mirrors the
     approach used in OceanOmics-OceanGenomes-Draft-Genomes/bin/create_samplesheet.py
@@ -285,7 +286,7 @@ def query_species_info(cursor, sample_id):
     'spp.'/'sp.' markers or parenthetical notes.
     """
     if cursor is None:
-        return "unknown", "unknown", ""
+        return "unknown", "unknown", "", "", ""
 
     query = """
     WITH sample_q AS (
@@ -300,40 +301,42 @@ def query_species_info(cursor, sample_id):
     SELECT
         s.nominal_species_id,
         m.class,
+        m.family,
+        m.ordr,
         m.ref_name
     FROM sample_q s
     LEFT JOIN LATERAL (
         SELECT *
         FROM (
-            SELECT sp.class, sp.species AS ref_name, 1 AS priority, 1.0 AS sim
+            SELECT sp.class, sp.family, sp.ordr, sp.species AS ref_name, 1 AS priority, 1.0 AS sim
             FROM species sp
             WHERE sp.ncbi_taxon_id IS NOT NULL
               AND lower(sp.species) = lower(s.nominal_name)
 
             UNION ALL
 
-            SELECT sp.class, sp.genus AS ref_name, 2 AS priority, 1.0 AS sim
+            SELECT sp.class, sp.family, sp.ordr, sp.genus AS ref_name, 2 AS priority, 1.0 AS sim
             FROM species sp
             WHERE sp.ncbi_taxon_id IS NOT NULL
               AND lower(sp.genus) = lower(s.nominal_genus)
 
             UNION ALL
 
-            SELECT sp.class, sp.family AS ref_name, 3 AS priority, 1.0 AS sim
+            SELECT sp.class, sp.family, sp.ordr, sp.family AS ref_name, 3 AS priority, 1.0 AS sim
             FROM species sp
             WHERE sp.ncbi_taxon_id IS NOT NULL
               AND lower(sp.family) = lower(s.nominal_name)
 
             UNION ALL
 
-            SELECT sp.class, sp.ordr AS ref_name, 4 AS priority, 1.0 AS sim
+            SELECT sp.class, sp.family, sp.ordr, sp.ordr AS ref_name, 4 AS priority, 1.0 AS sim
             FROM species sp
             WHERE sp.ncbi_taxon_id IS NOT NULL
               AND lower(sp.ordr) = lower(s.nominal_name)
 
             UNION ALL
 
-            SELECT sp.class, sp.species AS ref_name, 5 AS priority,
+            SELECT sp.class, sp.family, sp.ordr, sp.species AS ref_name, 5 AS priority,
                    similarity(sp.species, s.nominal_name) AS sim
             FROM species sp
             WHERE sp.ncbi_taxon_id IS NOT NULL
@@ -342,7 +345,7 @@ def query_species_info(cursor, sample_id):
 
             UNION ALL
 
-            SELECT sp.class, sp.family AS ref_name, 6 AS priority,
+            SELECT sp.class, sp.family, sp.ordr, sp.family AS ref_name, 6 AS priority,
                    similarity(sp.family, s.nominal_name) AS sim
             FROM species sp
             WHERE sp.ncbi_taxon_id IS NOT NULL
@@ -351,7 +354,7 @@ def query_species_info(cursor, sample_id):
 
             UNION ALL
 
-            SELECT sp.class, sp.ordr AS ref_name, 7 AS priority,
+            SELECT sp.class, sp.family, sp.ordr, sp.ordr AS ref_name, 7 AS priority,
                    similarity(sp.ordr, s.nominal_name) AS sim
             FROM species sp
             WHERE sp.ncbi_taxon_id IS NOT NULL
@@ -367,13 +370,13 @@ def query_species_info(cursor, sample_id):
         cursor.execute(query, (sample_id,))
     except Exception as exc:
         print(f"Error querying species info for {sample_id}: {exc}", file=sys.stderr)
-        return "unknown", "unknown", ""
+        return "unknown", "unknown", "", "", ""
 
     result = cursor.fetchone()
     if not result:
-        return "unknown", "unknown", ""
+        return "unknown", "unknown", "", "", ""
 
-    nominal_species_id, tax_class, ref_name = result
+    nominal_species_id, tax_class, tax_family, tax_order, ref_name = result
     # Fall back to a cleaned form of the nominal name when the species table has
     # no usable match, so findMitoReference still gets a plausible query string.
     reference_species_id = ref_name or clean_species_name(nominal_species_id)
@@ -384,6 +387,13 @@ def query_species_info(cursor, sample_id):
     return (
         nominal_species_id if nominal_species_id else "unknown",
         tax_class if tax_class else "unknown",
+        # family / order are emitted so REFERENCE_DIVERGENCE can grade the resolved
+        # reference beyond "not congeneric": without them every non-congeneric
+        # reference collapses to the NON_CONGENERIC tier and the CROSS_ORDER route
+        # to reference-free assembly can never fire. Blank when the species table
+        # has no match, which the divergence check degrades on gracefully.
+        tax_family or "",
+        tax_order or "",
         reference_species_id or "",
     )
 
@@ -411,6 +421,16 @@ def main():
             file_list.extend(glob.glob(ext))
         file_list = [os.path.abspath(f) for f in file_list]
 
+    # Never emit "unassigned" read files (reads that failed HiFi barcode
+    # demultiplexing and may belong to any specimen on the SMRT cell). They must
+    # not be assembled into a sample, so keep them out of the generated sheet.
+    dropped_unassigned = [f for f in file_list if 'unassigned' in os.path.basename(f).lower()]
+    if dropped_unassigned:
+        print(f"Excluding {len(dropped_unassigned)} unassigned read file(s) from samplesheet:", file=sys.stderr)
+        for f in dropped_unassigned:
+            print(f"  {f}", file=sys.stderr)
+    file_list = [f for f in file_list if 'unassigned' not in os.path.basename(f).lower()]
+
     header = [
         'sample',
         'sequencing_type',
@@ -422,6 +442,8 @@ def main():
         'nominal_species_id',
         'reference_species_id',
         'class',
+        'family',
+        'order',
         'invertebrates',
         'fastq_1',
         'fastq_2'
@@ -481,7 +503,8 @@ def main():
             else:
                 assembly_prefix = f"{cleaned_id}.{sequencing_type}.{date}"
 
-            nominal_species_id, tax_class, reference_species_id = query_species_info(cursor, cleaned_id)
+            (nominal_species_id, tax_class, tax_family, tax_order,
+             reference_species_id) = query_species_info(cursor, cleaned_id)
             invertebrates = is_invertebrate(tax_class)
 
             def write_row(r1, r2, single_end):
@@ -496,6 +519,8 @@ def main():
                     nominal_species_id,
                     reference_species_id,
                     tax_class,
+                    tax_family,
+                    tax_order,
                     invertebrates,
                     r1,
                     r2

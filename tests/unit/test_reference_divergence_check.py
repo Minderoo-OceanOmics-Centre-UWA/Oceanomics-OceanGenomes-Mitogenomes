@@ -6,10 +6,14 @@ signal to switch to reference-free assembly -- and its graceful degradation to t
 existing genus/family grading when a sample order is not supplied.
 """
 import importlib.util
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# bin/ on sys.path so the module's sibling import of species_name_utils resolves
+# the same way it does in the task container (Nextflow puts bin/ on PATH there).
+sys.path.insert(0, str(ROOT / "bin"))
 SPEC = importlib.util.spec_from_file_location(
     "reference_divergence_check", ROOT / "bin" / "reference_divergence_check.py"
 )

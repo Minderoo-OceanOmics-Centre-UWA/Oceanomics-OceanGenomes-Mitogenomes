@@ -62,6 +62,7 @@ COMMON_NAMES = {
 ASSEMBLY_SUFFIXES = (
     ".contigs_stats.with_coverage.tsv",
     ".contigs_stats.tsv",
+    ".mito_depth.tsv",
     ".coverage.tsv",
     ".annotation_stats.csv",
     ".qc_summary.tsv",
@@ -82,6 +83,7 @@ TOOL_TO_GROUP = {
     "mitohififindreference": "MITOHIFI_FINDMITOREFERENCE",
     "mitohifi": "MITOHIFI_MITOHIFI",
     "mitohifiaveragecoverage": "MITOHIFI_AVERAGE_COVERAGE",
+    "mitogenomecoverage": "MITOGENOME_COVERAGE",
     "emma": "EMMA",
     "blastblastn": "BLAST_BLASTN",
     "lca": "LCA",
@@ -104,6 +106,7 @@ TOOL_ORDER = {
     "MITOHIFI_FINDMITOREFERENCE": 40,
     "MITOHIFI_MITOHIFI": 50,
     "MITOHIFI_AVERAGE_COVERAGE": 60,
+    "MITOGENOME_COVERAGE": 65,
     "EMMA": 70,
     "BLAST_BLASTN": 80,
     "LCA": 90,

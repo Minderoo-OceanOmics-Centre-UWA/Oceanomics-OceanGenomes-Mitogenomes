@@ -1,0 +1,96 @@
+nextflow_workflow {
+    name "QC-only GFF circularity propagation"
+    script "./main.nf"
+    workflow "GFF_CIRCULARITY"
+
+    test("true and false topology remain independent five-field tuples") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.true'], [file('../test_data/circular_true.gff')], 'Species one'],
+                    [[id: 'OG2', mt_assembly_prefix: 'OG2.false'], [file('../test_data/circular_false.gff')], 'Species two']
+                )
+                """
+            }
+        }
+
+        then {
+            def results = workflow.out.qc_input
+            assertAll(
+                { assert workflow.success },
+                { assert results.size() == 2 },
+                { assert results.every { it.size() == 5 } },
+                { assert results.find { it[0].id == 'OG1' }[0].circular == true },
+                { assert results.find { it[0].id == 'OG1' }[3] == true },
+                { assert results.find { it[0].id == 'OG2' }[0].circular == false },
+                { assert results.find { it[0].id == 'OG2' }[3] == false },
+                { assert results.every { it[2] == true } }
+            )
+        }
+    }
+
+    test("missing GFF fails early") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value(
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.missing'], [file('../test_data/ena_stub.fa')], 'Species one']
+                )
+                """
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+
+    test("missing Is_circular fails early") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value(
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.missing_flag'], [file('../test_data/circular_missing.gff')], 'Species one']
+                )
+                """
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+
+    test("malformed Is_circular fails early") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value(
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.invalid'], [file('../test_data/circular_invalid.gff')], 'Species one']
+                )
+                """
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+
+    test("conflicting Is_circular values fail early") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value(
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.conflict'], [file('../test_data/circular_conflicting.gff')], 'Species one']
+                )
+                """
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+}

@@ -73,7 +73,16 @@ class OatkParseRunTests(unittest.TestCase):
         return root
 
     def summarise(self, root):
-        thr = mas.Thresholds(20, 1.0, 10000, 25000, 37, 13)
+        # Keyword construction on purpose: the positional form silently mis-binds
+        # every threshold if the dataclass fields are ever reordered.
+        thr = mas.Thresholds(
+            min_mean_coverage=20,
+            max_coverage_cv=1.0,
+            min_length=10000,
+            max_length=25000,
+            expected_gene_count=37,
+            expected_pcg_count=13,
+        )
         rows = mas.build_summary([root], thr)
         return [r for r in rows if r["assembler"] == "Oatk"][0]
 

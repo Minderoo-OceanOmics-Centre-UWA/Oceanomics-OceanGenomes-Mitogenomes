@@ -36,6 +36,16 @@ def mitoGeneticCode(taxClass, isInvert, defaultCode) {
     return defaultCode
 }
 
+// Identify a read file that came from the "unassigned" bin of HiFi barcode
+// demultiplexing (e.g. *.hifi_reads.unassigned.filt.fastq.gz). These reads failed
+// demux and can belong to any specimen on the SMRT cell, so they must never be
+// assembled into a sample even if a row for one lands on the samplesheet.
+def isUnassignedReadFile(readPath) {
+    if (!readPath) return false
+    def base = readPath.toString().tokenize('/').last().toLowerCase()
+    return base.contains('unassigned')
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     SUBWORKFLOW TO INITIALISE PIPELINE
@@ -88,7 +98,8 @@ workflow PREPARE_SAMPLESHEET {
             }
             .flatMap { sample_list ->
                 // Convert each sample record to the expected format
-                sample_list.collect { sample_record ->
+                // (findResults drops any record returned as null, e.g. unassigned reads)
+                sample_list.findResults { sample_record ->
                     // sample_record[0] is a meta map like [id:OG1341] so we want to destructure the map.
                     def raw_meta  = sample_record[0]
                     def sample_id = (raw_meta instanceof Map) ? raw_meta.id : raw_meta
@@ -98,6 +109,18 @@ workflow PREPARE_SAMPLESHEET {
                     def fastq_1 = sample_record[1]
                     def fastq_2 = sample_record[2]
                     def single_end = (!fastq_2 || fastq_2.toString() == '[]')
+
+                    // Defensive guard: never assemble from "unassigned" read files.
+                    // These are reads that failed HiFi barcode demultiplexing and may
+                    // belong to other specimens on the same SMRT cell. Drop such rows
+                    // even if they slip onto the samplesheet (checked on both mates so
+                    // a paired unassigned row is caught too). Toggle off with
+                    // --exclude_unassigned_reads false.
+                    if (params.exclude_unassigned_reads != false &&
+                        (isUnassignedReadFile(fastq_1) || isUnassignedReadFile(fastq_2))) {
+                        log.warn "Excluding unassigned read file(s) for ${sample_id} (${meta.sequencing_type}): ${fastq_1}${fastq_2 && fastq_2.toString() != '[]' ? ", ${fastq_2}" : ''}"
+                        return null
+                    }
                     def meta_single_end = meta.single_end
                     if (meta.date != null) {
                         meta = meta + [ date: meta.date.toString() ]

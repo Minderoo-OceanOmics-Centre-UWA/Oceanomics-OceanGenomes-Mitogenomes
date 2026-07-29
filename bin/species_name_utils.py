@@ -39,3 +39,21 @@ def normalise_open_nomenclature(name):
     if not m:
         return s
     return f"{m.group('genus')} sp."
+
+
+def genus_of(name):
+    """Genus = first whitespace-delimited token of a taxon name, else ''.
+
+    Shared by the reference-divergence (taxonomy) and reference-relevance (BLAST)
+    checks so both grade "is this reference congeneric with the sample?" the same
+    way. Genus names are consistent between the OceanOmics species table and
+    GenBank lineages, which is why the comparison is done at genus rather than at
+    class -- see reference_divergence_check.classify_divergence.
+    """
+    return (name or "").strip().split(" ")[0] if (name or "").strip() else ""
+
+
+def same_genus(a, b):
+    """True when two taxon names share a genus (case-insensitive)."""
+    ga, gb = genus_of(a).lower(), genus_of(b).lower()
+    return bool(ga) and ga == gb

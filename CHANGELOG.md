@@ -9,6 +9,62 @@ Initial release of nf-core/oceangenomesmitogenomes, created with the [nf-core](h
 
 ### `Added`
 
+- Uniform, cross-platform mitogenome read depth: `MITOGENOME_COVERAGE` + `bin/mito_depth.py`. `mitogenome_data.avg_coverage`
+  previously held three different quantities depending on which assembler produced the row, so comparing it across
+  platforms was always wrong: GetOrganelle wrote **k-mer** coverage (~0.2x true depth, and measured over the reduced read
+  set its `--reduce-reads-for-coverage` default selects), MitoHiFi wrote per-base depth of *only* the reads recruited by
+  mapping to a related-species reference (so a divergent reference silently depressed it, the same failure mode the
+  divergence guard targets), and Oatk wrote nothing at all. One definition now replaces all three: mean per-base depth of
+  the sample's own reads remapped to the assembly that actually reaches annotation. Remapping to **self** rather than to a
+  reference is the point, since a genuinely divergent mitogenome is then measured just as accurately as a well-referenced
+  one. Circular molecules are mapped to a head-to-tail doubled reference and folded (`d[p] += d[p+L]`), removing the false
+  depth dip at both ends of the linearised molecule: on a synthetic 16.5 kb circle at a known 145.45x this recovers exactly
+  145.45x folded versus 129.2x unfolded, and drops the CV from 0.22 to 0.08. NUMTs are rejected by **gap-compressed**
+  identity rather than raw `NM`/aligned-length, so a read spanning a real control-region indel survives (`74M30D46M`,
+  `NM:i:30`: raw 0.75, gap-compressed 0.992) instead of punching a depth hole in the D-loop. MAPQ is deliberately ignored,
+  since a doubled reference gives every read two equally good placements. Runs once per sample on the `SANITISE_FASTA`
+  output, so nothing is spent remapping assemblies that failed, fell below the length floor, or lost to a reseed. Results
+  land in `<prefix>.mito_depth.tsv`, the assembly summary, MultiQC, and the new `mean_depth` / `depth_cv` / `breadth_*` /
+  `mito_read_fraction` / `depth_method` columns in SQL (`sql/003_mitogenome_data_uniform_depth.sql`). Controlled by
+  `--skip_mitogenome_depth`, `--mitogenome_depth_min_identity_{sr,hifi}`,
+  `--mitogenome_depth_min_aligned_frac_{sr,hifi}` and `--mitogenome_depth_subsample_fraction`.
+- `high_coverage_variability` is now advisory on a complete-core assembly, joining `low_mean_coverage` in
+  `ADVISORY_WHEN_COMPLETE`. It was previously blocking only because it could barely fire: `coverage_cv` was populated for
+  MitoHiFi alone, and even there it was measured against a *linear* reference, so 15-20 kb HiFi reads produced a
+  triangular depth profile whose CV was mostly an artefact of linearisation. Now that the folded remap measures it
+  properly for all three assemblers, leaving it blocking would mean measuring coverage *better* caused finished
+  mitogenomes that previously passed to start failing. It stays visible in `manual_review_reason`, and still blocks on
+  anything that is not a complete-core assembly. `parse_coverage` also now scans sources in an explicit order
+  (`.mito_depth.tsv`, then `.coverage.tsv`, then `.contigs_stats.with_coverage.tsv` read from its `final_mitogenome` row);
+  the previous predicate matched `.contigs_stats.with_coverage.tsv` through a loose substring test, so which file won was
+  non-deterministic.
+- Reference re-selection: `REFERENCE_CANDIDATES` + `REFERENCE_RANK` (`bin/rank_reference_candidates.py`).
+  `findMitoReference` stops at the *first* complete mitogenome it meets walking up the sample's NCBI lineage, so a taxon
+  with no congeneric record gets an arbitrary member of whatever rank the walk reached, and nothing in the pipeline ever
+  looked for a better one. When the pre-assembly divergence guard reports a non-congeneric reference, these modules now
+  fetch `--n_reference_candidates` candidates (the same `findMitoReference.py`, asked for more of them with `-n`) and keep
+  the one a subsample of the sample's *own reads* maps to best — the quantity that actually determines whether MitoHiFi's
+  reference-guided read recruitment succeeds, and one that is measurable before assembly. Scored by aligned read bases per
+  reference base so a longer reference cannot win on length; ties keep the taxonomically closest candidate, so the choice
+  can only improve on the previous behaviour. Wired into both the MitoHiFi route and the GetOrganelle vertebrate reseed
+  (where the reference drives both the seed and the custom gene DB). A published `<prefix>.reference_ranking.tsv` records
+  every candidate and its score. Congeneric samples skip the whole path — a same-genus reference is already the best
+  obtainable — which keeps the extra NCBI calls off the large majority of a cohort. Controlled by
+  `--enable_reference_reselection` (default true), `--n_reference_candidates`, `--reference_rank_read_subsample`.
+  Degrades to the previous single-reference behaviour whenever a lookup fails or returns nothing usable.
+- Gene-incomplete MitoHiFi assemblies now route to the reference-free Oatk fallback, not just empty ones. A reference too
+  distant for read recruitment does not always yield *nothing*: it can drop the most divergent gene blocks and return a
+  clean-looking but gene-incomplete molecule. OG2102 (*Rouleina attrita*, non-congeneric *Alepocephalus* reference) came
+  back as a plausible 15.6 kb contig carrying 7 of 13 protein-coding genes, so the empty-FASTA fallback never fired. The
+  PCG count is now read from MitoHiFi's own `final_mitogenome.gb` — available inside the assembly subworkflow, so no
+  dataflow cycle — and anything below `--mitogenome_summary_expected_pcg_count` is sent to Oatk with
+  `fallback_reason=gene_incomplete_mitohifi`. The MitoHiFi assembly stays published alongside the Oatk attempt so curation
+  can compare rather than lose information.
+- `family` and `order` are now resolved from the OceanOmics species table (`sp.family` / `sp.ordr`) and emitted onto the
+  samplesheet (optional in `assets/schema_input.json`, so existing samplesheets stay valid). Without them every
+  non-congeneric reference collapsed to the flat `NON_CONGENERIC` tier and the `CROSS_ORDER` route to reference-free
+  assembly was unreachable dead code. `REFERENCE_DIVERGENCE` now also runs on the GetOrganelle reseed path, which
+  previously produced no divergence flag at all.
 - Post-assembly circularity re-check for MitoHiFi (`MITOHIFI_CHECK_CIRCULARITY` + `bin/check_circularity.py`). MitoHiFi's
   terminal-overlap test yields false negatives on hifiasm assemblies that are genuinely circular (the closed unitig loses
   its self-overlap once MitoHiFi rotates/trims it), which then mislabels the record in the SQL db as a "scaffold" and trips
@@ -57,6 +113,31 @@ Initial release of nf-core/oceangenomesmitogenomes, created with the [nf-core](h
 
 ### `Fixed`
 
+- Reference-relevance check no longer flags good assemblies. It was calibrated on coral data (same genus ~99.6% identity,
+  same family ~96.9%, wrong family ~81.5%) and applied unchanged to fish, whose mtDNA evolves far faster: in the
+  `mitogenomes-missing-audit-5` run it called 27 assemblies `reference_mismatch`, **10 of them against a same-genus
+  reference**, and held 18 finished mitogenomes (37 genes, 13 PCGs, circular, in-range length) at `manual_review`. The
+  `PASS` and `MISMATCH` identity distributions did not separate, they abutted — PASS bottomed out at 88.4%, MISMATCH
+  topped out at 87.7%. Four independent fixes, calibrated against all 95 assemblies in that run:
+  - **Coverage is normalised by reference length, not assembly length.** Assembly-normalised coverage conflated a bad
+    reference with an inflated or fragmented assembly: OG778 scored 0.30 against its *own species'* reference at 100%
+    identity purely because the assembly was fragmented, and the control-region-repeat samples (OG852/OG853) were
+    punished for being longer than any reference could cover.
+  - **dc-megablast instead of blastn's default megablast**, matching the fix already made in `bin/check_getorganelle.py`
+    (commit `e0d41f0`) but never carried across: megablast's long exact seeds miss diverged cross-species HSPs, reporting
+    0.35 coverage on OG56 where dc-megablast reports 0.76.
+  - **A congeneric reference is never called a mismatch** (capped at the new `DIVERGENT` state): it is the best reference
+    obtainable, so low identity there is biology, not a labelling error.
+  - **The identity floor is taxon-aware** — 82% for vertebrates, 88% (the validated coral value) for invertebrates.
+  The verdict is now `PASS` / `DIVERGENT` / `MISMATCH` / `UNKNOWN`, and `MISMATCH` requires *both* poor coverage and low
+  identity, since good coverage at low identity is a distant relative and high identity over part of the molecule is a
+  partial assembly — neither is the wrong reference. On the audit-5 cohort this yields 0 mismatches and 14 advisory
+  `DIVERGENT` calls, while the synthetic wrong-reference fixture still calls `MISMATCH`.
+- `reference_mismatch`, `reference_divergent` and `no_congeneric_reference` are advisory on a complete-core assembly.
+  They describe the *reference*, not the assembly; a circular molecule of the expected length with all 13 PCGs and both
+  rRNAs is finished whatever reference built it. When a poor reference really did damage an assembly, the damage still
+  blocks — `missing_protein_coding_genes` and every structural flag are unaffected — so OG2102, OG1946, OG56, OG675,
+  OG696, OG769, OG810, OG852 and OG853 all remain in `manual_review`.
 - Open-nomenclature species names are normalised to the ENA-submittable `Genus sp.` form, fixing
   `ERROR: Organism is not Submittable` rejections at webin-cli validation. ENA/NCBI only recognise `Genus sp.`
   for an undescribed species; `Genus sp` (no period) and `Genus spp.` are not taxa, and the flatfile's

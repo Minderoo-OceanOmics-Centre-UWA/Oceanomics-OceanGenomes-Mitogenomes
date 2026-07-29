@@ -35,6 +35,40 @@ def load_db_config(config_file):
         'port': config.getint('postgres', 'port')    
     }
 
+# Columns written from the uniform remap-based depth measurement
+# (MITOGENOME_COVERAGE / bin/mito_depth.py).
+#
+# This tuple is the ONLY thing the depth-only upgrade path below is allowed to
+# write. It deliberately contains no assembly column: stats, length, avg_coverage
+# and avg_base_coverage never appear here, in any code path, so adding a depth to
+# a preserved row can never rewrite the assembly result it belongs to.
+#
+# avg_coverage / avg_base_coverage keep their historical (assembler-specific,
+# mutually incomparable) meaning and are left exactly as they were. mean_depth is
+# the number to use for any cross-platform comparison; depth_method says which of
+# the two a given row carries.
+DEPTH_COLUMNS = (
+    "mean_depth",
+    "median_depth",
+    "depth_sd",
+    "depth_cv",
+    "breadth_1x",
+    "breadth_10x",
+    "mito_mapped_reads",
+    "total_reads",
+    "mito_read_fraction",
+    "depth_target_length_bp",
+    "depth_target_fasta",
+    "depth_method",
+)
+
+# Written when this run produced no depth at all: the assembly never reached
+# annotation (failed, under-length, or a discarded GetOrganelle variant), or the
+# depth step was skipped. Distinct from the legacy_* labels the SQL migration
+# stamps on rows that predate the uniform measurement entirely.
+DEPTH_METHOD_NOT_MEASURED = "not_measured"
+
+
 # -------------------------------
 # Helpers
 # -------------------------------
@@ -93,6 +127,75 @@ def try_parse_contig_stats(tsv_path: Path, target_contig="final_mitogenome"):
         print(f"⚠️ Could not parse contig_stats-like file: {e}")
         return None, None
 
+def _num(value):
+    """TSV cell -> float, or None for blank / NA / unparseable."""
+    if value is None:
+        return None
+    token = str(value).strip()
+    if not token or token.upper() == "NA":
+        return None
+    try:
+        return float(token)
+    except ValueError:
+        return None
+
+
+def parse_depth_tsv(path):
+    """Read the single data row of a <prefix>.mito_depth.tsv.
+
+    Returns a dict keyed by DEPTH_COLUMNS, or None when there is no usable
+    measurement -- which covers the header-only assets/empty_mito_depth.tsv
+    placeholder, a missing file, and a fail-open run of mito_depth.py. Callers
+    treat None as "this row was never measured", never as "depth is zero".
+    """
+    if path is None:
+        return None
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path, sep="\t")
+    except Exception as e:
+        print(f"⚠️ Could not parse depth TSV {path}: {e}")
+        return None
+    if df.empty or "mean_depth" not in df.columns:
+        return None
+
+    row = df.iloc[0]
+    mean_depth = _num(row.get("mean_depth"))
+    if mean_depth is None:
+        # A row with no mean depth carries no measurement worth recording.
+        return None
+
+    def text(column):
+        if column not in df.columns:
+            return None
+        value = row.get(column)
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return None
+        token = str(value).strip()
+        return token if token and token.upper() != "NA" else None
+
+    def integer(column):
+        value = _num(row.get(column) if column in df.columns else None)
+        return int(value) if value is not None else None
+
+    return {
+        "mean_depth": mean_depth,
+        "median_depth": _num(row.get("median_depth")),
+        "depth_sd": _num(row.get("sd_depth")),
+        "depth_cv": _num(row.get("depth_cv")),
+        "breadth_1x": _num(row.get("breadth_1x")),
+        "breadth_10x": _num(row.get("breadth_10x")),
+        "mito_mapped_reads": integer("mito_mapped_reads"),
+        "total_reads": integer("total_reads"),
+        "mito_read_fraction": _num(row.get("mito_read_fraction")),
+        "depth_target_length_bp": integer("target_length_bp"),
+        "depth_target_fasta": text("target_fasta"),
+        "depth_method": text("depth_method") or "remap_full_v1",
+    }
+
+
 def parse_log_for_stats_and_cov(log_text: str):
     """Parse GetOrganelle-style log for stats, avg_coverage, avg_base_coverage."""
     match_stats = re.findall(r"Result status of animal_mt:\s*(.+)", log_text)
@@ -125,6 +228,16 @@ if __name__ == "__main__":
             "holds a real result. Off by default: existing successful rows "
             "are preserved and only NULL / 'failed to assemble' rows get "
             "updated automatically."
+        ),
+    )
+    parser.add_argument(
+        "--depth-tsv",
+        default=None,
+        help=(
+            "Uniform remap-based depth from MITOGENOME_COVERAGE "
+            "(<prefix>.mito_depth.tsv). Optional: a header-only placeholder or an "
+            "absent file records the row as depth_method='not_measured' rather "
+            "than failing."
         ),
     )
     parser.add_argument("config_file")
@@ -219,10 +332,18 @@ if __name__ == "__main__":
                     print(f"ℹ️ Overriding stats '{stats}' -> '{corrected}' from --circular={args.circular}.")
                 stats = corrected
 
+    # Uniform remap-based depth. None when this assembly never reached annotation
+    # (failed / under-length / a discarded variant) or the depth step was skipped.
+    depth = parse_depth_tsv(args.depth_tsv)
+
     print(f"Stats: {stats}")
     print(f"Length: {length}")
-    print(f"Avg Coverage: {avg_coverage}")
-    print(f"Avg Base Coverage: {avg_base_coverage}")
+    print(f"Avg Coverage: {avg_coverage}  (legacy, assembler-specific)")
+    print(f"Avg Base Coverage: {avg_base_coverage}  (legacy, assembler-specific)")
+    if depth is not None:
+        print(f"Mean Depth: {depth['mean_depth']}  (uniform, {depth['depth_method']})")
+    else:
+        print("Mean Depth: None (not measured)")
 
     # Parse assembly_prefix
     try:
@@ -247,6 +368,14 @@ if __name__ == "__main__":
             "avg_coverage": float(avg_coverage) if avg_coverage is not None else None,
             "avg_base_coverage": float(avg_base_coverage) if avg_base_coverage is not None else None,
         }
+        # Every row gets a depth_method so a legacy number is never mistaken for a
+        # measured one, even when this run had nothing to measure.
+        depth_values = dict(depth) if depth is not None else {
+            column: None for column in DEPTH_COLUMNS
+        }
+        if depth is None:
+            depth_values["depth_method"] = DEPTH_METHOD_NOT_MEASURED
+        params.update(depth_values)
 
         # Look up the current row (if any) and decide whether to write.
         # Default policy is insert-only: existing rows are preserved unless
@@ -298,27 +427,94 @@ if __name__ == "__main__":
             existing_dict = dict(zip(field_names, existing))
             print(f"⚠️ Existing values preserved for {assembly_prefix}: {skip_reason}.")
             print(f"📌 Preserved stored values: {existing_dict}")
+
+            # Narrow, additive exception to the preserve-everything rule: a row
+            # written before the uniform depth measurement existed has a perfectly
+            # good assembly result but no mean_depth, and the guard above keys only
+            # on `stats`, so it would otherwise never gain one without --force.
+            #
+            # This can only ever ADD a depth to a row that has none:
+            #   1. the SET list is DEPTH_COLUMNS, a module-level constant naming no
+            #      assembly column, so stats/length/avg_coverage/avg_base_coverage
+            #      cannot be touched from here;
+            #   2. the WHERE clause is `mean_depth IS NULL`, so a row that already
+            #      carries any measured depth is untouchable from here. Deliberately
+            #      NOT ORed with the depth_method states: a row with a real
+            #      mean_depth but a NULL / stale label would then have been eligible
+            #      and its measurement overwritten. Legacy and not_measured rows all
+            #      have mean_depth NULL, so this single predicate already covers them;
+            #   3. it runs only when this run HAS a depth, so it can never null one out.
+            if depth is not None:
+                assignments = ", ".join(
+                    "{0} = %({0})s".format(column) for column in DEPTH_COLUMNS
+                )
+                cursor.execute(
+                    f"""
+                    UPDATE mitogenome_data
+                    SET {assignments}, depth_measured_at = now()
+                    WHERE og_id = %(og_id)s
+                      AND tech = %(tech)s
+                      AND seq_date = %(seq_date)s
+                      AND code = %(code)s
+                      AND mean_depth IS NULL
+                    RETURNING mean_depth, depth_cv, depth_method
+                    """,
+                    params,
+                )
+                depth_returned = cursor.fetchone()
+                conn.commit()
+                if depth_returned:
+                    print(
+                        f"📌 Depth metrics added for {assembly_prefix}: "
+                        f"mean_depth={depth_returned[0]}, depth_cv={depth_returned[1]}, "
+                        f"depth_method={depth_returned[2]}"
+                    )
+                    print(
+                        f"✅ Depth metrics added for {assembly_prefix} "
+                        "(assembly stats preserved)."
+                    )
+                else:
+                    print(
+                        f"ℹ️ Row for {assembly_prefix} already carries a measured depth; "
+                        "left untouched."
+                    )
         else:
-            upsert_query = """
+            depth_columns_sql = ", ".join(DEPTH_COLUMNS)
+            depth_values_sql = ", ".join("%({0})s".format(c) for c in DEPTH_COLUMNS)
+            # On conflict, replace the depth ONLY when this run actually measured one.
+            # Without this guard a --force rerun that skipped the depth step (or whose
+            # assembly never reached annotation) would null out a perfectly good
+            # existing measurement, which is data loss rather than an overwrite.
+            depth_updates_sql = ", ".join(
+                "{0} = CASE WHEN EXCLUDED.mean_depth IS NOT NULL "
+                "THEN EXCLUDED.{0} ELSE mitogenome_data.{0} END".format(c)
+                for c in DEPTH_COLUMNS
+            )
+            upsert_query = f"""
             INSERT INTO mitogenome_data (
-                og_id, tech, seq_date, code, stats, length, avg_coverage, avg_base_coverage
+                og_id, tech, seq_date, code, stats, length, avg_coverage, avg_base_coverage,
+                {depth_columns_sql}, depth_measured_at
             )
             VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(stats)s, %(length)s, %(avg_coverage)s, %(avg_base_coverage)s
+                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(stats)s, %(length)s, %(avg_coverage)s, %(avg_base_coverage)s,
+                {depth_values_sql}, now()
             )
             ON CONFLICT (og_id, tech, seq_date, code)
             DO UPDATE SET
                 stats = EXCLUDED.stats,
                 length = EXCLUDED.length,
                 avg_coverage = EXCLUDED.avg_coverage,
-                avg_base_coverage = EXCLUDED.avg_base_coverage
-            RETURNING stats, length, avg_coverage, avg_base_coverage
+                avg_base_coverage = EXCLUDED.avg_base_coverage,
+                {depth_updates_sql},
+                depth_measured_at = CASE WHEN EXCLUDED.mean_depth IS NOT NULL
+                    THEN EXCLUDED.depth_measured_at ELSE mitogenome_data.depth_measured_at END
+            RETURNING stats, length, avg_coverage, avg_base_coverage, mean_depth, depth_method
             """
             cursor.execute(upsert_query, params)
             returned = cursor.fetchone()
             conn.commit()
 
-            final_dict = dict(zip(field_names, returned))
+            final_dict = dict(zip(field_names + ["mean_depth", "depth_method"], returned))
             print(f"📌 Final stored values: {final_dict}")
             if force_overwrite and existing is not None:
                 print(

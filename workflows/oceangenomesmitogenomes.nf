@@ -20,6 +20,7 @@ include { MIRROR_MTDNA_TO_COLLAPSED } from '../modules/local/mirror_mtdna_to_col
 include { UPLOAD_RESULTS; UPLOAD_ENA_RESULTS } from '../subworkflows/local/upload_results_mito'
 include { MITOGENOME_QC             } from '../subworkflows/local/mitogenome_qc'
 include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
+include { MITOGENOME_COVERAGE      } from '../modules/local/mitogenome_coverage/main'
 include { MITOGENOME_ASSEMBLY_SUMMARY } from '../modules/local/multiqc/mitogenome_assembly_summary'
 
 // Using local module SANITISE_FASTA (see modules/local/sanitise_fasta)
@@ -464,6 +465,48 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_annotation_input_sanitised = SANITISE_FASTA.out
 
     //
+    // MODULE: MITOGENOME_COVERAGE -- one uniform, cross-platform depth number.
+    //
+    //   Remaps each sample's own full read set to the assembly and reports mean
+    //   per-base depth. This replaces three quantities that were never comparable:
+    //   GetOrganelle's k-mer coverage (~0.2x true depth, off a reduced read set),
+    //   MitoHiFi's depth over only the reads a related-species reference recruited
+    //   (so a divergent reference depressed it), and Oatk's absence of any number.
+    //
+    //   Deliberately placed on the SANITISE_FASTA output, i.e. the exact molecule
+    //   that reaches annotation and GenBank: post-collapse (measuring a concatemer
+    //   would halve the depth), post-reseed (only the variant that won matters), and
+    //   post-concatenation (SANITISE_FASTA rewrites a multi-contig assembly into a
+    //   single _concat record). Anything that failed or fell below the length floor
+    //   was already filtered out above, so no remap is spent on a dead assembly.
+    //
+    ch_depth_reads = Channel.empty()
+    if (!params.skip_mitogenome_assembly_getorg) {
+        ch_depth_reads = ch_depth_reads.mix(MITOGENOME_ASSEMBLY_GETORG.out.depth_reads)
+    }
+    if (!params.skip_mitogenome_assembly_hifi) {
+        ch_depth_reads = ch_depth_reads.mix(MITOGENOME_ASSEMBLY_MITOHIFI.out.depth_reads)
+    }
+
+    ch_mito_depth = Channel.empty()
+    if (!params.skip_mitogenome_depth) {
+        // Inner join on mt_assembly_prefix: a precomputed / assembly-skipped run has
+        // no reads channel at all, and those samples simply get no depth (the SQL
+        // push falls back to the empty placeholder rather than being dropped).
+        MITOGENOME_COVERAGE (
+            ch_annotation_input_sanitised
+                .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+                .join(ch_depth_reads, by: 0)
+                .map { _prefix, meta, fasta, reads -> [ meta, fasta, reads ] }
+        )
+        ch_mito_depth = MITOGENOME_COVERAGE.out.depth
+        ch_assembly_summary_files = ch_assembly_summary_files.mix(
+            ch_mito_depth.map { _meta, tsv -> tsv })
+        ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_COVERAGE.out.tool_params.collect { it[1] })
+        ch_versions = ch_versions.mix(MITOGENOME_COVERAGE.out.versions.first())
+    }
+
+    //
     // SUBWORKFLOW: MITOGENOME_ANNOTATION
     //
     // Per-sample reference GenBanks from whichever assembler ran, for the
@@ -606,12 +649,28 @@ workflow OCEANGENOMESMITOGENOMES {
             [ meta.mt_assembly_prefix, [ priority: 0, meta: meta, fasta: fasta, log: log ] ]
         }
 
-    ch_mitogenome_assembly_results = ch_raw_getorg_upload_candidates
+    ch_mitogenome_assembly_selected = ch_raw_getorg_upload_candidates
         .mix(ch_canonical_upload_candidates)
         .groupTuple(by: 0)
         .map { _prefix, candidates ->
             def selected = candidates.max { it.priority }
             [ selected.meta, selected.fasta, selected.log ]
+        }
+
+    // Attach the uniform depth TSV, keyed on the assembly prefix. remainder:true plus
+    // a header-only placeholder is essential: only the molecule that reached
+    // annotation has a depth, so an inner join would drop every failed assembly, every
+    // under-length one, every discarded GetOrganelle provenance variant, and the whole
+    // cohort on a precomputed/skipped run. Those rows are still uploaded, just with no
+    // depth (push_mtdna_assm_results.py records them as 'not_measured').
+    def no_depth_file = file("${projectDir}/assets/empty_mito_depth.tsv", checkIfExists: true)
+    ch_mitogenome_assembly_results = ch_mitogenome_assembly_selected
+        .map { meta, fasta, log -> [ meta.mt_assembly_prefix, meta, fasta, log ] }
+        .join(ch_mito_depth.map { meta, tsv -> [ meta.mt_assembly_prefix, tsv ] }, by: 0, remainder: true)
+        .filter { items -> items[1] != null }   // keep assembly rows; drop depth-only remainder
+        .map { items ->
+            def depth = (items.size() > 4 && items[4] != null) ? items[4] : no_depth_file
+            [ items[1], items[2], items[3], depth ]
         }
 
     //

@@ -5,8 +5,12 @@
 -- submission_ready = true it is frozen and later reruns under the same
 -- validation_attempt label no longer overwrite it.
 --
--- Run once, manually, the same way as 001_create_ena_validation_attempts.sql:
---   psql --dbname oceanomics --file sql/002_ena_validation_attempts_single_row_per_attempt.sql
+-- Run once, manually, the same way as 001_create_ena_validation_attempts.sql.
+-- Connection details are in /home/tpeirce/postgresql_details/oceanomics.cfg (the
+-- same file the pipeline passes as --sql_config). Note the database is
+-- oceanomics_genomes; the "--dbname oceanomics" this file used to name does not exist:
+--   psql -h 146.118.120.134 -p 5432 -U postgres -d oceanomics_genomes \
+--        -f sql/002_ena_validation_attempts_single_row_per_attempt.sql
 
 BEGIN;
 

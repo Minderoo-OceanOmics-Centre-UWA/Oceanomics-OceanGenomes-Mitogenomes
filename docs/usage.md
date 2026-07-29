@@ -214,6 +214,47 @@ The attempt token accepts letters, numbers, dots, underscores, and hyphens. It i
 the combined `ena/ena_run_summary.tsv`. Standalone runs also create a MultiQC report containing the detailed gate
 tables and the combined **ENA submission readiness** section.
 
+## Mitogenome read depth
+
+`MITOGENOME_COVERAGE` measures one depth number that means the same thing on every assembler and
+platform: **mean per-base depth of the sample's own reads remapped to the assembly that goes to
+annotation**. It writes `<assembly_prefix>.mito_depth.tsv` beside the assembly and populates
+`mitogenome_data.mean_depth` in SQL.
+
+This replaces three quantities that were never comparable with each other:
+
+| Assembler | Legacy `avg_coverage` was | Now |
+|-----------|---------------------------|-----|
+| GetOrganelle | k-mer coverage off the assembly graph, roughly 0.2x true depth, over the reduced read set GetOrganelle selects by default | `mean_depth` |
+| MitoHiFi | per-base depth of only the reads recruited by mapping to a related-species reference, so a divergent reference depressed it | `mean_depth` |
+| Oatk | nothing at all (NULL) | `mean_depth` |
+
+`avg_coverage` and `avg_base_coverage` are left untouched for provenance. Use `mean_depth` for any
+cross-platform comparison, and `depth_method` to tell the two generations apart (`remap_full_v1`,
+`not_measured`, or a `legacy_*` label applied by `sql/003_mitogenome_data_uniform_depth.sql`).
+
+Two details worth knowing when reading the numbers:
+
+- **Circular molecules are folded.** The assembly is doubled head to tail before mapping and the depth
+  folded back, so origin-spanning reads are counted properly. Without this both ends of the linearised
+  molecule show a false depth dip, which depresses the mean and inflates the CV.
+- **NUMTs are filtered by gap-compressed identity**, so a read spanning a real control-region indel is
+  kept while a diverged nuclear copy is rejected. MAPQ is deliberately ignored: on a doubled reference
+  every read has two equally good placements, so MAPQ carries no information here.
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `--skip_mitogenome_depth` | `false` | Skip the measurement; rows record `depth_method='not_measured'` |
+| `--mitogenome_depth_min_identity_sr` | `0.95` | Minimum gap-compressed identity, Illumina/HiC |
+| `--mitogenome_depth_min_identity_hifi` | `0.99` | Minimum gap-compressed identity, HiFi |
+| `--mitogenome_depth_min_aligned_frac_sr` | `0.80` | Minimum aligned read fraction, Illumina/HiC (waived at reference ends) |
+| `--mitogenome_depth_min_aligned_frac_hifi` | `0.70` | Minimum aligned read fraction, HiFi (a HiFi read can exceed the mitogenome length) |
+| `--mitogenome_depth_subsample_fraction` | `0` | `0` uses every read. A value in (0,1) keeps a uniform random fraction and scales back up; saves mapping time but not decompression, so the full read set is the default |
+
+Depth is measured only for the molecule that actually reaches annotation. Assemblies that failed, fell
+below `--mitogenome_summary_min_length`, or are superseded GetOrganelle variants are recorded as
+`not_measured` rather than remapped.
+
 ## Assembly summary QC thresholds
 
 The pipeline writes `multiqc/mitogenome_assembly_summary_mqc.tsv` and includes it in MultiQC as
@@ -221,8 +262,8 @@ The pipeline writes `multiqc/mitogenome_assembly_summary_mqc.tsv` and includes i
 
 | Parameter | Default | Flag |
 |-----------|---------|------|
-| `--mitogenome_summary_min_mean_coverage` | `20` | `low_mean_coverage` |
-| `--mitogenome_summary_max_coverage_cv` | `1.0` | `high_coverage_variability` |
+| `--mitogenome_summary_min_mean_coverage` | `20` | `low_mean_coverage` (advisory on a complete assembly) |
+| `--mitogenome_summary_max_coverage_cv` | `1.0` | `high_coverage_variability` (advisory on a complete assembly) |
 | `--mitogenome_summary_min_length` | `10000` | `length_outside_expected_range` |
 | `--mitogenome_summary_max_length` | `25000` | `length_outside_expected_range` |
 | `--mitogenome_summary_expected_gene_count` | `37` | `missing_genes` when annotation-derived counts are lower |

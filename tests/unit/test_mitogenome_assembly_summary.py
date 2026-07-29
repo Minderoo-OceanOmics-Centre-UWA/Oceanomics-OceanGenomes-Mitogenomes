@@ -7,6 +7,7 @@ manual-review samples from the mitogenomes-missing-audit-3 run.
 """
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -101,6 +102,47 @@ class BlockingAdvisoryTests(unittest.TestCase):
         reason, blocking = self.apply(complete_row(reference_divergence="NON_CONGENERIC"))
         self.assertIn("no_congeneric_reference", reason)   # kept for transparency
         self.assertEqual(blocking, "")                     # but not blocking
+
+    def test_reference_mismatch_on_complete_is_advisory(self):
+        # A finished mitogenome is finished whatever reference built it. This is the
+        # false positive that held 18 complete assemblies at manual_review in the
+        # mitogenomes-missing-audit-5 run.
+        reason, blocking = self.apply(complete_row(reference_relevance="MISMATCH"))
+        self.assertIn("reference_mismatch", reason)        # still recorded
+        self.assertEqual(blocking, "")                     # but not blocking
+
+    def test_reference_divergent_on_complete_is_advisory(self):
+        reason, blocking = self.apply(complete_row(reference_relevance="DIVERGENT"))
+        self.assertIn("reference_divergent", reason)
+        self.assertEqual(blocking, "")
+
+    def test_reference_relevance_states_are_mutually_exclusive(self):
+        # DIVERGENT must not also raise the mismatch reason, and vice versa.
+        divergent, _ = self.apply(complete_row(reference_relevance="DIVERGENT"))
+        self.assertNotIn("reference_mismatch", divergent)
+        mismatch, _ = self.apply(complete_row(reference_relevance="MISMATCH"))
+        self.assertNotIn("reference_divergent", mismatch)
+
+    def test_reference_pass_raises_no_reason(self):
+        reason, blocking = self.apply(complete_row(reference_relevance="PASS"))
+        self.assertNotIn("reference", reason)
+        self.assertEqual(blocking, "")
+
+    def test_reference_mismatch_still_blocks_a_damaged_assembly(self):
+        # OG2102-like: the reference really was too divergent and the assembly
+        # collapsed. The damage blocks, even though the reference reason no longer
+        # does on its own.
+        _, blocking = self.apply(
+            complete_row(reference_relevance="MISMATCH", num_genes="25", num_cds="7")
+        )
+        self.assertIn("missing_protein_coding_genes", blocking)
+
+    def test_reference_mismatch_still_blocks_a_non_circular_assembly(self):
+        # OG810-like: structural defect present, so the row stays in review.
+        _, blocking = self.apply(
+            complete_row(reference_relevance="MISMATCH", circularised="false")
+        )
+        self.assertIn("not_circularised", blocking)
 
     def test_low_coverage_on_complete_is_advisory(self):
         reason, blocking = self.apply(complete_row(mean_coverage="12"))
@@ -444,6 +486,111 @@ class GetOrganelleRowStatusTests(unittest.TestCase):
         for verdict in ("circular genome", "1 scaffold(s)"):
             with self.subTest(verdict=verdict):
                 self.assertNotEqual(self.make_run(verdict)["status"], "circular")
+
+
+DEPTH_HEADER = (
+    "sample\ttarget_fasta\ttarget_length_bp\tn_contigs\tcircular_doubled\tpreset\t"
+    "sequencing_type\tmean_depth\tmedian_depth\tsd_depth\tdepth_cv\tp10_depth\t"
+    "min_depth\tbreadth_1x\tbreadth_10x\tbreadth_20x\tmito_mapped_reads\t"
+    "reads_fail_identity\treads_fail_clip\tsupplementary_dropped\ttotal_reads\t"
+    "mito_read_fraction\tmean_identity\tmin_identity\tmin_aligned_frac\tsubsampled\t"
+    "subsample_fraction\tscale_factor\tdepth_method\tmean_coverage\tcoverage_cv"
+)
+
+
+def depth_tsv_text(prefix, mean_depth="412.5", cv="0.11"):
+    return DEPTH_HEADER + "\n" + "\t".join([
+        prefix, prefix + ".fasta", "16500", "1", "true", "sr", "ilmn",
+        mean_depth, mean_depth, "45", cv, "380", "300", "1", "1", "1",
+        "120000", "300", "12", "0", "900000", "0.133", "0.998", "0.95",
+        "0.8", "false", "NA", "1", "remap_full_v1", mean_depth, cv,
+    ]) + "\n"
+
+
+class UniformDepthPrecedenceTests(unittest.TestCase):
+    """The remap-based depth must win over every legacy coverage source."""
+
+    def write(self, tmp, name, text):
+        path = Path(tmp) / name
+        path.write_text(text)
+        return path
+
+    def test_mito_depth_beats_getorganelle_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = "OG1.ilmn.240101.getorg1770"
+            log = self.write(tmp, prefix + ".get_org.log.txt",
+                             "INFO: Average animal_mt base-coverage = 335.9\n")
+            depth = self.write(tmp, prefix + ".mito_depth.tsv", depth_tsv_text(prefix))
+            mean, cv = mas.parse_coverage([log, depth])
+            self.assertAlmostEqual(mean, 412.5)
+            self.assertAlmostEqual(cv, 0.11)
+
+    def test_mito_depth_beats_contigs_stats_with_coverage(self):
+        """Regression: the old loose glob let with_coverage.tsv win by file order."""
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = "OG1.hifi.240101.v323mitohifi"
+            stats = self.write(
+                tmp, prefix + ".contigs_stats.with_coverage.tsv",
+                "contig_id\twas_circular\tavg_coverage\tcoverage_cv\n"
+                "final_mitogenome\tTrue\t88.2\t0.19\n",
+            )
+            depth = self.write(tmp, prefix + ".mito_depth.tsv", depth_tsv_text(prefix))
+            # Both orderings must give the same answer.
+            for files in ([stats, depth], [depth, stats]):
+                mean, _cv = mas.parse_coverage(files)
+                self.assertAlmostEqual(mean, 412.5)
+
+    def test_with_coverage_reads_final_mitogenome_row_not_row_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stats = self.write(
+                tmp, "OG1.hifi.240101.v323mitohifi.contigs_stats.with_coverage.tsv",
+                "contig_id\twas_circular\tavg_coverage\tcoverage_cv\n"
+                "ptg000001l\tTrue\t\t\n"
+                "final_mitogenome\tTrue\t88.2\t0.19\n",
+            )
+            mean, cv = mas.parse_coverage([stats])
+            self.assertAlmostEqual(mean, 88.2)
+            self.assertAlmostEqual(cv, 0.19)
+
+    def test_depth_suffix_stripped_so_no_phantom_run(self):
+        """A reseed depth must join the reseed run, not spawn <prefix>.mito_depth."""
+        self.assertEqual(
+            mas.strip_known_suffix("OG1.ilmn.240101.getorg1770reseed.mito_depth.tsv"),
+            "OG1.ilmn.240101.getorg1770reseed",
+        )
+
+    def test_depth_tsv_does_not_trip_numt_flag(self):
+        """has_numt_signal greps .tsv text; the depth columns must be inert."""
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = "OG1.ilmn.240101.getorg1770"
+            depth = self.write(tmp, prefix + ".mito_depth.tsv", depth_tsv_text(prefix))
+            self.assertFalse(mas.has_numt_signal([depth]))
+
+
+class CoverageVariabilityAdvisoryTests(unittest.TestCase):
+    """high_coverage_variability must not newly fail finished mitogenomes.
+
+    Before the uniform remap this reason could barely fire: coverage_cv was
+    populated for MitoHiFi alone, and even there it was dominated by the
+    triangular profile that mapping 15-20 kb reads to a LINEAR reference
+    produces. Now that it is measured properly for all three assemblers it has to
+    behave like low_mean_coverage: advisory on a finished mitogenome, blocking on
+    anything less.
+    """
+
+    def test_high_cv_on_complete_assembly_is_advisory(self):
+        row = complete_row(coverage_cv="2.5")
+        mas.apply_qc(row, THRESHOLDS)
+        mas.finalise_status(row)
+        self.assertIn("high_coverage_variability", row["manual_review_reason"])
+        self.assertEqual(row["status"], "complete")
+
+    def test_high_cv_on_incomplete_assembly_still_blocks(self):
+        row = complete_row(coverage_cv="2.5", circularised="false")
+        mas.apply_qc(row, THRESHOLDS)
+        mas.finalise_status(row)
+        self.assertIn("high_coverage_variability", row["manual_review_reason"])
+        self.assertEqual(row["status"], "manual_review")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,72 @@
+nextflow_process {
+
+    name "Test Process MITOGENOME_COVERAGE"
+    script "../main.nf"
+    process "MITOGENOME_COVERAGE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "mitogenome_coverage"
+
+    // The stub exercises the output NAMING, which is the part of this module that
+    // silently corrupts the assembly summary if it is wrong: the summary groups
+    // runs by filename, so a depth TSV named after meta.mt_assembly_prefix would
+    // attach a reseed's depth to the discarded first-pass row, and a name still
+    // carrying _collapsed / _concat would manufacture a phantom run with a depth
+    // but no assembly. The depth arithmetic itself is covered by the real script
+    // in tests/unit/test_mito_depth.py.
+    test("stub names the output after the measured FASTA, keeping the reseed suffix") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'OG1', sequencing_type:'ilmn', circular:true,
+                      mt_assembly_prefix:'OG1.ilmn.240101.getorg1770' ],
+                    file("\${projectDir}/modules/local/mitogenome_coverage/tests/data/OG1.ilmn.240101.getorg1770reseed.fasta", checkIfExists: true),
+                    file("\${projectDir}/modules/local/mitogenome_coverage/tests/data/reads.fastq", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // Named after the FASTA measured, NOT meta.mt_assembly_prefix.
+                { assert process.out.depth[0][1] ==~ ".*/OG1.ilmn.240101.getorg1770reseed.mito_depth.tsv" },
+                { assert path(process.out.depth[0][1]).text.contains("remap_full_v1") },
+                // sr preset for short reads.
+                { assert path(process.out.depth[0][1]).text.contains("sr") }
+            )
+        }
+    }
+
+    test("stub strips a trailing _collapsed so the depth joins the original run") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'OG1', sequencing_type:'hifi', circular:true,
+                      mt_assembly_prefix:'OG1.ilmn.240101.getorg1770' ],
+                    file("\${projectDir}/modules/local/mitogenome_coverage/tests/data/OG1.ilmn.240101.getorg1770_collapsed.fasta", checkIfExists: true),
+                    file("\${projectDir}/modules/local/mitogenome_coverage/tests/data/reads.fastq", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.depth[0][1] ==~ ".*/OG1.ilmn.240101.getorg1770.mito_depth.tsv" },
+                { assert !(process.out.depth[0][1].toString().contains("_collapsed")) }
+            )
+        }
+    }
+}

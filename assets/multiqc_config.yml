@@ -73,9 +73,11 @@ custom_data:
       frameshift_flag:
         title: "Frameshift"
       mean_coverage:
-        title: "Mean coverage"
+        title: "Mean depth (remap)"
+        description: "Mean per-base depth of the sample's own reads remapped to the final assembly, folded for circular molecules. One definition for every assembler and platform."
       coverage_cv:
-        title: "Coverage CV"
+        title: "Depth CV (remap)"
+        description: "Standard deviation of per-base depth over the mean."
       reference_species:
         title: "Reference species"
       reference_accession:
@@ -84,6 +86,13 @@ custom_data:
         title: "Possible NUMT"
       manual_review_reason:
         title: "Manual review reason"
+
+  mito_depth:
+    section_name: "Mitogenome Read Depth"
+    description: "Uniform remap-based depth: the sample's own reads mapped back to its final assembly, folded on a doubled reference for circular molecules and filtered for NUMTs by gap-compressed identity. Comparable across GetOrganelle, MitoHiFi and Oatk, unlike the legacy per-assembler coverage figures."
+    plot_type: table
+    data_format: tsv
+    filename_glob: "*.mito_depth.tsv"
 
   mitohifi_stats:
     section_name: "MitoHiFi Contig Stats"

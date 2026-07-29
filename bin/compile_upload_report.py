@@ -96,6 +96,15 @@ def classify_status(step, text):
             return "failed_kept_prior_success"
         if "row already records 'failed to assemble'" in body:
             return "failed_to_assemble"
+        # A preserved row that nonetheless gained the uniform depth measurement.
+        # Must be tested BEFORE the plain "preserved" match below, which would
+        # otherwise swallow it and hide the fact that the row was updated at all.
+        # The assembly stats themselves are still preserved in this case.
+        if (
+            "row already exists; pass --force to overwrite" in body
+            and "Depth metrics added" in body
+        ):
+            return "preserved_depth_updated"
         if "row already exists; pass --force to overwrite" in body:
             return "preserved"
         if "failed to assemble" in body or "Empty assembly FASTA detected" in body:

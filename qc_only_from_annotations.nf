@@ -58,20 +58,26 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
                 error "Input file '${file.name}' must include '<sample>.<sequencing_type>.<date>.<code>.<annotation>'"
             }
 
-            def mt_assembly_prefix = stem
+            // Keep the annotation stem as the channel identity, while retaining
+            // the four-field assembly prefix expected by source-modifier naming.
+            def annotation_prefix = stem
+            def mt_assembly_prefix = parts[0..3].join('.')
             def meta = [
                 id                : parts[0],
                 sequencing_type   : parts[1],
                 date              : parts[2],
                 code              : parts[3],
                 annotation        : parts[4],
+                annotation_prefix : annotation_prefix,
                 mt_assembly_prefix: mt_assembly_prefix
             ]
-            [ mt_assembly_prefix, meta, file ]
+            [ annotation_prefix, meta, file ]
         }
         .groupTuple(by: 0)
         .map { _assembly_prefix, metas, files ->
-            tuple(metas[0], files.flatten())
+            def annotation_files = files.flatten()
+            def meta = GffCircularity.annotate(metas[0], annotation_files)
+            tuple(meta, annotation_files)
         }
 
     // Query validated species names from lca_validation.
@@ -83,15 +89,15 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
     ch_species = VALIDATED_SPECIES_QUERY.out.species
         .map { meta, species ->
             def species_name = species ? species.toString().trim() : 'unknown'
-            [ meta.mt_assembly_prefix, species_name ?: 'unknown' ]
+            [ meta.annotation_prefix, species_name ?: 'unknown' ]
         }
 
     // Build the tuple shape required by MITOGENOME_QC.
     ch_qc_input = ch_annotations_grouped
-        .map { meta, files -> [ meta.mt_assembly_prefix, meta, files ] }
+        .map { meta, files -> [ meta.annotation_prefix, meta, files ] }
         .join(ch_species, by: 0)
-        .map { _prefix, meta, files, species_name ->
-            tuple(meta, species_name, 'true', files)
+        .map { _annotation_prefix, meta, files, species_name ->
+            tuple(meta, species_name, true, meta.circular as boolean, files)
         }
 
     MITOGENOME_QC(

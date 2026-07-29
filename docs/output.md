@@ -81,6 +81,14 @@ These files form the short-read reference for later annotation and validation st
   - `<assembly_prefix>.fasta`: HiFi-derived circularised assembly with header normalised to the prefix.
   - `<assembly_prefix>.gb`: GenBank annotation file emitted by MitoHiFi.
   - `<assembly_prefix>.contigs_stats.tsv`: Per-contig metrics summarised in MultiQC (`MitoHiFi Contig Stats` section).
+  - `<assembly_prefix>.contigs_stats.with_coverage.tsv`: The same table with MitoHiFi's legacy
+    reference-recruited `avg_coverage` / `coverage_cv` columns appended.
+  - `<assembly_prefix>.coverage.tsv`: Legacy MitoHiFi depth, over reference-recruited reads only.
+  - `<assembly_prefix>.mito_depth.tsv`: Uniform remap-based read depth (`Mitogenome Read Depth` section
+    in MultiQC). Written for every assembler, not just MitoHiFi, and the only depth figure comparable
+    across GetOrganelle / MitoHiFi / Oatk and across Illumina / HiC / HiFi. Carries `mean_depth`,
+    `median_depth`, `depth_cv`, breadth at 1x/10x/20x, the mitochondrial read fraction, and the filter
+    thresholds actually applied. See "Mitogenome read depth" in `docs/usage.md`.
   - `<assembly_prefix>.hifiasm.log`, `<assembly_prefix>.log`: Tool and wrapper logs (also parsed by MultiQC).
   - `all_potential_contigs.fa`, `shared_genes.tsv`, PNG plots, and subdirectories (`contigs_circularization/`,
     `coverage_mapping/`, `reads_mapping_and_assembly/`, …) capturing all diagnostic artefacts from MitoHiFi.
@@ -146,11 +154,28 @@ Manual review reasons are semicolon-separated and can include `missing_final_fas
 `multiple_candidate_contigs`, `multiple_final_contigs`, `missing_genes`, `missing_protein_coding_genes`,
 `frameshift_detected`, `low_mean_coverage`, `high_coverage_variability`, `possible_numt`,
 `ambiguous_getorganelle_graph`, `failed_run`, `length_anomaly`, `length_outside_expected_range`,
-`reference_mismatch`, `no_congeneric_reference`, and `data_limited`. The reference-related reasons come from
-the pre-assembly reference-divergence guard and the reference-relevance check (a wrong-family reference is
-surfaced rather than silently used); `data_limited` marks assemblies limited by input data rather than a
-pipeline defect. `missing_protein_coding_genes` fires when the annotation-derived CDS count falls below
+`reference_mismatch`, `reference_divergent`, `no_congeneric_reference`, and `data_limited`.
+`data_limited` marks assemblies limited by input data rather than a pipeline defect.
+`missing_protein_coding_genes` fires when the annotation-derived CDS count falls below
 `--mitogenome_summary_expected_pcg_count`, catching collapses that tRNA counts mask in the total gene count.
+
+The reference-related reasons come from the pre-assembly reference-divergence guard
+(`no_congeneric_reference`) and the post-assembly reference-relevance check
+(`reference_divergent` / `reference_mismatch`). All three are **advisory on a complete-core
+assembly**: a circular molecule of the expected length carrying all 13 protein-coding genes and
+both rRNAs is a finished mitogenome whatever reference was used to build it, so these reasons are
+recorded for curation but do not by themselves force `manual_review`. They describe the reference,
+not the assembly; when a poor reference actually damages an assembly, the damage itself
+(`missing_protein_coding_genes`, or any structural flag) still blocks.
+
+`reference_divergent` means the reference corresponds to the assembly but is a distant relative, so a
+closer reference would seed and annotate better. `reference_mismatch` is the stronger claim that the
+reference neither covers nor matches the assembly, i.e. the species label pointed `findMitoReference`
+at the wrong reference entirely. The check measures coverage against the **reference** length, not the
+assembly length, so a concatemer, a control-region tandem repeat or a fragmented assembly does not read
+as a bad reference; it never calls a congeneric reference a mismatch; and its identity floor is
+taxon-aware (82% for vertebrates, 88% for invertebrates), because anthozoan mtDNA evolves far more
+slowly than teleost mtDNA, where congeneric references routinely align at 78-88%.
 
 QC thresholds are configurable with:
 `--mitogenome_summary_min_mean_coverage`, `--mitogenome_summary_max_coverage_cv`,

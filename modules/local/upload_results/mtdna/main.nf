@@ -8,7 +8,10 @@ process PUSH_MTDNA_ASSM_RESULTS {
         'tylerpeirce/psycopg2:0.1' }"
 
     input:
-    tuple val(meta), path(fasta), path(out_log)
+    // depth_tsv is the uniform remap-based depth from MITOGENOME_COVERAGE, or the
+    // header-only assets/empty_mito_depth.tsv placeholder for a row that never
+    // reached annotation (failed, under-length, or a discarded assembly variant).
+    tuple val(meta), path(fasta), path(out_log), path(depth_tsv)
     path config
 
     output:
@@ -25,11 +28,13 @@ process PUSH_MTDNA_ASSM_RESULTS {
     // Corrected circular verdict from the assembly subworkflow (GetOrganelle
     // reference check / MitoHiFi circularity check); null/absent -> no override.
     def circular = meta.circular == null ? 'null' : meta.circular.toString()
-    def effective_args = [args, "--circular ${circular}", config, mt_assembly_prefix, out_log, fasta].findAll { it?.toString()?.trim() }.join(' ')
+    def depth_arg = depth_tsv ? "--depth-tsv ${depth_tsv}" : ''
+    def effective_args = [args, "--circular ${circular}", depth_arg, config, mt_assembly_prefix, out_log, fasta].findAll { it?.toString()?.trim() }.join(' ')
     """
     push_mtdna_assm_results.py \\
         $args \\
         --circular ${circular} \\
+        $depth_arg \\
         $config \\
         ${mt_assembly_prefix} \\
         $out_log \\
@@ -50,7 +55,7 @@ process PUSH_MTDNA_ASSM_RESULTS {
     stub:
     def args = task.ext.args ?: ''
     def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
-    def effective_args = [args, config, mt_assembly_prefix, out_log, fasta].findAll { it?.toString()?.trim() }.join(' ')
+    def effective_args = [args, config, mt_assembly_prefix, out_log, fasta, depth_tsv].findAll { it?.toString()?.trim() }.join(' ')
     """
     touch ${mt_assembly_prefix}.mtdna.upload.txt
 

@@ -1,11 +1,14 @@
-// Flag when the mitogenome reference chosen for a sample is not relevant to its
+// Grade how well the mitogenome reference chosen for a sample corresponds to its
 // assembly. The reference is resolved by MITOHIFI_FINDMITOREFERENCE from the
 // sample's species *label*, so a wrong/coarse label yields a wrong-family
 // reference that silently degrades seeding + the coral annotation fix. This
 // module BLASTs the reference against the assembly and writes a one-line
-// PASS/MISMATCH/UNKNOWN flag (label- and taxonomy-DB-free). Always exits 0 so a
-// bad reference only records a review flag, never breaks the run. Runs in the
-// MITOS2 BioContainer (provides blastn + biopython).
+// PASS/DIVERGENT/MISMATCH/UNKNOWN flag (label- and taxonomy-DB-free):
+//   DIVERGENT = right molecule, distant relative (advisory; a closer reference
+//               would seed and annotate better)
+//   MISMATCH  = the reference neither covers nor matches, i.e. the wrong reference
+// Always exits 0 so a bad reference only records a review flag, never breaks the
+// run. Runs in the MITOS2 BioContainer (provides blastn + biopython).
 process REFERENCE_RELEVANCE {
     tag "$meta.id"
     label 'process_single'
@@ -27,10 +30,21 @@ process REFERENCE_RELEVANCE {
 
     script:
     def args = task.ext.args ?: ''
+    // Sample species drives the congeneric veto: a same-genus reference is the best
+    // obtainable, so it is never called MISMATCH however low the identity runs.
+    def species = (meta.nominal_species_id ?: meta.reference_species_id ?: '').toString().trim()
+    def species_arg = species ? "--sample-species '${species}'" : ''
+    // Taxon-aware identity floor. The 88.0 default was calibrated on corals, whose
+    // mtDNA evolves far more slowly than vertebrate mtDNA; teleost *congeners*
+    // routinely align at 78-88%, so keeping 88.0 for fish flags good assemblies.
+    // Invertebrates (in practice cnidarians) keep the validated coral number.
+    def min_pid = meta.invertebrates ? 88.0 : 82.0
     """
     reference_relevance_check.py \\
         --assembly ${assembly} \\
         --reference-gb ${reference_gb} \\
+        ${species_arg} \\
+        --min-pid ${min_pid} \\
         --out ${meta.mt_assembly_prefix}.reference_relevance.txt \\
         ${args}
 

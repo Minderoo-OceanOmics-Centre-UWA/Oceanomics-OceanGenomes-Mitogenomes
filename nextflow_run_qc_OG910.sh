@@ -3,10 +3,10 @@ module load singularity/4.1.0-nompi
 
 nextflow run qc_only_from_annotations.nf \
   -profile singularity \
-  --annotation_files "/path/to/annotation/emma/*.{fa,fasta,gff,tbl,gb}" \
+  --annotation_files "/scratch/pawsey1348/tpeirce/OG910/*/annotation/*.{fa,fasta,gff,tbl,gb}" \
   --sql_config ~/postgresql_details/oceanomics.cfg \
   --template_sbt "bin/template.sbt" \
-  --outdir "$(realpath ../qc_outdir)" \
+  --outdir "/scratch/pawsey1348/tpeirce/OG910" \
   --ena_webin_validate true \
   --ena_study "PRJEB110568" \
   --ena_validation_attempt "initial"

@@ -1,0 +1,4 @@
+##gff-version 3
+##sequence-region	OG1.conflict	1	100
+OG1.conflict	Emma	region	1	100	.	+	0	Is_circular=true
+OG1.conflict	Emma	region	1	100	.	+	0	Is_circular=false

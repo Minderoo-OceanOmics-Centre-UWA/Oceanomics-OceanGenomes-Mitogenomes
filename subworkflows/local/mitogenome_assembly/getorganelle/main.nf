@@ -15,6 +15,9 @@ include { GETORGANELLE_RESEED       } from '../../../../modules/local/getorganel
 include { GETORGANELLE_GENEDB       } from '../../../../modules/local/getorganelle/genedb'
 include { MITOHIFI_FINDMITOREFERENCE } from '../../../../modules/nf-core/mitohifi/findmitoreference'
 include { RELABEL_REFERENCE_GB      } from '../../../../modules/local/relabel_reference_gb'
+include { REFERENCE_DIVERGENCE      } from '../../../../modules/local/reference_divergence'
+include { REFERENCE_CANDIDATES      } from '../../../../modules/local/reference_candidates'
+include { REFERENCE_RANK            } from '../../../../modules/local/reference_rank'
 include { GETORGANELLE_JOIN         } from '../../../../modules/local/getorganelle/join'
 include { GETORGANELLE_CHECK        } from '../../../../modules/local/getorganelle/check'
 include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
@@ -38,6 +41,25 @@ def parseFinalVerdictCircular(tsv) {
     } catch (ignored) {
         return null
     }
+}
+
+// Read the tier from a REFERENCE_DIVERGENCE flag file. Mirrors the helper in the
+// MitoHiFi subworkflow; both routes grade the resolved reference the same way.
+def parseReferenceTier(tsv) {
+    try {
+        return tsv.text.readLines().find { it?.trim() }?.split('\t', -1)?.first()?.trim()?.toUpperCase() ?: 'UNKNOWN'
+    } catch (ignored) {
+        return 'UNKNOWN'
+    }
+}
+
+// Is this divergence tier worth re-selecting a reference for? CONGENERIC already has
+// the best obtainable reference and UNKNOWN carries no evidence the reference is
+// poor. CROSS_ORDER is not special-cased here: GetOrganelle seeds from the reference
+// rather than recruiting reads against it, so it degrades gracefully where MitoHiFi
+// fails outright, and re-selection is the right response for it too.
+def shouldReselectReference(tier) {
+    return tier in ['CONFAMILIAL', 'DIFFERENT_FAMILY', 'NON_CONGENERIC', 'CROSS_ORDER']
 }
 
 // Decide whether a first-pass GetOrganelle result warrants a reseed attempt.
@@ -218,12 +240,61 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         MITOHIFI_FINDMITOREFERENCE (
             ch_reseed_branched.vert.map { meta, _fasta, _log, _reads -> meta }
         )
-        ch_vert_seed = MITOHIFI_FINDMITOREFERENCE.out.reference
+        ch_vert_reference = MITOHIFI_FINDMITOREFERENCE.out.reference
             .filter { _meta, ref_fasta, ref_gb -> ref_fasta.size() > 0 && ref_gb.size() > 0 }
-            .map { meta, ref_fasta, _ref_gb -> [meta, ref_fasta] }   // [meta, seed]
-        ch_vert_ref_gb = MITOHIFI_FINDMITOREFERENCE.out.reference
-            .filter { _meta, ref_fasta, ref_gb -> ref_fasta.size() > 0 && ref_gb.size() > 0 }
-            .map { meta, _ref_fasta, ref_gb -> [meta, ref_gb] }      // [meta, ref_gb]
+
+        //
+        // Reference divergence guard + re-selection for the vertebrate reseed.
+        // The reseed seeds GetOrganelle from this reference AND builds the custom
+        // gene label DB from it, so a reference that fell back past genus degrades
+        // both. Grade it, and when it is not congeneric replace it with the candidate
+        // the sample's own reads map to best. Until now the GetOrganelle route had no
+        // divergence flag at all, which is why its assemblies showed an empty tier in
+        // the assembly summary.
+        //
+        REFERENCE_DIVERGENCE (
+            ch_vert_reference.map { meta, _ref_fasta, ref_gb -> [meta, ref_gb] }
+        )
+
+        ch_vert_reads = ch_reseed_branched.vert.map { meta, _fasta, _log, reads -> [meta, reads] }
+
+        ch_vert_route = ch_vert_reference
+            .join(ch_vert_reads, by: 0)                       // [meta, ref_fasta, ref_gb, reads]
+            .join(REFERENCE_DIVERGENCE.out.flag, by: 0)       // + flag
+            .branch { _meta, _ref_fasta, _ref_gb, _reads, flag ->
+                reselect: params.enable_reference_reselection &&
+                          shouldReselectReference(parseReferenceTier(flag))
+                keep: true
+            }
+
+        REFERENCE_CANDIDATES (
+            ch_vert_route.reselect.map { meta, _ref_fasta, _ref_gb, _reads, _flag -> meta }
+        )
+
+        REFERENCE_RANK (
+            ch_vert_route.reselect
+                .map { meta, _ref_fasta, _ref_gb, reads, _flag -> [meta, reads] }
+                .join(REFERENCE_CANDIDATES.out.candidates, by: 0)
+        )
+
+        // remainder:true keeps samples whose candidate lookup found nothing on their
+        // original reference, so re-selection never costs a sample its reseed.
+        ch_vert_resolved = ch_vert_route.keep
+            .mix(ch_vert_route.reselect
+                .join(REFERENCE_RANK.out.reference, by: 0, remainder: true)
+                .filter { it[1] != null }   // drop any right-only remainder
+                .map { items ->
+                    def chosen_fasta = items.size() > 5 ? items[5] : null
+                    def chosen_gb    = items.size() > 6 ? items[6] : null
+                    (chosen_fasta && chosen_gb)
+                        ? [ items[0], chosen_fasta, chosen_gb, items[3], items[4] ]
+                        : [ items[0], items[1], items[2], items[3], items[4] ]
+                })
+
+        ch_vert_seed = ch_vert_resolved
+            .map { meta, ref_fasta, _ref_gb, _reads, _flag -> [meta, ref_fasta] }   // [meta, seed]
+        ch_vert_ref_gb = ch_vert_resolved
+            .map { meta, _ref_fasta, ref_gb, _reads, _flag -> [meta, ref_gb] }      // [meta, ref_gb]
 
         // Custom label database from the reference GenBank (disentangles contigs for
         // divergent animal mitogenomes); the vertebrate reseed only runs WITH it.
@@ -323,10 +394,17 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             .mix(GETORGANELLE_RESEED.out.raw_assm_graph)
             .mix(GETORGANELLE_RESEED.out.simp_assm_graph)
             .mix(RELABEL_REFERENCE_GB.out.gb.map { _meta, gb -> gb })
+            // Divergence tier + re-selection audit trail, same as the MitoHiFi route.
+            .mix(REFERENCE_DIVERGENCE.out.flag.map { _meta, flag -> flag })
+            .mix(REFERENCE_RANK.out.ranking.map { _meta, ranking -> ranking })
+            .mix(REFERENCE_CANDIDATES.out.status.map { _meta, status -> status })
         ch_versions = ch_versions
             .mix(GETORGANELLE_RESEED.out.versions.first())
             .mix(GETORGANELLE_GENEDB.out.versions.first())
             .mix(MITOHIFI_FINDMITOREFERENCE.out.versions.first())
+            .mix(REFERENCE_DIVERGENCE.out.versions.first())
+            .mix(REFERENCE_CANDIDATES.out.versions.first())
+            .mix(REFERENCE_RANK.out.versions.first())
 
     } else {
         ch_assembly_fasta = GETORGANELLE_FROMREADS.out.fasta
@@ -523,6 +601,13 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     db_assembly_results = ch_db_assembly_results   // channel: [ meta(per-variant prefix+circular), fasta, log ] -> one DB row per variant
     reference_gb    = ch_reference_gb              // channel: [ meta, reference.gb ] (partial: reseed candidates only)
     circularity_evidence = GETORGANELLE_CHECK.out.evidence  // channel: [ meta, getorg_check.tsv ]
+    // Reads keyed by assembly prefix, for MITOGENOME_COVERAGE in the parent workflow.
+    // Keyed rather than meta-joined because meta gains `circular` downstream (lines
+    // ~453 / ~550), so a whole-meta join would never match; mt_assembly_prefix is
+    // stable across the reseed / _rgj variants because those suffixes live only on
+    // the filename. One entry per sample: every GetOrganelle variant is built from
+    // exactly the same reads, so one remap covers whichever variant wins.
+    depth_reads     = fastp_with_mt_assembly_prefix.map { m, r -> [ m.mt_assembly_prefix, r ] }
     summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]
