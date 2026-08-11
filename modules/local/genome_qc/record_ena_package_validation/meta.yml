@@ -1,0 +1,22 @@
+name: record_ena_package_validation
+description: Persist test or production genome-context Webin validation for a registered candidate package
+keywords:
+  - ena
+  - webin
+  - database
+input:
+  - status:
+      type: file
+      description: Structured Webin validation status TSV
+  - db_config:
+      type: file
+      description: PostgreSQL INI configuration
+output:
+  - receipt:
+      type: file
+      description: Database persistence receipt
+      pattern: "*.ena_validation_recorded.tsv"
+  - versions:
+      type: file
+      description: Software versions
+      pattern: versions.yml

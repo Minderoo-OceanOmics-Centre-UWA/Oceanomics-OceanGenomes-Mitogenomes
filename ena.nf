@@ -9,6 +9,7 @@ include { ENA_VALIDATION_RESULT  } from './modules/local/genome_qc/ena_validatio
 include { ENA_VALIDATION_SUMMARY } from './modules/local/genome_qc/ena_validation_summary'
 include { UPLOAD_ENA_RESULTS     } from './subworkflows/local/upload_results_mito'
 include { MULTIQC                } from './modules/nf-core/multiqc/main'
+include { enaTargetAnnotate; validateEnaTargets } from './subworkflows/local/utils_ena_targets/main'
 
 def requiredValue(row, String column, rowLabel) {
     def value = row[column]?.toString()?.trim()
@@ -70,9 +71,9 @@ workflow {
     if (!params.ena_input) {
         error "--ena_input is required for the standalone ENA runner."
     }
-    if (!params.ena_study?.toString()?.trim()) {
-        error "--ena_study is required for Webin validation."
-    }
+    // Each row's study is resolved from its own technology below; this only
+    // checks that all three child studies and prefixes are configured.
+    validateEnaTargets(params)
     if (!params.outdir) {
         error "--outdir is required for the standalone ENA runner."
     }
@@ -95,7 +96,11 @@ workflow {
             if (!seen_keys.add(key)) {
                 error "Duplicate sample/mt_assembly_prefix combination in ENA input: ${sample}/${prefix}"
             }
-            tuple(row, [id: sample, mt_assembly_prefix: prefix])
+            // The study is a per-row property: mt_assembly_prefix carries the
+            // technology in position 1, and each technology has its own child
+            // study. A row whose technology is unknown fails here rather than
+            // being validated against whatever study the run defaulted to.
+            tuple(row, enaTargetAnnotate(params, [id: sample, mt_assembly_prefix: prefix]))
         }
         .ifEmpty { error "ENA input CSV contains no data rows: ${input_sheet}" }
 
@@ -119,7 +124,6 @@ workflow {
         ENA_FLATFILE(ch_conversion_input)
         WEBIN_VALIDATE(
             ENA_FLATFILE.out.embl_file,
-            params.ena_study.toString().trim(),
             params.ena_validation_attempt.toString()
         )
 
@@ -147,7 +151,6 @@ workflow {
         ENA_EMBL_PREFLIGHT(ch_preflight_input)
         WEBIN_VALIDATE(
             ENA_EMBL_PREFLIGHT.out.embl_file,
-            params.ena_study.toString().trim(),
             params.ena_validation_attempt.toString()
         )
 
@@ -166,8 +169,8 @@ workflow {
         .groupTuple(by: 0)
         .map { _prefix, metas, validationFiles -> tuple(metas[0], validationFiles.flatten()) }
 
+    // No ena_study here: it is per row now and read from meta.ena_study.
     validation_settings = [
-        ena_study: params.ena_study.toString().trim(),
         validation_mode: params.ena_mode,
         validation_attempt: params.ena_validation_attempt,
         webin_requested: true,

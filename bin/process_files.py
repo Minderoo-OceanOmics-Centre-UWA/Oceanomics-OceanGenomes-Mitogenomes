@@ -190,6 +190,54 @@ def compute_transl_except_pos(start: int, end: int, seq: str, stops):
             return None
         return f"complement({lo})" if rem == 1 else f"complement({lo}..{hi})"
 
+def _tbl_interval(line: str):
+    """Return (start, end) if line opens a feature interval, else None.
+
+    Feature lines are non-indented and carry the interval in the first two
+    columns.  A feature-key column marks the start of a new feature; a bare
+    two-column line is an additional interval of the feature above it.
+    """
+    if not line or line.startswith('\t'):
+        return None
+    cols = line.split('\t')
+    if len(cols) < 2:
+        return None
+    try:
+        return int(cols[0].lstrip('<>')), int(cols[1].lstrip('<>'))
+    except ValueError:
+        return None
+
+def sort_tbl_features(lines):
+    """Order feature blocks by position on the molecule.
+
+    Emma sorts its output by the start coordinate as a *string*, so a molecule
+    comes out as 1, 10053, 1027, 10343, 1099 ...  The downstream locus-tag
+    allocator numbers loci in file order, so that ordering ends up baked into
+    the published tags.  Re-sort numerically here, at the point the feature
+    table is normalised, so the .tbl and everything derived from it agree with
+    the coordinate order table2asn and seqret impose on the flatfile anyway.
+
+    A block is the feature line, any additional interval lines belonging to a
+    joined feature, and the indented qualifier lines that follow.  The sort is
+    stable and keyed on the block's lowest coordinate only, which keeps a
+    gene adjacent to the mRNA/CDS/tRNA Emma already emits beneath it.
+    """
+    preamble, blocks = [], []
+    for line in lines:
+        interval = _tbl_interval(line)
+        # A third column holds the feature key and opens a new block; a bare
+        # two-column line is a continuation interval of the block above it.
+        cols = line.split('\t')
+        starts_feature = interval is not None and len(cols) >= 3 and bool(cols[2])
+        if starts_feature:
+            blocks.append([line])
+        elif blocks:
+            blocks[-1].append(line)
+        else:
+            preamble.append(line)
+    blocks.sort(key=lambda block: min(_tbl_interval(block[0])))
+    return preamble + [line for block in blocks for line in block]
+
 def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_code=2):
     log(f"📝 Processing TBL/GB file: {input_file}")
     stops = mito_stop_codons(genetic_code)
@@ -250,9 +298,36 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
         out.append(clean(lines[i]))
         i += 1
 
+    out = sort_tbl_features(out)
+
     with open(output_file, 'w') as f_out:
         f_out.write('\n'.join(out) + '\n')
     log(f"✅ Processed TBL/GB: {output_file} (transl_except added to {added} CDS)")
+
+def sort_gff_records(lines):
+    """Order GFF loci by position, mirroring sort_tbl_features.
+
+    Emma's string sort affects the GFF the same way it affects the .tbl.  A
+    block is a top-level record plus the records that hang off it via
+    Parent=, so gene -> mRNA -> CDS stays together even where a child's
+    coordinates differ from its parent's.  Directives and the whole-molecule
+    'region' record are pinned ahead of the sorted blocks; region spans the
+    entire sequence, so sorting it by start would let the first gene overtake
+    it.  Unlike the .tbl, GFF always writes start <= end with the strand in
+    column 7, so column 4 alone is the key.
+    """
+    preamble, blocks = [], []
+    for line in lines:
+        fields = line.rstrip('\r\n').split('\t')
+        record = len(fields) == 9 and not line.startswith('#')
+        if record and fields[2] != 'region' and 'Parent=' not in fields[8]:
+            blocks.append([line])
+        elif blocks:
+            blocks[-1].append(line)
+        else:
+            preamble.append(line)
+    blocks.sort(key=lambda block: int(block[0].split('\t')[3]))
+    return preamble + [line for block in blocks for line in block]
 
 def process_gff_file(input_file, output_file, assembly):
     log(f"📝 Processing GFF file: {input_file}")
@@ -287,6 +362,8 @@ def process_gff_file(input_file, output_file, assembly):
         processed_line = re.sub(r'(?i)\bputative\b[\s;,:]*', '', processed_line)
         processed_line = processed_line.replace('MT-', '')
         new_lines.append(processed_line + '\n')
+
+    new_lines = sort_gff_records(new_lines)
 
     with open(output_file, 'w') as f:
         for line in new_lines:

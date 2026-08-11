@@ -1,0 +1,10 @@
+{
+  "biosample_accession": "SAMEA1",
+  "full_seqid": "OG910.hifi.250101.v3mitohifi.emma102",
+  "local_validation_status": "PASS",
+  "normalised_circular_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "og_id": "OG910",
+  "package_status": "READY",
+  "sequence_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "study": "PRJEB110568"
+}

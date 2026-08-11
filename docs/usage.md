@@ -79,8 +79,9 @@ that matches your container/conda environment.
 | `--blast_db_dir` | ✔ | Directory used to cache the downloaded `taxdb.*` files; re-use between runs to avoid repeated downloads. |
 | `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
 | `--template_sbt` | ✔ | Submission template passed to `table2asn` when packaging GenBank artefacts. |
-| `--ena_webin_validate` | Optional | Run production Webin-CLI validation for ENA flat files that pass table2asn and conversion checks (default `false`). |
-| `--ena_study` | With Webin validation | ENA study accession or alias written to each targeted-sequence manifest. |
+| `--ena_validate_webin_test` | Optional | Validate every ready genome-context candidate package against the Webin test service (default `false`). |
+| `--ena_study_hifi`, `--ena_study_hic`, `--ena_study_ilmn` | ENA packaging | ENA child study written to each genome-context manifest, chosen by the candidate's technology (defaults `PRJEB123419`, `PRJEB123420`, `PRJEB123421`). The umbrella `PRJEB110568` is an UMBRELLA_PROJECT and cannot receive data. |
+| `--ena_locus_prefix_hifi`, `--ena_locus_prefix_hic`, `--ena_locus_prefix_ilmn` | ENA packaging | Locus-tag prefix registered to each child study (defaults `OGMTHIFI`, `OGMTHIC`, `OGMTILMN`). Gene serials are specimen level, so OG910 gene 1 is `OGMTHIFI_000910001` in the HiFi record and `OGMTHIC_000910001` in the Hi-C record. |
 | `--samplesheet_prefix` | Optional | Reserved for generated samplesheet naming in wrapper scripts. |
 | `--getorganelle_genedb_min_genes` | Optional | Minimum genes a reference must yield to build the reseed custom gene database (default `10`). Below this, the sample keeps its first-pass GetOrganelle assembly instead of reseeding. |
 | `--getorganelle_fromreads_args` | Optional | Override the default GetOrganelle from-reads arguments (default `-R 20 -w 95 --continue`). |
@@ -119,6 +120,90 @@ and `nhmmscan`.
 
 ### ENA Webin validation
 
+Every viable assembly/annotation version produces a self-contained ENA
+genome-context candidate package during the sequencing run. The full OceanOmics
+SeqID is retained in the EMBL entry, chromosome list, manifest, and filenames.
+The chromosome-list row uses the reusable chromosome name `MT`:
+
+```text
+OG910.hifi.241127.v3mitohifi.emma102	MT	Circular-Chromosome	Mitochondrion
+```
+
+For the prepared OG111 pilot, restore and stage its matching 2023 Illumina
+lanes, then launch the complete Pawsey run:
+
+```bash
+bin/stage_ena_pilot_input.sh
+./nextflow_run_ena_pilot.sh
+```
+
+Packages are written beneath
+`<outdir>/mitogenomes/OG910/OG910.hifi.241127.v3mitohifi/ena/package/`.
+A missing BioSample or uniform `mean_depth` blocks the manifest while retaining
+the generated sequence, annotation, locus-tag map, hashes, and structured
+blocker.
+
+Apply the ENA migrations after the existing depth and validation migrations:
+
+```bash
+singularity exec \
+  "$MYSOFTWARE/.nextflow_singularity/tylerpeirce-psycopg2-0.1.img" \
+  python bin/apply_ena_migrations.py \
+  --config /home/tpeirce/postgresql_details/oceanomics.cfg
+```
+
+Set `--ena_validate_webin_test true` to test-validate every ready candidate.
+This uses genome context and never submits.
+
+### Per-technology ENA package selection
+
+Run selection after the packages have been published. Every technology with a
+viable mitogenome is published to its own ENA child study, so selection runs
+within a technology: a specimen can be selected once as HiFi, once as Hi-C and
+once as Illumina, but never twice within one of those. Report mode is
+read-only:
+
+```bash
+nextflow run ena_selection.nf -profile singularity \
+  --ena_package_metadata '<outdir>/mitogenomes/OG*/*/ena/package/*.package_metadata.json' \
+  --ena_selection_mode report \
+  --outdir <outdir>
+```
+
+Within a technology, equivalent circular sequences are selected deterministically
+(newest sequencing date wins); distinct passing sequences produce
+`MANUAL_REVIEW_REQUIRED`. Identical sequences in two different technologies are
+both published, since they are separate assemblies from separate data. Resolve
+reviews with a TSV containing `og_id`, `selected_seqid`, `reviewer`, and
+`reason`, one row per specimen per technology; the technology is taken from
+`selected_seqid`, so a specimen may take up to three independent rows:
+
+```bash
+nextflow run ena_selection.nf -profile singularity \
+  --ena_package_metadata '<outdir>/mitogenomes/OG*/*/ena/package/*.package_metadata.json' \
+  --ena_selection_mode apply \
+  --ena_decision_file ena_selection_decisions.tsv \
+  --ena_selected_by tpeirce \
+  --sql_config /path/oceanomics.cfg \
+  --outdir <outdir>
+```
+
+Add `--ena_validate_webin_production true` to validate only applied selected
+packages against production Webin. This still runs `-validate`, never
+`-submit`. Apply mode first refreshes BioSample and uniform `mean_depth` from
+the database and rewrites only the manifest, readiness metadata, and checksums;
+it does not rerun assembly, annotation, or locus allocation. The refresh targets
+the published package recorded in `published_package_path`, not the staged copy
+in the task work directory, so the refreshed manifest is the one a submitter
+later reads.
+
+Apply mode also registers each selection in `ena_submission_selections` at
+`archive_status = 'NOT_SUBMITTED'`, which is what puts it on the
+`ena_submission_queue` view. Submission itself happens in a separate pipeline,
+because specimens stay under embargo long after assembly finishes; see
+[ENA submission handoff](ena_submission_handoff.md) for the contract between the
+two.
+
 ENA conversion runs automatically for samples with no table2asn `ERROR`/`REJECT` or discrepancy-report `FATAL`.
 Warnings remain visible in MultiQC but do not block conversion. To add the credentialed production Webin check:
 
@@ -128,9 +213,12 @@ nextflow secrets set WEBIN_PASSWORD
 
 nextflow run main.nf \
   ... \
-  --ena_webin_validate true \
-  --ena_study PRJEB12345
+  --ena_webin_validate true
 ```
+
+Each candidate's study is resolved from its sequencing technology
+(`--ena_study_hifi` / `--ena_study_hic` / `--ena_study_ilmn`), so no study is
+passed on the command line.
 
 The password is stored in Nextflow's secret store rather than a parameter or params file. The pipeline invokes
 Webin with `-validate` only and never submits records. Individual Webin failures are written to the sample's
@@ -140,8 +228,9 @@ the local table2asn gate and Webin validation.
 ### Standalone ENA conversion and validation
 
 Use `ena.nf` when table2asn or EMBL outputs already exist and the assembly, annotation, and QC stages should not run.
-The runner always performs Webin validation and therefore requires `--ena_study` and the two Webin secrets described
-above.
+The runner always performs Webin validation and therefore requires the two Webin secrets described above. Each row's
+study is resolved from the technology in its `mt_assembly_prefix`, and a row whose technology is not `hifi`, `hic` or
+`ilmn` stops the run rather than being validated against a default study.
 
 To convert table2asn `.gbf` files and then validate them, create a CSV with these columns:
 
@@ -158,7 +247,6 @@ nextflow run ena.nf \
   -profile singularity \
   --ena_mode convert_validate \
   --ena_input ena_gbf_inputs.csv \
-  --ena_study PRJEB123456 \
   --outdir results
 ```
 
@@ -170,12 +258,23 @@ deliberately before enabling this upload, in order:
 ```bash
 psql --dbname oceanomics --file sql/001_create_ena_validation_attempts.sql
 psql --dbname oceanomics --file sql/002_ena_validation_attempts_single_row_per_attempt.sql
+psql --dbname oceanomics --file sql/003_mitogenome_data_uniform_depth.sql
+psql --dbname oceanomics --file sql/004_ena_candidate_packages.sql
+psql --dbname oceanomics --file sql/005_ena_validation_attempts_genome_context.sql
+psql --dbname oceanomics --file sql/006_ena_tech_aware_locus_tags.sql
+psql --dbname oceanomics --file sql/007_insdc_biosample_accessions.sql
+psql --dbname oceanomics --file sql/008_ena_submission_queue.sql
 ```
+
+`bin/apply_ena_migrations.py --config <cfg>` applies the same list in order under an advisory lock
+and audits the schema before and after; `--check-only` reports the current state without changing
+anything.
 
 `ena_validation_attempts` keeps one row per `(assembly_prefix, ena_study, validation_attempt)`.
 Rerunning under the same attempt token overwrites that row rather than adding a new one, so retrying
-a failed submission doesn't pile up history. Once a row's `submission_ready` becomes true it is
-frozen — later reruns under that same token are reported as `locked` and no longer change it. Bump
+a failed validation doesn't pile up history. Once the corresponding selection
+record for that study is marked submitted or accessioned it is frozen; later reruns
+under that same token are reported as `locked` and no longer change it. Bump
 `--ena_validation_attempt` (see below) when you want a genuinely separate, independently tracked attempt.
 
 The PostgreSQL password remains in the protected SQL configuration file and is not written to ENA
@@ -193,7 +292,6 @@ nextflow run ena.nf \
   -profile singularity \
   --ena_mode validate \
   --ena_input ena_embl_inputs.csv \
-  --ena_study PRJEB123456 \
   --outdir results
 ```
 

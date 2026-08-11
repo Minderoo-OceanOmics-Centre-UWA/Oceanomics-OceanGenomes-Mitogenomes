@@ -1,9 +1,9 @@
 -- Collapses ena_validation_attempts to one row per
 -- (assembly_prefix, ena_study, validation_attempt) so pipeline reruns overwrite
 -- the previous attempt instead of appending a new history row every time.
--- push_ena_validation_results.py enforces the other half: once a row reaches
--- submission_ready = true it is frozen and later reruns under the same
--- validation_attempt label no longer overwrite it.
+-- sql/004 plus push_ena_validation_results.py later supersede the original
+-- freeze rule: rows remain overwritable until the corresponding selected
+-- archive record is SUBMITTED or ACCESSION_ASSIGNED.
 --
 -- Run once, manually, the same way as 001_create_ena_validation_attempts.sql.
 -- Connection details are in /home/tpeirce/postgresql_details/oceanomics.cfg (the

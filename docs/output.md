@@ -299,6 +299,24 @@ this entire stage is skipped.
 - `ena/ena_validation_results_mqc.tsv`: batch-level ENA submission-readiness table included in MultiQC.
 - `sql_uploaded_data/<assembly_prefix>.ena_validation.upload.txt`: non-fatal PostgreSQL upload result.
 - `sql_uploaded_data/upload_results_summary_mqc.tsv`: final summary across pre-QC and ENA validation uploads.
+- `mitogenomes/<sample>/<assembly_prefix>/ena/package/`: the complete per-version
+  genome-context candidate, including the full-SeqID EMBL flat file, chromosome
+  list, manifest, tagged TBL, locus-tag mapping, package metadata, local
+  validation result, and checksums. It also holds the collaborator handover pair,
+  `<full_seqid>.fa` and `<full_seqid>.gff`: the GFF carries `locus_tag=` on every
+  taggable feature and its `ID=`/`Parent=` are rebuilt from those tags, so it lines
+  up against the published INSDC record rather than against the annotator's own
+  identifiers. Send this directory, not `genbank/processed/`, whose GFF still keys
+  on Emma's UUIDs. `<full_seqid>.package_metadata.json` reports
+  `gff_locus_tag_coverage` so an untagged feature is visible without opening the
+  file; it never blocks an ENA submission.
+- `mitogenomes/<sample>/<assembly_prefix>/ena/validation/`: Webin test results
+  for candidates and production validation for the package selected for that
+  specimen and technology.
+- `ena/selection/ena_selection_report.tsv`: comparison outcome for all candidate
+  packages, grouped by specimen and technology.
+- `ena/selection/ena_selected_packages.tsv`: one row per selected package, one
+  per specimen per technology.
 
 </details>
 
@@ -320,12 +338,14 @@ When `ena.nf` is used independently, it publishes the same per-sample `genbank/e
 When `--sql_config` is supplied and uploads are not skipped, the standalone runner uses the same uploader and
 emits the same `*.ena_validation.upload.txt` log. `ena_validation_attempts` holds one row per
 `(assembly_prefix, ena_study, validation_attempt)`: a rerun under the same key overwrites that row (`updated`,
-with `attempt_count` incremented) instead of adding history, until the row's `submission_ready` becomes true, at
-which point it is frozen and reported as `locked` on any later rerun so a flaky retry can never clobber a recorded
-success. Use a new `--ena_validation_attempt` token for a deliberately separate, independently tracked attempt.
-The explicit SQL migrations (`sql/001_create_ena_validation_attempts.sql`, then
-`sql/002_ena_validation_attempts_single_row_per_attempt.sql`) create `ena_validation_attempts` and the
-`ena_validation_latest` view. Neither is run automatically by the pipeline.
+with `attempt_count` incremented) instead of adding history. The row freezes
+only when the corresponding selection record for that study is marked
+`SUBMITTED` or `ACCESSION_ASSIGNED`. Use a new `--ena_validation_attempt` token for a
+deliberately separate, independently tracked attempt.
+The explicit numbered SQL migrations in `sql/` create the validation, uniform
+depth, candidate-package, prefix-free locus-registry, and per-technology
+submission-selection structures.
+They are not run automatically by the pipeline.
 
 ### Standalone QC-only workflow (`qc_only_from_annotations.nf`)
 

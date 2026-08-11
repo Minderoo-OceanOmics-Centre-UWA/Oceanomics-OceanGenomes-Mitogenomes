@@ -92,7 +92,7 @@ class PushEnaValidationTests(unittest.TestCase):
             MODULE.upload_record(record, {}, connect=lambda **_kw: connection), "updated"
         )
 
-    def test_conflict_on_submission_ready_attempt_is_locked(self):
+    def test_conflict_on_archived_canonical_is_locked(self):
         with tempfile.TemporaryDirectory() as tmp:
             record = MODULE.read_record(self.make_record(Path(tmp)))
         connection = FakeConnection(row=None)

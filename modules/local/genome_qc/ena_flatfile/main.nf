@@ -21,7 +21,7 @@ process ENA_FLATFILE {
     task.ext.when == null || task.ext.when
 
     script:
-    def prefix = meta.mt_assembly_prefix ?: meta.id
+    def prefix = meta.full_seqid ?: meta.mt_assembly_prefix ?: meta.id
     """
     set +e
     prefix="${prefix}"
@@ -33,6 +33,7 @@ process ENA_FLATFILE {
 
     seqret -auto -feature -sformat genbank -osformat embl -sequence "$gbf" -outseq "\${raw}" > "\${log}" 2>&1
     seqret_rc=\$?
+    postprocess_rc=0
 
     # seqret's GenBank->EMBL conversion has two known gaps for pre-accession
     # organelle submissions, both of which ENA's flatfile validator rejects:
@@ -41,9 +42,79 @@ process ENA_FLATFILE {
         # is blank (true for anything not yet accessioned), but ENA requires the
         # AC block to appear exactly once regardless. Insert the standard
         # not-yet-accessioned placeholder right after the ID block.
-        if ! grep -q '^AC ' "\${raw}"; then
-            awk '/^ID   /{print; print "XX"; print "AC   ;"; next} {print}' "\${raw}" > "\${raw}.tmp" && mv "\${raw}.tmp" "\${raw}"
+        # Both lines are required and they are not interchangeable: "AC   ;" is
+        # the empty AC block webin counts, while "AC * _<entry>" is the separate
+        # entry-name directive. Emitting only the directive leaves the record
+        # with zero AC blocks and webin fails with
+        # "ERROR: Block AC must occur exactly once".
+        awk -v entry="\${prefix}" '
+            /^ID   / {
+                sub(/^ID   [^;]+;/, "ID   " entry ";")
+                print
+                next
+            }
+            /^AC / {
+                if (!seen_ac++) {
+                    print "AC   ;"
+                    print "XX"
+                    print "AC * _" entry
+                }
+                next
+            }
+            index(\$0, "/note=\\"*geo_loc_name: ") {
+                value = \$0
+                sub(/^FT +/, "", value)
+                sub("^/note=\\"[*]geo_loc_name: ", "", value)
+                while (value !~ /"\$/ && (getline continuation) > 0) {
+                    sub(/^FT +/, "", continuation)
+                    value = value " " continuation
+                }
+                sub(/"\$/, "", value)
+                print "FT                   /geo_loc_name=\\"" value "\\""
+                next
+            }
+            {print}
+            END {
+                if (!seen_ac) exit 42
+            }
+        ' "\${raw}" > "\${raw}.tmp"
+        awk_rc=\$?
+        if [ "\${awk_rc}" -eq 42 ]; then
+            # Sentinel: seqret emitted no AC line at all (the usual case for a
+            # blank ACCESSION), so the pass above had nothing to rewrite. Its
+            # output is otherwise complete, so insert the placeholder into that
+            # result -- re-running against "\${raw}" would silently discard the
+            # ID-line and geo_loc_name fixes it just made.
+            awk -v entry="\${prefix}" '/^ID   /{print; print "XX"; print "AC   ;"; print "XX"; print "AC * _" entry; next} {print}' "\${raw}.tmp" > "\${raw}.tmp2"
+            awk_rc=\$?
+            if [ "\${awk_rc}" -eq 0 ]; then
+                mv "\${raw}.tmp2" "\${raw}.tmp"
+            else
+                rm -f "\${raw}.tmp2"
+            fi
         fi
+        if [ "\${awk_rc}" -eq 0 ]; then
+            mv "\${raw}.tmp" "\${raw}"
+        else
+            # Any other non-zero exit means awk died partway (or before reading
+            # anything), leaving a truncated or empty temp file. Keep seqret's
+            # output intact and record the real cause, otherwise the structural
+            # checks below compare against an empty file and misreport this as a
+            # record_structure_mismatch.
+            rm -f "\${raw}.tmp"
+            postprocess_rc=\${awk_rc}
+        fi
+
+        # seqret propagates "SOURCE mitochondrion <organism>" into OS and turns
+        # /geo_loc_name into a wrapped "*geo_loc_name" note. The awk pass above
+        # restores the qualifier; derive OS/DE from /organism so names containing
+        # punctuation never become shell code.
+        organism=\$(grep -m1 '/organism=' "\${raw}" | sed -E 's#.*="([^"]+)".*#\\1#')
+        awk -v organism="\${organism}" '
+            /^OS   / { print "OS   " organism; next }
+            /^DE   / { print "DE   " organism " mitochondrion, complete genome"; next }
+            { print }
+        ' "\${raw}" > "\${raw}.tmp" && mv "\${raw}.tmp" "\${raw}"
 
         # 2. It defaults the ID line's molecule-type token to "unassigned DNA"
         # instead of deriving it from the source feature, leaving it
@@ -64,7 +135,7 @@ process ENA_FLATFILE {
     output_features=\$(grep -Ec '^FT   [^[:space:]]+[[:space:]]' "\${raw}" 2>/dev/null || true)
 
     missing_qualifiers=""
-    for qualifier in organism mol_type organelle gene product transl_table codon_start translation; do
+    for qualifier in organism mol_type organelle gene product transl_table codon_start translation locus_tag geo_loc_name; do
         if grep -q "/\${qualifier}=" "$gbf" && ! grep -q "/\${qualifier}=" "\${raw}"; then
             missing_qualifiers="\${missing_qualifiers}\${missing_qualifiers:+,}\${qualifier}"
         fi
@@ -75,7 +146,7 @@ process ENA_FLATFILE {
     topology_ok=1
     grep -Eq '^FT   source[[:space:]]' "\${raw}" 2>/dev/null && source_ok=1
     grep -q '/organism=' "\${raw}" 2>/dev/null && organism_ok=1
-    if grep -Eq '^LOCUS.*[[:space:]]circular[[:space:]]' "$gbf" && ! grep -Eq '^ID.*; circular;' "\${raw}" 2>/dev/null; then
+    if grep -Eq '^LOCUS.*[[:space:]]circular([[:space:]]|\$)' "$gbf" && ! grep -Eq '^ID.*; circular;' "\${raw}" 2>/dev/null; then
         topology_ok=0
     fi
 
@@ -84,6 +155,9 @@ process ENA_FLATFILE {
     if [ "\${seqret_rc}" -ne 0 ]; then
         conversion_status="FAIL_CONVERSION"
         reason="seqret_exit_\${seqret_rc}"
+    elif [ "\${postprocess_rc}" -ne 0 ]; then
+        conversion_status="FAIL_CONVERSION"
+        reason="embl_postprocess_exit_\${postprocess_rc}"
     elif [ "\${input_records}" -lt 1 ] || [ "\${input_records}" -ne "\${output_records}" ] || [ "\${output_records}" -ne "\${terminators}" ]; then
         conversion_status="FAIL_CONVERSION"
         reason="record_structure_mismatch"
@@ -120,7 +194,7 @@ process ENA_FLATFILE {
     """
 
     stub:
-    def prefix = meta.mt_assembly_prefix ?: meta.id ?: 'stub'
+    def prefix = meta.full_seqid ?: meta.mt_assembly_prefix ?: meta.id ?: 'stub'
     """
     : > ${prefix}.embl
     gzip -n -k ${prefix}.embl

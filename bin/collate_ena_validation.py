@@ -7,6 +7,7 @@ import argparse
 import csv
 import glob
 import hashlib
+import json
 from pathlib import Path
 
 
@@ -19,6 +20,10 @@ RECORD_COLUMNS = [
     "conversion_status", "conversion_reason", "conversion_exit",
     "preflight_status", "preflight_reason", "preflight_exit",
     "webin_status", "webin_reason", "webin_exit", "submission_ready",
+    "package_status", "local_package_status", "webin_test_status",
+    "webin_production_status", "webin_error_count", "webin_warning_count",
+    "webin_error_codes", "webin_cli_version", "webin_test_report_path",
+    "webin_production_report_path", "overall_status", "package_digest",
     "flatfile_name", "flatfile_sha256", "flatfile_size",
     "manifest_name", "manifest_sha256", "manifest_size",
     "workflow_run_name", "workflow_session_id", "pipeline_revision",
@@ -29,6 +34,8 @@ MQC_COLUMNS = [
     "assembly_prefix", "og_id", "validation_mode", "ena_study",
     "table2asn_status", "conversion_status", "preflight_status",
     "webin_status", "webin_reason", "submission_ready",
+    "package_status", "local_package_status", "webin_test_status",
+    "webin_production_status", "overall_status",
     "validation_attempt",
 ]
 
@@ -95,6 +102,10 @@ def build_record(
     preflight_path = _first(input_paths, ".ena_preflight_status.tsv")
     preflight_check_path = _first(input_paths, ".ena_preflight_check.tsv")
     webin_path = _first(input_paths, ".webin_status.tsv")
+    webin_test_path = _first(input_paths, ".webin_test_status.tsv")
+    webin_production_path = _first(input_paths, ".webin_production_status.tsv")
+    local_package_path = _first(input_paths, ".local_validation.tsv")
+    package_metadata_path = _first(input_paths, ".package_metadata.json")
     flatfile_path = next((p for p in input_paths if p.name.endswith(".embl.gz")), None)
     manifest_path = _first(input_paths, ".webin_manifest.txt")
 
@@ -103,6 +114,15 @@ def build_record(
     preflight = read_status(preflight_path) if preflight_path else {}
     preflight_check = read_tsv_row(preflight_check_path) if preflight_check_path else {}
     webin = read_status(webin_path) if webin_path else {}
+    webin_test = read_status(webin_test_path) if webin_test_path else {}
+    webin_production = read_status(webin_production_path) if webin_production_path else {}
+    local_package = read_status(local_package_path) if local_package_path else {}
+    package_metadata = {}
+    if package_metadata_path:
+        try:
+            package_metadata = json.loads(package_metadata_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            package_metadata = {}
 
     if validation_mode == "validate":
         table_status = "NOT_APPLICABLE"
@@ -149,7 +169,31 @@ def build_record(
         preflight_status == "PASS" if validation_mode == "validate"
         else table_status == "PASS" and conversion_status == "PASS"
     )
-    ready = "true" if gates_pass and webin_status == "PASS" else "false"
+    package_status = str(package_metadata.get("package_status") or "NOT_RUN")
+    local_package_status = local_package.get(
+        "status", str(package_metadata.get("local_validation_status") or "NOT_RUN")
+    )
+    webin_test_status = webin_test.get("status", "NOT_RUN")
+    webin_production_status = webin_production.get("status", "NOT_RUN")
+    # Selection for submission is deliberately decided outside this per-candidate
+    # collator, so a candidate can never become submission-ready here.
+    ready = "false"
+    if webin_production_status == "PASS":
+        overall_status = "PRODUCTION_VALIDATED"
+    elif webin_production_status not in {"NOT_RUN", "NOT_REQUESTED"}:
+        overall_status = webin_production_status
+    elif webin_test_status == "PASS":
+        overall_status = "WEBIN_TEST_PASS"
+    elif webin_test_status not in {"NOT_RUN", "NOT_REQUESTED"}:
+        overall_status = webin_test_status
+    elif package_status == "READY" and local_package_status == "PASS":
+        overall_status = "LOCAL_PACKAGE_READY"
+    elif package_status != "NOT_RUN":
+        overall_status = package_status
+    elif gates_pass and webin_status == "PASS":
+        overall_status = "LEGACY_SEQUENCE_VALIDATED"
+    else:
+        overall_status = "NOT_RUN"
 
     record = {column: "" for column in RECORD_COLUMNS}
     record.update({
@@ -180,6 +224,26 @@ def build_record(
         "webin_reason": webin_reason,
         "webin_exit": webin.get("webin_exit", ""),
         "submission_ready": ready,
+        "package_status": package_status,
+        "local_package_status": local_package_status,
+        "webin_test_status": webin_test_status,
+        "webin_production_status": webin_production_status,
+        "webin_error_count": webin_production.get(
+            "error_count", webin_test.get("error_count", "")
+        ),
+        "webin_warning_count": webin_production.get(
+            "warning_count", webin_test.get("warning_count", "")
+        ),
+        "webin_error_codes": webin_production.get(
+            "error_codes", webin_test.get("error_codes", "")
+        ),
+        "webin_cli_version": webin_production.get(
+            "webin_cli_version", webin_test.get("webin_cli_version", "")
+        ),
+        "webin_test_report_path": webin_test.get("report_path", ""),
+        "webin_production_report_path": webin_production.get("report_path", ""),
+        "overall_status": overall_status,
+        "package_digest": str(package_metadata.get("package_digest") or ""),
         "flatfile_name": flat_name,
         "flatfile_sha256": flat_hash,
         "flatfile_size": flat_size,

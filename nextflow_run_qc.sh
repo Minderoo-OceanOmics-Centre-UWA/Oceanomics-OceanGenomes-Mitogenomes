@@ -7,6 +7,5 @@ nextflow run qc_only_from_annotations.nf \
   --sql_config ~/postgresql_details/oceanomics.cfg \
   --template_sbt "bin/template.sbt" \
   --outdir "$(realpath ../qc_outdir)" \
-  --ena_webin_validate true \
-  --ena_study "PRJEB110568" \
+  --ena_validate_webin_test true \
   --ena_validation_attempt "initial"

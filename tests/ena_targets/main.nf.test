@@ -1,0 +1,91 @@
+nextflow_workflow {
+    name "Per-technology ENA study and locus-tag prefix resolution"
+    script "./main.nf"
+    workflow "ENA_TARGETS"
+
+    test("each technology resolves to its own child study and prefix") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [id: 'OG910', sequencing_type: 'hifi', full_seqid: 'OG910.hifi.250101.v3mitohifi.emma102'],
+                    [id: 'OG910', sequencing_type: 'hic', full_seqid: 'OG910.hic.250101.getorg1770.emma102'],
+                    [id: 'OG910', sequencing_type: 'ilmn', full_seqid: 'OG910.ilmn.250101.getorg1770.emma102']
+                )
+                """
+            }
+        }
+
+        then {
+            def resolved = workflow.out.resolved.collectEntries { [(it.sequencing_type): it] }
+            assertAll(
+                { assert workflow.success },
+                { assert resolved.hifi.ena_study == 'PRJEB123419' },
+                { assert resolved.hic.ena_study == 'PRJEB123420' },
+                { assert resolved.ilmn.ena_study == 'PRJEB123421' },
+                { assert resolved.hifi.ena_locus_prefix == 'OGMTHIFI' },
+                { assert resolved.hic.ena_locus_prefix == 'OGMTHIC' },
+                { assert resolved.ilmn.ena_locus_prefix == 'OGMTILMN' },
+                // Three studies, three prefixes: no two technologies may share
+                // either, or one is submitted under the other's namespace.
+                { assert resolved.values().collect { it.ena_study }.unique().size() == 3 },
+                { assert resolved.values().collect { it.ena_locus_prefix }.unique().size() == 3 }
+            )
+        }
+    }
+
+    test("technology is recovered from the SeqID when meta has none") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [id: 'OG910', mt_assembly_prefix: 'OG910.hic.250101.getorg1770']
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.resolved[0].ena_study == 'PRJEB123420' },
+                { assert workflow.out.resolved[0].ena_locus_prefix == 'OGMTHIC' }
+            )
+        }
+    }
+
+    test("an unknown technology stops the run instead of defaulting") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [id: 'OG910', sequencing_type: 'ont', full_seqid: 'OG910.ont.250101.flye.emma102']
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.failed },
+                { assert workflow.errorReport.contains('not one of hifi, hic, ilmn') }
+            )
+        }
+    }
+
+    test("a technology with trailing whitespace is rejected, not repaired") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [id: 'OG910', sequencing_type: 'hifi ', full_seqid: 'OG910.hifi.250101.v3mitohifi.emma102']
+                )
+                """
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+}

@@ -22,7 +22,7 @@ process GEN_FILES_TABLE2ASN {
     task.ext.when == null || task.ext.when
 
     script:
-    def sample_out = "${meta.mt_assembly_prefix}.sqn"
+    def sample_out = "${meta.full_seqid ?: meta.mt_assembly_prefix}.sqn"
     def topology_mod = (circular?.toString()?.trim() == 'true') ? '[topology=circular] [completeness=complete]' : '[topology=linear]'
     def mgcode = meta.genetic_code ?: 2
     def effective_args = "-indir . -euk -J -t ${sample_sbt} -i ${sample_fa} -f ${sample_tbl} -w ${sample_cmt} -src-file ${sample_src} -o ${sample_out} -M n -j '[mgcode=${mgcode}] [location=mitochondrion] ${topology_mod}' -V vb -Z -W"
@@ -49,10 +49,10 @@ process GEN_FILES_TABLE2ASN {
     for f in *.val; do [ -e "\$f" ] && { val_file="\$f"; break; }; done
     dr_file=""
     for f in *.dr; do [ -e "\$f" ] && { dr_file="\$f"; break; }; done
-    [ -n "\${val_file}" ] && [ "\${val_file}" != "${meta.mt_assembly_prefix}.val" ] && cp "\${val_file}" "${meta.mt_assembly_prefix}.val"
-    [ -e "${meta.mt_assembly_prefix}.val" ] || touch "${meta.mt_assembly_prefix}.val"
-    [ -n "\${dr_file}" ] && [ "\${dr_file}" != "${meta.mt_assembly_prefix}.dr" ] && cp "\${dr_file}" "${meta.mt_assembly_prefix}.dr"
-    [ -e "${meta.mt_assembly_prefix}.dr" ] || touch "${meta.mt_assembly_prefix}.dr"
+    [ -n "\${val_file}" ] && [ "\${val_file}" != "${meta.full_seqid ?: meta.mt_assembly_prefix}.val" ] && cp "\${val_file}" "${meta.full_seqid ?: meta.mt_assembly_prefix}.val"
+    [ -e "${meta.full_seqid ?: meta.mt_assembly_prefix}.val" ] || touch "${meta.full_seqid ?: meta.mt_assembly_prefix}.val"
+    [ -n "\${dr_file}" ] && [ "\${dr_file}" != "${meta.full_seqid ?: meta.mt_assembly_prefix}.dr" ] && cp "\${dr_file}" "${meta.full_seqid ?: meta.mt_assembly_prefix}.dr"
+    [ -e "${meta.full_seqid ?: meta.mt_assembly_prefix}.dr" ] || touch "${meta.full_seqid ?: meta.mt_assembly_prefix}.dr"
 
     printf '%s\n' '<tr><td>Table2ASN</td><td><samp>${effective_args}</samp></td><td>Generates GenBank files and non-fatal per-sample validation reports for ${meta.id}.</td></tr>' > 19_table2asn.tool_params_mqcrow.html
     table2asn_version=\$(table2asn -version 2>&1 | head -1 | sed 's/.* //')
@@ -60,7 +60,7 @@ process GEN_FILES_TABLE2ASN {
     """
 
     stub:
-    def sample_out = "${meta.mt_assembly_prefix ?: (meta.id ?: 'stub')}.sqn"
+    def sample_out = "${meta.full_seqid ?: meta.mt_assembly_prefix ?: (meta.id ?: 'stub')}.sqn"
     def topology_mod = (circular?.toString()?.trim() == 'true') ? '[topology=circular] [completeness=complete]' : '[topology=linear]'
     def mgcode = meta.genetic_code ?: 2
     def effective_args = "-indir . -euk -J -t ${sample_sbt} -i ${sample_fa} -f ${sample_tbl} -w ${sample_cmt} -src-file ${sample_src} -o ${sample_out} -M n -j '[mgcode=${mgcode}] [location=mitochondrion] ${topology_mod}' -V vb -Z -W"

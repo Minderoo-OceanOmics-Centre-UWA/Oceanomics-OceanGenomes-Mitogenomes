@@ -1,0 +1,23 @@
+name: allocate_ena_locus_tags
+description: Allocate stable OG-derived ENA locus tags and inject them into an NCBI feature table.
+keywords: [ena, locus-tag, mitochondrion]
+tools:
+  - python:
+      description: Python
+input:
+  - processed:
+      type: tuple
+      description: Metadata, processed FASTA and processed feature table.
+  - db_config:
+      type: file
+      description: PostgreSQL INI configuration.
+  - locus_prefix:
+      type: string
+      description: Registered INSDC locus-tag prefix.
+output:
+  - tagged_tbl:
+      type: file
+      pattern: "tagged/*.tbl"
+  - mapping:
+      type: file
+      pattern: "*.locus_tag_mapping.tsv"

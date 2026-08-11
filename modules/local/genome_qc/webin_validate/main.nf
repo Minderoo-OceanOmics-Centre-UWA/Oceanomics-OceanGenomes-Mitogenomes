@@ -9,7 +9,6 @@ process WEBIN_VALIDATE {
 
     input:
     tuple val(meta), path(embl_file)
-    val ena_study
     val validation_attempt
 
     output:
@@ -26,6 +25,11 @@ process WEBIN_VALIDATE {
 
     script:
     def prefix = meta.mt_assembly_prefix ?: meta.id
+    // Per-technology child study, resolved from the candidate by EnaTargets.
+    def ena_study = meta.ena_study?.toString()?.trim()
+    if (!ena_study) {
+        error "meta.ena_study is not set for ${meta.id}: cannot build a Webin manifest"
+    }
     """
     set +e
     prefix="${prefix}"
@@ -46,8 +50,8 @@ process WEBIN_VALIDATE {
         -manifest "\${manifest}" \\
         -inputDir . \\
         -outputDir webin_output \\
-        -username "\$WEBIN_USERNAME" \\
-        -password "\$WEBIN_PASSWORD" \\
+        -userName "\$WEBIN_USERNAME" \\
+        -passwordEnv WEBIN_PASSWORD \\
         -validate > "\${log_file}" 2>&1
     webin_rc=\$?
 
@@ -78,7 +82,7 @@ process WEBIN_VALIDATE {
     """
     mkdir -p validated webin_output
     cp "$embl_file" validated/
-    printf 'STUDY\t%s\nNAME\t%s\nFLATFILE\t%s\n' "${ena_study}" "${prefix}" "${embl_file.name}" > ${prefix}.webin_manifest.txt
+    printf 'STUDY\t%s\nNAME\t%s\nFLATFILE\t%s\n' "${meta.ena_study}" "${prefix}" "${embl_file.name}" > ${prefix}.webin_manifest.txt
     printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\n%s\tPASS\tvalidated\t0\t%s\n' "${prefix}" "${validation_attempt}" > ${prefix}.webin_status.tsv
     printf 'Stub Webin validation passed\n' > ${prefix}.webin_validate.log
     printf 'PASS\n' > webin_output/validation.txt

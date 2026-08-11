@@ -1,0 +1,38 @@
+name: select_ena_submission
+description: Compare completed ENA candidate packages per OG specimen and technology, and report or record the package selected for submission
+keywords:
+  - ena
+  - mitogenome
+  - submission
+tools:
+  - select_ena_submission:
+      description: OceanOmics per-technology mitogenome submission selector
+input:
+  - package_metadata:
+      type: file
+      description: Collected candidate package metadata JSON files
+  - selection_mode:
+      type: string
+      description: report or apply
+  - decision_file:
+      type: file
+      description: Optional reviewed manual decisions TSV
+  - db_config:
+      type: file
+      description: PostgreSQL configuration, required in apply mode
+  - selected_by:
+      type: string
+      description: Person or process recording the selection
+output:
+  - report:
+      type: file
+      description: All candidate comparisons and selection outcomes
+      pattern: ena_selection_report.tsv
+  - selected:
+      type: file
+      description: One row per automatically or manually selected package, one per specimen per technology
+      pattern: ena_selected_packages.tsv
+  - versions:
+      type: file
+      description: Software versions
+      pattern: versions.yml

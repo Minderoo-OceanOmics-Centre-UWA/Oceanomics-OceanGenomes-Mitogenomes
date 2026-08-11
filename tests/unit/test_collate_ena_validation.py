@@ -69,8 +69,9 @@ class CollateEnaValidationTests(unittest.TestCase):
         manifest = self.root / f"{self.prefix}.webin_manifest.txt"
         manifest.write_text("STUDY\tPRJEB1\n")
         record = self.build([self.table(), self.conversion(), self.webin(), flatfile, manifest])
-        self.assertEqual(record["submission_ready"], "true")
+        self.assertEqual(record["submission_ready"], "false")
         self.assertEqual(record["webin_status"], "PASS")
+        self.assertEqual(record["overall_status"], "LEGACY_SEQUENCE_VALIDATED")
         self.assertEqual(len(record["flatfile_sha256"]), 64)
         self.assertNotIn(str(self.root), record["flatfile_name"])
 

@@ -20,6 +20,7 @@ INTEGER_COLUMNS = {
     "reject_count", "error_count", "warning_count", "info_count",
     "fatal_discrepancy_count", "nostop_count", "conversion_exit",
     "preflight_exit", "webin_exit", "flatfile_size", "manifest_size",
+    "webin_error_count", "webin_warning_count",
 }
 
 INSERT_COLUMNS = [
@@ -30,6 +31,10 @@ INSERT_COLUMNS = [
     "conversion_status", "conversion_reason", "conversion_exit",
     "preflight_status", "preflight_reason", "preflight_exit", "webin_status",
     "webin_reason", "webin_exit", "submission_ready", "flatfile_name",
+    "package_status", "local_package_status", "webin_test_status",
+    "webin_production_status", "webin_error_count", "webin_warning_count",
+    "webin_error_codes", "webin_cli_version", "webin_test_report_path",
+    "webin_production_report_path", "overall_status", "package_digest",
     "flatfile_sha256", "flatfile_size", "manifest_name", "manifest_sha256",
     "manifest_size", "workflow_run_name", "workflow_session_id",
     "pipeline_revision", "result_digest",
@@ -87,13 +92,12 @@ def upload_record(record: dict[str, object], db_config: dict[str, object], conne
     """Insert or overwrite the row for this (assembly_prefix, ena_study, validation_attempt).
 
     A rerun under the same key overwrites the previous attempt so failed
-    attempts don't pile up history rows. Once a row's submission_ready is
-    true it is frozen: the WHERE clause on the DO UPDATE skips the overwrite,
-    so a later failing rerun can never clobber a recorded success.
+    attempts don't pile up history rows. Rows freeze only after the associated
+    selected package for that study is explicitly submitted or assigned an accession.
 
     Returns "inserted" (first row for this key), "updated" (overwrote a
-    not-yet-ready attempt), or "locked" (a submission-ready row already
-    exists and was left untouched).
+    non-archived attempt), or "locked" (the selected package is already
+    submitted/accessioned and the row was left untouched).
     """
     connect = connect or (psycopg2.connect if psycopg2 is not None else None)
     if connect is None:
@@ -110,7 +114,13 @@ def upload_record(record: dict[str, object], db_config: dict[str, object], conne
             {set_clause},
             recorded_at = CURRENT_TIMESTAMP,
             attempt_count = ena_validation_attempts.attempt_count + 1
-        WHERE ena_validation_attempts.submission_ready = FALSE
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM ena_submission_selections selection
+            WHERE selection.ena_study_accession = EXCLUDED.ena_study
+              AND selection.og_id = EXCLUDED.og_id
+              AND selection.archive_status IN ('SUBMITTED', 'ACCESSION_ASSIGNED')
+        )
         RETURNING id, (xmax = 0) AS inserted
     """
     connection = connect(**db_config)

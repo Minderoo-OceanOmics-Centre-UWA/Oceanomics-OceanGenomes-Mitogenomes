@@ -259,12 +259,78 @@
                 },
                 "ena_webin_validate": {
                     "type": "boolean",
-                    "description": "Validate passing ENA EMBL flat files with Webin-CLI. Requires ena_study and the WEBIN_USERNAME/WEBIN_PASSWORD Nextflow secrets."
+                    "default": false,
+                    "description": "Deprecated compatibility flag. Prefer ena_validate_webin_test or ena_validate_webin_production."
                 },
-                "ena_study": {
+                "ena_validate_webin_test": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Validate ready genome-context candidate packages against the Webin test service."
+                },
+                "ena_validate_webin_production": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Validate the selected package against production Webin without submitting it."
+                },
+                "ena_study_hifi": {
+                    "type": "string",
+                    "default": "PRJEB123419",
+                    "pattern": "^PRJEB[0-9]+$",
+                    "description": "ENA child study for HiFi candidates. The umbrella PRJEB110568 cannot receive data."
+                },
+                "ena_study_hic": {
+                    "type": "string",
+                    "default": "PRJEB123420",
+                    "pattern": "^PRJEB[0-9]+$",
+                    "description": "ENA child study for Hi-C candidates."
+                },
+                "ena_study_ilmn": {
+                    "type": "string",
+                    "default": "PRJEB123421",
+                    "pattern": "^PRJEB[0-9]+$",
+                    "description": "ENA child study for Illumina candidates."
+                },
+                "ena_locus_prefix_hifi": {
+                    "type": "string",
+                    "default": "OGMTHIFI",
+                    "pattern": "^[A-Z][A-Z0-9]{2,11}$",
+                    "description": "INSDC locus-tag prefix registered to the HiFi study. Tags render as OGMTHIFI_000910001."
+                },
+                "ena_locus_prefix_hic": {
+                    "type": "string",
+                    "default": "OGMTHIC",
+                    "pattern": "^[A-Z][A-Z0-9]{2,11}$",
+                    "description": "INSDC locus-tag prefix registered to the Hi-C study. Tags render as OGMTHIC_000910001."
+                },
+                "ena_locus_prefix_ilmn": {
+                    "type": "string",
+                    "default": "OGMTILMN",
+                    "pattern": "^[A-Z][A-Z0-9]{2,11}$",
+                    "description": "INSDC locus-tag prefix registered to the Illumina study. Tags render as OGMTILMN_000910001."
+                },
+                "ena_selection_mode": {
+                    "type": "string",
+                    "default": "report",
+                    "enum": ["report", "apply"],
+                    "description": "Per-technology package selection mode. Report is read-only; apply writes reviewed decisions."
+                },
+                "ena_decision_file": {
                     "type": "string",
                     "default": null,
-                    "description": "ENA study accession or alias used in per-sample targeted-sequence manifests."
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Optional reviewed TSV containing og_id, selected_seqid, reviewer and reason. One row per specimen per technology; the technology is taken from selected_seqid."
+                },
+                "ena_selected_by": {
+                    "type": "string",
+                    "default": "pipeline",
+                    "minLength": 1,
+                    "description": "Operator or workflow identity recorded when selections are applied."
+                },
+                "ena_package_metadata": {
+                    "type": "string",
+                    "default": null,
+                    "description": "Glob matching published *.package_metadata.json files for ena_selection.nf."
                 },
                 "ena_mode": {
                     "type": "string",

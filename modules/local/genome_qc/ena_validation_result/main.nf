@@ -19,13 +19,16 @@ process ENA_VALIDATION_RESULT {
 
     script:
     def webin_arg = settings.webin_requested ? '--webin-requested' : ''
+    // Study is per candidate (one ENA child study per technology), so it comes
+    // from meta rather than the run-level settings map.
+    def ena_study = meta.ena_study?.toString()?.trim() ?: ''
     """
     collate_ena_validation.py record \\
         --input 'validation_inputs/*' \\
         --output '${meta.mt_assembly_prefix}.ena_validation_result.tsv' \\
         --assembly-prefix '${meta.mt_assembly_prefix}' \\
         --og-id '${meta.id}' \\
-        --ena-study '${settings.ena_study ?: ''}' \\
+        --ena-study '${ena_study}' \\
         --validation-mode '${settings.validation_mode}' \\
         --validation-attempt '${settings.validation_attempt}' \\
         ${webin_arg} \\
@@ -40,7 +43,7 @@ process ENA_VALIDATION_RESULT {
     stub:
     """
     printf 'assembly_prefix\tog_id\ttech\tseq_date\tcode\tena_study\tvalidation_mode\tvalidation_attempt\ttable2asn_status\treject_count\terror_count\twarning_count\tinfo_count\tfatal_discrepancy_count\tnostop_count\tblocking_codes\twarning_codes\tconversion_status\tconversion_reason\tconversion_exit\tpreflight_status\tpreflight_reason\tpreflight_exit\twebin_status\twebin_reason\twebin_exit\tsubmission_ready\tflatfile_name\tflatfile_sha256\tflatfile_size\tmanifest_name\tmanifest_sha256\tmanifest_size\tworkflow_run_name\tworkflow_session_id\tpipeline_revision\tresult_digest\n' > '${meta.mt_assembly_prefix}.ena_validation_result.tsv'
-    printf '${meta.mt_assembly_prefix}\t${meta.id}\t\t\t\t${settings.ena_study ?: ''}\t${settings.validation_mode}\t${settings.validation_attempt}\tPASS\t0\t0\t0\t0\t0\t0\t\t\tPASS\tok\t0\tNOT_APPLICABLE\tnot_applicable\t\tPASS\tvalidated\t0\ttrue\tstub.embl.gz\tstub\t1\tstub.webin_manifest.txt\tstub\t1\tstub\tstub\tstub\tstub\n' >> '${meta.mt_assembly_prefix}.ena_validation_result.tsv'
+    printf '${meta.mt_assembly_prefix}\t${meta.id}\t\t\t\t${meta.ena_study ?: ''}\t${settings.validation_mode}\t${settings.validation_attempt}\tPASS\t0\t0\t0\t0\t0\t0\t\t\tPASS\tok\t0\tNOT_APPLICABLE\tnot_applicable\t\tPASS\tvalidated\t0\ttrue\tstub.embl.gz\tstub\t1\tstub.webin_manifest.txt\tstub\t1\tstub\tstub\tstub\tstub\n' >> '${meta.mt_assembly_prefix}.ena_validation_result.tsv'
     printf '"%s":\n    python: "stub"\n    collate_ena_validation: "stub"\n' "${task.process}" > versions.yml
     """
 }
