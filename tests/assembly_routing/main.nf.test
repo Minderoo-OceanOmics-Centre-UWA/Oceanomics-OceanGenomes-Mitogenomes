@@ -81,33 +81,41 @@ nextflow_workflow {
     config "./nextflow.config"
     workflow "UPLOAD_SELECTION"
 
-    test("canonical final replaces one raw variant without dropping history") {
+    test("the first-pass variant is excluded and the rest keep their history") {
         when {
             workflow {
                 """
+                // Three GetOrganelle variants for one sample. Every row carries the SAMPLE-level
+                // mt_assembly_prefix; the variant suffix is in the key, which is the FASTA
+                // basename. The checked variant here is the _rgj one.
                 input[0] = Channel.of(
-                    [[id: 'OG1', mt_assembly_prefix: 'OG1.first'], 'raw-first.fa', 'first.log'],
-                    [[id: 'OG1', mt_assembly_prefix: 'OG1.reseed'], 'raw-reseed.fa', 'reseed.log'],
-                    [[id: 'OG1', mt_assembly_prefix: 'OG1.rgj'], 'raw-rgj.fa', 'rgj.log']
+                    ['OG1.getorg1770',           [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-first.fa',  'first.log'],
+                    ['OG1.getorg1770reseed',     [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-reseed.fa', 'reseed.log'],
+                    ['OG1.getorg1770reseed_rgj', [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-rgj.fa',    'rgj.log']
                 )
                 input[1] = Channel.of(
-                    [[id: 'OG1', mt_assembly_prefix: 'OG1.rgj', circular: true], 'curated-rgj.fa', 'rgj.log'],
-                    [[id: 'OG2', mt_assembly_prefix: 'OG2.oatk'], 'oatk.fa', 'oatk.log']
+                    ['OG1.getorg1770', 'OG1.getorg1770reseed_rgj', true]
                 )
                 """
             }
         }
         then {
-            def results = workflow.out.results
+            def results = workflow.out.results.collect { it instanceof String ? evaluate(it) : it }
             assertAll(
                 { assert workflow.success },
-                { assert results.size() == 4 },
-                { assert results.count { it[0].mt_assembly_prefix == 'OG1.rgj' } == 1 },
-                { assert results.find { it[0].mt_assembly_prefix == 'OG1.rgj' }[1] == 'curated-rgj.fa' },
-                { assert results.find { it[0].mt_assembly_prefix == 'OG1.rgj' }[0].circular },
-                { assert results.any { it[0].mt_assembly_prefix == 'OG1.first' && it[1] == 'raw-first.fa' } },
-                { assert results.any { it[0].mt_assembly_prefix == 'OG1.reseed' && it[1] == 'raw-reseed.fa' } },
-                { assert results.any { it[0].mt_assembly_prefix == 'OG2.oatk' } }
+                // The first-pass row is dropped: its prefix equals the sample prefix, which is
+                // the key the parent workflow's canonical row carries. Emitting it would put a
+                // duplicate into mtdna_assembly, which is what the removed groupTuple used to
+                // prevent at the cost of a whole-run barrier.
+                { assert results.size() == 2 },
+                { assert !results.any { it[0].mt_assembly_prefix == 'OG1.getorg1770' } },
+                // Provenance history is preserved, each exactly once, with its own FASTA.
+                { assert results.count { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed' } == 1 },
+                { assert results.find { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed' }[1] == 'raw-reseed.fa' },
+                { assert results.find { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed_rgj' }[1] == 'raw-rgj.fa' },
+                // The corrected circular verdict lands only on the variant that was checked.
+                { assert results.find { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed_rgj' }[0].circular },
+                { assert results.find { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed' }[0].circular == null }
             )
         }
     }

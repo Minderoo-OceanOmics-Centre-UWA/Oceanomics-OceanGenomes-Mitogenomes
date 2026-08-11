@@ -31,6 +31,34 @@ def getAnnotationName(filename) {
     return parts.size() > 1 ? parts[1] : name
 }
 
+// How many of CO1 / 12S / 16S an annotation bundle yielded, i.e. how many items
+// this sample contributes to ch_annot_co1/s12/s16 and therefore how many BLAST
+// and LCA tasks it will spawn (0-3).
+//
+// This count is what lets upload_results_mito size each sample's result group
+// with groupKey() and release the sample as soon as its own regions are done,
+// instead of waiting for every LCA in the run to finish. It is derived from the
+// annotation bundle rather than emitted by the annotators so that EMMA / MITOS2 /
+// CORAL_ANNOTATION_FIX task hashes are untouched and -resume still works.
+//
+// Counts matched globs, not files: the annotators declare
+// `path("annotation/cds/*CO1*.fa")`, which emits a single channel item even in
+// the (unseen so far) case of a glob matching more than one file.
+def countAnnotatedRegions(files) {
+    try {
+        def bundle = (files instanceof List) ? files : [files]
+        def cds = bundle.find { it.name == 'cds' && it.isDirectory() }
+        if (!cds) return 0
+        def names = []
+        cds.eachFile { names << it.name }
+        return ['CO1', 'RNR1', 'RNR2'].count { region ->
+            names.any { it.endsWith('.fa') && it.contains(region) }
+        }
+    } catch (ignored) {
+        return 0
+    }
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MITOGENOME ANNOTATION AND LCA WORKFLOW
@@ -203,6 +231,12 @@ workflow MITOGENOME_ANNOTATION {
     ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, CORAL_ANNOTATION_FIX.out.s12_sequences)
     ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, CORAL_ANNOTATION_FIX.out.s16_sequences)
     ch_annot_results = EMMA.out.results.mix(ch_mitos_results_pass, CORAL_ANNOTATION_FIX.out.results)
+
+    // Per-sample region count, emitted once per annotated sample (including the
+    // 0-region case). Downstream this both sizes the result groups and identifies
+    // the samples that will never reach BLAST/LCA at all.
+    ch_annot_region_counts = ch_annot_results
+        .map { meta, files -> [ meta, countAnnotatedRegions(files) ] }
     ch_annot_params  = EMMA.out.tool_params.mix(ROTATE_ORIGIN.out.tool_params, MITOS2.out.tool_params, CORAL_ANNOTATION_FIX.out.tool_params)
     ch_annot_versions = EMMA.out.versions.mix(ROTATE_ORIGIN.out.versions, MITOS2.out.versions,
                                               ANNOTATION_QC_GATE.out.versions, CORAL_ANNOTATION_FIX.out.versions,
@@ -315,6 +349,7 @@ workflow MITOGENOME_ANNOTATION {
     blast_filtered_results  = BLAST_BLASTN.out.validation
     lca_results             = LCA.out.lca
     lca_raw_results         = LCA.out.lca_raw
+    region_counts           = ch_annot_region_counts   // channel: [ val(meta), val(0..3) ]
     reference_relevance     = ch_reference_relevance   // channel: [ meta, path(reference_relevance.txt) ] (PASS|MISMATCH|UNKNOWN)
     versions                = ch_versions              // channel: [ path(versions.yml) ]
 }

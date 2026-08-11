@@ -1,0 +1,73 @@
+nextflow_workflow {
+    name "The reference join survives a meta whose shape changed"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "REFERENCE_JOIN"
+
+    test("reads join their reference when the process hands the meta back intact") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [
+                        [ id: 'OGSINGLE', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGSINGLE.hifi.250101', family: [] ],
+                        [ file("\${projectDir}/tests/test_data/read_preparation/OGSINGLE.hifi.250101.fastq.gz", checkIfExists: true) ]
+                    ],
+                    [
+                        [ id: 'OGSOLO', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGSOLO.hifi.250101', family: [] ],
+                        [ file("\${projectDir}/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz", checkIfExists: true) ]
+                    ]
+                )
+                """
+            }
+        }
+        then {
+            def ids = workflow.out.marker.collect { meta, _marker -> meta.id }
+            assertAll(
+                { assert workflow.success },
+                { assert ids.toSorted() == ['OGSINGLE', 'OGSOLO'] }
+            )
+        }
+    }
+
+    test("reads still join their reference when the returned meta has lost a key") {
+        when {
+            params {
+                // The exact regression: schema_input.json gained an optional `family`
+                // column, nf-schema put `family: []` in every live meta, the task hash did
+                // not change so findMitoReference resumed from a cache written before the
+                // column existed, and the meta it handed back had no `family` key. A join
+                // keyed on the whole meta map matched zero of 78 samples and every HiFi
+                // assembly stopped without a word.
+                drop_meta_key = 'family'
+            }
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [
+                        [ id: 'OGSINGLE', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGSINGLE.hifi.250101', family: [] ],
+                        [ file("\${projectDir}/tests/test_data/read_preparation/OGSINGLE.hifi.250101.fastq.gz", checkIfExists: true) ]
+                    ],
+                    [
+                        [ id: 'OGSOLO', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGSOLO.hifi.250101', family: [] ],
+                        [ file("\${projectDir}/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz", checkIfExists: true) ]
+                    ]
+                )
+                """
+            }
+        }
+        then {
+            def ids = workflow.out.marker.collect { meta, _marker -> meta.id }
+            assertAll(
+                { assert workflow.success },
+                // No drops: both samples reach downstream even though the reference side
+                // came back with a different key set.
+                { assert ids.toSorted() == ['OGSINGLE', 'OGSOLO'] },
+                // The meta that travels on is the live one, so it still carries the key
+                // the reference side lost.
+                { assert workflow.out.joined.every { meta, _reads, _ref -> meta.containsKey('family') } },
+                { assert workflow.out.joined.every { meta, _reads, ref -> path(ref).text.contains(meta.id) } }
+            )
+        }
+    }
+}

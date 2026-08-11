@@ -1,0 +1,142 @@
+nextflow_workflow {
+    name "HiFi read preparation routes selectively and streams"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "READ_PREPARATION"
+
+    test("a singleton group bypasses CAT_FASTQ and keeps its original FASTQ") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id: 'OGSINGLE', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGSINGLE.hifi.250101' ],
+                    [ file("\${projectDir}/tests/test_data/read_preparation/OGSINGLE.hifi.250101.fastq.gz", checkIfExists: true) ]
+                ])
+                """
+            }
+        }
+        then {
+            def catTasks = workflow.trace.tasks().findAll { it.name.contains('CAT_FASTQ') }
+            def markers = workflow.out.marker
+            assertAll(
+                { assert workflow.success },
+                { assert catTasks.size() == 0 },
+                { assert markers.size() == 1 },
+                { assert markers[0][0].mt_assembly_prefix == 'OGSINGLE.hifi.250101.v323mitohifi' },
+                { assert path(markers[0][1]).text.split('\t')[1] == 'OGSINGLE.hifi.250101.fastq.gz' }
+            )
+        }
+    }
+
+    test("a multi-file group runs exactly one CAT_FASTQ and sends the merged FASTQ downstream") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id: 'OGMULTI', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGMULTI.hifi.250101' ],
+                    [
+                        file("\${projectDir}/tests/test_data/read_preparation/OGMULTI.hifi.250101.bc01.fastq.gz", checkIfExists: true),
+                        file("\${projectDir}/tests/test_data/read_preparation/OGMULTI.hifi.250101.bc02.fastq.gz", checkIfExists: true)
+                    ]
+                ])
+                """
+            }
+        }
+        then {
+            def catTasks = workflow.trace.tasks().findAll { it.name.contains('CAT_FASTQ') }
+            def markers = workflow.out.marker
+            def merged = workflow.out.reads[0][1]
+            assertAll(
+                { assert workflow.success },
+                { assert catTasks.size() == 1 },
+                { assert markers.size() == 1 },
+                { assert path(merged).fileName.toString() == 'OGMULTI.hifi.250101.merged.fastq.gz' },
+                { assert path(markers[0][1]).text.split('\t')[1] == 'OGMULTI.hifi.250101.merged.fastq.gz' },
+                // Both inputs are in the merge, in order: the concatenation is real,
+                // not one file renamed.
+                { assert path(merged).linesGzip.findAll { it.startsWith('@') } == ['@OGMULTI.hifi.250101.bc01/1', '@OGMULTI.hifi.250101.bc02/1'] }
+            )
+        }
+    }
+
+    test("a singleton finishes downstream work while a multi-file group is still concatenating") {
+        when {
+            params {
+                cat_fastq_delay = 25
+            }
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [
+                        [ id: 'OGMULTI', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGMULTI.hifi.250101' ],
+                        [
+                            file("\${projectDir}/tests/test_data/read_preparation/OGMULTI.hifi.250101.bc01.fastq.gz", checkIfExists: true),
+                            file("\${projectDir}/tests/test_data/read_preparation/OGMULTI.hifi.250101.bc02.fastq.gz", checkIfExists: true)
+                        ]
+                    ],
+                    [
+                        [ id: 'OGSINGLE', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGSINGLE.hifi.250101' ],
+                        [ file("\${projectDir}/tests/test_data/read_preparation/OGSINGLE.hifi.250101.fastq.gz", checkIfExists: true) ]
+                    ]
+                )
+                """
+            }
+        }
+        then {
+            // Each marker row is: id, staged read names, start epoch, end epoch.
+            def rows = workflow.out.marker.collectEntries { meta, marker ->
+                [ (meta.id): path(marker).text.trim().split('\t') ]
+            }
+            def catTasks = workflow.trace.tasks().findAll { it.name.contains('CAT_FASTQ') }
+            assertAll(
+                { assert workflow.success },
+                { assert catTasks.size() == 1 },
+                { assert rows.size() == 2 },
+                // The proof of no cohort barrier: the singleton's downstream task had
+                // already FINISHED before the concatenated sample's downstream task
+                // STARTED. Under an all-samples-first design both would begin only
+                // after the 25 s concatenation, so this ordering could not hold.
+                { assert (rows.OGSINGLE[3] as long) < (rows.OGMULTI[2] as long) }
+            )
+        }
+    }
+
+    test("every accepted sample reaches downstream exactly once") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [
+                        [ id: 'OGSINGLE', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGSINGLE.hifi.250101' ],
+                        [ file("\${projectDir}/tests/test_data/read_preparation/OGSINGLE.hifi.250101.fastq.gz", checkIfExists: true) ]
+                    ],
+                    [
+                        [ id: 'OGSOLO', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGSOLO.hifi.250101' ],
+                        [ file("\${projectDir}/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz", checkIfExists: true) ]
+                    ],
+                    [
+                        [ id: 'OGMULTI', sequencing_type: 'hifi', date: '250101', single_end: true, assembly_prefix: 'OGMULTI.hifi.250101' ],
+                        [
+                            file("\${projectDir}/tests/test_data/read_preparation/OGMULTI.hifi.250101.bc01.fastq.gz", checkIfExists: true),
+                            file("\${projectDir}/tests/test_data/read_preparation/OGMULTI.hifi.250101.bc02.fastq.gz", checkIfExists: true)
+                        ]
+                    ]
+                )
+                """
+            }
+        }
+        then {
+            def ids = workflow.out.marker.collect { meta, _marker -> meta.id }
+            def catTasks = workflow.trace.tasks().findAll { it.name.contains('CAT_FASTQ') }
+            assertAll(
+                { assert workflow.success },
+                { assert catTasks.size() == 1 },
+                // No drops and no duplicates: three samples in, three markers out.
+                { assert ids.size() == 3 },
+                { assert ids.toSorted() == ['OGMULTI', 'OGSINGLE', 'OGSOLO'] },
+                // Every sample kept the prefix attached before routing.
+                { assert workflow.out.marker.every { meta, _marker -> meta.mt_assembly_prefix == "${meta.id}.hifi.250101.v323mitohifi" } }
+            )
+        }
+    }
+}

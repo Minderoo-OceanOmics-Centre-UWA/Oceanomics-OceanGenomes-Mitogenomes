@@ -1,0 +1,105 @@
+nextflow_workflow {
+    name "Per-sample LCA result grouping streams samples through"
+    script "./main.nf"
+    workflow "LCA_STREAMING"
+
+    test("region counts are derived from the annotation bundle") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [[id: 'OGFAST'], file("${projectDir}/tests/test_data/lca_streaming/three_regions").listFiles().toList()],
+                    [[id: 'OGSLOW'], file("${projectDir}/tests/test_data/lca_streaming/one_region").listFiles().toList()],
+                    [[id: 'OGNONE'], file("${projectDir}/tests/test_data/lca_streaming/zero_regions").listFiles().toList()]
+                )
+                input[1] = Channel.of(
+                    [[id: 'OGFAST'], 'CO1', 0],
+                    [[id: 'OGFAST'], '12s', 0],
+                    [[id: 'OGFAST'], '16s', 0],
+                    [[id: 'OGSLOW'], 'CO1', 0]
+                )
+                """
+            }
+        }
+
+        then {
+            def counts = workflow.out.counts.collectEntries { row ->
+                def parsed = row instanceof String ? evaluate(row) : row
+                [(parsed[0].id): parsed[1]]
+            }
+            assertAll(
+                { assert workflow.success },
+                { assert counts['OGFAST'] == 3 },
+                { assert counts['OGSLOW'] == 1 },
+                // No CO1/RNR1/RNR2 in the bundle, despite cds/ being non-empty.
+                { assert counts['OGNONE'] == 0 }
+            )
+        }
+    }
+
+    test("a sample with zero regions still reaches the consumer") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [[id: 'OGNONE'], file("${projectDir}/tests/test_data/lca_streaming/zero_regions").listFiles().toList()]
+                )
+                input[1] = Channel.empty()
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // The whole point: no LCA task ran for this sample, and it was
+                // still released rather than silently dropped.
+                { assert workflow.out.released.size() == 1 },
+                { assert workflow.out.released[0].toString().contains('OGNONE') }
+            )
+        }
+    }
+
+    test("a fast sample is released before a slow sample's LCA finishes") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [[id: 'OGFAST'], file("${projectDir}/tests/test_data/lca_streaming/three_regions").listFiles().toList()],
+                    [[id: 'OGSLOW'], file("${projectDir}/tests/test_data/lca_streaming/one_region").listFiles().toList()]
+                )
+                // OGFAST has three regions but they finish immediately;
+                // OGSLOW has a single region that takes 20s. Under a bare
+                // groupTuple(by: 0) neither sample can emit until the channel
+                // closes, so OGFAST would be pinned to OGSLOW's completion.
+                input[1] = Channel.of(
+                    [[id: 'OGFAST'], 'CO1', 0],
+                    [[id: 'OGFAST'], '12s', 0],
+                    [[id: 'OGFAST'], '16s', 0],
+                    [[id: 'OGSLOW'], 'CO1', 20]
+                )
+                """
+            }
+        }
+
+        then {
+            def released = [:]
+            workflow.out.released.each { row ->
+                def parsed = row instanceof String ? evaluate(row) : row
+                def line = path(parsed[1].toString()).text.trim().split('\t')
+                released[line[0]] = [ n_files: line[1] as int, at_ns: line[2] as long ]
+            }
+
+            assertAll(
+                { assert workflow.success },
+                { assert released.size() == 2 },
+                { assert released['OGFAST'].n_files == 3 },
+                { assert released['OGSLOW'].n_files == 1 },
+                // The streaming guarantee, stated as a margin rather than a bare
+                // ordering so it cannot pass by scheduler luck: OGFAST must be
+                // released at least 10s before OGSLOW, whose only region sleeps 20s.
+                { assert (released['OGSLOW'].at_ns - released['OGFAST'].at_ns) > 10_000_000_000L }
+            )
+        }
+    }
+}

@@ -1,6 +1,6 @@
 process PREPARE_LCA_DATABASES {
     tag 'taxonomy-cache'
-    label 'process_single'
+    label 'process_upload'
     label 'error_retry'
 
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?

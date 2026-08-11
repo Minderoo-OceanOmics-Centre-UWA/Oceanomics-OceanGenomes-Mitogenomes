@@ -127,6 +127,37 @@ def try_parse_contig_stats(tsv_path: Path, target_contig="final_mitogenome"):
         print(f"⚠️ Could not parse contig_stats-like file: {e}")
         return None, None
 
+def try_parse_getorg_check(tsv_path: Path):
+    """
+    If tsv_path looks like a getorg_check.tsv circularity-evidence table -- the
+    schema emitted by both OATK_CHECK (modules/local/oatk/check_circularity) and
+    the GetOrganelle check, carrying a `final_verdict_circular` column -- map that
+    corrected verdict to 'circular genome' / 'scaffold'.
+
+    Returns None when the file is missing or is not a getorg_check-shaped TSV, so
+    the caller can fall through to the free-text GetOrganelle log parser. Carries
+    no coverage: this schema records topology only, so avg_coverage is left to the
+    other parsers / the depth measurement.
+    """
+    try:
+        if not tsv_path.exists():
+            return None
+        lines = tsv_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        if not lines or "\t" not in lines[0]:
+            return None
+
+        df = pd.read_csv(tsv_path, sep="\t", comment="#")
+        if df.empty or "final_verdict_circular" not in df.columns:
+            return None
+
+        verdict = coerce_bool(df["final_verdict_circular"].iloc[0])
+        if verdict is None:
+            return None
+        return "circular genome" if verdict else "scaffold"
+    except Exception as e:
+        print(f"⚠️ Could not parse getorg_check-like file: {e}")
+        return None
+
 def _num(value):
     """TSV cell -> float, or None for blank / NA / unparseable."""
     if value is None:
@@ -272,6 +303,10 @@ if __name__ == "__main__":
     avg_coverage = None
     avg_base_coverage = None
     failed_to_assemble = False
+    # Set when the assembly produced a contig but none of the parsers could
+    # resolve a topology from the input. Carried down to the write so the run
+    # stops claiming success on a row it left NULL (see below).
+    stats_unresolved = False
 
     # Compute sequence length from FASTA up-front so we can detect the
     # "process finished but produced no contig" case and short-circuit.
@@ -293,12 +328,22 @@ if __name__ == "__main__":
         # First, try interpreting the 3rd arg as contig_stats.tsv
         stats_from_tsv, avg_coverage_from_tsv = try_parse_contig_stats(input_path, target_contig="final_mitogenome")
 
+        # Structured TSV first, free text last. Second attempt is the
+        # getorg_check.tsv circularity-evidence schema that OATK_CHECK and the
+        # GetOrganelle check both emit, so an oatk contig fed its evidence TSV
+        # resolves a real topology instead of silently landing on stats=None.
+        stats_from_check = try_parse_getorg_check(input_path)
+
         if stats_from_tsv is not None:
             # HiFi-style input: use circular/scaffold mapping
             stats = stats_from_tsv
             avg_coverage = avg_coverage_from_tsv
             avg_base_coverage = avg_coverage_from_tsv
             print(f"ℹ️ Detected contig_stats.tsv. Using stats = '{stats}' from final_mitogenome row.")
+        elif stats_from_check is not None:
+            # getorg_check.tsv evidence (oatk / GetOrganelle circularity check).
+            stats = stats_from_check
+            print(f"ℹ️ Detected getorg_check.tsv. Using stats = '{stats}' from final_verdict_circular.")
         else:
             # Fall back to GetOrganelle log parsing
             try:
@@ -331,6 +376,16 @@ if __name__ == "__main__":
                 if corrected != stats:
                     print(f"ℹ️ Overriding stats '{stats}' -> '{corrected}' from --circular={args.circular}.")
                 stats = corrected
+
+        # An assembled contig (length > 0) whose topology none of the parsers and
+        # no --circular override could resolve. The row is still written so the run
+        # does not abort, but flag it loudly here and downgrade the success message
+        # at the write so the NULL is greppable instead of invisible.
+        if stats is None:
+            stats_unresolved = True
+            print(f"⚠️ Unrecognised assembly input: {input_path}")
+            print("   Not a contigs_stats.tsv, getorg_check.tsv, or GetOrganelle log.")
+            print("   Writing row with stats=NULL — needs manual review.")
 
     # Uniform remap-based depth. None when this assembly never reached annotation
     # (failed / under-length / a discarded variant) or the depth step was skipped.
@@ -516,7 +571,12 @@ if __name__ == "__main__":
 
             final_dict = dict(zip(field_names + ["mean_depth", "depth_method"], returned))
             print(f"📌 Final stored values: {final_dict}")
-            if force_overwrite and existing is not None:
+            if stats_unresolved:
+                # A contig was assembled but its topology never resolved, so this
+                # is not a success no matter how the write went. Say so, and make
+                # it greppable across sql_uploaded_data/*.mtdna.upload.txt.
+                print(f"⚠️ Wrote INCOMPLETE row for {assembly_prefix} (stats=NULL) — needs manual review.")
+            elif force_overwrite and existing is not None:
                 print(
                     f"✅ Success: Overwrote mitogenome_data for {assembly_prefix} (--force)."
                 )

@@ -35,6 +35,36 @@ FISHBASE_DATABASES = {
     "fishbase_synonyms.parquet": "https://huggingface.co/datasets/cboettig/fishbase/resolve/main/data/fb/v24.07/parquet/synonyms.parquet?download=true",
 }
 
+# Column order for the two per-region LCA outputs, mirroring the taxaRaw and
+# taxaFinal dicts built in calculate_lca_assignments().
+#
+# These exist so a region with no valid BLAST hits can still be written as a
+# header-only file rather than no file at all. Downstream, upload_results_mito
+# closes each sample's result group as soon as `region count` items arrive, so a
+# sample must contribute exactly one lca/lca_raw output per annotated region
+# regardless of whether that region produced hits. A silently absent file would
+# leave the group one short and stall the sample until the end of the run.
+TAXA_RAW_COLUMNS = [
+    'seq_id', 'domain', 'phylum', 'class', 'order', 'family', 'genus',
+    'specificEpithet', 'scientificName', 'scientificNameAuthorship', 'taxonRank',
+    'taxonID', 'taxonID_db', 'verbatimIdentification', 'accession_id',
+    'accession_id_ref_db', 'percent_match', 'percent_query_cover',
+    'percent_query_cover_hsp', 'alignment_length', 'subject_length',
+    'sequence_length', 'confidence_score', 'sequence_region', 'lca_run_date',
+    'dna_sequence', 'identificationRemarks',
+]
+
+TAXA_FINAL_COLUMNS = [
+    'seq_id', 'species_in_LCA', 'numberOfUnq_BlastHits', 'domain', 'phylum',
+    'class', 'order', 'family', 'genus', 'specificEpithet', 'scientificName',
+    'scientificNameAuthorship', 'taxonRank', 'top_taxonID', 'taxonID_db',
+    'top_verbatimIdentification', 'top_accession_id', 'accession_id_ref_db',
+    'top_percent_match', 'top_percent_query_cover', 'top_percent_query_cover_hsp',
+    'alignment_length', 'subject_length', 'sequence_length',
+    'top_confidence_score', 'sequence_region', 'lca_run_date', 'dna_sequence',
+    'identificationRemarks',
+]
+
 
 @dataclass
 class Config:
@@ -1132,11 +1162,25 @@ class BLASTLCAAnalyzer:
 
         return results, taxaRaw, taxaFinal
 
-    def write_results(self, results: List[Dict], output_file: Path):
-        """Write results to output file."""
+    def write_results(
+            self,
+            results: List[Dict],
+            output_file: Path,
+            columns: Optional[List[str]] = None
+        ):
+        """Write results to output file.
+
+        `columns` supplies the header when there are no rows to infer it from,
+        so an empty result set still produces a valid header-only TSV.
+        """
         try:
+            header = list(results[0].keys()) if results else list(columns or [])
+            if not header:
+                raise ValueError(
+                    f"No columns available to write {output_file}"
+                )
+
             with open(output_file, 'w') as out:
-                header = results[0].keys()
                 out.write('\t'.join(header) + '\n')
 
                 for result in results:
@@ -1177,7 +1221,15 @@ class BLASTLCAAnalyzer:
         )
 
         if not asv_hits:
-            self.logger.warning("No valid hits found in input file")
+            # A hit-less region is an expected outcome, not a failure. Still emit
+            # header-only lca/lca_raw files so the sample contributes one output
+            # per annotated region and downstream grouping can close its group
+            # without waiting on the rest of the run (see TAXA_*_COLUMNS above).
+            self.logger.warning(
+                "No valid hits found in input file; writing header-only LCA outputs"
+            )
+            self.write_results([], raw_output, TAXA_RAW_COLUMNS)
+            self.write_results([], final_output, TAXA_FINAL_COLUMNS)
             return
 
         results, taxaRaw, taxaFinal = self.calculate_lca_assignments(
@@ -1185,8 +1237,8 @@ class BLASTLCAAnalyzer:
         )
 
         self.write_results(results, output_file)
-        self.write_results(taxaRaw, raw_output)
-        self.write_results(taxaFinal, final_output)
+        self.write_results(taxaRaw, raw_output, TAXA_RAW_COLUMNS)
+        self.write_results(taxaFinal, final_output, TAXA_FINAL_COLUMNS)
 
         self.logger.info("Analysis complete")
 

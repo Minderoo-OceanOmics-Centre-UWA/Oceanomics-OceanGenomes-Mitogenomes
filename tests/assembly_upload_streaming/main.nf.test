@@ -1,0 +1,92 @@
+nextflow_workflow {
+    name "Assembly upload rows stream per sample instead of waiting for the whole run"
+    script "./main.nf"
+    workflow "ASSEMBLY_UPLOAD_STREAMING"
+
+    test("a fast assembly reaches the SQL upload before a slow assembly finishes") {
+        when {
+            workflow {
+                """
+                // OGSLOW's assembly takes 20s, standing in for the queued REFERENCE_RANK that
+                // stalled run mitogenomes-missing-audit-5. Under the previous
+                // groupTuple(by: prefix) reconciliation NEITHER sample produced an upload row
+                // until that assembly finished, because a bare groupTuple emits nothing until
+                // its source channel closes -- and with no upload receipt, no sample reached QC.
+                input[0] = Channel.of(
+                    [[id: 'OGFAST', mt_assembly_prefix: 'OGFAST.hifi.240101.v323mitohifi'], 0, 16000],
+                    [[id: 'OGSLOW', mt_assembly_prefix: 'OGSLOW.hifi.240101.v323mitohifi'], 20, 16000]
+                )
+                input[1] = Channel.empty()
+                input[2] = 12000
+                """
+            }
+        }
+
+        then {
+            def uploaded = [:]
+            workflow.out.uploaded.each { row ->
+                def parsed = row instanceof String ? evaluate(row) : row
+                def line = path(parsed[1].toString()).text.trim().split('\t')
+                uploaded[line[0].split('\\.')[0]] = [ depth: line[1], at_ns: line[2] as long ]
+            }
+
+            assertAll(
+                { assert workflow.success },
+                { assert uploaded.size() == 2 },
+                // Stated as a margin rather than a bare ordering so it cannot pass by
+                // scheduler luck: OGFAST must upload at least 10s before OGSLOW, whose
+                // assembly sleeps 20s.
+                { assert (uploaded['OGSLOW'].at_ns - uploaded['OGFAST'].at_ns) > 10_000_000_000L },
+                // Both are full length, so both carry a real measurement.
+                { assert uploaded['OGFAST'].depth == 'OGFAST.hifi.240101.v323mitohifi.mito_depth.tsv' }
+            )
+        }
+    }
+
+    test("failed, under-length and provenance rows upload with the placeholder, not at end of run") {
+        when {
+            workflow {
+                """
+                // None of these three is ever measured: an empty assembly and an under-length
+                // one never reach annotation, and a provenance variant is not the molecule that
+                // was annotated. They must still be uploaded (they are how a failure is recorded
+                // in SQL at all), and they must not be held behind OGSLOW -- which is what a
+                // remainder join would do, since it can only classify a row as unmatched once
+                // its inputs close.
+                input[0] = Channel.of(
+                    [[id: 'OGEMPTY', mt_assembly_prefix: 'OGEMPTY.hifi.240101.v323mitohifi'], 0, 0],
+                    [[id: 'OGSHORT', mt_assembly_prefix: 'OGSHORT.hifi.240101.v323mitohifi'], 0, 500],
+                    [[id: 'OGSLOW',  mt_assembly_prefix: 'OGSLOW.hifi.240101.v323mitohifi'],  20, 16000]
+                )
+                input[1] = Channel.of(
+                    [[id: 'OGVAR', mt_assembly_prefix: 'OGVAR.ilmn.230302.getorg1770reseed'], 0, 16000]
+                )
+                input[2] = 12000
+                """
+            }
+        }
+
+        then {
+            def uploaded = [:]
+            workflow.out.uploaded.each { row ->
+                def parsed = row instanceof String ? evaluate(row) : row
+                def line = path(parsed[1].toString()).text.trim().split('\t')
+                uploaded[line[0].split('\\.')[0]] = [ depth: line[1], at_ns: line[2] as long ]
+            }
+
+            assertAll(
+                { assert workflow.success },
+                // Nothing dropped: the failed assembly and the provenance variant are still
+                // uploaded rather than silently vanishing.
+                { assert uploaded.keySet() == ['OGEMPTY', 'OGSHORT', 'OGVAR', 'OGSLOW'] as Set },
+                { assert uploaded['OGEMPTY'].depth == 'empty_mito_depth.tsv' },
+                { assert uploaded['OGSHORT'].depth == 'empty_mito_depth.tsv' },
+                { assert uploaded['OGVAR'].depth   == 'empty_mito_depth.tsv' },
+                // The whole point: unmeasured rows are not pinned to the end of the run.
+                { assert (uploaded['OGSLOW'].at_ns - uploaded['OGEMPTY'].at_ns) > 10_000_000_000L },
+                { assert (uploaded['OGSLOW'].at_ns - uploaded['OGSHORT'].at_ns) > 10_000_000_000L },
+                { assert (uploaded['OGSLOW'].at_ns - uploaded['OGVAR'].at_ns)   > 10_000_000_000L }
+            )
+        }
+    }
+}

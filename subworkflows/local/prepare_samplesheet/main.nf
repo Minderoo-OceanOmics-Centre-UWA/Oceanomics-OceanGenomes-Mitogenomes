@@ -105,6 +105,27 @@ workflow PREPARE_SAMPLESHEET {
                     def sample_id = (raw_meta instanceof Map) ? raw_meta.id : raw_meta
                     
                     def meta = (raw_meta instanceof Map) ? raw_meta : [ id: raw_meta ]
+
+                    // nf-schema fills a column the samplesheet does not carry with an
+                    // EMPTY LIST rather than omitting the key, so adding an optional
+                    // column to schema_input.json silently changes the shape of every
+                    // meta map -- even for sheets that never gained the column.
+                    //
+                    // That is not cosmetic. Nextflow's task hash ignores an empty
+                    // collection, so a resumed run still hits the old cache and hands
+                    // back the OLD meta, which then fails `equals` against the live one.
+                    // Every join(..., by: 0) keyed on the whole meta map then matches
+                    // nothing and drops the sample without an error or a warning. Adding
+                    // `family` / `order` did exactly that: it emptied the MitoHiFi
+                    // reference join for all 70 samples whose reads had not also come
+                    // back from cache.
+                    //
+                    // Keep meta shape a function of what the samplesheet actually
+                    // carries. Only the empty placeholders go; false / 0 / '' are real
+                    // values and stay. Removing them changes no task hash, so cached
+                    // work stays valid.
+                    meta = meta.findAll { _key, value -> !(value instanceof Collection) || !value.isEmpty() }
+
                     meta = meta + [ sequencing_type: sample_record[3] ]
                     def fastq_1 = sample_record[1]
                     def fastq_2 = sample_record[2]

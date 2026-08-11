@@ -1,6 +1,6 @@
 process PUSH_MTDNA_ASSM_RESULTS {
     tag "$meta.id"
-    label 'process_medium'
+    label 'process_upload'
     
     conda "conda-forge::python=3.9 conda-forge::psycopg2"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
@@ -15,7 +15,7 @@ process PUSH_MTDNA_ASSM_RESULTS {
     path config
 
     output:
-    path "${meta.mt_assembly_prefix ?: meta.id}.mtdna.upload.txt", emit: upload
+    tuple val(meta), path("${meta.mt_assembly_prefix ?: meta.id}.mtdna.upload.txt"), emit: upload
     tuple val(meta), path("10_push_mtdna_assm_results.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 

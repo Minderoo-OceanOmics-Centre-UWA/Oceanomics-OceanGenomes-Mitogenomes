@@ -14,42 +14,41 @@ workflow REFERENCE_POLICY {
     status = MITOHIFI_FINDMITOREFERENCE.out.status
 }
 
+// Import the real implementation rather than copying it, so this cannot silently pass
+// against a stale duplicate of the logic it is meant to protect. (It previously WAS such a
+// duplicate: a copy of the old groupTuple selection, fed hand-written inputs in which the
+// canonical row carried the final variant's prefix. Real runs key the canonical row on the
+// SAMPLE-level prefix -- verified against run mitogenomes-missing-audit-5, where OG868
+// produced exactly two rows: canonical "OG868.hic.250624.getorg1770" carrying the reseed
+// FASTA and a real depth, plus provenance "OG868.hic.250624.getorg1770reseed" with the
+// placeholder. The duplicate also could not run at all, so nobody noticed.)
+include { selectProvenanceVariants } from '../../subworkflows/local/mitogenome_assembly/getorganelle/main.nf'
+
 workflow UPLOAD_SELECTION {
     take:
-    raw_variants
-    canonical_results
+    variant_inputs // [ variant_prefix, meta, fasta, log ]
+    checked_circ   // [ sample_prefix, checked_variant_prefix, verdict ]
 
     main:
-    raw_candidates = raw_variants.map { meta, fasta, log ->
-        [ meta.mt_assembly_prefix, [ priority: 0, meta: meta, fasta: fasta, log: log ] ]
-    }
-    canonical_candidates = canonical_results.map { meta, fasta, log ->
-        [ meta.mt_assembly_prefix, [ priority: 1, meta: meta, fasta: fasta, log: log ] ]
-    }
-    selected = raw_candidates
-        .mix(canonical_candidates)
-        .groupTuple(by: 0)
-        .map { _prefix, candidates ->
-            def result = candidates.max { it.priority }
-            [ result.meta, result.fasta, result.log ]
-        }
+    results = selectProvenanceVariants(variant_inputs, checked_circ)
 
     emit:
-    results = selected
+    results
 }
 
 workflow {
     if (params.scenario == 'upload_selection') {
-        raw = Channel.of(
-            [[id: 'OG1', mt_assembly_prefix: 'OG1.first'], 'raw-first.fa', 'first.log'],
-            [[id: 'OG1', mt_assembly_prefix: 'OG1.reseed'], 'raw-reseed.fa', 'reseed.log'],
-            [[id: 'OG1', mt_assembly_prefix: 'OG1.rgj'], 'raw-rgj.fa', 'rgj.log']
+        // meta.mt_assembly_prefix is the SAMPLE-level prefix on every variant row; the
+        // reseed / _rgj suffix lives only in the variant prefix (the FASTA basename).
+        variants = Channel.of(
+            ['OG1.getorg1770',          [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-first.fa',  'first.log'],
+            ['OG1.getorg1770reseed',    [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-reseed.fa', 'reseed.log'],
+            ['OG1.getorg1770reseed_rgj',[id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-rgj.fa',    'rgj.log']
         )
-        canonical = Channel.of(
-            [[id: 'OG1', mt_assembly_prefix: 'OG1.rgj', circular: true], 'curated-rgj.fa', 'rgj.log'],
-            [[id: 'OG2', mt_assembly_prefix: 'OG2.oatk'], 'oatk.fa', 'oatk.log']
+        checked = Channel.of(
+            ['OG1.getorg1770', 'OG1.getorg1770reseed_rgj', true]
         )
-        UPLOAD_SELECTION(raw, canonical)
+        UPLOAD_SELECTION(variants, checked)
         UPLOAD_SELECTION.out.results.view { meta, fasta, log ->
             "RESULT\t${meta.mt_assembly_prefix}\t${fasta}\t${meta.circular}\t${log}"
         }

@@ -20,7 +20,6 @@ include { REFERENCE_CANDIDATES      } from '../../../../modules/local/reference_
 include { REFERENCE_RANK            } from '../../../../modules/local/reference_rank'
 include { GETORGANELLE_JOIN         } from '../../../../modules/local/getorganelle/join'
 include { GETORGANELLE_CHECK        } from '../../../../modules/local/getorganelle/check'
-include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
 // Read the corrected circular verdict from a GETORGANELLE_CHECK evidence TSV.
 // Returns true / false (final_verdict_circular) or null when the column is
@@ -41,6 +40,35 @@ def parseFinalVerdictCircular(tsv) {
     } catch (ignored) {
         return null
     }
+}
+
+// Reduce the per-variant DB inputs to the PROVENANCE variants -- everything except the
+// first-pass assembly, whose basename is exactly meta.mt_assembly_prefix (see
+// GETORGANELLE_FROMREADS's output block) and which therefore collides with the parent
+// workflow's canonical post-curation row for the same sample. The canonical row supersedes
+// it, so excluding it here lets the parent plain-mix the two channels instead of
+// reconciling them with a whole-run groupTuple. See the call site for the run that cost.
+//
+// variant_inputs is [ variant_prefix, meta, fasta, log ] (meta.mt_assembly_prefix is the
+// SAMPLE-level prefix, stable across variants); checked_circ is
+// [ sample_prefix, checked_variant_prefix, verdict ], one row per sample.
+//
+// combine(by: 0) on the sample key, not a prefix-keyed join(remainder: true): every sample
+// runs exactly one GETORGANELLE_CHECK, so the key always matches and each variant emits as
+// soon as its OWN sample is checked. A remainder join would hold every unmatched variant --
+// which is all of them but the checked one -- until the channel closed.
+def selectProvenanceVariants(variant_inputs, checked_circ) {
+    return variant_inputs
+        .filter { prefix, meta, _fasta, _logf -> prefix != meta.mt_assembly_prefix }
+        .map { prefix, meta, fasta, logf -> [ meta.mt_assembly_prefix, prefix, meta, fasta, logf ] }
+        .combine( checked_circ, by: 0 )
+        .map { _sample_prefix, prefix, meta, fasta, logf, checked_prefix, verdict ->
+            def variant_meta = meta + [ mt_assembly_prefix: prefix ]
+            if (prefix == checked_prefix && verdict != null) {
+                variant_meta = variant_meta + [ circular: verdict ]
+            }
+            [ variant_meta, fasta, logf ]
+        }
 }
 
 // Read the tier from a REFERENCE_DIVERGENCE flag file. Mirrors the helper in the
@@ -552,26 +580,21 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         .join(ch_circular_update, by: 0)
         .map { meta, logf, v -> [ (v == null ? meta : meta + [ circular: v ]), logf ] }
 
-    // Per-variant DB upload results. The corrected circular verdict only applies to
-    // the variant that was actually checked (the final assembly); its evidence file
-    // is named after that variant's prefix, so key the verdict by prefix and attach
-    // it to the matching variant only. Every other variant carries no verdict, so
-    // the DB push falls back to that variant's own GetOrganelle log topology.
+    // Per-variant DB upload results, for the PROVENANCE variants only -- see
+    // selectProvenanceVariants above for why the first-pass assembly is excluded.
+    //
+    // The corrected circular verdict only applies to the variant that was actually checked
+    // (the final assembly), whose evidence file is named after that variant's prefix, so
+    // carry it keyed by sample alongside the prefix it belongs to. Variants with no verdict
+    // fall back to their own GetOrganelle log topology in the DB push.
     ch_checked_circ = GETORGANELLE_CHECK.out.evidence
-        .map { _meta, ev -> [ ev.name.replaceAll(/\.getorg_check\.tsv$/, ''), parseFinalVerdictCircular(ev) ] }
-
-    ch_db_assembly_results = ch_db_variant_inputs
-        .map { prefix, meta, fasta, logf -> [ prefix, [ meta, fasta, logf ] ] }
-        .join( ch_checked_circ, by: 0, remainder: true )
-        .filter { it[1] != null }                       // drop check-only remainders
-        .map { items ->
-            def prefix  = items[0]
-            def payload = items[1]
-            def verdict = items.size() > 2 ? items[2] : null
-            def meta    = payload[0] + [ mt_assembly_prefix: prefix ]
-            if (verdict != null) meta = meta + [ circular: verdict ]
-            [ meta, payload[1], payload[2] ]
+        .map { meta, ev ->
+            [ meta.mt_assembly_prefix,
+              ev.name.replaceAll(/\.getorg_check\.tsv$/, ''),
+              parseFinalVerdictCircular(ev) ]
         }
+
+    ch_db_assembly_results = selectProvenanceVariants(ch_db_variant_inputs, ch_checked_circ)
 
     // Evidence feeds the assembly summary (anomaly reason + circular override) and
     // is emitted for the QC gate (anomaly block + circular condition).
@@ -598,8 +621,20 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     mtdna_files     = ch_mtdna_files               // channel: [ mt_assembly_prefix, [ mtdna files ] ]
     assembly_fasta  = ch_assembly_fasta
     assembly_log    = ch_assembly_log
-    db_assembly_results = ch_db_assembly_results   // channel: [ meta(per-variant prefix+circular), fasta, log ] -> one DB row per variant
+    // CONTRACT: the PROVENANCE variants only (reseed, _rgj) -- never the first-pass assembly,
+    // whose prefix collides with the parent workflow's canonical row for the same sample.
+    // The parent relies on that to mix this channel straight into the upload candidates
+    // without a de-duplicating groupTuple (which would be a whole-run barrier).
+    db_assembly_results = ch_db_assembly_results   // channel: [ meta(per-variant prefix+circular), fasta, log ] -> one DB row per non-first-pass variant
     reference_gb    = ch_reference_gb              // channel: [ meta, reference.gb ] (partial: reseed candidates only)
+    // CONTRACT: exactly one row per assembly FASTA this subworkflow emits. That holds by
+    // construction here -- assembly_fasta and GETORGANELLE_CHECK are both derived from
+    // ch_getorg_check_in, so every emitted assembly is checked and no placeholder is needed
+    // (unlike the MitoHiFi subworkflow, which has failed / no-contig branches to fill in).
+    // The parent workflow and the QC gate rely on that totality to attach evidence with a
+    // plain per-key join rather than collecting the whole channel; if a future change lets an
+    // assembly bypass the check, it must emit assets/empty_circularity_check.tsv for that
+    // sample or the sample will be dropped at the QC gate.
     circularity_evidence = GETORGANELLE_CHECK.out.evidence  // channel: [ meta, getorg_check.tsv ]
     // Reads keyed by assembly prefix, for MITOGENOME_COVERAGE in the parent workflow.
     // Keyed rather than meta-joined because meta gains `circular` downstream (lines

@@ -8,8 +8,8 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = Channel.of(
-                    [[id: 'OG1', mt_assembly_prefix: 'OG1.true'], [file('../test_data/circular_true.gff')], 'Species one'],
-                    [[id: 'OG2', mt_assembly_prefix: 'OG2.false'], [file('../test_data/circular_false.gff')], 'Species two']
+                    [[id: 'OG1', mt_assembly_prefix: 'OG1.true'], [file("\${projectDir}/tests/test_data/circular_true.gff", checkIfExists: true)], 'Species one'],
+                    [[id: 'OG2', mt_assembly_prefix: 'OG2.false'], [file("\${projectDir}/tests/test_data/circular_false.gff", checkIfExists: true)], 'Species two']
                 )
                 """
             }

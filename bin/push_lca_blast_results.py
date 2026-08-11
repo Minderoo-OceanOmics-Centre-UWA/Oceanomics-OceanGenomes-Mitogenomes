@@ -46,6 +46,14 @@ def process_blast(blast_file, sample, db_params):
         print("❌ Missing 'query_id' in BLAST file")
         return
 
+    # A sample whose regions produced no filtered hits gets an empty combined file. Splitting
+    # query_id on an empty frame yields a 0-column result and raises "Columns must be same
+    # length as key", which under errorStrategy 'ignore' silently dropped the sample's whole
+    # BLAST upload. No hits is a legitimate outcome, not an error.
+    if df.empty:
+        print(f"ℹ️  No filtered BLAST hits for {sample} — nothing to upload")
+        return
+
     df[['og_id', 'tech', 'seq_date', 'code', 'annotation']] = df['query_id'].str.split('.', expand=True)
 
     success, failure = 0, 0
@@ -147,10 +155,22 @@ lca_column_headers = [
 def process_lca(lca_file, sample, db_params):
     print(f"📂 Reading LCA file: {lca_file}")
     # df = pd.read_csv(lca_file, sep='\t', header=True, names=lca_column_headers).replace({np.nan: None})
-    df = pd.read_csv(lca_file, sep='\t', header=0).replace({np.nan: None})
+    # header=0 means a 0-byte file raises EmptyDataError rather than parsing to an empty
+    # frame (process_blast passes explicit names, so it does not). Both mean the same thing
+    # here -- nothing to upload -- so treat them the same instead of failing the task.
+    try:
+        df = pd.read_csv(lca_file, sep='\t', header=0).replace({np.nan: None})
+    except pd.errors.EmptyDataError:
+        print(f"ℹ️  Empty LCA file for {sample} — nothing to upload")
+        return
 
     if 'seq_id' not in df.columns:
         print("❌ Missing 'seq_id' in LCA file")
+        return
+
+    # Same as process_blast: a header-only combined file is "no assignments", not a failure.
+    if df.empty:
+        print(f"ℹ️  No LCA assignments for {sample} — nothing to upload")
         return
 
     df[['og_id', 'tech', 'seq_date', 'code', 'annotation']] = df['seq_id'].str.split('.', expand=True)

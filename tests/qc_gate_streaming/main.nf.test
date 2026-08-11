@@ -1,0 +1,114 @@
+nextflow_workflow {
+    name "Per-sample circularity evidence streams samples through the QC gate"
+    script "./main.nf"
+    workflow "QC_GATE_STREAMING"
+
+    test("a fast sample reaches the QC gate before a slow assembly finishes") {
+        when {
+            workflow {
+                """
+                // Both samples are validated and annotated immediately. OGSLOW's assembly
+                // check takes 20s, standing in for the queued REFERENCE_RANK that stalled
+                // run mitogenomes-missing-audit-5. Under the previous
+                // circularity_evidence.toList() lookup neither sample could reach the gate
+                // until that check finished, so OGFAST was pinned to OGSLOW.
+                input[0] = Channel.of(
+                    [[id: 'OGFAST', mt_assembly_prefix: 'OGFAST.hifi.240101.v323mitohifi'], 0],
+                    [[id: 'OGSLOW', mt_assembly_prefix: 'OGSLOW.hifi.240101.v323mitohifi'], 0]
+                )
+                input[1] = Channel.of(
+                    [[id: 'OGFAST', mt_assembly_prefix: 'OGFAST.hifi.240101.v323mitohifi'], 0],
+                    [[id: 'OGSLOW', mt_assembly_prefix: 'OGSLOW.hifi.240101.v323mitohifi'], 20]
+                )
+                input[2] = Channel.empty()
+                """
+            }
+        }
+
+        then {
+            def released = [:]
+            workflow.out.released.each { row ->
+                def parsed = row instanceof String ? evaluate(row) : row
+                def line = path(parsed[1].toString()).text.trim().split('\t')
+                released[line[0].split('\\.')[0]] = [ evidence: line[1], at_ns: line[2] as long ]
+            }
+
+            assertAll(
+                { assert workflow.success },
+                { assert released.size() == 2 },
+                // Stated as a margin rather than a bare ordering so it cannot pass by
+                // scheduler luck: OGFAST must reach the gate at least 10s before OGSLOW,
+                // whose assembly check sleeps 20s.
+                { assert (released['OGSLOW'].at_ns - released['OGFAST'].at_ns) > 10_000_000_000L }
+            )
+        }
+    }
+
+    test("an assembly with no circularity check still reaches the gate") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [[id: 'OGNOCHECK', mt_assembly_prefix: 'OGNOCHECK.ilmn.230302.getorg1770'], 0]
+                )
+                input[1] = Channel.empty()
+                input[2] = Channel.of(
+                    [id: 'OGNOCHECK', mt_assembly_prefix: 'OGNOCHECK.ilmn.230302.getorg1770']
+                )
+                """
+            }
+        }
+
+        then {
+            def line = path(
+                (workflow.out.released[0] instanceof String
+                    ? evaluate(workflow.out.released[0])
+                    : workflow.out.released[0])[1].toString()
+            ).text.trim().split('\t')
+
+            assertAll(
+                { assert workflow.success },
+                // The whole point: no circularity check ran for this assembly, and the
+                // sample was still released rather than silently dropped by the plain join.
+                { assert workflow.out.released.size() == 1 },
+                { assert line[0] == 'OGNOCHECK.ilmn.230302.getorg1770' },
+                { assert line[1] == 'empty_circularity_check.tsv' }
+            )
+        }
+    }
+
+    test("a collapsed sample whose meta gained circular still matches its own evidence") {
+        when {
+            workflow {
+                """
+                // The collapse path folds the post-collapse verdict into meta.circular, so
+                // the gate side of the join carries a meta the assembly side never had. A
+                // whole-meta key silently misses here and hands the sample the "no anomaly"
+                // stand-in; keying on mt_assembly_prefix matches the real evidence.
+                input[0] = Channel.of(
+                    [[id: 'OGCOLL', mt_assembly_prefix: 'OGCOLL.hifi.240101.v323mitohifi', circular: 'true'], 0]
+                )
+                input[1] = Channel.of(
+                    [[id: 'OGCOLL', mt_assembly_prefix: 'OGCOLL.hifi.240101.v323mitohifi'], 0]
+                )
+                input[2] = Channel.empty()
+                """
+            }
+        }
+
+        then {
+            def line = path(
+                (workflow.out.released[0] instanceof String
+                    ? evaluate(workflow.out.released[0])
+                    : workflow.out.released[0])[1].toString()
+            ).text.trim().split('\t')
+
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.released.size() == 1 },
+                // The real check, not the empty stand-in.
+                { assert line[1] == 'OGCOLL.hifi.240101.v323mitohifi.circularity_check.tsv' }
+            )
+        }
+    }
+}

@@ -1,0 +1,106 @@
+nextflow_workflow {
+    name "Samplesheet meta shape is a function of what the sheet carries"
+    script "../../subworkflows/local/prepare_samplesheet/main.nf"
+    config "./nextflow.config"
+    workflow "PREPARE_SAMPLESHEET"
+
+    // PREPARE_SAMPLESHEET runs the real nf-schema parse, so these tests pin the exact
+    // contract that broke the pipeline once: nf-schema materialises a samplesheet column
+    // the sheet does not carry as an EMPTY LIST rather than omitting the key. Nextflow's
+    // task hash cannot see an empty collection, so a resumed run still hits a cache
+    // written before the column existed and hands back a meta with a different key set --
+    // which then fails `equals` and empties every join keyed on the whole meta map.
+    // PREPARE_SAMPLESHEET strips those placeholders so meta shape stays stable.
+
+    test("an optional column the sheet does not carry leaves no placeholder key in meta") {
+        when {
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/without_taxonomy.csv", checkIfExists: true)
+                def sheet = file("without_taxonomy.csv")
+                sheet.text = template.text.replace('__PROJECT_DIR__', "\${projectDir}")
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
+            assertAll(
+                { assert workflow.success },
+                { assert metas.keySet().toSorted() == ['OGCORAL', 'OGFISH'] },
+                // schema_input.json declares `family` and `order`; this sheet has neither
+                // column, so neither key may appear. This is the regression itself.
+                { assert metas.values().every { !it.containsKey('family') } },
+                { assert metas.values().every { !it.containsKey('order') } },
+                // A blank cell in a column the sheet DOES carry is the same "no value"
+                // placeholder and goes the same way.
+                { assert !metas.OGFISH.containsKey('original_id') },
+                { assert metas.OGCORAL.original_id == 'OGCORAL' },
+                // Everything the sheet actually carries survives untouched.
+                { assert metas.OGFISH.assembly_prefix == 'OGFISH.hifi.250101' },
+                { assert metas.OGFISH.date == '250101' },
+                { assert metas.OGFISH.class == 'Actinopteri' }
+            )
+        }
+    }
+
+    test("a populated optional column reaches meta unchanged") {
+        when {
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/with_taxonomy.csv", checkIfExists: true)
+                def sheet = file("with_taxonomy.csv")
+                sheet.text = template.text.replace('__PROJECT_DIR__', "\${projectDir}")
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
+            assertAll(
+                { assert workflow.success },
+                { assert metas.keySet().toSorted() == ['OGCORAL', 'OGFISH'] },
+                // A real value is a String, never a Collection, so the placeholder strip
+                // cannot touch it. REFERENCE_DIVERGENCE reads these two keys to pass
+                // --sample-family / --sample-order, which is what enables the CROSS_ORDER
+                // tier; if they were dropped, grading would silently fall back to genus.
+                { assert metas.OGFISH.family == 'Lutjanidae' },
+                { assert metas.OGFISH.order == 'Eupercaria' },
+                { assert metas.OGCORAL.family == 'Acroporidae' },
+                { assert metas.OGCORAL.order == 'Scleractinia' },
+                { assert metas.values().every { it.family instanceof String && it.order instanceof String } }
+            )
+        }
+    }
+
+    test("the class-driven genetic code still derives through the placeholder strip") {
+        when {
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/with_taxonomy.csv", checkIfExists: true)
+                def sheet = file("with_taxonomy.csv")
+                sheet.text = template.text.replace('__PROJECT_DIR__', "\${projectDir}")
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
+            assertAll(
+                { assert workflow.success },
+                // mitoGeneticCode() reads meta.class immediately after the strip, so this
+                // pins that the strip left the taxonomy it depends on in place.
+                { assert metas.OGFISH.genetic_code == 2 },
+                { assert metas.OGFISH.invertebrates == false },
+                { assert metas.OGCORAL.genetic_code == 4 },
+                { assert metas.OGCORAL.invertebrates == true }
+            )
+        }
+    }
+}

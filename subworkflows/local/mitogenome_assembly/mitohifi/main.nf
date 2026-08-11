@@ -19,7 +19,6 @@ include { REFERENCE_RANK                   } from '../../../../modules/local/ref
 include { OATK                             } from '../../../../modules/local/oatk'
 include { OATK_CHECK                       } from '../../../../modules/local/oatk/check_circularity'
 include { ASSEMBLY_NO_RESULT               } from '../../../../modules/local/assembly_no_result'
-include { PUSH_MTDNA_ASSM_RESULTS   } from '../../../../modules/local/upload_results/mtdna'
 
 // Read the circularity verdict from a MITOHIFI_CHECK_CIRCULARITY evidence TSV.
 // Returns true / false (final_verdict_circular) or null when the column is
@@ -56,6 +55,20 @@ def shouldReselectReference(tier) {
 // subworkflow, and therefore no dataflow cycle when the count is used to route.
 // Returns null when the file is missing/unparseable, which routing treats as "no
 // evidence of a collapse" so an odd GenBank never diverts a good assembly.
+//
+// ROUTING SIGNAL ONLY. The single caller (the gene-incomplete oatk branch below) uses
+// this as a filter predicate and then drops the value: it is never published, never
+// written to a file, and never reported in the assembly summary, MultiQC or the SQL
+// upload.
+//
+// It is NOT the pipeline's protein-coding-gene count. These are CDS features written
+// by MitoHiFi's own reference-guided annotation, whereas every assembly is re-annotated
+// downstream by EMMA / MITOS2; the reported num_cds comes from that re-annotation via
+// *.annotation_stats.csv (see bin/mitogenome_assembly_summary.py). The two numbers can
+// legitimately disagree and neither overwrites the other -- they only share the
+// params.mitogenome_summary_expected_pcg_count threshold. Reading MitoHiFi's GenBank is
+// the right source *for this decision*: it measures what reference-guided read
+// recruitment lost, which is exactly the collapse being detected.
 def countGenbankCds(gb) {
     try {
         if (!gb || !gb.exists() || gb.size() == 0) return null
@@ -106,17 +119,35 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     def mitohifi_version = params.mitohifi_container.tokenize(':').last()
     def mitohifi_version_stripped = mitohifi_version.replaceAll('\\.', '')
 
+    // Stand-in for assemblies that never reached a circularity check (failed / no-contig).
+    // Keeps circularity_evidence one-row-per-assembly; see the emit block for why totality
+    // is a contract rather than a convenience.
+    def no_circularity_evidence = file("${projectDir}/assets/empty_circularity_check.tsv", checkIfExists: true)
+
     //
-    // map just the meta for the species query
+    // Canonical read channel. The assembly prefix is embedded once, up front, and
+    // both the reference lookup and every read route reuse that same meta map. The
+    // prefix is part of the meta, so it is part of every downstream join key:
+    // deriving it a second time (from a meta that a process may have handed back)
+    // risks the two copies drifting apart and silently emptying a join. One
+    // derivation, one key.
+    //
+    // The version is parsed from the pinned container tag (params.mitohifi_container)
+    // rather than `mitohifi.py --version`, because the 3.2.3 release ships a stale
+    // self-reported version (3.2.1). The tag is the single source of truth: bump it in
+    // nextflow.config and the version in every assembly name follows automatically.
     //
 
-    ch_species_reference = fastp_reads
-    .map { meta, _files ->
-        def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${mitohifi_version_stripped}mitohifi"
-        meta + [ mt_assembly_prefix: mt_assembly_prefix ]
-    }
+    ch_reads_prefixed = fastp_reads
+        .map { meta, reads ->
+            def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${mitohifi_version_stripped}mitohifi"
+            [ meta + [ mt_assembly_prefix: mt_assembly_prefix ], reads ]
+        }
+
+    // map just the meta for the species query
+    ch_species_reference = ch_reads_prefixed.map { meta, _reads -> meta }
     // .view()
-    
+
     //
     // MODULE: Find a closely related species for reference
     //
@@ -125,48 +156,68 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         ch_species_reference
     )
 
-    // Split fastp_reads based on whether concatenation is needed
-    fastp_reads_split = fastp_reads.branch { meta, reads ->
-        def readList = reads instanceof List ? reads.collect { it.toString() } : [reads.toString()]
-        def needsConcatenation = meta.single_end ? readList.size > 1 : readList.size > 2
-        
-        needs_concat: needsConcatenation
-            return [meta, reads]
-        no_concat: !needsConcatenation
-            return [meta, reads]
+    //
+    // Route reads on whether they actually need concatenating.
+    //
+    // Only groups that carry more than one FASTQ (more than one pair, when paired)
+    // are worth a CAT_FASTQ task; a group holding a single file is already the merged
+    // FASTQ MitoHiFi wants. `passthrough` is an unconditional fallback rather than the
+    // negation of the first condition, so the two branches are mutually exclusive and
+    // jointly exhaustive by construction: no sample can fall through the branch and
+    // disappear, which is how the singleton route was lost once before.
+    //
+
+    ch_reads_routed = ch_reads_prefixed.branch { meta, reads ->
+        def readList = reads instanceof List ? reads : [ reads ]
+        needs_concat: meta.single_end ? readList.size() > 1 : readList.size() > 2
+        passthrough: true
     }
+
     //
     // MODULE: Concatenate fastq reads where there are multiple fastq files
     //
 
     CAT_FASTQ (
-        fastp_reads_split.needs_concat
+        ch_reads_routed.needs_concat
     )
 
-    // Combine the results
-    final_reads = fastp_reads_split.no_concat.mix(CAT_FASTQ.out.reads)
+    // Recombine the two routes with `mix`. `mix` forwards each item the moment it
+    // arrives, so singleton samples reach the reference join, MitoHiFi and Oatk while
+    // the multi-file groups are still concatenating. Anything that has to see a whole
+    // channel first (collect / groupTuple / a remainder join) would instead hold every
+    // sample back until the slowest concatenation finished.
+    final_reads = ch_reads_routed.passthrough.mix(CAT_FASTQ.out.reads)
 
     //
     // Combine fastp files with the mito reference output
     //
-
-    // Embed the assembly prefix before the reference join so reads remain routable
-    // when findMitoReference emits a no-reference placeholder. The version is parsed from the
-    // pinned container tag (params.mitohifi_container) rather than `mitohifi.py
-    // --version`, because the 3.2.3 release ships a stale self-reported version
-    // (3.2.1). The tag is the single source of truth: bump it in nextflow.config and
-    // the version in every assembly name follows automatically.
+    // Keyed on mt_assembly_prefix, NOT on the whole meta map. On a resumed run
+    // findMitoReference's meta comes back from the cache database, and a cache-restored
+    // meta is not guaranteed to `equals` the live one that never went through a process:
+    // Nextflow's task hash ignores an empty collection, so an optional samplesheet column
+    // the sheet does not carry (nf-schema materialises it as `[]`) changes meta shape
+    // without changing the hash. The task still resumes, hands back the older meta, and a
+    // whole-meta join silently matches nothing -- which is exactly how every singleton
+    // HiFi sample stopped reaching MitoHiFi. The prefix is one stable string per assembly,
+    // and the reads-side meta (live, canonical, already carrying the prefix) is what
+    // travels downstream. .toString() because the prefix is a GString and a GString never
+    // equals a String.
     //
-
-    ch_reads_by_prefix = final_reads.map { meta, reads ->
-        def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${mitohifi_version_stripped}mitohifi"
-        def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
-        [meta_ext, reads]
-    }
+    // Reads keep the meta they were routed with, so they stay joinable even when
+    // findMitoReference emits a no-reference placeholder.
+    //
 
     ch_reference_outcomes = MITOHIFI_FINDMITOREFERENCE.out.reference
         .join(MITOHIFI_FINDMITOREFERENCE.out.status, by: 0)
-    ch_reference_joined = ch_reads_by_prefix.join(ch_reference_outcomes, by: 0)
+        .map { meta, ref_fasta, ref_gb, status ->
+            [ meta.mt_assembly_prefix.toString(), ref_fasta, ref_gb, status ]
+        }
+    ch_reference_joined = final_reads
+        .map { meta, reads -> [ meta.mt_assembly_prefix.toString(), meta, reads ] }
+        .join(ch_reference_outcomes, by: 0)
+        .map { _prefix, meta, reads, ref_fasta, ref_gb, status ->
+            [ meta, reads, ref_fasta, ref_gb, status ]
+        }
     ch_reference_branched = ch_reference_joined.branch { _meta, _reads, ref_fasta, ref_gb, _status ->
         found: ref_fasta.size() > 0 && ref_gb.size() > 0
         missing: true
@@ -343,8 +394,8 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_routed_failure_fasta = Channel.empty()
     ch_routed_failure_log = Channel.empty()
     // Oatk's reads keyed by the OATK assembly prefix. Kept separate from
-    // ch_reads_by_prefix because ch_oatk_input below OVERWRITES mt_assembly_prefix
-    // with the oatk prefix, so a prefix-keyed join against ch_reads_by_prefix would
+    // final_reads because ch_oatk_input below OVERWRITES mt_assembly_prefix
+    // with the oatk prefix, so a prefix-keyed join against final_reads would
     // match nothing and silently drop every oatk sample from the depth measurement.
     ch_oatk_reads = Channel.empty()
 
@@ -357,9 +408,6 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         .mix(ch_reference_route.oatk_direct
             .map { meta, reads, _ref_fasta, _ref_gb, _flag -> [meta, reads, 'cross_order_reference'] })
     if (params.enable_oatk_fallback) {
-        // Reads keyed by the SAME enriched meta (with mt_assembly_prefix) the failed
-        // branch carries, so the join matches. combined_with_mt_assembly_prefix holds
-        // [meta_ext, reads, ref_fasta, ref_gb]; take meta + reads.
         // Oatk assembler tag for the run prefix, parsed from the container version
         // (1.0 -> v10oatk) so the summary files it as an Oatk run distinct from the
         // failed MitoHiFi attempt. Overwrite mt_assembly_prefix so every downstream
@@ -367,9 +415,16 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         def oatk_version_stripped = (params.oatk_container ?: 'oatk:1.0')
             .tokenize(':').last().tokenize('--').first().replaceAll('\\.', '')
 
+        // Reads keyed by the assembly prefix for the two joins below, for the same reason
+        // the reference join is keyed that way: MITOHIFI_MITOHIFI's meta is cache-restored
+        // on a resume while final_reads is computed live, and the two are not guaranteed
+        // to `equals` even when they describe the same sample.
+        ch_reads_keyed = final_reads.map { meta, reads -> [ meta.mt_assembly_prefix.toString(), reads ] }
+
         ch_failed_oatk_reads = ch_mitohifi_fasta_branched.failed
-            .join(ch_reads_by_prefix, by: 0)
-            .map { meta, _empty_fasta, reads -> [meta, reads, 'empty_mitohifi'] }
+            .map { meta, _empty_fasta -> [ meta.mt_assembly_prefix.toString(), meta ] }
+            .join(ch_reads_keyed, by: 0)
+            .map { _prefix, meta, reads -> [meta, reads, 'empty_mitohifi'] }
 
         // An empty FASTA is not the only way a divergent reference ruins an assembly.
         // When the reference is too distant, MitoHiFi's reference-guided read
@@ -381,17 +436,32 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         // for a collapse the reference caused. The PCG count comes from MitoHiFi's own
         // final_mitogenome.gb (inner join: an assembly with no GenBank yields no
         // evidence and is left alone).
+        //
+        // This whole branch is inside `if (params.enable_oatk_fallback)`, which is false
+        // by default, so on a default run the count is computed nowhere and changes
+        // nothing. Its failure modes are asymmetric and cheap either way: a concatemer
+        // duplicates CDS features so the count lands above the threshold and never trips
+        // the `<` filter, and a spuriously low count costs only one extra Oatk run,
+        // because the MitoHiFi assembly is not withdrawn (see below).
         def expected_pcg_count = (params.mitogenome_summary_expected_pcg_count ?: 13) as int
         ch_gene_incomplete_oatk_reads = ch_mitohifi_fasta_branched.assembled
             .join(MITOHIFI_MITOHIFI.out.gb, by: 0)
             .map { meta, _fasta, gb -> [meta, countGenbankCds(gb)] }
             .filter { _meta, cds -> cds != null && cds < expected_pcg_count }
-            .join(ch_reads_by_prefix, by: 0)
-            .map { meta, _cds, reads -> [meta, reads, 'gene_incomplete_mitohifi'] }
+            .map { meta, _cds -> [ meta.mt_assembly_prefix.toString(), meta ] }
+            .join(ch_reads_keyed, by: 0)
+            .map { _prefix, meta, reads -> [meta, reads, 'gene_incomplete_mitohifi'] }
 
         // The MitoHiFi assembly is deliberately NOT withdrawn when this fires: it stays
         // published alongside the Oatk attempt (distinct v10oatk prefix), so the summary
         // shows both and curation picks. Discarding it would lose information.
+        //
+        // fallback_reason records WHY oatk was invoked (no_reference /
+        // reference_lookup_error / cross_order_reference / empty_mitohifi /
+        // gene_incomplete_mitohifi). It is carried in meta for provenance only: nothing in
+        // the repo reads it, so the routing decision currently leaves no trace in any
+        // output file. Surfacing it (and the CDS count above) as summary evidence is a
+        // deliberate TODO, not an oversight to be fixed in passing.
         ch_oatk_input = ch_direct_oatk_reads
             .mix(ch_failed_oatk_reads, ch_gene_incomplete_oatk_reads)
             .map { meta, reads, reason ->
@@ -422,8 +492,15 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         ch_oatk_assembled = OATK.out.fasta.filter { _meta, fasta -> fasta.size() > 0 }
 
         // Assembled oatk contigs always emit a GFA; pair them for the self-link
-        // circularity read.
-        ch_oatk_fa_gfa = ch_oatk_assembled.join(OATK.out.gfa, by: 0)   // [meta, fasta, gfa]
+        // circularity read. Keyed on mt_assembly_prefix, not the whole meta:
+        // OATK.out.fasta and OATK.out.gfa both carry cache-restored meta on a
+        // -resume, and a whole-meta join drops every sample whose restored meta no
+        // longer `equals` the live one -- the same failure the reference join above
+        // documents, and exactly why OG109/OG2089 never reached OATK_CHECK.
+        ch_oatk_fa_gfa = ch_oatk_assembled
+            .map { m, fasta -> [ m.mt_assembly_prefix.toString(), m, fasta ] }
+            .join(OATK.out.gfa.map { m, gfa -> [ m.mt_assembly_prefix.toString(), gfa ] }, by: 0)
+            .map { _prefix, m, fasta, gfa -> [ m, fasta, gfa ] }   // [meta, fasta, gfa]
 
         // Attach the per-sample reference GenBank. RELABEL_REFERENCE_GB.out.gb carries the
         // MitoHiFi-prefixed meta (not the oatk one), so key on [id, sequencing_type, date].
@@ -446,20 +523,46 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
         // Fold the corrected circular verdict into meta on every oatk channel that is later
         // joined by the whole meta map (fasta <-> evidence in the parent collapse join; the
-        // QC-gate evidence). All three must carry the SAME meta, so fold the identical
-        // verdict into each. remainder:true keeps the no-contig oatk (no evidence ->
-        // circular:null, empty FASTA filtered out of annotation downstream).
+        // QC-gate evidence). Keyed on mt_assembly_prefix, not the whole meta: OATK.out.* and
+        // OATK_CHECK.out.evidence carry meta from different cache entries on a -resume, and a
+        // whole-meta join drops the verdict for every sample whose restored meta no longer
+        // `equals` the live one (same failure the reference join above documents). remainder:true
+        // keeps the no-contig oatk (no evidence -> circular:null, empty FASTA filtered out of
+        // annotation downstream).
         ch_oatk_circ_verdict = OATK_CHECK.out.evidence
-            .map { m, tsv -> [ m, parseFinalVerdictCircular(tsv) ] }
+            .map { m, tsv -> [ m.mt_assembly_prefix.toString(), parseFinalVerdictCircular(tsv) ] }
 
         ch_oatk_fasta = OATK.out.fasta
+            .map { m, fasta -> [ m.mt_assembly_prefix.toString(), m, fasta ] }
             .join(ch_oatk_circ_verdict, by: 0, remainder: true)
-            .map { m, fasta, circ -> [ m + [ circular: circ ], fasta ] }
-        ch_oatk_log = OATK.out.log
+            .map { _prefix, m, fasta, circ -> [ m + [ circular: circ ], fasta ] }
+
+        // Push input for oatk: the getorg_check.tsv evidence when OATK_CHECK ran (so the push
+        // script parses final_verdict_circular into a real stats value), else the raw .oatk.log
+        // so a no-contig / no-evidence oatk still emits a tuple and hits the push script's
+        // fail-loud path rather than vanishing. NOT OATK.out.log alone, which is the raw syncasm
+        // log that matches no parser and silently wrote stats=NULL. The raw log stays in
+        // ch_summary_files (below) for the summary / MultiQC.
+        ch_oatk_push_input = OATK.out.log
+            .map { m, log -> [ m.mt_assembly_prefix.toString(), m, log ] }
+            .join(OATK_CHECK.out.evidence.map { m, ev -> [ m.mt_assembly_prefix.toString(), ev ] }, by: 0, remainder: true)
+            .map { prefix, m, log, ev -> [ prefix, m, ev ?: log ] }
+        ch_oatk_log = ch_oatk_push_input
             .join(ch_oatk_circ_verdict, by: 0, remainder: true)
-            .map { m, log, circ -> [ m + [ circular: circ ], log ] }
+            .map { _prefix, m, push_file, circ -> [ m + [ circular: circ ], push_file ] }
+
+        // One evidence row per emitted oatk FASTA, never fewer. OATK_CHECK runs on the
+        // assembled contigs only (ch_oatk_assembled), so the no-contig empties are paired
+        // with the empty-check placeholder here instead of being left absent. Downstream
+        // joins the evidence per sample rather than waiting for the channel to close, so a
+        // sample with no evidence row would be dropped at the QC gate rather than delayed.
+        // The complement is taken from the same local filter that built ch_oatk_assembled,
+        // so no join (and no channel-close dependency) is needed to identify it.
         ch_oatk_circularity_evidence = OATK_CHECK.out.evidence
             .map { m, ev -> [ m + [ circular: parseFinalVerdictCircular(ev) ], ev ] }
+            .mix( OATK.out.fasta
+                    .filter { _meta, fasta -> fasta.size() == 0 }
+                    .map { m, _fasta -> [ m + [ circular: null ], no_circularity_evidence ] } )
 
         // Non-zero OATK exits are propagated by the process itself so Nextflow's
         // retry/error strategy remains effective. This channel therefore contains
@@ -508,8 +611,23 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         .join(ch_circ_verdict, by: 0, remainder: true)
         .map { meta, gb, circ -> [ meta + [ circular: circ ], gb ] }
 
+    // One evidence row per emitted assembly FASTA, never fewer. MITOHIFI_CHECK_CIRCULARITY
+    // runs on the `assembled` branch only, and ch_assembly_fasta additionally carries the
+    // `failed` branch plus the routed failures, so those two are paired with the empty-check
+    // placeholder here (circular stays null -- unknown, not "not circular"). Both complements
+    // come from branches/channels that are already local at this point, so establishing
+    // totality costs no join and introduces no channel-close dependency.
+    //
+    // Totality matters downstream: the parent workflow and the QC gate now attach evidence
+    // with a plain per-key join instead of collecting the whole channel, which is what lets a
+    // finished sample cross the gate while other assemblies are still running. A missing
+    // evidence row would silently drop its sample there rather than merely delay it.
     ch_circularity_evidence = MITOHIFI_CHECK_CIRCULARITY.out.evidence
         .map { meta, evidence -> [ meta + [ circular: parseFinalVerdictCircular(evidence) ], evidence ] }
+        .mix( ch_mitohifi_fasta_branched.failed
+                .map { meta, _fasta -> [ meta + [ circular: null ], no_circularity_evidence ] } )
+        .mix( ch_routed_failure_fasta
+                .map { meta, _fasta -> [ meta + [ circular: null ], no_circularity_evidence ] } )
 
     //
     // Collect MultiQC inputs and versions
@@ -599,20 +717,28 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     mtdna_files     = ch_mtdna_files               // channel: [ mt_assembly_prefix, [ mtdna files ] ]
     assembly_fasta  = ch_assembly_fasta            // channel: [ meta(+circular), assembly.fasta ]
     oatk_fasta      = ch_oatk_fasta                // channel: [ meta(+circular), oatk.mito.ctg.fasta ] (empty unless fallback enabled)
-    oatk_log        = ch_oatk_log                  // channel: [ meta, oatk.log ]
+    oatk_log        = ch_oatk_log                  // channel: [ meta(+circular), getorg_check.tsv (assembled) | oatk.log (no-contig) ] — push input
     assembly_log    = ch_assembly_log              // channel: [ meta(+circular), contigs_stats.tsv ]
     reference_gb    = ch_reference_gb              // channel: [ meta(+circular), reference.gb ]
-    // Full merged HiFi reads keyed by assembly prefix, for MITOGENOME_COVERAGE in the
-    // parent workflow. Keyed rather than meta-joined because meta gains `circular`
+    // The complete HiFi read set per sample (concatenated where the group held more
+    // than one FASTQ, otherwise the single original file), keyed by assembly prefix,
+    // for MITOGENOME_COVERAGE in the parent workflow. Keyed rather than meta-joined because meta gains `circular`
     // downstream, so a whole-meta join would never match. Oatk is mixed in from its own
     // channel: ch_oatk_input rewrites mt_assembly_prefix, so its reads are not reachable
-    // through ch_reads_by_prefix.
-    depth_reads     = ch_reads_by_prefix.map { m, r -> [ m.mt_assembly_prefix, r ] }
+    // through final_reads.
+    depth_reads     = final_reads.map { m, r -> [ m.mt_assembly_prefix, r ] }
                         .mix(ch_oatk_reads.map { m, r -> [ m.mt_assembly_prefix, r ] })
     // Fold the oatk fallback's circularity evidence into the same channel so the parent
     // workflow's collapse-concatemer join, QC gate and assembly summary treat oatk exactly
     // like MitoHiFi (matched join item -> flows to annotation incrementally). Empty unless
     // the fallback ran.
+    //
+    // CONTRACT: exactly one row per assembly FASTA this subworkflow emits (assembly_fasta +
+    // oatk_fasta), using assets/empty_circularity_check.tsv where no check ran. The parent
+    // workflow and the QC gate rely on that totality to attach evidence with a plain per-key
+    // join; a channel that is merely "evidence where it exists" would force them back to a
+    // remainder join or a collect, which is what previously pinned every finished sample to
+    // the slowest assembly in the run.
     circularity_evidence = ch_circularity_evidence.mix(ch_oatk_circularity_evidence) // channel: [ meta(+circular), *_check.tsv ]
     summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]

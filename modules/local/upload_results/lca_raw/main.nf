@@ -1,6 +1,6 @@
 process PUSH_LCA_RAW_RESULTS {
     tag "$meta.id"
-    label 'process_medium'
+    label 'process_upload'
 
     conda "conda-forge::python=3.9 conda-forge::psycopg2 conda-forge::pandas"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?

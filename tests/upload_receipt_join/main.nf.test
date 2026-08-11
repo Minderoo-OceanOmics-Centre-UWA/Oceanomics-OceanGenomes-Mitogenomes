@@ -1,0 +1,100 @@
+nextflow_workflow {
+    name "QC-ready samples are gated on their own upload receipt, not on meta equality"
+    script "./main.nf"
+    workflow "UPLOAD_RECEIPT_JOIN"
+
+    test("a sample is released even though the two sides carry different meta maps") {
+        when {
+            workflow {
+                """
+                // The QC side's meta has been through MITOGENOME_ANNOTATION: mt_assembly_prefix
+                // was rewritten to the annotated FASTA's basename, and it has picked up extra
+                // keys along the way. The upload side carries the assembly stage's meta for the
+                // same assembly. The maps are NOT equal -- which is precisely the case a
+                // whole-meta join drops on the floor without a word.
+                input[0] = Channel.of(
+                    [[id: 'OG868', mt_assembly_prefix: 'OG868.hic.250624.getorg1770reseed', circular: 'true', assembler_fallback: null],
+                     'Chrysophrys auratus', 'true', 'true']
+                )
+                input[1] = Channel.of(
+                    [[id: 'OG868', mt_assembly_prefix: 'OG868.hic.250624.getorg1770reseed'], 0]
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // The whole point: the sample reached QC despite the meta maps differing.
+                { assert workflow.out.consumed.size() == 1 },
+                { assert workflow.out.qc_ready.size() == 1 },
+                // meta is passed through unchanged -- the receipt is only an ordering dependency.
+                { assert (workflow.out.qc_ready[0] instanceof String
+                            ? evaluate(workflow.out.qc_ready[0])
+                            : workflow.out.qc_ready[0])[0].circular == 'true' }
+            )
+        }
+    }
+
+    test("a fast sample is released before a slow sample's upload commits") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [[id: 'OGFAST', mt_assembly_prefix: 'OGFAST.hifi.240101.v323mitohifi', circular: 'true'], 'Species fast', 'true', 'true'],
+                    [[id: 'OGSLOW', mt_assembly_prefix: 'OGSLOW.hifi.240101.v323mitohifi', circular: 'true'], 'Species slow', 'true', 'true']
+                )
+                input[1] = Channel.of(
+                    [[id: 'OGFAST', mt_assembly_prefix: 'OGFAST.hifi.240101.v323mitohifi'], 0],
+                    [[id: 'OGSLOW', mt_assembly_prefix: 'OGSLOW.hifi.240101.v323mitohifi'], 20]
+                )
+                """
+            }
+        }
+
+        then {
+            def released = [:]
+            workflow.out.consumed.each { row ->
+                def parsed = row instanceof String ? evaluate(row) : row
+                def line = path(parsed[1].toString()).text.trim().split('\t')
+                released[line[0].split('\\.')[0]] = [ at_ns: line[2] as long ]
+            }
+
+            assertAll(
+                { assert workflow.success },
+                { assert released.size() == 2 },
+                // Stated as a margin so it cannot pass by scheduler luck.
+                { assert (released['OGSLOW'].at_ns - released['OGFAST'].at_ns) > 10_000_000_000L }
+            )
+        }
+    }
+
+    test("a sample with no upload row is held back rather than reaching QC") {
+        when {
+            workflow {
+                """
+                // A failed assembly never gets an upload row, so it must not reach QC. This is
+                // an inner join on purpose: the receipt is a real dependency, not decoration.
+                input[0] = Channel.of(
+                    [[id: 'OGOK',      mt_assembly_prefix: 'OGOK.hifi.240101.v323mitohifi'],      'Species ok', 'true', 'true'],
+                    [[id: 'OGNOUPLOAD',mt_assembly_prefix: 'OGNOUPLOAD.hifi.240101.v323mitohifi'],'Species nope','true', 'true']
+                )
+                input[1] = Channel.of(
+                    [[id: 'OGOK', mt_assembly_prefix: 'OGOK.hifi.240101.v323mitohifi'], 0]
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.consumed.size() == 1 },
+                { assert (workflow.out.qc_ready[0] instanceof String
+                            ? evaluate(workflow.out.qc_ready[0])
+                            : workflow.out.qc_ready[0])[0].id == 'OGOK' }
+            )
+        }
+    }
+}
