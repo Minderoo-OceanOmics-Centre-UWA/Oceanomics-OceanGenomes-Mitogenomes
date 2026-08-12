@@ -124,24 +124,49 @@ def determine_file_type(filename):
     return 'single'
 
 
+def library_date_hint(filepath, seq_type):
+    """Date this file's library can be identified by, from the filename alone.
+
+    Only used to separate libraries at grouping time, so it must not depend on
+    the database. Returns '' when the filename cannot say, which keeps the
+    pre-existing grouping for those files.
+    """
+    if seq_type == 'ilmn':
+        return extract_ilmn_date(filepath)
+    if seq_type == 'hic':
+        return extract_hic_run_date(filepath)
+    # HiFi libraries are assembled from every movie of a sample, so movie dates
+    # must not split them.
+    return ''
+
+
 def group_files_by_sample(file_list):
+    """Group reads into libraries, keyed by sample, technology and run date.
+
+    Keying on the sample id alone merges every library a specimen has into one
+    row: two ilmn dates get concatenated into a single assembly, as do two runs
+    of one Hi-C tube. Including the technology and the run date keeps each
+    library separate, while files whose date cannot be read from the name fall
+    back to the previous behaviour.
+    """
     samples = {}
 
     for filepath in file_list:
         sample_id = extract_sample_info(filepath)
         file_type = determine_file_type(filepath)
         seq_type = determine_sequencing_type(filepath)
+        library_key = (sample_id, seq_type, library_date_hint(filepath, seq_type))
 
-        if sample_id not in samples:
-            samples[sample_id] = {
+        if library_key not in samples:
+            samples[library_key] = {
                 'R1': [],
                 'R2': [],
                 'single': [],
                 'sequencing_types': set()
             }
 
-        samples[sample_id][file_type].append(filepath)
-        samples[sample_id]['sequencing_types'].add(seq_type)
+        samples[library_key][file_type].append(filepath)
+        samples[library_key]['sequencing_types'].add(seq_type)
 
     return samples
 
@@ -172,13 +197,45 @@ def clean_sample_id(sample_id):
 
 
 def extract_hifi_completion_date(filename):
+    """Date the SMRT cell finished, taken from the field after the movie id.
+
+    Anchored on the movie id rather than a fixed field index, because the number
+    of prefix fields varies: OG785_m84154_..., OG104_OG104_m84154_... and
+    OG62G_D_m84154_... all carry the date in a different position, and reading
+    index 2 blindly returns the movie id 'm84154' for the latter two.
+    """
     parts = Path(filename).name.split('_')
+    for i, part in enumerate(parts[:-1]):
+        if re.fullmatch(r'm\d+e?', part) and re.fullmatch(r'\d{6}', parts[i + 1]):
+            return parts[i + 1]
     return parts[2] if len(parts) >= 3 else 'unknown'
 
 
 def extract_ilmn_date(filename):
     parts = Path(filename).name.split('.')
     return parts[2] if len(parts) >= 3 else 'unknown'
+
+
+def extract_hic_run_date(filename):
+    """Run date embedded straight after the HICL token, or '' when absent.
+
+    Raw Hi-C reads come off the sequencer as <tube>_HICL_S<n>_L00<lane>_R<n>_001
+    with no date in them at all, so the run has to be recovered from the DB. A
+    tube is often sequenced more than once, and query_hic_date() returns only
+    the most recent seq_date for that tube, which silently collapses every run
+    of a tube into one library. Reprocessing archived data therefore stamps the
+    run date into the name at fetch time:
+
+        OG2088G-1_HICL_260605_S3_L001_R1_001.fastq.gz
+
+    Freshly sequenced reads keep their original names and fall back to the DB
+    lookup, which is correct for them because there is only one run.
+    """
+    parts = Path(filename).name.split('_')
+    for i, part in enumerate(parts[:-1]):
+        if re.match(r'^HIC[A-Za-z0-9]*$', part) and re.fullmatch(r'\d{6}', parts[i + 1]):
+            return parts[i + 1]
+    return ''
 
 
 def extract_ilmn_prefix(filename, sample_id, sequencing_type, date):
@@ -195,11 +252,16 @@ def query_hifi_date(cursor, sample_id, completion_date_str):
         try:
             completion_date = datetime.strptime(completion_date_str, '%y%m%d').date()
             search_start = completion_date - timedelta(days=30)
+            # seq_type must be pinned to PacBio. Without it, a movie whose own
+            # run sits outside the window silently takes whatever other
+            # sequencing falls inside it: OG16 and OG79 were dated from HiC runs
+            # and OG88 from an ONT run.
             cursor.execute(
                 """
                 SELECT seq_date
                 FROM sequencing
                 WHERE og_id = %s
+                  AND seq_type = 'PacBio'
                   AND seq_date >= %s
                   AND seq_date <= %s
                 ORDER BY seq_date DESC
@@ -208,11 +270,16 @@ def query_hifi_date(cursor, sample_id, completion_date_str):
                 (sample_id, search_start.strftime('%y%m%d'), completion_date.strftime('%y%m%d'))
             )
         except ValueError as exc:
-            print(f"Error parsing completion date '{completion_date_str}': {exc}", file=sys.stderr)
-            cursor.execute(
-                "SELECT seq_date FROM sequencing WHERE og_id = %s ORDER BY seq_date DESC LIMIT 1",
-                (sample_id,)
+            # Do not fall back to the sample's most recent PacBio run. That is
+            # how OG104's 241127 movie came to be labelled 250113 and merged
+            # with the later run: an unreadable name produced a confident wrong
+            # date instead of a visible gap.
+            print(
+                f"Error parsing completion date '{completion_date_str}' for {sample_id}: {exc}. "
+                f"Dating this movie 'unknown' rather than guessing a run.",
+                file=sys.stderr
             )
+            return "unknown"
     else:
         return "unknown"
 
@@ -472,7 +539,7 @@ def main():
         writer = csv.writer(csvfile)
         writer.writerow(header)
 
-        for sample_id, files in sorted(samples.items()):
+        for (sample_id, _key_seq_type, run_date_hint), files in sorted(samples.items()):
             seq_types = files['sequencing_types']
             sequencing_type = pick_primary_seq_type(seq_types, sample_id)
 
@@ -492,7 +559,10 @@ def main():
                 completion_date = extract_hifi_completion_date(first_file) if first_file else 'unknown'
                 date = query_hifi_date(cursor, cleaned_id, completion_date)
             elif sequencing_type == 'hic':
-                date = query_hic_date(cursor, original_id)
+                # A run date in the filename is authoritative: it names the run
+                # this library actually came from, whereas the tube lookup can
+                # only ever return the most recent run of that tube.
+                date = run_date_hint or query_hic_date(cursor, original_id)
             elif sequencing_type == 'ilmn':
                 date = extract_ilmn_date(first_file) if first_file else 'unknown'
             else:
@@ -507,15 +577,24 @@ def main():
              reference_species_id) = query_species_info(cursor, cleaned_id)
             invertebrates = is_invertebrate(tax_class)
 
-            def write_row(r1, r2, single_end):
+            def write_row(r1, r2, single_end,
+                          row_completion_date=None, row_date=None, row_assembly_prefix=None):
+                # HiFi passes its own values so each movie is dated by the run it
+                # came from; everything else uses the entry's.
+                if row_completion_date is None:
+                    row_completion_date = completion_date
+                if row_date is None:
+                    row_date = date
+                if row_assembly_prefix is None:
+                    row_assembly_prefix = assembly_prefix
                 writer.writerow([
                     cleaned_id,
                     sequencing_type,
                     str(single_end).lower(),
                     original_id,
-                    completion_date,
-                    date,
-                    assembly_prefix,
+                    row_completion_date,
+                    row_date,
+                    row_assembly_prefix,
                     nominal_species_id,
                     reference_species_id,
                     tax_class,
@@ -536,8 +615,26 @@ def main():
                     if r1_file or r2_file:
                         write_row(r1_file, r2_file, False)
             elif files['single']:
+                # One movie can be one SMRT cell of a multi-cell run, or a whole
+                # separate run months later. Dating the whole group from its first
+                # file merged both cases into a single assembly; resolving each
+                # movie's own completion date keeps cells of one run together
+                # (they land on the same seq_date) and separates real runs, which
+                # is what prepare_samplesheet's [id, sequencing_type, date] group
+                # key then acts on.
+                date_cache = {}
                 for single_file in sorted(files['single']):
-                    write_row(single_file, '', True)
+                    if sequencing_type != 'hifi':
+                        write_row(single_file, '', True)
+                        continue
+                    file_completion = extract_hifi_completion_date(single_file)
+                    if file_completion not in date_cache:
+                        date_cache[file_completion] = query_hifi_date(
+                            cursor, cleaned_id, file_completion)
+                    file_date = date_cache[file_completion]
+                    write_row(single_file, '', True,
+                              file_completion, file_date,
+                              f"{cleaned_id}.{sequencing_type}.{file_date}")
             elif files['R1']:
                 for r1_file in sorted(files['R1']):
                     write_row(r1_file, '', True)
