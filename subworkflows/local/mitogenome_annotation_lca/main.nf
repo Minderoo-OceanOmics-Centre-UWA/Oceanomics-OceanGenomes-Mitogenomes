@@ -94,15 +94,25 @@ workflow MITOGENOME_ANNOTATION {
     DOWNLOAD_TAXONKIT_DB(Channel.value("taxdump"))
     
     //
-    // Extract the assembly name from the fasta file and embeds it into the meta map.
-    // Overwrites mt_assembly_prefix if it already exists in meta to allow for any concatgenated sequences created in sanitse fasta module.
-    // The concatinated fasta is to allow for species validation from multiple contig/scaffold assemblies.
+    // Assert the assembly's identity rather than assigning it.
     //
-
+    // This used to OVERWRITE meta.mt_assembly_prefix with the FASTA basename, which is where
+    // the pipeline's two notions of "the prefix" collided: the assembly stage kept a
+    // sample-level value while everything from here on used the curated basename, so every
+    // join spanning this line silently missed. That dropped 23 of 168 assemblies at the QC
+    // gate and filed a reseed's depth against the first-pass row.
+    //
+    // Identity is now stamped by whoever renames the molecule (the reseed/rgj resolution, the
+    // collapse, SANITISE_FASTA), so by here the two must already agree. Fail loudly if they do
+    // not: a silent re-assignment is exactly what made the original defect invisible.
+    //
     fasta_with_mt_assembly_prefix = mito_assembly
     .map { meta, fasta ->
-        def meta_ext = meta + [ mt_assembly_prefix: fasta.baseName ]
-        [meta_ext, fasta]
+        assert meta.mt_assembly_prefix == fasta.baseName : \
+            "Assembly identity out of sync with its FASTA: meta.mt_assembly_prefix=" +
+            "'${meta.mt_assembly_prefix}' but the annotated FASTA is '${fasta.baseName}'. " +
+            "Whichever stage produced this FASTA must stamp mt_assembly_prefix from its basename."
+        [meta, fasta]
     }
 
     //
@@ -113,19 +123,19 @@ workflow MITOGENOME_ANNOTATION {
     // record a PASS/MISMATCH review flag for every sample that has one. Label- and
     // taxonomy-DB-free; always exits 0.
     //
-    // Key the reference reuse on the ORIGINAL assembly prefix (meta.mt_assembly_prefix
-    // on mito_assembly, before the fasta-basename overwrite above), not the whole meta
-    // map: a curated FASTA basename (<prefix>_collapsed / <prefix>_concat) no longer
-    // equals reference_gb's original-prefix meta, so a whole-meta join would silently
-    // drop those samples from the relevance check. The output still carries the new
-    // (fasta basename) prefix so it publishes into the same dir as the annotation.
-    ch_reference_gb_keyed = reference_gb.map { meta, ref -> [ meta.mt_assembly_prefix, ref ] }
+    // Key the reference reuse on the LINEAGE prefix, not on identity and not on the whole meta
+    // map: one reference is resolved per assembly run, before curation, so reference_gb's meta
+    // carries the assembly-stage name while mito_assembly's carries the curated one
+    // (<prefix>reseed / _collapsed / _concat). Joining on either identity or the whole map
+    // would silently drop every curated assembly from the relevance check. The output keeps
+    // the assembly's identity so it publishes into the same dir as the annotation.
+    ch_reference_gb_keyed = reference_gb.map { meta, ref -> [ meta.mt_assembly_run_prefix, ref ] }
 
     REFERENCE_RELEVANCE (
         mito_assembly
-            .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+            .map { meta, fasta -> [ meta.mt_assembly_run_prefix, meta, fasta ] }
             .join(ch_reference_gb_keyed, by: 0)
-            .map { _key, meta, fasta, ref -> [ meta + [ mt_assembly_prefix: fasta.baseName ], fasta, ref ] }
+            .map { _key, meta, fasta, ref -> [ meta, fasta, ref ] }
     )
     ch_reference_relevance = REFERENCE_RELEVANCE.out.flag
 

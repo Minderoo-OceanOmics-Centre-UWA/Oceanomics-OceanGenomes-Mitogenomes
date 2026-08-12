@@ -221,7 +221,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_getorg_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_getorg, checkIfExists: false)
@@ -236,7 +237,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
         // No check is re-run for precomputed assemblies, but the original run's
@@ -260,7 +262,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
         // Restore the one-row-per-assembly contract the assembly subworkflows guarantee:
@@ -270,9 +273,9 @@ workflow OCEANGENOMESMITOGENOMES {
         // remainder: true is safe HERE, unlike the collapse join below, because both sides are
         // Channel.fromPath globs that close immediately -- there is no running task to wait on.
         ch_mitogenome_getorg_circularity_evidence = ch_mitogenome_getorg_assembly_fasta
-            .map { meta, _fasta -> [ meta.mt_assembly_prefix, meta ] }
+            .map { meta, _fasta -> [ meta.mt_assembly_run_prefix, meta ] }
             .join(
-                ch_mitogenome_getorg_circularity_evidence.map { meta, ev -> [ meta.mt_assembly_prefix, ev ] },
+                ch_mitogenome_getorg_circularity_evidence.map { meta, ev -> [ meta.mt_assembly_run_prefix, ev ] },
                 by: 0, remainder: true
             )
             .filter { items -> items[1] != null }   // keep assembly rows; drop evidence-only remainder
@@ -339,7 +342,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_hifi_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_hifi, checkIfExists: false)
@@ -354,7 +358,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
         // No circularity check is re-run for precomputed assemblies, but the
@@ -375,7 +380,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
         // Oatk fallback assemblies are published beside the MitoHiFi results, so a
@@ -398,7 +404,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_hifi_oatk_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_oatk, checkIfExists: false)
@@ -413,7 +420,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
 
@@ -423,9 +431,9 @@ workflow OCEANGENOMESMITOGENOMES {
         // safe on the precomputed path and not downstream.
         ch_mitogenome_hifi_circularity_evidence = ch_mitogenome_hifi_assembly_fasta
             .mix(ch_mitogenome_hifi_oatk_fasta)
-            .map { meta, _fasta -> [ meta.mt_assembly_prefix, meta ] }
+            .map { meta, _fasta -> [ meta.mt_assembly_run_prefix, meta ] }
             .join(
-                ch_mitogenome_hifi_circularity_evidence.map { meta, ev -> [ meta.mt_assembly_prefix, ev ] },
+                ch_mitogenome_hifi_circularity_evidence.map { meta, ev -> [ meta.mt_assembly_run_prefix, ev ] },
                 by: 0, remainder: true
             )
             .filter { items -> items[1] != null }   // keep assembly rows; drop evidence-only remainder
@@ -506,6 +514,12 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_collapse_branched.concatemer.map { meta, fasta, evidence -> [meta, fasta, evidence] }
     )
 
+    // The pre-collapse original, for the provenance row built alongside the upload rows below
+    // (it needs the assembly log, which is only assembled down there). Keyed by LINEAGE so it
+    // can be re-paired after the collapse rename.
+    ch_precollapse_original = ch_collapse_branched.concatemer
+        .map { meta, fasta, _evidence -> [ meta.mt_assembly_run_prefix, meta, fasta ] }
+
     // The collapse report feeds the assembly summary so a collapsed concatemer is
     // reported at its monomer length rather than re-flagged as over-length.
     ch_assembly_summary_files = ch_assembly_summary_files.mix(
@@ -519,13 +533,14 @@ workflow OCEANGENOMESMITOGENOMES {
     // dir that downstream annotation forks into (via the _collapsed FASTA basename),
     // so the curated variant directory carries the full provenance in one place.
     // Passthrough samples are untouched and keep only their original mtdna dir.
-    // Keyed on the original assembly prefix (mt_assembly_prefix), which is stable
-    // across the collapse -- the _collapsed suffix lives only in the FASTA basename.
+    // Keyed on the LINEAGE prefix: the bundle being restaged is this sample's assembly-stage
+    // mtdna folder, which is grouped under the same key on the other side, and the collapse
+    // rename does not change it.
     ch_collapse_bundle = COLLAPSE_CONCATEMER.out.fasta
         .join(COLLAPSE_CONCATEMER.out.report, by: 0)
         .join(COLLAPSE_CONCATEMER.out.evidence, by: 0)
         .filter { _meta, _fasta, report, _evidence -> collapseAction(report) == 'collapsed' }
-        .map { meta, fasta, report, evidence -> [ meta.mt_assembly_prefix, meta, fasta, report, evidence ] }
+        .map { meta, fasta, report, evidence -> [ meta.mt_assembly_run_prefix, meta, fasta, report, evidence ] }
 
     ch_mtdna_bundle = ch_mitogenome_hifi_mtdna_files.mix(ch_mitogenome_getorg_mtdna_files)
 
@@ -538,6 +553,9 @@ workflow OCEANGENOMESMITOGENOMES {
             def report    = items[3]
             def evidence  = items[4]
             def bundle    = (items.size() > 5 && items[5] != null) ? items[5] : []
+            // The identity stamp for this branch. Not redundant with the one on
+            // ch_collapsed_canonical_fasta below: this block consumes COLLAPSE_CONCATEMER's
+            // raw output, whose meta is still the pre-collapse input meta.
             def newPrefix = fasta.baseName   // <prefix>_collapsed -> drives the mirror's publish dir
             [ meta + [ mt_assembly_prefix: newPrefix ], [ fasta, report, evidence ] + bundle ]
         }
@@ -546,37 +564,73 @@ workflow OCEANGENOMESMITOGENOMES {
 
     // Rebuild the annotation input from the (possibly collapsed) FASTAs plus the
     // assemblies that had no concatemer to collapse.
+    //
+    // A genuine collapse renames the molecule to "<prefix>_collapsed", so this is a curation
+    // point and the assembly's IDENTITY is re-stamped from the FASTA basename. That is what
+    // gives a collapsed assembly its own name everywhere downstream -- its own publish dir,
+    // its own mitogenome_data row, its own depth -- instead of writing curated stats onto a
+    // row that reads as an ordinary uncurated assembly. Passthrough samples restamp to the
+    // value they already had.
     ch_collapsed_canonical_fasta = COLLAPSE_CONCATEMER.out.fasta
         .join(COLLAPSE_CONCATEMER.out.evidence, by: 0)
         .map { meta, fasta, evidence ->
             def circular = evidenceFinalVerdictCircular(evidence)
-            [ circular == null ? meta : meta + [ circular: circular ], fasta ]
+            def meta_ext = (circular == null ? meta : meta + [ circular: circular ])
+            [ meta_ext + [ mt_assembly_prefix: fasta.baseName ], fasta ]
         }
     ch_canonical_assembly_fasta = ch_collapsed_canonical_fasta
         .mix(ch_collapse_branched.bypass.map { meta, fasta, _evidence -> [meta, fasta] })
         .filter { _meta, fasta -> fasta.size() > 0 }
-
-    // One evidence row per canonical assembly, keyed by mt_assembly_prefix for the QC gate.
-    //
-    // Prefix-keyed, not meta-keyed: the collapsed branch above rewrites meta (it folds the
-    // post-collapse verdict into meta.circular) while COLLAPSE_CONCATEMER.out.evidence still
-    // carries the pre-collapse meta, so a whole-meta lookup misses every genuinely collapsed
-    // sample and silently hands it the "no anomaly" stand-in. mt_assembly_prefix is stable
-    // across the collapse -- the _collapsed suffix lives only in the FASTA basename.
-    ch_canonical_circularity_evidence = COLLAPSE_CONCATEMER.out.evidence
-        .mix(ch_collapse_branched.bypass.map { meta, _fasta, evidence -> [meta, evidence] })
-        .map { meta, evidence -> [ meta.mt_assembly_prefix, evidence ] }
 
     // Assemblies below the configured biological minimum are retained for SQL
     // and summary reporting, but do not enter EMMA/MITOS/table2asn.
     ch_annotation_input = ch_canonical_assembly_fasta
         .filter { _meta, fasta -> fastaSequenceLength(fasta) >= params.mitogenome_summary_min_length }
 
-    // Sanitise FASTA before annotation to avoid duplicate IDs / multi-contig issues
+    // Sanitise FASTA before annotation to avoid duplicate IDs / multi-contig issues.
+    //
+    // The last curation point, and so the last identity re-stamp: a multi-contig assembly is
+    // rewritten to a single "<prefix>_concat" record here. Everything downstream -- depth,
+    // annotation, LCA, species validation, the QC gate, ENA -- runs on THIS molecule, so its
+    // basename is the assembly's final name and the key those stages all share.
     SANITISE_FASTA(
         ch_annotation_input
     )
-    ch_annotation_input_sanitised = SANITISE_FASTA.out
+    ch_annotation_input_sanitised = SANITISE_FASTA.out.fasta
+        .map { meta, fasta -> [ meta + [ mt_assembly_prefix: fasta.baseName ], fasta ] }
+
+    // One evidence row per canonical assembly, keyed for the QC gate by the SANITISED
+    // assembly's identity -- the same name annotation, species validation and the gate all
+    // use. Keying it by the assembly-stage prefix instead is what silently dropped every
+    // curated variant (reseed / _rgj / _collapsed) at the gate: the gate's plain join simply
+    // never matched, and 23 of 168 finished assemblies vanished without a warning.
+    //
+    // Keyed on the lineage prefix to attach, then re-emitted under the identity: the evidence
+    // is produced before curation and so carries the pre-rename meta, while the sanitised
+    // FASTA carries the post-rename one. Lineage is what the two still share.
+    ch_evidence_by_run_prefix = COLLAPSE_CONCATEMER.out.evidence
+        .mix(ch_collapse_branched.bypass.map { meta, _fasta, evidence -> [meta, evidence] })
+        .map { meta, evidence -> [ meta.mt_assembly_run_prefix, evidence ] }
+
+    // THE canonical molecule for each assembly: the one that is annotated, measured, QC'd,
+    // submitted, and whose name the SQL row carries. Everything downstream that has to agree
+    // on "which assembly is this" derives from this single channel, so the upload row and the
+    // QC gate cannot drift apart the way they did before.
+    //
+    // Normally the SANITISED assembly. When annotation is skipped in favour of precomputed
+    // results SANITISE_FASTA does not run at all (its `when:` guard), so fall back to the
+    // length-filtered post-collapse assembly: nothing rewrote a FASTA in this run, so there is
+    // no _concat rename to miss and the two are the same molecule. The fallback is
+    // load-bearing -- without it this path would produce no canonical SQL rows and starve the
+    // QC gate, which is precisely the silent-drop failure this change exists to remove.
+    ch_canonical_molecule = params.skip_mitogenome_annotation
+        ? ch_annotation_input
+        : ch_annotation_input_sanitised
+
+    ch_canonical_circularity_evidence = ch_canonical_molecule
+        .map { meta, _fasta -> [ meta.mt_assembly_run_prefix, meta.mt_assembly_prefix ] }
+        .join(ch_evidence_by_run_prefix, by: 0)
+        .map { _run_prefix, identity, evidence -> [ identity, evidence ] }
 
     //
     // MODULE: MITOGENOME_COVERAGE -- one uniform, cross-platform depth number.
@@ -609,7 +663,7 @@ workflow OCEANGENOMESMITOGENOMES {
         // push falls back to the empty placeholder rather than being dropped).
         MITOGENOME_COVERAGE (
             ch_annotation_input_sanitised
-                .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+                .map { meta, fasta -> [ meta.mt_assembly_run_prefix, meta, fasta ] }
                 .join(ch_depth_reads, by: 0)
                 .map { _prefix, meta, fasta, reads -> [ meta, fasta, reads ] }
         )
@@ -673,7 +727,8 @@ workflow OCEANGENOMESMITOGENOMES {
         .map { mt_assembly_prefix, sample_keys, files -> [ sample_keys[0], mt_assembly_prefix, files ] }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, files, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, files)
         }
         ch_mitogenome_blast_results = Channel.fromPath(params.precomputed_mitogenome_blast_results)
@@ -693,7 +748,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_lca_results = Channel.fromPath(params.precomputed_mitogenome_lca_results)
@@ -709,7 +765,8 @@ workflow OCEANGENOMESMITOGENOMES {
         }
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_lca_raw_results = params.precomputed_mitogenome_lca_raw_results
@@ -726,7 +783,8 @@ workflow OCEANGENOMESMITOGENOMES {
                 }
                 .combine(ch_samplesheet_meta, by: 0)
                 .map { sample_key, mt_assembly_prefix, file, meta ->
-                    def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+                    def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
                     return tuple(meta_ext, file)
                 }
             : Channel.empty()
@@ -771,22 +829,64 @@ workflow OCEANGENOMESMITOGENOMES {
     // anyway), and the precomputed path emits nothing at all. With no collisions left there
     // is nothing to reconcile, so a plain mix suffices and each row reaches SQL as soon as
     // its OWN assembly is done.
+    // Keyed by LINEAGE: one GetOrganelle / MitoHiFi / Oatk log per assembly run, and it is the
+    // same log whichever curated variant won, so it cannot be keyed by a name that curation
+    // rewrites.
     ch_canonical_assembly_logs = ch_mitogenome_getorg_assembly_log
         .mix(ch_mitogenome_hifi_assembly_log)
         .mix(ch_mitogenome_hifi_oatk_log)
-        .map { meta, log -> [ meta.mt_assembly_prefix, log ] }
+        .map { meta, log -> [ meta.mt_assembly_run_prefix, log ] }
 
-    ch_canonical_upload_rows = ch_canonical_assembly_fasta
+    // Assemblies that never reach SANITISE_FASTA and so have no curated identity of their own:
+    // an empty (failed) assembly, and one below the biological length floor. They keep their
+    // assembly-stage name, still get a SQL row, and are routed around the depth join by
+    // buildAssemblyUploadRows.
+    ch_under_length_assembly_fasta = ch_canonical_assembly_fasta
+        .filter { _meta, fasta -> fastaSequenceLength(fasta) < params.mitogenome_summary_min_length }
+
+    // The canonical row IS the molecule that gets annotated, measured, QC'd and submitted --
+    // i.e. the SANITISE_FASTA output, not the pre-curation assembly. Building it from the
+    // pre-curation channel is what filed a curated assembly's stats under an uncurated name:
+    // OG750's collapsed monomer had no row of its own at all, and its stats landed on
+    // OG750.hifi.241004.v323mitohifi, which reads as an ordinary MitoHiFi assembly.
+    //
+    // Attach the log by LINEAGE (it predates curation), then re-key the row by IDENTITY so the
+    // depth join below and ch_variant_upload_rows share one key space.
+    ch_canonical_upload_rows = ch_canonical_molecule
+        .mix(ch_under_length_assembly_fasta)
         .mix(ch_failed_assembly_fasta)
-        .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+        .map { meta, fasta -> [ meta.mt_assembly_run_prefix, meta, fasta ] }
         .join(ch_canonical_assembly_logs, by: 0)
+        .map { _run_prefix, meta, fasta, log -> [ meta.mt_assembly_prefix, meta, fasta, log ] }
+
+    // Provenance row for a GENUINELY collapsed assembly's pre-collapse original.
+    //
+    // A collapse supersedes the assembly it acted on, exactly as a reseed supersedes the first
+    // pass. The GetOrganelle route already records its superseded attempts
+    // (selectProvenanceVariants); the collapse route had nowhere to record one, because the
+    // curated monomer was filed under the original's own name -- so the original ceased to
+    // exist in SQL and the collapsed molecule silently inherited its row. Now that the monomer
+    // carries its own "<prefix>_collapsed" identity, the original gets its own row back.
+    //
+    // Passthrough samples are excluded: nothing was rewritten, so there is no superseded
+    // molecule and the assembly keeps its single canonical row.
+    ch_precollapse_provenance_rows = COLLAPSE_CONCATEMER.out.report
+        .filter { _meta, report -> collapseAction(report) == 'collapsed' }
+        .map { meta, _report -> [ meta.mt_assembly_run_prefix, meta ] }
+        .join(ch_precollapse_original.map { run_prefix, _meta, fasta -> [ run_prefix, fasta ] }, by: 0)
+        .join(ch_canonical_assembly_logs, by: 0)
+        .map { _run_prefix, meta, original_fasta, log ->
+            [ meta.mt_assembly_prefix, meta, original_fasta, log ]
+        }
 
     ch_variant_upload_rows = ch_mitogenome_getorg_db_results
         .map { meta, fasta, log -> [ meta.mt_assembly_prefix, meta, fasta, log ] }
+        .mix(ch_precollapse_provenance_rows)
 
-    // Attach the uniform depth TSV, keyed on the assembly prefix. Rows with no depth are
-    // still uploaded, just with the header-only placeholder (push_mtdna_assm_results.py
-    // records them as 'not_measured'). See buildAssemblyUploadRows for the routing.
+    // Attach the uniform depth TSV, keyed on the assembly IDENTITY -- the name of the molecule
+    // that was actually remapped. Rows with no depth are still uploaded, just with the
+    // header-only placeholder (push_mtdna_assm_results.py records them as 'not_measured').
+    // See buildAssemblyUploadRows for the routing.
     def no_depth_file = file("${projectDir}/assets/empty_mito_depth.tsv", checkIfExists: true)
 
     ch_mitogenome_assembly_results = buildAssemblyUploadRows(

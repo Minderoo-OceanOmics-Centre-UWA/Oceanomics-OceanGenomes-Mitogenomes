@@ -17,17 +17,20 @@ workflow REFERENCE_POLICY {
 // Import the real implementation rather than copying it, so this cannot silently pass
 // against a stale duplicate of the logic it is meant to protect. (It previously WAS such a
 // duplicate: a copy of the old groupTuple selection, fed hand-written inputs in which the
-// canonical row carried the final variant's prefix. Real runs key the canonical row on the
-// SAMPLE-level prefix -- verified against run mitogenomes-missing-audit-5, where OG868
-// produced exactly two rows: canonical "OG868.hic.250624.getorg1770" carrying the reseed
-// FASTA and a real depth, plus provenance "OG868.hic.250624.getorg1770reseed" with the
-// placeholder. The duplicate also could not run at all, so nobody noticed.)
+// canonical row carried the final variant's prefix. The duplicate also could not run at all,
+// so nobody noticed.)
+//
+// The canonical row now carries the WINNING assembly's own name, so this selection excludes
+// the winner and keeps every superseded attempt. It used to exclude the first pass, which was
+// correct only while the canonical row was misnamed -- filed under the sample-level prefix
+// even when the molecule in it was a reseed. That misnaming is what dropped curated assemblies
+// at the QC gate and filed their depth against a superseded row.
 include { selectProvenanceVariants } from '../../subworkflows/local/mitogenome_assembly/getorganelle/main.nf'
 
 workflow UPLOAD_SELECTION {
     take:
-    variant_inputs // [ variant_prefix, meta, fasta, log ]
-    checked_circ   // [ sample_prefix, checked_variant_prefix, verdict ]
+    variant_inputs // [ variant_prefix(identity), meta(+mt_assembly_run_prefix), fasta, log ]
+    checked_circ   // [ mt_assembly_run_prefix, checked_identity, verdict ]
 
     main:
     results = selectProvenanceVariants(variant_inputs, checked_circ)
@@ -38,12 +41,12 @@ workflow UPLOAD_SELECTION {
 
 workflow {
     if (params.scenario == 'upload_selection') {
-        // meta.mt_assembly_prefix is the SAMPLE-level prefix on every variant row; the
-        // reseed / _rgj suffix lives only in the variant prefix (the FASTA basename).
+        // meta.mt_assembly_run_prefix is the LINEAGE key, identical on every variant row; each
+        // variant's own identity is the key (the FASTA basename).
         variants = Channel.of(
-            ['OG1.getorg1770',          [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-first.fa',  'first.log'],
-            ['OG1.getorg1770reseed',    [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-reseed.fa', 'reseed.log'],
-            ['OG1.getorg1770reseed_rgj',[id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-rgj.fa',    'rgj.log']
+            ['OG1.getorg1770',          [id: 'OG1', mt_assembly_run_prefix: 'OG1.getorg1770'], 'raw-first.fa',  'first.log'],
+            ['OG1.getorg1770reseed',    [id: 'OG1', mt_assembly_run_prefix: 'OG1.getorg1770'], 'raw-reseed.fa', 'reseed.log'],
+            ['OG1.getorg1770reseed_rgj',[id: 'OG1', mt_assembly_run_prefix: 'OG1.getorg1770'], 'raw-rgj.fa',    'rgj.log']
         )
         checked = Channel.of(
             ['OG1.getorg1770', 'OG1.getorg1770reseed_rgj', true]

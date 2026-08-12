@@ -61,9 +61,33 @@ include { softwareVersionsToYAML        } from '../../nf-core/utils_nfcore_pipel
 // assembly stage and here (and gains it again on the collapse path), and on a -resume the two
 // sides carry meta restored from different cache entries, so whole-map equality is not a
 // reliable join key -- the same failure documented for the oatk reference join.
+//
+// Both sides now key on the assembly's IDENTITY, the curated FASTA basename. They did not
+// always: the evidence side was keyed by the sample-level assembly prefix while this side had
+// been re-stamped to the basename, so for every curated assembly (reseed / _rgj / _collapsed)
+// the join simply never matched. A plain join has no way to report that -- it emits nothing
+// and says nothing -- so 23 of 168 finished assemblies vanished between species validation and
+// the QC gate with no error, no warning and no empty output to notice. Hence the tee below.
 def attachCircularityEvidence(qc_pairs, circularity_evidence) {
-    return qc_pairs
-        .map { meta, blast, stats -> [ meta.mt_assembly_prefix, meta, blast, stats ] }
+    def keyed = qc_pairs.map { meta, blast, stats -> [ meta.mt_assembly_prefix, meta, blast, stats ] }
+
+    // Diagnostic tee ONLY. The main path keeps its plain join, because emitting each sample the
+    // moment its own work lands is load-bearing here (see above). This branch is allowed the
+    // remainder join's whole-run wait precisely because nothing depends on it: it exists to
+    // name, at end of run, any assembly that reached the gate and found no evidence to pair
+    // with. A silent key miss is what made the original defect invisible; this makes the next
+    // one say so.
+    keyed
+        .map { prefix, _meta, _blast, _stats -> [ prefix, true ] }
+        .join(circularity_evidence.map { prefix, _ev -> [ prefix, true ] }, by: 0, remainder: true)
+        .filter { items -> items[1] != null && (items.size() < 3 || items[2] == null) }
+        .view { items ->
+            "WARNING: assembly '${items[0]}' reached the QC gate with no circularity evidence " +
+            "under that name and was dropped. Its evidence is keyed by a different name, which " +
+            "means an assembly identity was not stamped from its FASTA basename."
+        }
+
+    return keyed
         .join(circularity_evidence, by: 0)
         .map { _prefix, meta, blast, stats, evidence -> [ meta, blast, stats, evidence ] }
 }
@@ -78,14 +102,19 @@ def attachCircularityEvidence(qc_pairs, circularity_evidence) {
 // The receipt is a pure ordering dependency: ENA metadata reads mean_depth from
 // mitogenome_data, so QC must not race ahead of the committed row. The key must be the prefix
 // and not the whole meta map -- exactly the lesson stated for attachCircularityEvidence above,
-// which this join was ignoring. The two sides arrive down different lineages (the QC side
-// passed through MITOGENOME_ANNOTATION, which rewrites meta.mt_assembly_prefix to the
-// annotated FASTA's basename; the upload side carries the assembly stage's meta) and on a
-// -resume both are restored from separate cache entries. A whole-map join then matches nothing
-// and drops every sample SILENTLY instead of failing -- which is what it did the moment the
+// which this join was ignoring. The two sides arrive down different lineages and on a -resume
+// are restored from separate cache entries, so a whole-map join matches nothing and drops
+// every sample SILENTLY instead of failing -- which is what it did the moment the
 // assembly-upload barrier upstream was removed and this became the binding constraint:
 // 123 samples cleared the gate, all 123 had a matching upload row by prefix, and
 // MITOGENOME_QC still ran zero times. The prefix is 1:1 on both sides, so no fan-out.
+//
+// Both sides key on the assembly's IDENTITY, and the upload side is now built from the
+// SANITISED assembly, so the receipt exists under the same curated name the QC row carries.
+// It did not used to: the canonical upload row was filed under the assembly-stage name, so a
+// _collapsed or _concat assembly had no receipt under its own name and would have been dropped
+// here even after the evidence join was fixed. reseed / _rgj happened to survive only because
+// they get a provenance row of their own that collided with the right name by accident.
 def attachAssemblyUploadReceipt(qc_rows, upload_rows) {
     return qc_rows
         .map { meta, species_name, proceed_qc, circular ->

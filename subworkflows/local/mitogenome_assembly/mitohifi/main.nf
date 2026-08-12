@@ -138,10 +138,23 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // nextflow.config and the version in every assembly name follows automatically.
     //
 
+    // Two fields with different lifetimes -- see the GetOrganelle subworkflow for the full
+    // rationale. mt_assembly_prefix is IDENTITY (re-stamped to the FASTA basename wherever
+    // curation renames the assembly, e.g. _collapsed / _concat); mt_assembly_run_prefix is
+    // LINEAGE, written once here and never reassigned, for the joins that reunite artefacts
+    // which are per sample+assembler and identical across variants.
+    //
+    // Note this stamp is EARLIER in its subworkflow than GetOrganelle's: the reference routing
+    // below already keys on the prefix, so CAT_FASTQ and MITOHIFI_FINDMITOREFERENCE sit
+    // downstream of it. Do not move it later to reclaim their cache -- that would be a second
+    // key-lifetime change layered on this one.
     ch_reads_prefixed = fastp_reads
         .map { meta, reads ->
             def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${mitohifi_version_stripped}mitohifi"
-            [ meta + [ mt_assembly_prefix: mt_assembly_prefix ], reads ]
+            [ meta + [
+                mt_assembly_prefix:     mt_assembly_prefix,
+                mt_assembly_run_prefix: mt_assembly_prefix
+            ], reads ]
         }
 
     // map just the meta for the species query
@@ -210,10 +223,10 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     ch_reference_outcomes = MITOHIFI_FINDMITOREFERENCE.out.reference
         .join(MITOHIFI_FINDMITOREFERENCE.out.status, by: 0)
         .map { meta, ref_fasta, ref_gb, status ->
-            [ meta.mt_assembly_prefix.toString(), ref_fasta, ref_gb, status ]
+            [ meta.mt_assembly_run_prefix.toString(), ref_fasta, ref_gb, status ]
         }
     ch_reference_joined = final_reads
-        .map { meta, reads -> [ meta.mt_assembly_prefix.toString(), meta, reads ] }
+        .map { meta, reads -> [ meta.mt_assembly_run_prefix.toString(), meta, reads ] }
         .join(ch_reference_outcomes, by: 0)
         .map { _prefix, meta, reads, ref_fasta, ref_gb, status ->
             [ meta, reads, ref_fasta, ref_gb, status ]
@@ -419,10 +432,10 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         // the reference join is keyed that way: MITOHIFI_MITOHIFI's meta is cache-restored
         // on a resume while final_reads is computed live, and the two are not guaranteed
         // to `equals` even when they describe the same sample.
-        ch_reads_keyed = final_reads.map { meta, reads -> [ meta.mt_assembly_prefix.toString(), reads ] }
+        ch_reads_keyed = final_reads.map { meta, reads -> [ meta.mt_assembly_run_prefix.toString(), reads ] }
 
         ch_failed_oatk_reads = ch_mitohifi_fasta_branched.failed
-            .map { meta, _empty_fasta -> [ meta.mt_assembly_prefix.toString(), meta ] }
+            .map { meta, _empty_fasta -> [ meta.mt_assembly_run_prefix.toString(), meta ] }
             .join(ch_reads_keyed, by: 0)
             .map { _prefix, meta, reads -> [meta, reads, 'empty_mitohifi'] }
 
@@ -448,7 +461,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
             .join(MITOHIFI_MITOHIFI.out.gb, by: 0)
             .map { meta, _fasta, gb -> [meta, countGenbankCds(gb)] }
             .filter { _meta, cds -> cds != null && cds < expected_pcg_count }
-            .map { meta, _cds -> [ meta.mt_assembly_prefix.toString(), meta ] }
+            .map { meta, _cds -> [ meta.mt_assembly_run_prefix.toString(), meta ] }
             .join(ch_reads_keyed, by: 0)
             .map { _prefix, meta, reads -> [meta, reads, 'gene_incomplete_mitohifi'] }
 
@@ -462,11 +475,21 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         // the repo reads it, so the routing decision currently leaves no trace in any
         // output file. Surfacing it (and the CDS count above) as summary evidence is a
         // deliberate TODO, not an oversight to be fixed in passing.
+        // Oatk is a distinct assembly RUN, not a curated variant of the MitoHiFi one: it has
+        // its own assembler prefix, its own reads entry and its own DB row. So it re-stamps
+        // the lineage key too, rather than inheriting MitoHiFi's -- otherwise its artefacts
+        // would join against the MitoHiFi run they were meant to replace.
         ch_oatk_input = ch_direct_oatk_reads
             .mix(ch_failed_oatk_reads, ch_gene_incomplete_oatk_reads)
             .map { meta, reads, reason ->
                 def oatk_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${oatk_version_stripped}oatk"
-                [ meta + [ mt_assembly_prefix: oatk_prefix, circular: null, assembler_fallback: 'oatk', fallback_reason: reason ], reads ]
+                [ meta + [
+                    mt_assembly_prefix:     oatk_prefix,
+                    mt_assembly_run_prefix: oatk_prefix,
+                    circular: null,
+                    assembler_fallback: 'oatk',
+                    fallback_reason: reason
+                ], reads ]
             }
 
         // Same reads, now carrying the oatk prefix, for the uniform depth measurement.
@@ -695,7 +718,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
               MITOHIFI_CHECK_CIRCULARITY.out.stats,
               MITOHIFI_CHECK_CIRCULARITY.out.evidence,
               REFERENCE_DIVERGENCE.out.flag )
-        .map { meta, f -> [ meta.mt_assembly_prefix, f ] }
+        .map { meta, f -> [ meta.mt_assembly_run_prefix, f ] }
         .groupTuple()
 
     // Fold the oatk fallback's mtdna files (assembly + circularity check) into the same
@@ -704,7 +727,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // assemblers. Empty (no oatk fallback ran, or the fallback is disabled).
     ch_oatk_mtdna_files = ch_oatk_fasta
         .mix(ch_oatk_circularity_evidence)
-        .map { meta, f -> [ meta.mt_assembly_prefix, f ] }
+        .map { meta, f -> [ meta.mt_assembly_run_prefix, f ] }
         .groupTuple()
     ch_mtdna_files = ch_mtdna_files.mix(ch_oatk_mtdna_files)
 
@@ -714,20 +737,22 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     //
 
     emit:
-    mtdna_files     = ch_mtdna_files               // channel: [ mt_assembly_prefix, [ mtdna files ] ]
+    mtdna_files     = ch_mtdna_files               // channel: [ mt_assembly_run_prefix, [ mtdna files ] ]
     assembly_fasta  = ch_assembly_fasta            // channel: [ meta(+circular), assembly.fasta ]
     oatk_fasta      = ch_oatk_fasta                // channel: [ meta(+circular), oatk.mito.ctg.fasta ] (empty unless fallback enabled)
     oatk_log        = ch_oatk_log                  // channel: [ meta(+circular), getorg_check.tsv (assembled) | oatk.log (no-contig) ] — push input
     assembly_log    = ch_assembly_log              // channel: [ meta(+circular), contigs_stats.tsv ]
     reference_gb    = ch_reference_gb              // channel: [ meta(+circular), reference.gb ]
-    // The complete HiFi read set per sample (concatenated where the group held more
-    // than one FASTQ, otherwise the single original file), keyed by assembly prefix,
-    // for MITOGENOME_COVERAGE in the parent workflow. Keyed rather than meta-joined because meta gains `circular`
-    // downstream, so a whole-meta join would never match. Oatk is mixed in from its own
-    // channel: ch_oatk_input rewrites mt_assembly_prefix, so its reads are not reachable
-    // through final_reads.
-    depth_reads     = final_reads.map { m, r -> [ m.mt_assembly_prefix, r ] }
-                        .mix(ch_oatk_reads.map { m, r -> [ m.mt_assembly_prefix, r ] })
+    // The complete HiFi read set per sample (concatenated where the group held more than one
+    // FASTQ, otherwise the single original file), keyed by the LINEAGE prefix, for
+    // MITOGENOME_COVERAGE in the parent workflow. Keyed rather than meta-joined because meta
+    // gains `circular` and a re-stamped identity downstream, so a whole-meta join would never
+    // match; lineage rather than identity because these are reads, not an assembly, and there
+    // is one set per sample+assembler whatever curation later renames the molecule to. Oatk is
+    // mixed in from its own channel: it is a separate assembly RUN with its own lineage key, so
+    // its reads are not reachable through final_reads.
+    depth_reads     = final_reads.map { m, r -> [ m.mt_assembly_run_prefix, r ] }
+                        .mix(ch_oatk_reads.map { m, r -> [ m.mt_assembly_run_prefix, r ] })
     // Fold the oatk fallback's circularity evidence into the same channel so the parent
     // workflow's collapse-concatemer join, QC gate and assembly summary treat oatk exactly
     // like MitoHiFi (matched join item -> flows to annotation incrementally). Empty unless

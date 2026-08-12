@@ -81,17 +81,18 @@ nextflow_workflow {
     config "./nextflow.config"
     workflow "UPLOAD_SELECTION"
 
-    test("the first-pass variant is excluded and the rest keep their history") {
+    test("the winning variant is excluded and every superseded attempt keeps its own name") {
         when {
             workflow {
                 """
-                // Three GetOrganelle variants for one sample. Every row carries the SAMPLE-level
-                // mt_assembly_prefix; the variant suffix is in the key, which is the FASTA
-                // basename. The checked variant here is the _rgj one.
+                // Three GetOrganelle variants for one sample. Every row carries the same
+                // LINEAGE key (mt_assembly_run_prefix); each variant's own identity is the
+                // tuple key, which is its FASTA basename. The checked -- i.e. winning --
+                // variant here is the _rgj one.
                 input[0] = Channel.of(
-                    ['OG1.getorg1770',           [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-first.fa',  'first.log'],
-                    ['OG1.getorg1770reseed',     [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-reseed.fa', 'reseed.log'],
-                    ['OG1.getorg1770reseed_rgj', [id: 'OG1', mt_assembly_prefix: 'OG1.getorg1770'], 'raw-rgj.fa',    'rgj.log']
+                    ['OG1.getorg1770',           [id: 'OG1', mt_assembly_run_prefix: 'OG1.getorg1770'], 'raw-first.fa',  'first.log'],
+                    ['OG1.getorg1770reseed',     [id: 'OG1', mt_assembly_run_prefix: 'OG1.getorg1770'], 'raw-reseed.fa', 'reseed.log'],
+                    ['OG1.getorg1770reseed_rgj', [id: 'OG1', mt_assembly_run_prefix: 'OG1.getorg1770'], 'raw-rgj.fa',    'rgj.log']
                 )
                 input[1] = Channel.of(
                     ['OG1.getorg1770', 'OG1.getorg1770reseed_rgj', true]
@@ -103,19 +104,25 @@ nextflow_workflow {
             def results = workflow.out.results.collect { it instanceof String ? evaluate(it) : it }
             assertAll(
                 { assert workflow.success },
-                // The first-pass row is dropped: its prefix equals the sample prefix, which is
-                // the key the parent workflow's canonical row carries. Emitting it would put a
+                // The WINNER is dropped: the parent workflow already emits it as the sample's
+                // canonical row, under this same identity. Emitting it here too would put a
                 // duplicate into mtdna_assembly, which is what the removed groupTuple used to
                 // prevent at the cost of a whole-run barrier.
                 { assert results.size() == 2 },
-                { assert !results.any { it[0].mt_assembly_prefix == 'OG1.getorg1770' } },
-                // Provenance history is preserved, each exactly once, with its own FASTA.
+                { assert !results.any { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed_rgj' } },
+                // Every superseded attempt survives, each exactly once, under its OWN name and
+                // with its own FASTA. The first pass is provenance now, not a duplicate: the
+                // canonical row no longer borrows its name.
+                { assert results.count { it[0].mt_assembly_prefix == 'OG1.getorg1770' } == 1 },
+                { assert results.find { it[0].mt_assembly_prefix == 'OG1.getorg1770' }[1] == 'raw-first.fa' },
                 { assert results.count { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed' } == 1 },
                 { assert results.find { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed' }[1] == 'raw-reseed.fa' },
-                { assert results.find { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed_rgj' }[1] == 'raw-rgj.fa' },
-                // The corrected circular verdict lands only on the variant that was checked.
-                { assert results.find { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed_rgj' }[0].circular },
-                { assert results.find { it[0].mt_assembly_prefix == 'OG1.getorg1770reseed' }[0].circular == null }
+                // No superseded attempt takes the corrected circular verdict: that verdict
+                // describes the molecule that was checked, which is none of these. Each falls
+                // back to its own GetOrganelle log topology in the DB push.
+                { assert results.every { it[0].circular == null } },
+                // The lineage key is never rewritten -- only the identity moves.
+                { assert results.every { it[0].mt_assembly_run_prefix == 'OG1.getorg1770' } }
             )
         }
     }

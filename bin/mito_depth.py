@@ -525,6 +525,28 @@ def main():
     parser.add_argument("--workdir", default=".")
     args = parser.parse_args()
 
+    # The label must name the molecule that is about to be measured. This is checked BEFORE
+    # the fail-open wrapper below and exits non-zero on purpose: a mismatch here is not a
+    # measurement problem to be degraded gracefully, it is the depth being attributed to the
+    # wrong assembly, and writing a placeholder row would hide it.
+    #
+    # This is the exact defect that motivated the check. A reseeded sample was remapped
+    # correctly against OG5.hic.250522.getorg1770reseed.fasta, but --sample was handed the
+    # sample-level prefix, so the TSV said "OG5.hic.250522.getorg1770" and the resulting
+    # 257.8x was filed against the superseded first-pass assembly while the reseed -- the
+    # molecule actually annotated and submitted -- recorded no depth at all.
+    fasta_stem = re.sub(r"\.(fa|fasta|fna)$", "", os.path.basename(args.fasta))
+    if args.sample != fasta_stem:
+        print(
+            "[mito_depth] --sample '{}' does not name the FASTA being measured ('{}'). "
+            "The assembly's identity (meta.mt_assembly_prefix) must equal its FASTA basename; "
+            "whichever stage produced this FASTA has not stamped it.".format(
+                args.sample, fasta_stem
+            ),
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         run(args)
     except Exception as exc:  # noqa: BLE001 - fail open, never break the workflow

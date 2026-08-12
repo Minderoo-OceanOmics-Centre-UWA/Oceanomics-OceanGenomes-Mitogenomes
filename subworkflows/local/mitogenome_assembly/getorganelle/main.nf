@@ -42,32 +42,39 @@ def parseFinalVerdictCircular(tsv) {
     }
 }
 
-// Reduce the per-variant DB inputs to the PROVENANCE variants -- everything except the
-// first-pass assembly, whose basename is exactly meta.mt_assembly_prefix (see
-// GETORGANELLE_FROMREADS's output block) and which therefore collides with the parent
-// workflow's canonical post-curation row for the same sample. The canonical row supersedes
-// it, so excluding it here lets the parent plain-mix the two channels instead of
-// reconciling them with a whole-run groupTuple. See the call site for the run that cost.
+// Reduce the per-variant DB inputs to the PROVENANCE variants -- every assembly attempt this
+// sample made EXCEPT the one that won, which the parent workflow already emits as the sample's
+// canonical row. Excluding the winner here is what lets the parent plain-mix the two channels
+// instead of reconciling them with a whole-run groupTuple. See the call site for the run that
+// cost.
 //
-// variant_inputs is [ variant_prefix, meta, fasta, log ] (meta.mt_assembly_prefix is the
-// SAMPLE-level prefix, stable across variants); checked_circ is
-// [ sample_prefix, checked_variant_prefix, verdict ], one row per sample.
+// The exclusion used to be "everything except the FIRST PASS", on the reasoning that the
+// first-pass basename equalled meta.mt_assembly_prefix and so collided with the canonical row.
+// That held only while the canonical row was misnamed: it was filed under the sample-level
+// prefix even when the molecule in it was a reseed. Now the canonical row carries the winning
+// assembly's own name, so the row that would collide is the WINNER's, and the first pass is
+// exactly the provenance worth keeping -- a superseded attempt with its own name, its own
+// stats and no depth.
 //
-// combine(by: 0) on the sample key, not a prefix-keyed join(remainder: true): every sample
+// variant_inputs is [ variant_prefix, meta, fasta, log ]; checked_circ is
+// [ run_prefix, checked_identity, verdict ], one row per sample.
+//
+// combine(by: 0) on the LINEAGE key, not a join(remainder: true) on identity: every sample
 // runs exactly one GETORGANELLE_CHECK, so the key always matches and each variant emits as
 // soon as its OWN sample is checked. A remainder join would hold every unmatched variant --
 // which is all of them but the checked one -- until the channel closed.
 def selectProvenanceVariants(variant_inputs, checked_circ) {
     return variant_inputs
-        .filter { prefix, meta, _fasta, _logf -> prefix != meta.mt_assembly_prefix }
-        .map { prefix, meta, fasta, logf -> [ meta.mt_assembly_prefix, prefix, meta, fasta, logf ] }
+        .map { prefix, meta, fasta, logf -> [ meta.mt_assembly_run_prefix, prefix, meta, fasta, logf ] }
         .combine( checked_circ, by: 0 )
-        .map { _sample_prefix, prefix, meta, fasta, logf, checked_prefix, verdict ->
-            def variant_meta = meta + [ mt_assembly_prefix: prefix ]
-            if (prefix == checked_prefix && verdict != null) {
-                variant_meta = variant_meta + [ circular: verdict ]
-            }
-            [ variant_meta, fasta, logf ]
+        .filter { _run_prefix, prefix, _meta, _fasta, _logf, checked_identity, _verdict ->
+            prefix != checked_identity
+        }
+        .map { _run_prefix, prefix, meta, fasta, logf, _checked_identity, _verdict ->
+            // A superseded attempt never takes the corrected circular verdict: that verdict
+            // describes the molecule that was checked, which by definition is not this one.
+            // Each falls back to its own GetOrganelle log topology in the DB push.
+            [ meta + [ mt_assembly_prefix: prefix ], fasta, logf ]
         }
 }
 
@@ -206,14 +213,36 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     }
 
     //
-    // Embed the assembly prefix into meta.
+    // Embed the assembly prefix into meta, as TWO fields with different lifetimes.
     //
+    //   mt_assembly_prefix     -- IDENTITY. What this molecule is called. Re-stamped to the
+    //                             FASTA basename every time curation renames the assembly
+    //                             (reseed, _rgj, _collapsed, _concat), so it always names the
+    //                             molecule in hand. Drives publishing, DB rows and every
+    //                             post-annotation join.
+    //   mt_assembly_run_prefix -- LINEAGE. This sample's GetOrganelle run. Written ONCE, here,
+    //                             and never reassigned. Drives the joins that reunite artefacts
+    //                             which are per sample+assembler and identical across variants
+    //                             (the reads, the resolved reference, this sample's mtdna bundle).
+    //
+    // They were one field until a curated variant proved they are not the same thing: the
+    // assembly stage kept the sample-level value while annotation overwrote it with the FASTA
+    // basename, so every join spanning that rewrite silently missed. That dropped 23 of 168
+    // assemblies at the QC gate and filed the reseed's depth against the first-pass row.
+    // Anything reassigning mt_assembly_run_prefix is a bug; the identity is the one that moves.
+    //
+    // Deliberately NOT set on anything upstream of here (GETORGANELLE_CONFIG, CAT_FASTQ,
+    // FASTP): read prep predates the version lookup this prefix needs, and keying it on
+    // meta.id / the samplesheet assembly_prefix keeps those tasks out of the hash change.
 
     fastp_with_mt_assembly_prefix = reads_for_assembly.combine(version_ch)
     .map { meta, fasta, version ->  // Destructure all 3 elements correctly
         def version_stripped = version.replaceAll('\\.', '')
         def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.getorg${version_stripped}"
-        def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix ]
+        def meta_ext = meta + [
+            mt_assembly_prefix:     mt_assembly_prefix,
+            mt_assembly_run_prefix: mt_assembly_prefix
+        ]
         [meta_ext, fasta]  // Return only what you want
     }
 
@@ -472,13 +501,20 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // unknown (null). Enrich fasta + log together so both keep an identical meta
     // map — the parent workflow joins these two channels by the whole meta map.
     //
+    // This is also where the assembly's IDENTITY is settled for the reseed fork. By here
+    // ch_assembly_fasta holds whichever molecule won -- the kept first pass (basename
+    // "<run>") or the reseed result (basename "<run>reseed") -- so stamping
+    // mt_assembly_prefix from the FASTA basename is what makes the curated variant name
+    // itself. Doing it here rather than at the three mixes above is deliberate: the log's
+    // basename is not the assembly's name, so the identity can only be derived once fasta
+    // and log are joined and can be stamped onto both at once.
     ch_assembly_topo = ch_assembly_fasta
         .join(ch_assembly_log, by: 0)
         .map { meta, fasta, log ->
             def circ
             try { circ = (log && (log.text =~ /Result status of .*: circular genome/)) ? true : false }
             catch (ignored) { circ = null }
-            [ meta + [ circular: circ ], fasta, log ]
+            [ meta + [ circular: circ, mt_assembly_prefix: fasta.baseName ], fasta, log ]
         }
     ch_assembly_fasta = ch_assembly_topo.map { meta, fasta, _log -> [ meta, fasta ] }
     ch_assembly_log   = ch_assembly_topo.map { meta, _fasta, log -> [ meta, log ] }
@@ -491,20 +527,18 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     //   and corrects the circular verdict. Samples with no findMitoReference get an
     //   empty placeholder reference (the check then just records "no_reference").
     //
-    // Join the reference by a stable key (mt_assembly_prefix): ch_reference_gb's
-    // meta predates the meta.circular enrichment above, so a whole-meta join would
-    // never match. ch_reference_gb is partial (reseed/vertebrate samples only), so
-    // remainder + placeholder keeps every fasta sample.
+    // Join the reference by the LINEAGE key: one reference is resolved per sample and it is
+    // the same reference whichever variant won, so it is not per-assembly. It also has to be
+    // a key that survives curation -- ch_reference_gb's meta predates both the meta.circular
+    // enrichment and the identity re-stamp above, so a whole-meta join would never match and
+    // an identity join would miss every renamed assembly. ch_reference_gb is partial
+    // (reseed/vertebrate samples only), so remainder + placeholder keeps every fasta sample.
+    // It is single-use, so this is its only consumer; the reference is then carried forward
+    // (through GETORGANELLE_JOIN's passthrough) rather than re-joined.
     def no_reference_gb = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
-    // Pair every assembly with its reference (or null), keyed by mt_assembly_prefix
-    // (ch_reference_gb's meta predates the meta.circular enrichment, so a whole-meta
-    // join would never match; it is also partial, so remainder keeps every fasta).
-    // ch_reference_gb is single-use, so this is its only consumer; the reference is
-    // then carried forward (through GETORGANELLE_JOIN's passthrough) rather than
-    // re-joined.
-    ch_ref_keyed = ch_reference_gb.map { meta, ref -> [ meta.mt_assembly_prefix, ref ] }
+    ch_ref_keyed = ch_reference_gb.map { meta, ref -> [ meta.mt_assembly_run_prefix, ref ] }
     ch_fasta_ref = ch_assembly_fasta
-        .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+        .map { meta, fasta -> [ meta.mt_assembly_run_prefix, meta, fasta ] }
         .join(ch_ref_keyed, by: 0, remainder: true)
         .filter { items -> items[1] != null }   // keep fasta rows; drop reference-only remainder
         .map { items ->
@@ -536,10 +570,18 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // Re-pair the joined assembly with its (passed-through) reference, mix back the
     // pass-through samples (substituting the empty placeholder where no reference
     // exists), and feed the combined channel to the circularity/length check.
+    //
+    // Re-stamp identity here too: GETORGANELLE_JOIN renames the molecule to "<prefix>_rgj",
+    // and this channel feeds BOTH the downstream assembly and GETORGANELLE_CHECK, so the
+    // check's evidence has to carry the joined assembly's name -- that identity is what
+    // decides, downstream, which variant the corrected circular verdict belongs to and which
+    // DB row the QC gate attaches the evidence to. Pass-through samples restamp to the same
+    // value they already had.
     ch_getorg_check_in = GETORGANELLE_JOIN.out.fasta
         .join(GETORGANELLE_JOIN.out.reference, by: 0)
         .map { meta, joined, ref -> [ meta, joined, ref ] }
         .mix( ch_join_branched.direct.map { meta, fasta, ref -> [ meta, fasta, ref ?: no_reference_gb ] } )
+        .map { meta, fasta, ref -> [ meta + [ mt_assembly_prefix: fasta.baseName ], fasta, ref ] }
 
     // The joined assembly replaces the multi-scaffold fasta for every downstream
     // stage (annotation, LCA, QC, upload), not just the check.
@@ -567,6 +609,18 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             .map { meta, fasta, log -> [ fasta.baseName, meta, fasta, log ] }
     )
 
+    // Carry the "_rgj" identity re-stamp onto the log as well, now that the DB-variant mix
+    // above (which needs the PRE-stamp meta, since GETORGANELLE_JOIN.out.fasta carries it) is
+    // done. An rgj assembly produces no GetOrganelle log of its own, so the log's own basename
+    // is not the assembly's name and cannot be stamped from it -- re-attach it to the stamped
+    // meta by LINEAGE, which is stable across the rename. Without this the fasta and log stop
+    // sharing a meta map and the whole-meta joins just below, and in the parent workflow,
+    // silently drop every _rgj sample.
+    ch_assembly_log = ch_assembly_log
+        .map { meta, logf -> [ meta.mt_assembly_run_prefix, logf ] }
+        .join(ch_assembly_fasta.map { meta, _fasta -> [ meta.mt_assembly_run_prefix, meta ] }, by: 0)
+        .map { _key, logf, meta -> [ meta, logf ] }
+
     // Fold the corrected circular verdict back into meta on BOTH the fasta and log
     // channels (the parent workflow joins them by the whole meta map, so the two
     // must stay identical). null verdict -> leave meta unchanged.
@@ -581,16 +635,23 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         .map { meta, logf, v -> [ (v == null ? meta : meta + [ circular: v ]), logf ] }
 
     // Per-variant DB upload results, for the PROVENANCE variants only -- see
-    // selectProvenanceVariants above for why the first-pass assembly is excluded.
+    // selectProvenanceVariants above for which variant is excluded and why.
     //
-    // The corrected circular verdict only applies to the variant that was actually checked
-    // (the final assembly), whose evidence file is named after that variant's prefix, so
-    // carry it keyed by sample alongside the prefix it belongs to. Variants with no verdict
-    // fall back to their own GetOrganelle log topology in the DB push.
+    // This tuple carries BOTH kinds of key, because it does two different jobs:
+    //   [0] LINEAGE  -- fans this one per-sample check out to all of that sample's variants.
+    //   [1] IDENTITY -- names the assembly the verdict actually describes, so only that one
+    //                   takes it. A superseded first pass and the reseed that replaced it
+    //                   share a lineage but are different molecules with different topology.
+    //
+    // The identity used to be recovered by parsing the evidence FILENAME, because meta had
+    // nowhere to carry it -- mt_assembly_prefix was the sample-level value at this point. It
+    // is stamped from the checked FASTA's basename now, so read it from meta and drop the
+    // parse: one less place where a name has to be taken apart to recover something the
+    // pipeline already knew.
     ch_checked_circ = GETORGANELLE_CHECK.out.evidence
         .map { meta, ev ->
-            [ meta.mt_assembly_prefix,
-              ev.name.replaceAll(/\.getorg_check\.tsv$/, ''),
+            [ meta.mt_assembly_run_prefix,
+              meta.mt_assembly_prefix,
               parseFinalVerdictCircular(ev) ]
         }
 
@@ -604,13 +665,14 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_versions = ch_versions.mix(GETORGANELLE_CHECK.out.versions.first())
 
     // Per-sample bundle of everything this stage publishes into <prefix>/mtdna
-    // (final assembly + its GetOrganelle log + the circularity/anomaly check),
-    // keyed by the (original) assembly prefix so the collapse mirror can restage the
-    // whole folder into <prefix>_collapsed/mtdna for genuinely collapsed samples.
+    // (final assembly + its GetOrganelle log + the circularity/anomaly check), keyed by the
+    // LINEAGE prefix -- it is this sample's assembly-run folder, not any one molecule's, and
+    // the key has to survive the collapse rename so the mirror can restage the whole folder
+    // into <prefix>_collapsed/mtdna for genuinely collapsed samples.
     ch_mtdna_files = ch_assembly_fasta
         .mix( ch_assembly_log,
               GETORGANELLE_CHECK.out.evidence )
-        .map { meta, f -> [ meta.mt_assembly_prefix, f ] }
+        .map { meta, f -> [ meta.mt_assembly_run_prefix, f ] }
         .groupTuple()
 
     //
@@ -618,14 +680,15 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     //
 
     emit:
-    mtdna_files     = ch_mtdna_files               // channel: [ mt_assembly_prefix, [ mtdna files ] ]
+    mtdna_files     = ch_mtdna_files               // channel: [ mt_assembly_run_prefix, [ mtdna files ] ]
     assembly_fasta  = ch_assembly_fasta
     assembly_log    = ch_assembly_log
-    // CONTRACT: the PROVENANCE variants only (reseed, _rgj) -- never the first-pass assembly,
-    // whose prefix collides with the parent workflow's canonical row for the same sample.
-    // The parent relies on that to mix this channel straight into the upload candidates
-    // without a de-duplicating groupTuple (which would be a whole-run barrier).
-    db_assembly_results = ch_db_assembly_results   // channel: [ meta(per-variant prefix+circular), fasta, log ] -> one DB row per non-first-pass variant
+    // CONTRACT: the PROVENANCE variants only -- every attempt this sample made EXCEPT the one
+    // that won, whose identity is the parent workflow's canonical row for that assembly. The
+    // parent relies on that to mix this channel straight into the upload candidates without a
+    // de-duplicating groupTuple (which would be a whole-run barrier). The exclusion is by
+    // IDENTITY (see selectProvenanceVariants), so it holds however curation renamed the winner.
+    db_assembly_results = ch_db_assembly_results   // channel: [ meta(per-variant identity), fasta, log ] -> one DB row per superseded attempt
     reference_gb    = ch_reference_gb              // channel: [ meta, reference.gb ] (partial: reseed candidates only)
     // CONTRACT: exactly one row per assembly FASTA this subworkflow emits. That holds by
     // construction here -- assembly_fasta and GETORGANELLE_CHECK are both derived from
@@ -636,13 +699,15 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // assembly bypass the check, it must emit assets/empty_circularity_check.tsv for that
     // sample or the sample will be dropped at the QC gate.
     circularity_evidence = GETORGANELLE_CHECK.out.evidence  // channel: [ meta, getorg_check.tsv ]
-    // Reads keyed by assembly prefix, for MITOGENOME_COVERAGE in the parent workflow.
-    // Keyed rather than meta-joined because meta gains `circular` downstream (lines
-    // ~453 / ~550), so a whole-meta join would never match; mt_assembly_prefix is
-    // stable across the reseed / _rgj variants because those suffixes live only on
-    // the filename. One entry per sample: every GetOrganelle variant is built from
-    // exactly the same reads, so one remap covers whichever variant wins.
-    depth_reads     = fastp_with_mt_assembly_prefix.map { m, r -> [ m.mt_assembly_prefix, r ] }
+    // Reads keyed by the LINEAGE prefix, for MITOGENOME_COVERAGE in the parent workflow.
+    // Keyed rather than meta-joined because meta gains `circular` and a re-stamped identity
+    // downstream, so a whole-meta join would never match. Lineage rather than identity because
+    // these are READS, not an assembly: there is exactly one set per sample+assembler and every
+    // GetOrganelle variant is built from precisely those, so one remap covers whichever variant
+    // wins and the reads have no curated name to be keyed by. Which MOLECULE gets measured is
+    // decided on the other side of that join -- the parent passes the sanitised assembly, i.e.
+    // the curated winner -- and the resulting depth is filed under that molecule's identity.
+    depth_reads     = fastp_with_mt_assembly_prefix.map { m, r -> [ m.mt_assembly_run_prefix, r ] }
     summary_files   = ch_summary_files
     multiqc_files   = ch_multiqc_files             // channel: [ path(multiqc_files) ]
     versions        = ch_versions              // channel: [ path(versions.yml) ]

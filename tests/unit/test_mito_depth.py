@@ -63,9 +63,13 @@ class MitoDepthTests(unittest.TestCase):
             sam.write_text("@SQ\tSN:chrM\tLN:{}\n".format(len(seq)) + "\n".join(sam_lines) + "\n")
 
             out = tmp / "out.mito_depth.tsv"
+            # --sample is the assembly's identity, which the pipeline guarantees equals the
+            # FASTA basename (mito_depth.py enforces it). Derive it here rather than hard-coding
+            # a name, so cases that vary fasta_name -- e.g. the _concat molecule below -- pass a
+            # label that matches, as a real run would.
             result = subprocess.run(
                 [sys.executable, str(SCRIPT),
-                 "--fasta", str(fasta), "--sample", "OG1.hifi.d.asm",
+                 "--fasta", str(fasta), "--sample", fasta.name.rsplit(".", 1)[0],
                  "--out", str(out), "--sam", str(sam),
                  "--circular", circular, "--workdir", str(tmp),
                  "--min-identity", str(min_identity),
@@ -277,7 +281,10 @@ class MitoDepthTests(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            fasta = tmp / "asm.fasta"
+            # Names match, as they always do in a real run: this exercises a MEASUREMENT
+            # failure, not a labelling one, and the two have different contracts (fail open
+            # vs fail loud).
+            fasta = tmp / "OG1.fasta"
             fasta.write_text(">chrM\n" + genome(200) + "\n")
             reads = tmp / "r.fastq"
             reads.write_text("@a\nACGT\n+\nIIII\n")
@@ -300,9 +307,12 @@ class MitoDepthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             out = tmp / "out.mito_depth.tsv"
+            # The FASTA is absent, but its NAME still matches the label -- an unreadable input
+            # is a measurement failure (fail open, header-only row) and must stay distinct from
+            # a mislabelled one (fail loud, no row).
             result = subprocess.run(
                 [sys.executable, str(SCRIPT),
-                 "--fasta", str(tmp / "missing.fasta"), "--sample", "OG1",
+                 "--fasta", str(tmp / "OG1.fasta"), "--sample", "OG1",
                  "--out", str(out), "--sam", str(tmp / "also_missing.sam"),
                  "--workdir", str(tmp)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
@@ -345,6 +355,58 @@ class SubsampleTests(unittest.TestCase):
             # Uniform enough: 25% of 4000 within a generous tolerance.
             self.assertGreater(kept1, n * 0.20)
             self.assertLess(kept1, n * 0.30)
+
+
+class SampleLabelGuardTests(unittest.TestCase):
+    """--sample must name the FASTA being measured.
+
+    This guards the defect the two-key split was made to fix. A reseeded sample was
+    remapped correctly against OG5.hic.250522.getorg1770reseed.fasta, but --sample was
+    handed the sample-level prefix, so the TSV recorded "OG5.hic.250522.getorg1770" and
+    the resulting 257.8x was written to the superseded first-pass row while the reseed --
+    the molecule actually annotated and submitted -- recorded no depth at all. Nothing
+    failed; the number was simply attached to the wrong assembly.
+
+    The check has to exit NON-ZERO rather than write a placeholder row: this is a
+    misattribution, not a measurement that degraded, and a placeholder would hide it.
+    """
+
+    def _run(self, fasta_name, sample):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            seq = genome(100)
+            fasta = tmp / fasta_name
+            fasta.write_text(">chrM\n" + seq + "\n")
+            sam = tmp / "in.sam"
+            sam.write_text("@SQ\tSN:chrM\tLN:{}\n".format(len(seq)))
+            out = tmp / "out.mito_depth.tsv"
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT),
+                 "--fasta", str(fasta), "--sample", sample,
+                 "--out", str(out), "--sam", str(sam),
+                 "--circular", "false", "--workdir", str(tmp)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+            )
+            return result, out
+
+    def test_mismatched_label_fails_loudly(self):
+        """The exact OG5 shape: reseed FASTA measured, first-pass name in --sample."""
+        result, out = self._run(
+            "OG5.hic.250522.getorg1770reseed.fasta", "OG5.hic.250522.getorg1770"
+        )
+        self.assertNotEqual(result.returncode, 0, "a mislabelled depth must not exit 0")
+        self.assertIn("getorg1770reseed", result.stderr)
+        self.assertFalse(out.exists(), "must not write a row it would misattribute")
+
+    def test_curated_suffixes_are_accepted(self):
+        """Curated identities are legitimate names, not mismatches to be stripped."""
+        for stem in ("OG5.hic.250522.getorg1770reseed",
+                     "OG107.hic.250820.getorg1770reseed_rgj",
+                     "OG750.hifi.241004.v323mitohifi_collapsed",
+                     "OG1.ilmn.240101.getorg1770_concat"):
+            with self.subTest(stem=stem):
+                result, _ = self._run(stem + ".fasta", stem)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
 
 def _load_module():

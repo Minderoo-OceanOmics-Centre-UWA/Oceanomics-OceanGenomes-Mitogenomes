@@ -54,12 +54,19 @@ process MITOGENOME_COVERAGE {
         : (params.mitogenome_depth_min_aligned_frac_sr ?: 0.80)
     def fraction = params.mitogenome_depth_subsample_fraction ?: 0
     def circular = meta.circular == null ? 'null' : meta.circular.toString()
-    // Name the output after the FASTA actually measured, NOT meta.mt_assembly_prefix:
-    // the reseed / _rgj suffix lives only on the filename (meta keeps the first-pass
-    // prefix), and the assembly summary groups runs by filename. Strip a trailing
-    // _collapsed / _concat because neither has a summary run of its own -- leaving
-    // either on would manufacture a phantom row carrying a depth but no assembly.
-    depth_prefix = fasta.baseName.replaceAll(/_(collapsed|concat)$/, '')
+    // Output FILENAME only. Which DB row this depth lands on is decided by the channel key
+    // (meta.mt_assembly_prefix, the identity of the molecule remapped below), never by this
+    // name -- so stripping here can only affect how bin/mitogenome_assembly_summary.py groups
+    // runs, which it does by filename.
+    //
+    // _collapsed is KEPT: a collapsed monomer is published, already appears as its own row in
+    // the assembly summary, and now has its own mitogenome_data row, so the depth measured on
+    // it belongs to it and not to the concatemer it replaced.
+    //
+    // _concat is still STRIPPED: SANITISE_FASTA is publishDir[enabled: false], so there is no
+    // published _concat assembly for a _concat depth file to attach to and it would manufacture
+    // a summary row carrying a depth but no assembly. Publish that FASTA and this strip can go.
+    depth_prefix = fasta.baseName.replaceAll(/_concat$/, '')
     def effective_args = [
         "minimap2 -ax ${preset} --secondary=no",
         "--min-identity ${minId}",

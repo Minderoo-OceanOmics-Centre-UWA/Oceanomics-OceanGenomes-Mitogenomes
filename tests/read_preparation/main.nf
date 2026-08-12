@@ -91,9 +91,13 @@ process REFERENCE_STUB {
 }
 
 //
-// The reference join under test: keyed on mt_assembly_prefix, not on the whole meta map.
-// A copy of the corresponding block in
+// The reference join under test: keyed on mt_assembly_run_prefix (the LINEAGE key), not on the
+// whole meta map. A copy of the corresponding block in
 // subworkflows/local/mitogenome_assembly/mitohifi/main.nf -- keep the two in step.
+//
+// Lineage rather than identity because one reference is resolved per assembly run, before any
+// curation renames the molecule; keying it on the identity would miss every assembly that was
+// later reseeded, joined, collapsed or concatenated.
 //
 // `params.drop_meta_key` models what a RESUMED run does. On resume the process side hands
 // back the meta stored in the cache database, which can carry a different set of keys from
@@ -110,7 +114,10 @@ workflow REFERENCE_JOIN {
     ch_reads_prefixed = fastp_reads
         .map { meta, reads ->
             def mt_assembly_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v323mitohifi"
-            [ meta + [ mt_assembly_prefix: mt_assembly_prefix ], reads ]
+            [ meta + [
+                mt_assembly_prefix:     mt_assembly_prefix,
+                mt_assembly_run_prefix: mt_assembly_prefix
+            ], reads ]
         }
 
     REFERENCE_STUB (
@@ -122,11 +129,11 @@ workflow REFERENCE_JOIN {
             def returned = params.drop_meta_key
                 ? meta.findAll { key, _value -> key != params.drop_meta_key }
                 : meta
-            [ returned.mt_assembly_prefix.toString(), reference ]
+            [ returned.mt_assembly_run_prefix.toString(), reference ]
         }
 
     ch_reference_joined = ch_reads_prefixed
-        .map { meta, reads -> [ meta.mt_assembly_prefix.toString(), meta, reads ] }
+        .map { meta, reads -> [ meta.mt_assembly_run_prefix.toString(), meta, reads ] }
         .join(ch_reference_outcomes, by: 0)
         .map { _prefix, meta, reads, reference -> [ meta, reads, reference ] }
 
