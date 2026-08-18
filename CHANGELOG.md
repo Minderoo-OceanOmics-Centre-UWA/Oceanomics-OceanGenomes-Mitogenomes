@@ -5,16 +5,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## v2.0.0 - [2026-08-18]
 
-Second major release. This cycle hardened post-assembly routing and the assembly summary, made the SQL migration
-chain replayable, and narrowed the pipeline's ENA scope to packaging and validation, handing locus-tag allocation
-and submission selection to a separate downstream pipeline.
+Second major release, and the first to carry the ENA submission path. Everything ENA-related below is new since
+v1.1.0, which shipped neither the params nor the tables: packaging, flatfile generation, Webin validation and the
+whole `sql/` migration chain. This release also hardens post-assembly routing and the assembly summary, and makes
+the migration chain replayable end to end.
 
-**Breaking changes.** Removed params: `--ena_locus_prefix_{hifi,hic,ilmn}`, `--ena_selection_mode`,
-`--ena_decision_file`, `--ena_selected_by`, `--ena_package_metadata`, `--ena_validate_webin_production`. The
-`ena_selection.nf` entrypoint is gone. Migrations `010`-`012` drop `ena_locus_registry`, `ena_candidate_loci`,
-`ena_candidate_packages`, `ena_submission_selections` and the `ena_submission_queue` view (the first two are
-archived first; the rest are not - dump them if their contents matter). The ENA validation record goes from 46
-columns to 27, and `package_digest` changes for every candidate now that locus tags are absent from packages.
+Nothing here breaks a released version. The `Deprecated` section records parts of the ENA layer that were built and
+then handed to a separate downstream pipeline within this same cycle, so no release ever carried the params or
+tables it retires.
+
+**Operator note.** The `sql/` migrations are applied to the live database as they land rather than at release
+boundaries, so a database already carrying `001`-`009` is affected by `010`-`012` regardless. `010` archives
+`ena_locus_registry` and `ena_candidate_loci` before dropping them; `012` drops `ena_candidate_packages`,
+`ena_submission_selections` and the `ena_submission_queue` view with no archive, so dump those first if their
+contents matter.
 
 ### `Added`
 
