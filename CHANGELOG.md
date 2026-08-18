@@ -3,9 +3,18 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## v1.0.0dev - [date]
+## v2.0.0 - [2026-08-18]
 
-Initial release of nf-core/oceangenomesmitogenomes, created with the [nf-core](https://nf-co.re/) template.
+Second major release. This cycle hardened post-assembly routing and the assembly summary, made the SQL migration
+chain replayable, and narrowed the pipeline's ENA scope to packaging and validation, handing locus-tag allocation
+and submission selection to a separate downstream pipeline.
+
+**Breaking changes.** Removed params: `--ena_locus_prefix_{hifi,hic,ilmn}`, `--ena_selection_mode`,
+`--ena_decision_file`, `--ena_selected_by`, `--ena_package_metadata`, `--ena_validate_webin_production`. The
+`ena_selection.nf` entrypoint is gone. Migrations `010`-`012` drop `ena_locus_registry`, `ena_candidate_loci`,
+`ena_candidate_packages`, `ena_submission_selections` and the `ena_submission_queue` view (the first two are
+archived first; the rest are not - dump them if their contents matter). The ENA validation record goes from 46
+columns to 27, and `package_digest` changes for every candidate now that locus tags are absent from packages.
 
 ### `Added`
 
