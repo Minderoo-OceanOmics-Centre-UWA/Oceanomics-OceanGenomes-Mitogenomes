@@ -16,6 +16,13 @@ include { RELABEL_REFERENCE_GB             } from '../../../../modules/local/rel
 include { REFERENCE_DIVERGENCE             } from '../../../../modules/local/reference_divergence'
 include { REFERENCE_CANDIDATES             } from '../../../../modules/local/reference_candidates'
 include { REFERENCE_RANK                   } from '../../../../modules/local/reference_rank'
+// Aliased so conf/modules.config can address this invocation on its own. The same
+// module also runs in MITOGENOME_ANNOTATION_LCA, on the PUBLISHED assembly (post
+// collapse/curation) -- that one is the curator-facing verdict and keeps the publish
+// rule. This one grades the RAW MitoHiFi output, early enough to route on, and is not
+// published: it is a routing signal like countGenbankCds, and publishing it would put a
+// second, differently-scoped reference_relevance.txt in the sample's annotation dir.
+include { REFERENCE_RELEVANCE as REFERENCE_RELEVANCE_ROUTING } from '../../../../modules/local/reference_relevance'
 include { OATK                             } from '../../../../modules/local/oatk'
 include { OATK_CHECK                       } from '../../../../modules/local/oatk/check_circularity'
 include { ASSEMBLY_NO_RESULT               } from '../../../../modules/local/assembly_no_result'
@@ -39,6 +46,17 @@ def parseFinalVerdictCircular(tsv) {
     } catch (ignored) {
         return null
     }
+}
+
+// Did REFERENCE_RANK actually choose a reference? It emits EMPTY chosen_reference
+// files when it declined -- no candidate recruited any reads, no reads were
+// subsampled, or a lone candidate went unmapped -- because a substitution made on no
+// read evidence cannot be known to improve on the reference findMitoReference already
+// resolved. OG56 is the case in point: assembled against a Fowleria vaiulae record
+// picked out of a five-way all-zero tie, at 76.2% identity to its own assembly.
+// Truthiness alone is not enough here; the files exist either way.
+def hasChosenReference(fasta, gb) {
+    return fasta && gb && fasta.size() > 0 && gb.size() > 0
 }
 
 // Is this divergence tier worth re-selecting a reference for? CONGENERIC is not (a
@@ -76,6 +94,113 @@ def countGenbankCds(gb) {
     } catch (ignored) {
         return null
     }
+}
+
+// Read one named column from the single data row of a per-sample TSV. Returns null
+// when the file, the column or the cell is missing, which every caller treats as "no
+// evidence" rather than as a defect -- an unreadable artefact must never divert an
+// assembly on its own.
+def firstRowColumn(tsv, name) {
+    try {
+        if (!tsv || !tsv.exists() || tsv.size() == 0) return null
+        def rows = tsv.text.readLines().findAll { it?.trim() }
+        if (rows.size() < 2) return null
+        def idx = rows[0].split('\t', -1).findIndexOf { it.trim() == name }
+        if (idx < 0) return null
+        def cells = rows[1].split('\t', -1)
+        return idx < cells.size() ? cells[idx].trim() : null
+    } catch (ignored) {
+        return null
+    }
+}
+
+// Assembly length as a multiple of the reference length, from MITOHIFI_CHECK_CIRCULARITY.
+// A reference too distant to recruit cleanly can inflate an assembly as readily as it
+// can truncate one: OG56 came back circular with all 13 CDS at 1.281x reference length,
+// carrying a ~170 bp control-region unit in ~78.6 tandem copies. The CDS count sees
+// nothing wrong with that molecule, so length is the second, independent measure of the
+// same failure. Null when unparseable (see firstRowColumn).
+//
+// ROUTING SIGNAL ONLY, exactly as countGenbankCds above: read as a predicate and
+// discarded. The value a curator reads comes from the published circularity_check.tsv
+// this parses, which already reports length_ratio, excess_bp and the repeat geometry.
+def parseLengthRatio(tsv) {
+    try {
+        def raw = firstRowColumn(tsv, 'length_ratio')
+        return raw ? raw as Double : null
+    } catch (ignored) {
+        return null
+    }
+}
+
+// PASS / DIVERGENT / MISMATCH / UNKNOWN from a REFERENCE_RELEVANCE flag file, which
+// grades the resolved reference against the assembly it produced. Same one-line
+// tab-separated shape as REFERENCE_DIVERGENCE, so it parses the same way.
+def parseRelevanceVerdict(txt) {
+    try {
+        return txt.text.readLines().find { it?.trim() }?.split('\t', -1)?.first()?.trim()?.toUpperCase() ?: 'UNKNOWN'
+    } catch (ignored) {
+        return 'UNKNOWN'
+    }
+}
+
+// Decide whether a MitoHiFi assembly is defective enough to warrant the reference-free
+// Oatk fallback, and say which defect caught it. Returns null to leave the assembly
+// alone. Named and file-scoped so tests/assembly_routing can exercise the real decision
+// rather than a copy of it (see that harness for why a copied predicate is worse than
+// no test at all).
+//
+// Judges the ASSEMBLY, not the reference that produced it. Two independent defects, from
+// artefacts MitoHiFi and the circularity check already write:
+//
+//   gene_incomplete  Recruitment against a too-distant reference drops the most divergent
+//                    gene blocks and returns a clean-looking but truncated molecule.
+//                    OG2102 (Rouleina attrita, non-congeneric Alepocephalus reference)
+//                    came back as a plausible 15.6 kb contig carrying 7 of 13 PCGs, so it
+//                    never reached the empty-FASTA fallback.
+//
+//   length_inflated  The same distant reference can inflate instead of truncate. OG56
+//                    (Vincentia punctata, Fowleria reference at 76.2% identity) came back
+//                    circular with all 13 CDS at 1.281x reference length, carrying a
+//                    ~170 bp control-region unit in ~78.6 tandem copies. The CDS count
+//                    sees nothing wrong with it, which is why length is checked separately.
+//
+// length_inflated is QUALIFIED by the relevance verdict and gene_incomplete is NOT, and the
+// asymmetry is load-bearing. Over-length is ambiguous on its own: OG848, OG852 and OG853 all
+// run 1.12-1.33x against congeneric references that PASS, which is real length heteroplasmy
+// and not something a different assembler will "fix". A PASS is therefore evidence the length
+// is the organism's, not the reference's. Missing genes admit no such reading -- OG2102 is
+// PASS at 7 of 13 PCGs -- so qualifying gene_incomplete would silently un-route the very
+// sample the branch was built for.
+//
+// Every condition demands POSITIVE evidence: a missing or unreadable artefact yields null
+// and the assembly is left alone. That is also why the qualifier tests for DIVERGENT/MISMATCH
+// rather than `!= PASS` -- UNKNOWN means the check reached no verdict, which is not evidence
+// the reference caused anything.
+//
+// Order is precedence, not preference: OG56 satisfies more than one condition and the caller
+// stamps every routed sample with the same oatk prefix, so a sample that produced two reasons
+// would launch two OATK tasks writing identical output names. First match wins makes that
+// unrepresentable.
+def oatkFallbackReason(gb, evidence, relevance, expected_pcg_count, length_ratio_threshold) {
+    def cds     = countGenbankCds(gb)
+    def ratio   = parseLengthRatio(evidence)
+    def verdict = relevance ? parseRelevanceVerdict(relevance) : 'UNKNOWN'
+
+    if (cds != null && cds < expected_pcg_count) {
+        return 'gene_incomplete_mitohifi'
+    }
+    if (ratio != null && ratio >= length_ratio_threshold && verdict in ['DIVERGENT', 'MISMATCH']) {
+        return 'length_inflated_mitohifi'
+    }
+    if (verdict == 'MISMATCH') {
+        // The reference neither covers nor matches the assembly, i.e. it is simply the
+        // wrong record -- the reference-free case by definition. Untested on real data:
+        // the only MISMATCH observed so far (OG810) is a GetOrganelle sample, which never
+        // reaches this branch.
+        return 'wrong_reference_mitohifi'
+    }
+    return null
 }
 
 def parseReferenceTier(tsv) {
@@ -303,7 +428,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         .map { items ->
             def chosen_fasta = items.size() > 5 ? items[5] : null
             def chosen_gb    = items.size() > 6 ? items[6] : null
-            (chosen_fasta && chosen_gb)
+            hasChosenReference(chosen_fasta, chosen_gb)
                 ? [ items[0], items[1], chosen_fasta, chosen_gb, items[4] ]
                 : [ items[0], items[1], items[2], items[3], items[4] ]
         }
@@ -439,31 +564,71 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
             .join(ch_reads_keyed, by: 0)
             .map { _prefix, meta, reads -> [meta, reads, 'empty_mitohifi'] }
 
-        // An empty FASTA is not the only way a divergent reference ruins an assembly.
-        // When the reference is too distant, MitoHiFi's reference-guided read
-        // recruitment drops the most divergent gene blocks and returns a clean-looking
-        // but gene-incomplete molecule: OG2102 (Rouleina attrita, non-congeneric
-        // Alepocephalus reference) came back as a plausible 15.6 kb contig carrying
-        // 7 of 13 protein-coding genes, so it never reached the empty-FASTA fallback.
-        // Route those to Oatk too -- it needs no reference, so it is exactly the tool
-        // for a collapse the reference caused. The PCG count comes from MitoHiFi's own
-        // final_mitogenome.gb (inner join: an assembly with no GenBank yields no
-        // evidence and is left alone).
+        // An empty FASTA is not the only way a divergent reference ruins an assembly, and a
+        // defective assembly is what the fallback is really keyed on -- so judge the ASSEMBLY,
+        // not the reference that produced it. oatkFallbackReason (defined at file scope, with
+        // the full rationale) reads the defect from artefacts MitoHiFi and the circularity
+        // check already write, and names which one caught the sample.
         //
-        // This whole branch is inside `if (params.enable_oatk_fallback)`, which is false
-        // by default, so on a default run the count is computed nowhere and changes
-        // nothing. Its failure modes are asymmetric and cheap either way: a concatemer
-        // duplicates CDS features so the count lands above the threshold and never trips
-        // the `<` filter, and a spuriously low count costs only one extra Oatk run,
-        // because the MitoHiFi assembly is not withdrawn (see below).
+        // Every signal here is a filter predicate and is discarded; none is published. The
+        // whole branch sits inside `if (params.enable_oatk_fallback)`, false by default, so on
+        // a default run none of it is computed. Failure modes stay cheap in both directions: a
+        // concatemer duplicates CDS features so the count lands above the threshold and never
+        // trips the `<` filter, and a spurious route costs one extra Oatk run, because the
+        // MitoHiFi assembly is not withdrawn (see below).
         def expected_pcg_count = (params.mitogenome_summary_expected_pcg_count ?: 13) as int
-        ch_gene_incomplete_oatk_reads = ch_mitohifi_fasta_branched.assembled
+        def length_ratio_threshold = (params.mitogenome_oatk_length_ratio_threshold ?: 1.15) as Double
+
+        // Grade the resolved reference against the assembly it produced, here rather than
+        // waiting for MITOGENOME_ANNOTATION_LCA's copy: the verdict is needed to route, and
+        // routing happens before annotation. No cycle is introduced -- the module needs only
+        // a FASTA and the reference GenBank, both of which exist at this point.
+        //
+        // Invoked inside the enable_oatk_fallback gate so a default run pays nothing for a
+        // signal it would not act on.
+        //
+        // Keyed on the run prefix, not the whole meta: RELABEL_REFERENCE_GB and
+        // MITOHIFI_MITOHIFI are different processes whose restored metas need not `equals`
+        // on a -resume, the failure documented for the oatk reference join below. The
+        // assembly's meta is the one carried forward, so out.flag joins cleanly against the
+        // other MitoHiFi outputs. Inner join is total here: every assembled sample came
+        // through ch_reference_resolved, which is also what RELABEL_REFERENCE_GB consumes.
+        ch_relabelled_gb_keyed = RELABEL_REFERENCE_GB.out.gb
+            .map { m, gb -> [ m.mt_assembly_run_prefix.toString(), gb ] }
+
+        REFERENCE_RELEVANCE_ROUTING (
+            ch_mitohifi_fasta_branched.assembled
+                .map { meta, fasta -> [ meta.mt_assembly_run_prefix.toString(), meta, fasta ] }
+                .join(ch_relabelled_gb_keyed, by: 0)
+                .map { _prefix, meta, fasta, gb -> [ meta, fasta, gb ] }
+        )
+
+        // One channel, one reason per sample. ch_oatk_input below stamps every entry with the
+        // SAME oatk_prefix, so a sample arriving on two channels would launch two OATK tasks
+        // writing identical output names; resolving the reason before the mix makes that
+        // unrepresentable, which is why this is not three mixed channels.
+        //
+        // The relevance join carries remainder:true while the GenBank and evidence joins do
+        // not: REFERENCE_RELEVANCE_ROUTING runs errorStrategy 'ignore', and an inner join
+        // would let one failed blastn silently withdraw gene_incomplete routing from a sample
+        // like OG2102, which does not depend on the relevance verdict at all.
+        ch_defective_oatk_reads = ch_mitohifi_fasta_branched.assembled
             .join(MITOHIFI_MITOHIFI.out.gb, by: 0)
-            .map { meta, _fasta, gb -> [meta, countGenbankCds(gb)] }
-            .filter { _meta, cds -> cds != null && cds < expected_pcg_count }
-            .map { meta, _cds -> [ meta.mt_assembly_run_prefix.toString(), meta ] }
+            .join(MITOHIFI_CHECK_CIRCULARITY.out.evidence, by: 0)
+            .join(REFERENCE_RELEVANCE_ROUTING.out.flag, by: 0, remainder: true)
+            .filter { it[1] != null }   // drop any right-only remainder
+            .map { items ->
+                [ items[0], oatkFallbackReason(
+                    items[2],                                  // MitoHiFi GenBank
+                    items[3],                                  // circularity evidence
+                    items.size() > 4 ? items[4] : null,        // relevance flag, may be absent
+                    expected_pcg_count,
+                    length_ratio_threshold) ]
+            }
+            .filter { _meta, reason -> reason != null }
+            .map { meta, reason -> [ meta.mt_assembly_run_prefix.toString(), meta, reason ] }
             .join(ch_reads_keyed, by: 0)
-            .map { _prefix, meta, reads -> [meta, reads, 'gene_incomplete_mitohifi'] }
+            .map { _prefix, meta, reason, reads -> [meta, reads, reason] }
 
         // The MitoHiFi assembly is deliberately NOT withdrawn when this fires: it stays
         // published alongside the Oatk attempt (distinct v10oatk prefix), so the summary
@@ -471,16 +636,19 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         //
         // fallback_reason records WHY oatk was invoked (no_reference /
         // reference_lookup_error / cross_order_reference / empty_mitohifi /
-        // gene_incomplete_mitohifi). It is carried in meta for provenance only: nothing in
-        // the repo reads it, so the routing decision currently leaves no trace in any
-        // output file. Surfacing it (and the CDS count above) as summary evidence is a
-        // deliberate TODO, not an oversight to be fixed in passing.
+        // gene_incomplete_mitohifi / length_inflated_mitohifi / wrong_reference_mitohifi).
+        // It is carried in meta for provenance only: nothing in the repo reads it, so the
+        // routing decision currently leaves no trace in any output file. Surfacing it (and
+        // the CDS count / length ratio behind it) as summary evidence is a deliberate TODO,
+        // not an oversight to be fixed in passing -- and it matters more now that the
+        // post-assembly gate has three ways to fire and a first-match precedence between
+        // them, so which one caught a sample is no longer inferable from the outputs.
         // Oatk is a distinct assembly RUN, not a curated variant of the MitoHiFi one: it has
         // its own assembler prefix, its own reads entry and its own DB row. So it re-stamps
         // the lineage key too, rather than inheriting MitoHiFi's -- otherwise its artefacts
         // would join against the MitoHiFi run they were meant to replace.
         ch_oatk_input = ch_direct_oatk_reads
-            .mix(ch_failed_oatk_reads, ch_gene_incomplete_oatk_reads)
+            .mix(ch_failed_oatk_reads, ch_defective_oatk_reads)
             .map { meta, reads, reason ->
                 def oatk_prefix = "${meta.id}.${meta.sequencing_type}.${meta.date}.v${oatk_version_stripped}oatk"
                 [ meta + [
@@ -594,6 +762,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
         ch_versions = ch_versions.mix(OATK.out.versions.first())
         ch_versions = ch_versions.mix(OATK_CHECK.out.versions.first())
+        ch_versions = ch_versions.mix(REFERENCE_RELEVANCE_ROUTING.out.versions.first())
         ch_summary_files = ch_summary_files.mix(OATK.out.log.map { _meta, log -> log })
         ch_summary_files = ch_summary_files.mix(OATK.out.fasta.map { _meta, fasta -> fasta })
         ch_summary_files = ch_summary_files.mix(OATK.out.gfa.map { _meta, gfa -> gfa })

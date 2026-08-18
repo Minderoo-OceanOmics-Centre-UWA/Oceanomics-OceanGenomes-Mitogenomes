@@ -1,18 +1,19 @@
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    RESOLVE THE ENA STUDY AND LOCUS-TAG PREFIX FOR A CANDIDATE
+    RESOLVE THE ENA STUDY FOR A CANDIDATE
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     PRJEB110568 is an umbrella project and can never receive data, so each
-    sequencing technology submits to its own ENA child study with its own
-    registered INSDC locus-tag prefix.  A prefix belongs to exactly one study,
-    which is why the tag a specimen gene renders to depends on the technology of
-    the candidate carrying it.
+    sequencing technology submits to its own ENA child study.
 
     Every technology with a viable mitogenome is published, so there is no
     fallback and no default: an unrecognised technology means the candidate
     would be submitted to the wrong study, and that must stop the run rather
     than be quietly resolved.
+
+    Locus-tag prefixes are registered against these same child studies, but this
+    pipeline does not resolve or apply them: the downstream submission pipeline
+    owns locus tags end to end.
 
     These are functions in a module rather than a class in lib/ so that they
     resolve from any entry script, including the stub workflows under tests/.
@@ -49,7 +50,7 @@ def enaTechOf(Map meta) {
     return tech
 }
 
-/* Study accession and locus-tag prefix for one technology. */
+/* Study accession for one technology. */
 def enaTargetForTech(Map params, String tech) {
     if (!enaTechnologies().contains(tech)) {
         throw new IllegalArgumentException(
@@ -57,15 +58,9 @@ def enaTargetForTech(Map params, String tech) {
         )
     }
     def study = params?."ena_study_${tech}"?.toString()?.trim()
-    def prefix = params?."ena_locus_prefix_${tech}"?.toString()?.trim()
     if (!study) {
         throw new IllegalArgumentException(
             "--ena_study_${tech} is not set, so ${tech} candidates have no ENA study."
-        )
-    }
-    if (!prefix) {
-        throw new IllegalArgumentException(
-            "--ena_locus_prefix_${tech} is not set, so ${tech} candidates have no locus-tag prefix."
         )
     }
     if (!(study ==~ /PRJEB[0-9]+/)) {
@@ -73,27 +68,21 @@ def enaTargetForTech(Map params, String tech) {
             "--ena_study_${tech} must be an ENA study accession (PRJEB...), got '${study}'."
         )
     }
-    if (!(prefix ==~ /[A-Z][A-Z0-9]{2,11}/)) {
-        throw new IllegalArgumentException(
-            "--ena_locus_prefix_${tech} must be a registered INSDC locus-tag prefix, got '${prefix}'."
-        )
-    }
-    return [ena_study: study, ena_locus_prefix: prefix]
+    return [ena_study: study]
 }
 
-/* Add the resolved study and prefix to a candidate's meta map. */
+/* Add the resolved study to a candidate's meta map. */
 def enaTargetAnnotate(Map params, Map meta) {
     return meta + enaTargetForTech(params, enaTechOf(meta))
 }
 
 /*
     Startup guard: every technology must resolve, and two technologies must never
-    share a study or a prefix.  ENA registers a prefix against exactly one study,
-    so a duplicate here submits one technology under another's namespace.
+    share a study.  A duplicate here submits one technology's records under
+    another's study.
 */
 def validateEnaTargets(Map params) {
     def studies = [:]
-    def prefixes = [:]
     enaTechnologies().each { tech ->
         def target = enaTargetForTech(params, tech)
         def clash = studies[target.ena_study]
@@ -104,13 +93,5 @@ def validateEnaTargets(Map params) {
             )
         }
         studies[target.ena_study] = tech
-        clash = prefixes[target.ena_locus_prefix]
-        if (clash) {
-            throw new IllegalArgumentException(
-                "Locus-tag prefix ${target.ena_locus_prefix} is set for both ${clash} and " +
-                "${tech}. INSDC registers a prefix to exactly one study."
-            )
-        }
-        prefixes[target.ena_locus_prefix] = tech
     }
 }

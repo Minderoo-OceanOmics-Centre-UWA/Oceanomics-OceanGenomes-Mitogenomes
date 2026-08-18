@@ -1,0 +1,146 @@
+nextflow_workflow {
+    name "Oatk fallback routes on assembly defects, not on the reference"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "OATK_FALLBACK_ROUTING"
+
+    // Every case is a real sample from mitogenomes-missing-audit-6. The two that must NOT
+    // route are the point of the exercise: an over-length assembly is only a defect when
+    // the reference is also implicated, otherwise it is length heteroplasmy and a different
+    // assembler will reproduce it.
+    test("real samples route on their own defect, and clean ones do not route at all") {
+        when {
+            workflow {
+                """
+                def fx = { name -> file("\$baseDir/tests/assembly_routing/fixtures/\$name") }
+                input[0] = Channel.of(
+                    // OG56: 13 CDS, 1.281x, DIVERGENT (pid 76.2). The sample that started this:
+                    // the CDS count sees nothing wrong, so only length catches it.
+                    ['OG56',   fx('cds13.gb'), fx('ratio_1281.tsv'), fx('rel_divergent.txt')],
+                    // OG2102: 7 of 13 PCGs but relevance PASS. Must route on genes ALONE --
+                    // qualifying gene_incomplete by relevance would silently un-route it.
+                    ['OG2102', fx('cds7.gb'),  fx('ratio_0988.tsv'), fx('rel_pass.txt')],
+                    // OG848: 1.325x against a congeneric reference that PASSes. Real length
+                    // heteroplasmy, not a recruitment artefact.
+                    ['OG848',  fx('cds13.gb'), fx('ratio_1325.tsv'), fx('rel_pass.txt')],
+                    // OG2202: clean by every measure. Its reference ranking was all-zero, which
+                    // is exactly why the ranking must not drive routing.
+                    ['OG2202', fx('cds13.gb'), fx('ratio_0988.tsv'), fx('rel_pass.txt')]
+                )
+                """
+            }
+        }
+        then {
+            def routed = workflow.out.results
+                .collect { it instanceof String ? evaluate(it) : it }
+                .collectEntries { [(it[0]): it[1]] }
+            assertAll(
+                { assert workflow.success },
+                { assert routed['OG56']   == 'length_inflated_mitohifi' },
+                { assert routed['OG2102'] == 'gene_incomplete_mitohifi' },
+                { assert routed['OG848']  == null },
+                { assert routed['OG2202'] == null }
+            )
+        }
+    }
+
+    // Order is precedence, not preference. OG56 with a truncated GenBank satisfies both
+    // conditions; the caller stamps every routed sample with the same oatk prefix, so two
+    // reasons would mean two OATK tasks writing identical output names.
+    test("a sample matching two conditions yields exactly one reason, the first") {
+        when {
+            workflow {
+                """
+                def fx = { name -> file("\$baseDir/tests/assembly_routing/fixtures/\$name") }
+                input[0] = Channel.of(
+                    ['both', fx('cds7.gb'), fx('ratio_1281.tsv'), fx('rel_divergent.txt')]
+                )
+                """
+            }
+        }
+        then {
+            def results = workflow.out.results.collect { it instanceof String ? evaluate(it) : it }
+            assertAll(
+                { assert workflow.success },
+                { assert results.size() == 1 },
+                { assert results[0][1] == 'gene_incomplete_mitohifi' }
+            )
+        }
+    }
+
+    // Routing demands positive evidence in every direction. A missing or ungraded artefact
+    // must leave the assembly alone -- REFERENCE_RELEVANCE_ROUTING runs errorStrategy
+    // 'ignore', so a null relevance flag is a real runtime state, not a hypothetical.
+    test("absent or ungraded evidence never routes on its own") {
+        when {
+            workflow {
+                """
+                def fx = { name -> file("\$baseDir/tests/assembly_routing/fixtures/\$name") }
+                input[0] = Channel.of(
+                    // Inflated, but the relevance check never returned: UNKNOWN is not
+                    // evidence the reference caused it.
+                    ['unknown_verdict', fx('cds13.gb'), fx('ratio_1281.tsv'), fx('rel_unknown.txt')],
+                    // Inflated, but the flag file is absent entirely (task ignored).
+                    ['no_flag',         fx('cds13.gb'), fx('ratio_1281.tsv'), null],
+                    // Divergent reference, but no length_ratio column to read.
+                    ['no_ratio',        fx('cds13.gb'), fx('ratio_missing.tsv'), fx('rel_divergent.txt')],
+                    // An unreadable GenBank yields no CDS count, which is not a low one.
+                    ['empty_gb',        fx('empty.gb'), fx('ratio_0988.tsv'), fx('rel_pass.txt')]
+                )
+                """
+            }
+        }
+        then {
+            def results = workflow.out.results.collect { it instanceof String ? evaluate(it) : it }
+            assertAll(
+                { assert workflow.success },
+                { assert results.every { it[1] == null } }
+            )
+        }
+    }
+
+    // A GenBank with no CDS features at all reads as 0 < 13. That is a genuine collapse, not
+    // a parse failure, and must be distinguished from the unreadable-file case above.
+    test("a GenBank with zero CDS features routes as gene-incomplete") {
+        when {
+            workflow {
+                """
+                def fx = { name -> file("\$baseDir/tests/assembly_routing/fixtures/\$name") }
+                input[0] = Channel.of(
+                    ['no_cds', fx('cds_none.gb'), fx('ratio_0988.tsv'), fx('rel_pass.txt')]
+                )
+                """
+            }
+        }
+        then {
+            def results = workflow.out.results.collect { it instanceof String ? evaluate(it) : it }
+            assertAll(
+                { assert workflow.success },
+                { assert results[0][1] == 'gene_incomplete_mitohifi' }
+            )
+        }
+    }
+
+    // MISMATCH means the reference is simply the wrong record, which is the reference-free
+    // case whatever the assembly's length or gene count.
+    test("a mismatched reference routes even when the assembly looks clean") {
+        when {
+            workflow {
+                """
+                def fx = { name -> file("\$baseDir/tests/assembly_routing/fixtures/\$name") }
+                input[0] = Channel.of(
+                    ['mismatch', fx('cds13.gb'), fx('ratio_0988.tsv'), fx('rel_mismatch.txt')]
+                )
+                """
+            }
+        }
+        then {
+            def results = workflow.out.results.collect { it instanceof String ? evaluate(it) : it }
+            assertAll(
+                { assert workflow.success },
+                { assert results[0][1] == 'wrong_reference_mitohifi' }
+            )
+        }
+    }
+}
+

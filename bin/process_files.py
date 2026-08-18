@@ -140,10 +140,25 @@ _DEFAULT_MITO_STOPS = ("TAA", "TAG")
 
 def mito_stop_codons(genetic_code: int):
     return _MITO_STOPS_BY_CODE.get(int(genetic_code), _DEFAULT_MITO_STOPS)
+
+# Initiation codons each mitochondrial code accepts without comment. A CDS
+# starting on anything else is what raises SEQ_FEAT.StartCodon, so these are the
+# codons for which no transl_except is needed. The vertebrate code (2) is the
+# strictest and the only one this pipeline routinely uses.
+_MITO_STARTS_BY_CODE = {
+    2: ("ATT", "ATC", "ATA", "ATG", "GTG"),
+}
+_DEFAULT_MITO_STARTS = ("ATG", "GTG")
+
+def mito_start_codons(genetic_code: int):
+    return _MITO_STARTS_BY_CODE.get(int(genetic_code), _DEFAULT_MITO_STARTS)
 # Substring of EMMA's note ("...TAA stop codon is completed by the addition of
 # 3' A residues to the mRNA") that survives the 'putative ' strip. Its presence
 # marks a CDS whose stop is completed post-transcriptionally by polyadenylation.
 POLYA_NOTE_MARK = "3' A residues"
+# Substring of EMMA's note ("non-standard start codon TTG"). Its presence marks a
+# CDS that initiates on a codon the genetic code does not list as a start.
+START_NOTE_MARK = "non-standard start codon"
 _COMP = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
 
 def read_fasta_sequence(fa_path) -> str:
@@ -190,6 +205,38 @@ def compute_transl_except_pos(start: int, end: int, seq: str, stops):
             return None
         return f"complement({lo})" if rem == 1 else f"complement({lo}..{hi})"
 
+def compute_start_transl_except_pos(start: int, end: int, seq: str, starts):
+    """Mirror of compute_transl_except_pos for the 5' end. For a single-interval
+    CDS (1-based; start>end means minus strand), return the transl_except 'pos:'
+    expression covering the initiation codon when that codon is not one the
+    genetic code accepts as a start, else None. `starts` is the start-codon tuple
+    for this sample's genetic code (see mito_start_codons).
+
+    table2asn raises SEQ_FEAT.StartCodon when a complete CDS begins on a codon
+    outside the table's start set, and then emits a gap symbol rather than an
+    amino acid for residue 1, which in turn raises SEQ_INST.BadProteinStart.
+    Declaring the codon as aa:Met is the INSDC way to record a genuine
+    alternative initiation codon, and clears both. Marking the CDS 5'-partial
+    would also silence table2asn but would misrepresent a complete gene.
+    """
+    n = len(seq)
+    if start <= end:                         # plus strand; 5' end at low coord
+        lo, hi = start, start + 2
+        if lo < 1 or hi > n:
+            return None
+        codon = seq[lo - 1:hi]               # coding-strand bases
+        if codon in starts:
+            return None
+        return f"{lo}..{hi}"
+    else:                                    # minus strand; 5' end at high coord
+        hi, lo = start, start - 2
+        if lo < 1 or hi > n:
+            return None
+        codon = _revcomp(seq[lo - 1:hi])     # coding-strand bases
+        if codon in starts:
+            return None
+        return f"complement({lo}..{hi})"
+
 def _tbl_interval(line: str):
     """Return (start, end) if line opens a feature interval, else None.
 
@@ -211,11 +258,13 @@ def sort_tbl_features(lines):
     """Order feature blocks by position on the molecule.
 
     Emma sorts its output by the start coordinate as a *string*, so a molecule
-    comes out as 1, 10053, 1027, 10343, 1099 ...  The downstream locus-tag
-    allocator numbers loci in file order, so that ordering ends up baked into
-    the published tags.  Re-sort numerically here, at the point the feature
-    table is normalised, so the .tbl and everything derived from it agree with
-    the coordinate order table2asn and seqret impose on the flatfile anyway.
+    comes out as 1, 10053, 1027, 10343, 1099 ...  Re-sort numerically here, at
+    the point the feature table is normalised, so the .tbl and everything
+    derived from it agree with the coordinate order table2asn and seqret impose
+    on the flatfile anyway.  File order is also load bearing downstream: the
+    submission pipeline that allocates locus tags numbers loci by walking the
+    feature table, so whatever order leaves here is the order the published tags
+    carry.
 
     A block is the feature line, any additional interval lines belonging to a
     joined feature, and the indented qualifier lines that follow.  The sort is
@@ -241,6 +290,7 @@ def sort_tbl_features(lines):
 def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_code=2):
     log(f"📝 Processing TBL/GB file: {input_file}")
     stops = mito_stop_codons(genetic_code)
+    starts = mito_start_codons(genetic_code)
 
     def clean(line: str) -> str:
         if line.startswith('>Feature'):
@@ -250,7 +300,7 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
     with open(input_file) as f_in:
         lines = f_in.read().splitlines()
 
-    out, added = [], 0
+    out, added, added_start = [], 0, 0
     i, n = 0, len(lines)
     while i < n:
         cols = lines[i].split('\t')
@@ -275,10 +325,22 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
 
             has_note = any(POLYA_NOTE_MARK in q for q in qual)
             has_te = any('\ttransl_except\t' in q or q.lstrip().startswith('transl_except') for q in qual)
+            has_start_note = any(START_NOTE_MARK in q for q in qual)
+            has_te_met = any('aa:Met' in q for q in qual)
+            ic = interval.split('\t')
+            # A CDS already marked 5'-partial has no initiation codon to declare;
+            # table2asn accepts the truncated start on its own.
+            partial_start = ic[0].startswith('<')
             # Only single-interval CDS are handled (mitochondrial genes are single-exon);
-            # joined features are passed through untouched to avoid mis-locating the stop.
+            # joined features are passed through untouched to avoid mis-locating the codon.
+            if (seq is not None and has_start_note and not has_te_met
+                    and not partial_start and not extra_intervals):
+                pos = compute_start_transl_except_pos(int(ic[0].lstrip('<>')),
+                                                      int(ic[1].lstrip('<>')), seq, starts)
+                if pos:
+                    out.append(f"\t\t\ttransl_except\t(pos:{pos},aa:Met)")
+                    added_start += 1
             if seq is not None and has_note and not has_te and not extra_intervals:
-                ic = interval.split('\t')
                 pos = compute_transl_except_pos(int(ic[0].lstrip('<>')),
                                                 int(ic[1].lstrip('<>')), seq, stops)
                 if pos:
@@ -302,7 +364,8 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
 
     with open(output_file, 'w') as f_out:
         f_out.write('\n'.join(out) + '\n')
-    log(f"✅ Processed TBL/GB: {output_file} (transl_except added to {added} CDS)")
+    log(f"✅ Processed TBL/GB: {output_file} "
+        f"(transl_except aa:TERM added to {added} CDS, aa:Met to {added_start} CDS)")
 
 def sort_gff_records(lines):
     """Order GFF loci by position, mirroring sort_tbl_features.

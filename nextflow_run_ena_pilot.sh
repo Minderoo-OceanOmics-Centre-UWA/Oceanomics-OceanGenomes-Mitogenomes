@@ -52,9 +52,7 @@ nextflow -log "${PILOT_OUT}/nextflow.log" run "${REPO_DIR}/main.nf" \
     --tempdir /scratch/pawsey0964/tpeirce/tmp \
     --template_sbt "${REPO_DIR}/bin/template.sbt" \
     --force_db_overwrite true \
-    --ena_validate_webin_test true \
-    --ena_validate_webin_production false \
-    --ena_webin_validate false \
+    --ena_webin_validate true \
     --ena_validation_attempt "og111-pilot-$(date +%Y%m%d)"
 
 echo "Pilot complete: ${PILOT_OUT}"

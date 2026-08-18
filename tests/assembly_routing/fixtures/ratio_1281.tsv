@@ -1,0 +1,2 @@
+sample	source_contig	mitohifi_was_circular	assembly_length	reference_length	length_ratio	anomaly_type
+S	c1	True	21195	16550	1.281	control_region_repeat

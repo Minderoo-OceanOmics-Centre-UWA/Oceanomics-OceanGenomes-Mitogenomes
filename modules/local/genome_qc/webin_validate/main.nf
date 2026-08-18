@@ -70,7 +70,12 @@ process WEBIN_VALIDATE {
     if [ "\${webin_status}" = "PASS" ]; then
         cp "$embl_file" validated/
     fi
-    printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\n%s\t%s\t%s\t%s\t%s\n' "\${prefix}" "\${webin_status}" "\${reason}" "\${webin_rc}" "${validation_attempt}" > "\${status_file}"
+    # The package build copies these counts into package_metadata.json.
+    error_count=\$(grep -RihE '(^|[^[:alpha:]])(ERROR|INVALID)([^[:alpha:]]|\$)' webin_output "\${log_file}" 2>/dev/null | wc -l)
+    warning_count=\$(grep -RihE '(^|[^[:alpha:]])WARNING([^[:alpha:]]|\$)' webin_output "\${log_file}" 2>/dev/null | wc -l)
+    printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\terror_count\twarning_count\twebin_cli_version\n%s\t%s\t%s\t%s\t%s\t%s\t%s\t9.0.3\n' \\
+        "\${prefix}" "\${webin_status}" "\${reason}" "\${webin_rc}" "${validation_attempt}" \\
+        "\${error_count}" "\${warning_count}" > "\${status_file}"
 
     printf '%s\n' '<tr><td>ENA Webin validation</td><td><samp>ena-webin-cli -context sequence -validate</samp></td><td>Validates the ENA flat file without submitting it for ${meta.id}.</td></tr>' > 21_webin_validate.tool_params_mqcrow.html
     printf '"%s":\n    webin-cli: "9.0.3"\n' "${task.process}" > versions.yml
@@ -83,7 +88,7 @@ process WEBIN_VALIDATE {
     mkdir -p validated webin_output
     cp "$embl_file" validated/
     printf 'STUDY\t%s\nNAME\t%s\nFLATFILE\t%s\n' "${meta.ena_study}" "${prefix}" "${embl_file.name}" > ${prefix}.webin_manifest.txt
-    printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\n%s\tPASS\tvalidated\t0\t%s\n' "${prefix}" "${validation_attempt}" > ${prefix}.webin_status.tsv
+    printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\terror_count\twarning_count\twebin_cli_version\n%s\tPASS\tvalidated\t0\t%s\t0\t0\tstub\n' "${prefix}" "${validation_attempt}" > ${prefix}.webin_status.tsv
     printf 'Stub Webin validation passed\n' > ${prefix}.webin_validate.log
     printf 'PASS\n' > webin_output/validation.txt
     printf '%s\n' '<tr><td>ENA Webin validation</td><td><samp>stub</samp></td><td>Stub Webin validation for ${meta.id}.</td></tr>' > 21_webin_validate.tool_params_mqcrow.html

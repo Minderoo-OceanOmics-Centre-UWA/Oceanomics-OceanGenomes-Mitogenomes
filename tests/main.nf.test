@@ -95,4 +95,5 @@ nextflow_workflow {
             }
         }
     }
-}The test file appears to be complete and valid, with proper structure and closure. It includes both pipeline-level and workflow-level tests with appropriate assertions.
+}
+

@@ -9,9 +9,14 @@
 //
 // Emits the winning fasta/gb plus a ranking TSV showing every candidate and its
 // score, so a curator can see why one was chosen. Runs in the MitoHiFi container,
-// which already ships minimap2. Always exits 0: on any failure the script falls
-// back to the first candidate, i.e. the reference the pipeline would have used
-// anyway, so re-selection can only improve on the previous behaviour.
+// which already ships minimap2. Always exits 0.
+//
+// The chosen_reference outputs are EMPTY when the script declined to substitute --
+// no candidate recruited any reads, no reads were subsampled, or there was a single
+// unmapped candidate. Callers must test them for size and fall back to the reference
+// findMitoReference resolved; an empty file here is a verdict, not a failure. See the
+// header of bin/rank_reference_candidates.py for why a zero-scoring candidate set is
+// not a tie to be broken.
 process REFERENCE_RANK {
     tag "$meta.id"
     label 'process_medium'
@@ -62,10 +67,13 @@ process REFERENCE_RANK {
     """
 
     stub:
+    // Non-empty on purpose: empty chosen_reference files now MEAN "declined to
+    // substitute", and this stub's ranking says chosen=yes. touch-ing them would
+    // make every stub run silently take the fallback path it claims not to.
     """
-    touch ${meta.mt_assembly_prefix}.chosen_reference.fasta
-    touch ${meta.mt_assembly_prefix}.chosen_reference.gb
-    printf 'accession\\tscore\\tmatched_bases\\tmapped_reads\\tchosen\\nSTUB001\\t1.0\\t100\\t10\\tyes\\n' > ${meta.mt_assembly_prefix}.reference_ranking.tsv
+    printf '>STUB001\\nACGT\\n' > ${meta.mt_assembly_prefix}.chosen_reference.fasta
+    printf 'LOCUS       STUB001                 4 bp    DNA     circular UNK\\n//\\n' > ${meta.mt_assembly_prefix}.chosen_reference.gb
+    printf 'accession\\tscore\\tmatched_bases\\tmapped_reads\\tchosen\\tstatus\\nSTUB001\\t1.0\\t100\\t10\\tyes\\tscored\\n' > ${meta.mt_assembly_prefix}.reference_ranking.tsv
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         minimap2: "2.24-r1122"

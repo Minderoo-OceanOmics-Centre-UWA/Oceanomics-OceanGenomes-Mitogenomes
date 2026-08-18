@@ -134,12 +134,27 @@ process ENA_FLATFILE {
     input_features=\$(grep -Ec '^     [A-Za-z_][A-Za-z_0-9]*[[:space:]]' "$gbf" || true)
     output_features=\$(grep -Ec '^FT   [^[:space:]]+[[:space:]]' "\${raw}" 2>/dev/null || true)
 
+    # Compare qualifier COUNTS between the GenBank input and the EMBL output, not
+    # mere presence. A presence test passes as long as one feature anywhere in the
+    # record still carries the qualifier, so a single CDS losing its /translation
+    # is invisible to it -- which is exactly how an ATP6 whose translation began
+    # with a gap symbol reached ENA with conversion_status=PASS.
     missing_qualifiers=""
-    for qualifier in organism mol_type organelle gene product transl_table codon_start translation locus_tag geo_loc_name; do
-        if grep -q "/\${qualifier}=" "$gbf" && ! grep -q "/\${qualifier}=" "\${raw}"; then
-            missing_qualifiers="\${missing_qualifiers}\${missing_qualifiers:+,}\${qualifier}"
+    for qualifier in organism mol_type organelle gene product transl_table codon_start translation geo_loc_name; do
+        gbf_count=\$(grep -c "/\${qualifier}=" "$gbf" || true)
+        embl_count=\$(grep -c "/\${qualifier}=" "\${raw}" 2>/dev/null || true)
+        if [ "\${gbf_count:-0}" -ne "\${embl_count:-0}" ]; then
+            missing_qualifiers="\${missing_qualifiers}\${missing_qualifiers:+,}\${qualifier}(\${gbf_count:-0}->\${embl_count:-0})"
         fi
     done
+
+    # seqret never fails on a qualifier it dislikes; it demotes it to free text as
+    # /note="*<name>: ...". The post-processing above deliberately restores
+    # geo_loc_name, so anything still demoted at this point is a qualifier that
+    # would reach ENA as prose and be silently lost (a dropped /translation, an
+    # invalid /lat_lon). One catch-all check covers every such qualifier,
+    # including ones not in the list above.
+    demoted_qualifiers=\$(grep -o '/note="[*][a-z_]*' "\${raw}" 2>/dev/null | sed 's#.*/note="[*]##' | sort -u | paste -sd, -)
 
     source_ok=0
     organism_ok=0
@@ -167,6 +182,9 @@ process ENA_FLATFILE {
     elif [ "\${input_features}" -ne "\${output_features}" ]; then
         conversion_status="FAIL_CONVERSION"
         reason="feature_count_mismatch"
+    elif [ -n "\${demoted_qualifiers}" ]; then
+        conversion_status="FAIL_CONVERSION"
+        reason="qualifier_demoted_by_seqret:\${demoted_qualifiers}"
     elif [ "\${source_ok}" -ne 1 ] || [ "\${organism_ok}" -ne 1 ] || [ "\${topology_ok}" -ne 1 ] || [ -n "\${missing_qualifiers}" ]; then
         conversion_status="FAIL_CONVERSION"
         reason="required_annotation_not_preserved"
@@ -177,8 +195,8 @@ process ENA_FLATFILE {
         printf '%s\t%s\t%s\t%s\n' "\${prefix}" "\${conversion_status}" "\${reason}" "\${seqret_rc}"
     } > "\${status_file}"
     {
-        printf 'sample\tinput_records\toutput_records\tterminators\tinput_length\toutput_length\tinput_features\toutput_features\tsource_ok\torganism_ok\ttopology_ok\tmissing_qualifiers\n'
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "\${prefix}" "\${input_records}" "\${output_records}" "\${terminators}" "\${input_length}" "\${output_length:-0}" "\${input_features}" "\${output_features}" "\${source_ok}" "\${organism_ok}" "\${topology_ok}" "\${missing_qualifiers}"
+        printf 'sample\tinput_records\toutput_records\tterminators\tinput_length\toutput_length\tinput_features\toutput_features\tsource_ok\torganism_ok\ttopology_ok\tmissing_qualifiers\tdemoted_qualifiers\n'
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "\${prefix}" "\${input_records}" "\${output_records}" "\${terminators}" "\${input_length}" "\${output_length:-0}" "\${input_features}" "\${output_features}" "\${source_ok}" "\${organism_ok}" "\${topology_ok}" "\${missing_qualifiers}" "\${demoted_qualifiers}"
     } > "\${checks_file}"
 
     if [ "\${conversion_status}" = "PASS" ]; then
@@ -199,7 +217,7 @@ process ENA_FLATFILE {
     : > ${prefix}.embl
     gzip -n -k ${prefix}.embl
     printf 'sample\tstatus\treason\tseqret_exit\n%s\tPASS\tok\t0\n' "${prefix}" > ${prefix}.ena_conversion_status.tsv
-    printf 'sample\tinput_records\toutput_records\tterminators\tinput_length\toutput_length\tinput_features\toutput_features\tsource_ok\torganism_ok\ttopology_ok\tmissing_qualifiers\n%s\t1\t1\t1\t1\t1\t1\t1\t1\t1\t1\t\n' "${prefix}" > ${prefix}.ena_conversion_check.tsv
+    printf 'sample\tinput_records\toutput_records\tterminators\tinput_length\toutput_length\tinput_features\toutput_features\tsource_ok\torganism_ok\ttopology_ok\tmissing_qualifiers\tdemoted_qualifiers\n%s\t1\t1\t1\t1\t1\t1\t1\t1\t1\t1\t\t\n' "${prefix}" > ${prefix}.ena_conversion_check.tsv
     printf 'Stub EMBOSS conversion passed\n' > ${prefix}.ena_conversion.log
     printf '%s\n' '<tr><td>ENA flat-file conversion</td><td><samp>stub</samp></td><td>Stub ENA conversion for ${meta.id}.</td></tr>' > 20_ena_flatfile.tool_params_mqcrow.html
     printf '"%s":\n    emboss: "stub"\n' "${task.process}" > versions.yml

@@ -109,10 +109,6 @@ def main() -> int:
                     f"ena_specimen_rows={specimens} "
                     f"ena_biosample_rows={biosamples}"
                 )
-                cursor.execute("SELECT count(*) FROM ena_locus_registry")
-                print(f"ena_locus_rows={cursor.fetchone()[0]}")
-                cursor.execute("SELECT count(*) FROM ena_candidate_packages")
-                print(f"ena_candidate_rows={cursor.fetchone()[0]}")
                 cursor.execute(
                     """
                     SELECT table_name, column_name

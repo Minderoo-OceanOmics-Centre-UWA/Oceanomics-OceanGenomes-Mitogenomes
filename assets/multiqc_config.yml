@@ -57,7 +57,7 @@ custom_data:
         title: "Assembler"
       status:
         title: "Status"
-        description: "QC verdict, identical across assemblers: complete (no blocking QC reason), manual_review (see Manual review reason), failed (no assembly produced). Topology is in the Circularised column, not here."
+        description: "QC verdict, identical across assemblers: complete (no blocking QC reason), manual_review (see Manual review reason), failed (no assembly produced), superseded (a curation step replaced this assembly with one that has its own row, e.g. the monomer of a collapsed concatemer). Topology is in the Circularised column, not here."
       final_length_bp:
         title: "Final length (bp)"
       circularised:
@@ -68,6 +68,10 @@ custom_data:
         title: "Final contigs"
       num_genes:
         title: "Genes"
+        description: "Total gene features (CDS + tRNA + rRNA) from the EMMA / MITOS2 re-annotation of this assembly. Blank means the assembly never reached annotation, not zero genes. Not MitoHiFi's own reference-guided gene count."
+      num_cds:
+        title: "CDS"
+        description: "Protein-coding genes from the same EMMA / MITOS2 re-annotation as Genes. Blank means not annotated."
       missing_genes:
         title: "Missing genes"
       frameshift_flag:

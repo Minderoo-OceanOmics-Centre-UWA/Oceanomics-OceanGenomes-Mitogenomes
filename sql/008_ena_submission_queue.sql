@@ -11,7 +11,7 @@
 --   selection_status       = SELECTED   (not MANUAL_REVIEW_REQUIRED)
 --   archive_status         = NOT_SUBMITTED
 --   package_status         = READY
---   local_validation_status = PASS
+--   local_validation_status = PASS   (dropped again in 011; see that file)
 --
 -- A row therefore means: this exact package, at this exact path, is the one
 -- candidate chosen for this specimen in this technology, and nobody has

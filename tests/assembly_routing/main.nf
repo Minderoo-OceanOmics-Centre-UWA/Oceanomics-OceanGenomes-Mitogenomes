@@ -27,6 +27,26 @@ workflow REFERENCE_POLICY {
 // at the QC gate and filed their depth against a superseded row.
 include { selectProvenanceVariants } from '../../subworkflows/local/mitogenome_assembly/getorganelle/main.nf'
 
+// Same reasoning as above: import the real Oatk-fallback predicate, not a copy. It decides
+// whether a MitoHiFi assembly is defective enough to re-assemble reference-free, from files
+// on disk, so the tests hand it real (tiny) artefacts rather than pre-parsed values -- that
+// way the parsers it depends on (countGenbankCds, parseLengthRatio, parseRelevanceVerdict)
+// are exercised too, and a change to the TSV shapes cannot pass silently.
+include { oatkFallbackReason } from '../../subworkflows/local/mitogenome_assembly/mitohifi/main.nf'
+
+workflow OATK_FALLBACK_ROUTING {
+    take:
+    cases   // [ label, gb, evidence, relevance ]
+
+    main:
+    results = cases.map { label, gb, evidence, relevance ->
+        [ label, oatkFallbackReason(gb, evidence, relevance, 13, 1.15) ]
+    }
+
+    emit:
+    results
+}
+
 workflow UPLOAD_SELECTION {
     take:
     variant_inputs // [ variant_prefix(identity), meta(+mt_assembly_run_prefix), fasta, log ]

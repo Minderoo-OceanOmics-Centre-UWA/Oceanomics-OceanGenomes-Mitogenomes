@@ -88,6 +88,16 @@ def parseReferenceTier(tsv) {
     }
 }
 
+// Did REFERENCE_RANK actually choose a reference? Mirrors the helper in the MitoHiFi
+// subworkflow. It emits EMPTY chosen_reference files when it declined to substitute
+// (no candidate recruited any reads, no reads subsampled, or a lone unmapped
+// candidate), so an evidence-free substitution never displaces the reference
+// findMitoReference resolved. OG2021 and OG810 are the samples this catches on the
+// GetOrganelle side. Truthiness alone is not enough; the files exist either way.
+def hasChosenReference(fasta, gb) {
+    return fasta && gb && fasta.size() > 0 && gb.size() > 0
+}
+
 // Is this divergence tier worth re-selecting a reference for? CONGENERIC already has
 // the best obtainable reference and UNKNOWN carries no evidence the reference is
 // poor. CROSS_ORDER is not special-cased here: GetOrganelle seeds from the reference
@@ -343,7 +353,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
                 .map { items ->
                     def chosen_fasta = items.size() > 5 ? items[5] : null
                     def chosen_gb    = items.size() > 6 ? items[6] : null
-                    (chosen_fasta && chosen_gb)
+                    hasChosenReference(chosen_fasta, chosen_gb)
                         ? [ items[0], chosen_fasta, chosen_gb, items[3], items[4] ]
                         : [ items[0], items[1], items[2], items[3], items[4] ]
                 })

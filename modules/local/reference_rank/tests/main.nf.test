@@ -1,0 +1,82 @@
+nextflow_process {
+
+    name "Test Process REFERENCE_RANK"
+    script "../main.nf"
+    process "REFERENCE_RANK"
+    config "./nextflow.config"
+
+    tag "modules"
+    tag "modules_local"
+    tag "reference_rank"
+
+    // The regression this module was changed for. OG56 (Vincentia punctata) had five
+    // candidates, every one scoring 0.0000 with 0 mapped reads, and the ranking still
+    // recorded chosen=yes against the first -- so MitoHiFi assembled it against a Fowleria
+    // vaiulae record picked out of an all-zero tie, at 76.2% identity to its own assembly.
+    // A tie among zeros is the absence of a result, not a result, so the module must now
+    // decline: chosen=no on every row, and EMPTY chosen_reference files, which is the
+    // signal both assembly subworkflows read to keep findMitoReference's original pick.
+    test("no candidate recruits reads -> declines to substitute") {
+        when {
+            process {
+                """
+                def data = "\${projectDir}/modules/local/reference_rank/tests/data"
+                input[0] = Channel.of([
+                    [ id:'OG56', mt_assembly_prefix:'OG56.test', sequencing_type:'hifi' ],
+                    file("\${data}/reads.fq.gz", checkIfExists: true),
+                    [ file("\${data}/PZ697398.fasta"), file("\${data}/PZ697399.fasta"), file("\${data}/PZ697400.fasta") ],
+                    [ file("\${data}/PZ697398.gb"),    file("\${data}/PZ697399.gb"),    file("\${data}/PZ697400.gb") ]
+                ])
+                """
+            }
+        }
+
+        then {
+            def ranking = path(process.out.ranking[0][1]).text.readLines()
+            assertAll(
+                { assert process.success },
+                // Every candidate is still reported -- declining must not cost the curator
+                // the audit trail that shows why nothing was chosen.
+                { assert ranking.size() == 4 },
+                { assert ranking[0].split('\t').contains('status') },
+                // The load-bearing assertion: no row claims to have been chosen.
+                { assert ranking[1..-1].every { it.split('\t')[4] == 'no' } },
+                { assert ranking[1..-1].every { it.split('\t')[5] == 'no_signal' } },
+                // Empty chosen_reference files are the contract with the callers.
+                { assert path(process.out.reference[0][1]).toFile().length() == 0 },
+                { assert path(process.out.reference[0][2]).toFile().length() == 0 }
+            )
+        }
+    }
+
+    // A lone candidate is never mapped, so nothing shows it beats the reference already
+    // resolved -- and it is not necessarily the same record. Declining here is what makes
+    // the module's "can only improve on the previous behaviour" claim actually true.
+    test("a single unscored candidate -> declines to substitute") {
+        when {
+            process {
+                """
+                def data = "\${projectDir}/modules/local/reference_rank/tests/data"
+                input[0] = Channel.of([
+                    [ id:'OG1', mt_assembly_prefix:'OG1.test', sequencing_type:'hifi' ],
+                    file("\${data}/reads.fq.gz", checkIfExists: true),
+                    [ file("\${data}/PZ697398.fasta") ],
+                    [ file("\${data}/PZ697398.gb") ]
+                ])
+                """
+            }
+        }
+
+        then {
+            def ranking = path(process.out.ranking[0][1]).text.readLines()
+            assertAll(
+                { assert process.success },
+                { assert ranking.size() == 2 },
+                { assert ranking[1].split('\t')[4] == 'no' },
+                { assert ranking[1].split('\t')[5] == 'unscored_single_candidate' },
+                { assert path(process.out.reference[0][1]).toFile().length() == 0 },
+                { assert path(process.out.reference[0][2]).toFile().length() == 0 }
+            )
+        }
+    }
+}

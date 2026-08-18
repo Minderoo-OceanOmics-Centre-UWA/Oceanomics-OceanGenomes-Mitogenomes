@@ -103,6 +103,51 @@ class ParseTable2AsnValidationTests(unittest.TestCase):
         self.assertEqual(status["warning_codes"], "MISSING_PROTEIN_ID")
         self.assertEqual(findings[0]["severity"], "WARNING")
 
+    def test_mixed_case_severity_is_recognised(self):
+        # table2asn writes "Error:", not "ERROR:". Matching only upper case sent
+        # every real finding into the UNPARSED fallback and reported PASS.
+        tmp, findings, status, _ = self.run_parser(
+            "Error: valid [SEQ_FEAT.StartCodon] Illegal start codon used. "
+            "Wrong genetic code [2] or protein should be partial FEATURE: CDS: ATP6 [lcl|x]\n"
+            "Error: valid [SEQ_INST.BadProteinStart] gap symbol at start of protein "
+            "sequence (ATP6) BIOSEQ: lcl|x\n"
+        )
+        self.addCleanup(tmp.cleanup)
+        self.assertEqual(status["status"], "FAIL_TABLE2ASN")
+        self.assertEqual(status["error_count"], "2")
+        self.assertEqual(status["info_count"], "0")
+        self.assertEqual(
+            status["blocking_codes"], "SEQ_FEAT.StartCodon,SEQ_INST.BadProteinStart"
+        )
+        self.assertTrue(all(f["severity"] == "ERROR" for f in findings))
+
+    def test_ncbi_only_validator_codes_are_advisory(self):
+        # These fire against NCBI submission rules that the ENA route does not
+        # apply, so they must stay visible without quarantining the assembly.
+        tmp, findings, status, _ = self.run_parser(
+            "Info: valid [SEQ_DESCR.LatLonWater] Lat_lon '14.0 S 121.8 E' is closest to "
+            "'Australia' at distance 221 km, but in water 'Indian Ocean'\n"
+            "Error: valid [SEQ_DESCR.OrganismIsUndefinedSpecies] Organism 'Chaunax sp.' "
+            "is undefined species and does not have a specific identifier.\n"
+            "Error: valid [SEQ_FEAT.GeneXrefWithoutLocus] Feature has Gene Xref with "
+            "locus_tag but no locus FEATURE: tRNA: Phe [lcl|x]\n"
+        )
+        self.addCleanup(tmp.cleanup)
+        self.assertEqual(status["status"], "PASS")
+        self.assertEqual(status["error_count"], "0")
+        self.assertEqual(status["warning_count"], "3")
+        self.assertTrue(all(f["severity"] == "WARNING" for f in findings))
+
+    def test_unparsed_line_is_a_warning_not_info(self):
+        # An unrecognised line means the output format moved, not that the record
+        # is clean; it has to stay visible.
+        tmp, findings, status, _ = self.run_parser("something entirely unexpected\n")
+        self.addCleanup(tmp.cleanup)
+        self.assertEqual(status["status"], "PASS")
+        self.assertEqual(status["warning_count"], "1")
+        self.assertEqual(findings[0]["code"], "UNPARSED")
+        self.assertEqual(findings[0]["severity"], "WARNING")
+
 
 if __name__ == "__main__":
     unittest.main()

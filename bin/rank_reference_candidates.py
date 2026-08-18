@@ -20,10 +20,21 @@ not win merely by being longer. The candidate with the highest score wins; ties
 keep the earlier candidate, which is the one findMitoReference ranked closest
 taxonomically, so this can only improve on the current behaviour.
 
-Writes <prefix>.reference_ranking.tsv (every candidate and its score, so the choice
-is auditable) and copies the winner to <prefix>.chosen_reference.{fasta,gb}.
-Always exits 0: on any failure it falls back to the first candidate, which is what
-the pipeline would have used anyway.
+SUBSTITUTE ONLY ON EVIDENCE. Every candidate scoring zero is not a tie to be broken
+-- it is the absence of a result, and the winner it used to yield was whichever
+candidate happened to sort first. OG56 (Vincentia punctata) was assembled against a
+Fowleria vaiulae reference chosen out of a five-way all-zero tie, at 76.2% identity
+to the assembly it produced; the ranking TSV recorded chosen=yes for a choice that
+was never made. So the three paths that reach a verdict without read evidence --
+every candidate scoring zero, no reads subsampled, and a lone candidate that is
+never mapped -- all now DECLINE instead: they mark every row chosen=no and write
+EMPTY chosen_reference files, which tells the caller to keep the reference
+findMitoReference already resolved. That is what makes the "can only improve"
+claim above true rather than merely intended.
+
+Writes <prefix>.reference_ranking.tsv (every candidate, its score and whether it was
+scored at all, so the choice is auditable) and copies the winner to
+<prefix>.chosen_reference.{fasta,gb} -- empty when declining. Always exits 0.
 
 Usage:
     rank_reference_candidates.py --candidate-dir candidates --reads r1.fq.gz [r2.fq.gz] \
@@ -141,35 +152,53 @@ def main():
         if gb.exists() and fasta.stat().st_size > 0 and gb.stat().st_size > 0:
             candidates.append((fasta, gb))
 
-    if not candidates:
-        ranking_out.write_text("accession\tscore\tmatched_bases\tmapped_reads\tchosen\n")
-        print("[rank_reference] no usable candidates; leaving reference unchanged",
-              file=sys.stderr)
+    def write_ranking(rows, winner_idx, status):
+        """winner_idx of -1 marks every row chosen=no, i.e. no substitution made."""
+        with open(ranking_out, "w") as out:
+            out.write("accession\tscore\tmatched_bases\tmapped_reads\tchosen\tstatus\n")
+            for i, (acc, score, matched, mapped) in enumerate(rows):
+                out.write(f"{acc}\t{score:.4f}\t{matched}\t{mapped}\t"
+                          f"{'yes' if i == winner_idx else 'no'}\t{status}\n")
+
+    def decline(rows, status, why):
+        """Keep the reference findMitoReference resolved, and say so.
+
+        Empty chosen_reference files are the signal: the caller tests them for size
+        and falls back to the original reference (see the mitohifi and getorganelle
+        subworkflows). Emitting empty files rather than nothing at all also means the
+        ranking TSV survives -- a task that omits a declared output is failed and
+        ignored, taking its ranking with it, so declining silently used to lose the
+        very evidence a curator needs to see why.
+        """
+        chosen_fa.write_text("")
+        chosen_gb.write_text("")
+        write_ranking(rows, -1, status)
+        print(f"[rank_reference] {why}; leaving reference unchanged", file=sys.stderr)
         sys.exit(0)
 
     def emit(winner_idx, rows):
         fasta, gb = candidates[winner_idx]
         shutil.copyfile(fasta, chosen_fa)
         shutil.copyfile(gb, chosen_gb)
-        with open(ranking_out, "w") as out:
-            out.write("accession\tscore\tmatched_bases\tmapped_reads\tchosen\n")
-            for i, (acc, score, matched, mapped) in enumerate(rows):
-                out.write(f"{acc}\t{score:.4f}\t{matched}\t{mapped}\t"
-                          f"{'yes' if i == winner_idx else 'no'}\n")
+        write_ranking(rows, winner_idx, "scored")
         print(f"[rank_reference] chose {fasta.stem} of {len(candidates)} candidates",
               file=sys.stderr)
         sys.exit(0)
 
-    # Single candidate: nothing to choose between, skip the mapping entirely.
+    if not candidates:
+        decline([], "no_candidates", "no usable candidates")
+
+    # A lone candidate is never mapped, so there is no evidence it beats the
+    # reference already resolved -- and it is not necessarily the same record.
     if len(candidates) == 1:
-        emit(0, [(candidates[0][0].stem, 0.0, 0, 0)])
+        decline([(candidates[0][0].stem, 0.0, 0, 0)], "unscored_single_candidate",
+                "single candidate, not scored")
 
     subsample = Path("reference_rank_subsample.fastq")
     n_reads = subsample_reads(args.reads, subsample, args.subsample_reads)
     if n_reads == 0:
-        print("[rank_reference] no reads subsampled; keeping first candidate",
-              file=sys.stderr)
-        emit(0, [(fa.stem, 0.0, 0, 0) for fa, _ in candidates])
+        decline([(fa.stem, 0.0, 0, 0) for fa, _ in candidates], "unscored_no_reads",
+                "no reads subsampled")
 
     rows, best_idx, best_score = [], 0, -1.0
     for i, (fasta, _gb) in enumerate(candidates):
@@ -180,6 +209,14 @@ def main():
             best_idx, best_score = i, score
 
     remove_quietly(subsample)
+
+    # Every candidate scored zero: minimap2 ran and recruited nothing anywhere, so
+    # there is no best. Note this is a real finding about the candidate set, not a
+    # failure -- map-hifi recruits little from a reference this distant, which is
+    # itself the signal that the sample needs the reference-free assembler.
+    if best_score <= 0.0:
+        decline(rows, "no_signal", "no candidate recruited any reads")
+
     emit(best_idx, rows)
 
 

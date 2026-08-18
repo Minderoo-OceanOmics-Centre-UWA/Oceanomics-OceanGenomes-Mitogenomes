@@ -173,10 +173,7 @@ workflow {
     validation_settings = [
         validation_mode: params.ena_mode,
         validation_attempt: params.ena_validation_attempt,
-        webin_requested: true,
-        workflow_run_name: workflow.runName ?: '',
-        workflow_session_id: workflow.sessionId?.toString() ?: '',
-        pipeline_revision: workflow.revision ?: workflow.commitId ?: ''
+        webin_requested: true
     ]
     ENA_VALIDATION_RESULT(ch_validation_inputs, validation_settings)
     ENA_VALIDATION_SUMMARY(ENA_VALIDATION_RESULT.out.record.map { _meta, record -> record }.collect())

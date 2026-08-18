@@ -48,6 +48,7 @@ def complete_row(**overrides):
         "reference_divergence": "",
         "anomaly_type": "none",
         "length_anomaly": "no",
+        "manual_review_reason": "",
     }
     row.update(overrides)
     return row
@@ -197,7 +198,12 @@ class BlockingAdvisoryTests(unittest.TestCase):
         self.assertNotIn("data_limited", reason)
 
 
-class CollapseOverrideTests(unittest.TestCase):
+class CollapseProvenanceTests(unittest.TestCase):
+    """A genuine collapse forks the molecule to <prefix>_collapsed, which carries its
+    own identity end to end and therefore its own summary row. This run is then the
+    superseded pre-collapse original, and must keep its OWN length rather than
+    borrowing the monomer's."""
+
     def make_run(self, report_text):
         import tempfile
         tmp = tempfile.TemporaryDirectory()
@@ -208,19 +214,32 @@ class CollapseOverrideTests(unittest.TestCase):
         return mas.RunFiles(sample_id="OG750", prefix="OG750.hifi.v323mitohifi",
                             assembler="MitoHiFi", files=[rep])
 
-    def test_collapsed_report_overrides_length_and_clears_anomaly(self):
+    def test_collapsed_report_marks_superseded_and_keeps_own_length(self):
         run = self.make_run(
             "sample\taction\toriginal_length\tcollapsed_length\treference_length\ttail_identity\treason\n"
             "OG750\tcollapsed\t32672\t16466\t16703\t1.0\tcollapsed_2.0x_concatemer\n"
         )
         row = complete_row(final_length_bp="32672", anomaly_type="concatemer", length_anomaly="yes")
-        mas.apply_collapse_override(row, run)
-        self.assertEqual(row["final_length_bp"], "16466")
-        self.assertEqual(row["anomaly_type"], "none")
-        # And the resolved assembly must no longer be blocked.
+        mas.apply_collapse_provenance(row, run)
+        # The monomer's 16466 belongs to the <prefix>_collapsed row, not this one.
+        self.assertEqual(row["final_length_bp"], "32672")
+        self.assertTrue(row[mas.SUPERSEDED_KEY])
+
+    def test_superseded_original_leaves_the_review_queue(self):
+        run = self.make_run(
+            "sample\taction\toriginal_length\tcollapsed_length\treference_length\ttail_identity\treason\n"
+            "OG750\tcollapsed\t32672\t16466\t16703\t1.0\tcollapsed_2.0x_concatemer\n"
+        )
+        row = complete_row(final_length_bp="32672", anomaly_type="concatemer", length_anomaly="yes")
+        mas.apply_collapse_provenance(row, run)
         mas.apply_qc(row, THRESHOLDS)
-        self.assertNotIn("concatemer", row.get(mas.BLOCKING_KEY, ""))
-        self.assertNotIn("length_outside_expected_range", row.get(mas.BLOCKING_KEY, ""))
+        mas.finalise_status(row)
+        # It is over-length and flagged, but triaging it would mean reviewing the
+        # same molecule twice -- the monomer's row is the one to review.
+        self.assertTrue(row.get(mas.BLOCKING_KEY))
+        self.assertEqual(row["status"], "superseded")
+        # apply_qc rebuilds manual_review_reason, so the marker has to survive it.
+        self.assertIn("superseded_by_collapse", row["manual_review_reason"])
 
     def test_passthrough_report_leaves_row_untouched(self):
         run = self.make_run(
@@ -228,9 +247,59 @@ class CollapseOverrideTests(unittest.TestCase):
             "OGX\tpassthrough\t32000\t32000\t16703\t0.0\ttail_identity_below_threshold\n"
         )
         row = complete_row(final_length_bp="32000", anomaly_type="unresolved", length_anomaly="yes")
-        mas.apply_collapse_override(row, run)
+        mas.apply_collapse_provenance(row, run)
         self.assertEqual(row["final_length_bp"], "32000")
         self.assertEqual(row["anomaly_type"], "unresolved")
+        self.assertFalse(row.get(mas.SUPERSEDED_KEY))
+
+
+class CollapseChildEvidenceTests(unittest.TestCase):
+    """The post-curation check is measured ON the monomer but written under the
+    PRE-collapse prefix, so the monomer's own row has to reach across for it."""
+
+    PARENT = "OG750.hifi.241004.v323mitohifi"
+    HEADER = "sample\tfinal_verdict_circular\tlength_anomaly\tanomaly_type\n"
+
+    def make(self, prefix, evidence_name):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        ev = root / evidence_name
+        ev.write_text(self.HEADER + f"{self.PARENT}\tTrue\tno\tnone\n")
+        run = mas.RunFiles(sample_id="OG750", prefix=prefix, assembler="MitoHiFi", files=[])
+        return run, [ev]
+
+    def test_collapsed_child_takes_the_post_curation_verdict(self):
+        run, files = self.make(f"{self.PARENT}_collapsed", f"{self.PARENT}.post_curation_check.tsv")
+        # anomaly_type "none" is dropped by first_value (it is a PLACEHOLDER_VALUE),
+        # exactly as anomaly_for_run drops it; apply_qc treats "" and "none" alike.
+        self.assertEqual(
+            mas.collapse_child_evidence(run, files),
+            {"circularised": "true", "length_anomaly": "no"},
+        )
+
+    def test_a_real_anomaly_on_the_monomer_is_carried_over(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        ev = root / f"{self.PARENT}.post_curation_check.tsv"
+        ev.write_text(self.HEADER + f"{self.PARENT}\tFalse\tyes\tunresolved\n")
+        run = mas.RunFiles(sample_id="OG750", prefix=f"{self.PARENT}_collapsed",
+                           assembler="MitoHiFi", files=[])
+        self.assertEqual(
+            mas.collapse_child_evidence(run, [ev]),
+            {"circularised": "false", "length_anomaly": "yes", "anomaly_type": "unresolved"},
+        )
+
+    def test_non_collapsed_run_reaches_for_nothing(self):
+        run, files = self.make(self.PARENT, f"{self.PARENT}.post_curation_check.tsv")
+        self.assertEqual(mas.collapse_child_evidence(run, files), {})
+
+    def test_another_samples_evidence_is_not_borrowed(self):
+        run, files = self.make(f"{self.PARENT}_collapsed", "OG751.hifi.241004.v323mitohifi.post_curation_check.tsv")
+        self.assertEqual(mas.collapse_child_evidence(run, files), {})
 
 
 class GetOrganelleEvidenceTests(unittest.TestCase):
@@ -305,7 +374,7 @@ class GetOrganelleEvidenceTests(unittest.TestCase):
 class StatusVocabularyTests(unittest.TestCase):
     """`status` must mean the same thing whichever assembler produced the row."""
 
-    VALUES = {"complete", "manual_review", "failed"}
+    VALUES = {"complete", "manual_review", "failed", "superseded"}
 
     def finalise(self, row, failed=False):
         mas.apply_qc(row, THRESHOLDS)
@@ -591,6 +660,177 @@ class CoverageVariabilityAdvisoryTests(unittest.TestCase):
         mas.finalise_status(row)
         self.assertIn("high_coverage_variability", row["manual_review_reason"])
         self.assertEqual(row["status"], "manual_review")
+
+
+class AnnotationJoinTests(unittest.TestCase):
+    """Gene counts must come from the assembly's OWN re-annotation.
+
+    Every case here is a real misattribution from the mitogenomes-missing-audit-6
+    cohort, caused by the join being a substring test: og_id "OG5" is a substring
+    of "OG58", "OG8" of "OG810" and "OG848", and code "getorg1770" of
+    "getorg1770reseed".
+    """
+
+    HEADER = "og_id,tech,seq_date,code,annotation,missing_genes,num_cds,num_trna,num_rrna\n"
+
+    def write(self, name, og_id, tech, seq_date, code, missing="no", cds=13, trna=22, rrna=2):
+        import tempfile
+        if not hasattr(self, "_root"):
+            tmp = tempfile.TemporaryDirectory()
+            self.addCleanup(tmp.cleanup)
+            self._root = Path(tmp.name)
+        path = self._root / name
+        path.write_text(
+            self.HEADER
+            + f"{og_id},{tech},{seq_date},{code},emma102,{missing},{cds},{trna},{rrna}\n"
+        )
+        return path
+
+    def test_shorter_sample_id_does_not_bleed_into_a_longer_one(self):
+        og5 = self.write("OG5.hifi.230609.v323mitohifi.annotation_stats.csv",
+                         "OG5", "hifi", "230609", "v323mitohifi")
+        self.assertEqual(mas.parse_annotation_stats([og5], "OG58.hifi.250704.v323mitohifi"), {})
+
+    def test_base_assembly_does_not_bleed_into_its_reseed(self):
+        base = self.write("OG838.hic.250522.getorg1770.annotation_stats.csv",
+                          "OG838", "hic", "250522", "getorg1770")
+        self.assertEqual(mas.parse_annotation_stats([base], "OG838.hic.250522.getorg1770reseed"), {})
+
+    def test_collapsed_variant_does_not_bleed_into_its_parent(self):
+        child = self.write("OG750.hifi.241004.v323mitohifi_collapsed.annotation_stats.csv",
+                           "OG750", "hifi", "241004", "v323mitohifi_collapsed",
+                           missing="TS2;TD;CO2;TK;ATP8", cds=11, trna=19, rrna=2)
+        self.assertEqual(mas.parse_annotation_stats([child], "OG750.hifi.241004.v323mitohifi"), {})
+        self.assertEqual(
+            mas.parse_annotation_stats([child], "OG750.hifi.241004.v323mitohifi_collapsed"),
+            {
+                "num_genes": "32",
+                "num_cds": "11",
+                "missing_genes": "TS2;TD;CO2;TK;ATP8",
+                "frameshift_flag": "",
+            },
+        )
+
+    def test_degenerate_row_matches_nothing(self):
+        # bin/annotation_stats.py blanks og_id/code when the GFF stem is not five
+        # dot-fields. A blank key must match nothing, not everything.
+        blank = self.write("weird.annotation_stats.csv", "", "", "", "")
+        self.assertEqual(mas.parse_annotation_stats([blank], "OG58.hifi.250704.v323mitohifi"), {})
+
+    def test_own_annotation_is_found_by_filename(self):
+        mine = self.write("OG58.hifi.250704.v10oatk.annotation_stats.csv",
+                          "OG58", "hifi", "250704", "v10oatk")
+        stats = mas.parse_annotation_stats([mine], "OG58.hifi.250704.v10oatk")
+        self.assertEqual(stats["num_genes"], "37")
+        self.assertEqual(stats["num_cds"], "13")
+
+    def test_content_match_is_used_when_the_file_was_not_renamed(self):
+        mine = self.write("emma_out.annotation_stats.csv", "OG58", "hifi", "250704", "v10oatk")
+        stats = mas.parse_annotation_stats([mine], "OG58.hifi.250704.v10oatk")
+        self.assertEqual(stats["num_cds"], "13")
+        self.assertEqual(mas.parse_annotation_stats([mine], "OG58.hifi.250704.v323mitohifi"), {})
+
+
+class RunDiscoveryTests(unittest.TestCase):
+    """A per-run sidecar must not manufacture an assembly of its own. The two
+    reference sidecars below produced 38 of the 250 rows in the
+    mitogenomes-missing-audit-6 table, every one of them reported as `failed`."""
+
+    def test_reference_sidecars_do_not_spawn_runs(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        prefix = "OG750.hifi.241004.v323mitohifi"
+        (root / f"{prefix}.fasta").write_text(">c\n" + "ACGT" * 4000 + "\n")
+        for sidecar in ("reference_ranking", "reference_candidates_status"):
+            (root / f"{prefix}.{sidecar}.tsv").write_text("sample\tvalue\nOG750\t1\n")
+
+        prefixes = [run.prefix for run in mas.discover_assembler_runs([root])]
+        self.assertEqual(prefixes, [prefix])
+
+    def test_unknown_sidecar_suffix_is_still_rejected(self):
+        # The generic net: strip_known_suffix cannot list a suffix nobody has
+        # written yet, so the shape of the prefix has to carry the decision.
+        self.assertFalse(mas.is_assembly_run_prefix("OG750.hifi.241004.v323mitohifi.some_new_check"))
+
+    def test_real_assembly_prefixes_survive(self):
+        for prefix in (
+            "OG750.hifi.241004.v323mitohifi",
+            "OG750.hifi.241004.v323mitohifi_collapsed",
+            "OG838.hic.250522.getorg1770",
+            "OG838.hic.250522.getorg1770reseed",
+            "OG778.hic.250624.getorg1770reseed_rgj",
+            "OG58.hifi.250704.v10oatk",
+            "OG750.hifi.v323mitohifi",
+        ):
+            self.assertTrue(mas.is_assembly_run_prefix(prefix), prefix)
+
+
+class GeneCountProvenanceTests(unittest.TestCase):
+    """num_genes and num_cds come from the same annotation or from neither."""
+
+    def test_contigs_stats_gene_count_is_not_reported(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        stats = root / "OG750.hifi.241004.v323mitohifi.contigs_stats.tsv"
+        stats.write_text(
+            "contig_id\tframeshifts_found\tannotation_file\tlength(bp)\tnumber_of_genes\twas_circular\n"
+            "final_mitogenome\tNo frameshift found\tfinal_mitogenome.gb\t32672\t56\tTrue\n"
+        )
+        parsed = mas.parse_mitohifi_stats([stats])
+        # 56 is MitoHiFi's reference-guided count over the un-collapsed 2.14x
+        # concatemer; the pipeline's gene count comes from EMMA / MITOS2 only.
+        self.assertNotIn("num_genes", parsed)
+        # The rest of the sidecar is still read.
+        self.assertEqual(parsed["circularised"], "true")
+        self.assertEqual(parsed["frameshift_flag"], "false")
+
+    def test_unannotated_run_reports_neither_count(self):
+        import tempfile
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        prefix = "OG750.hifi.241004.v323mitohifi"
+        (root / f"{prefix}.fasta").write_text(">c\n" + "ACGT" * 4000 + "\n")
+        (root / f"{prefix}.contigs_stats.tsv").write_text(
+            "contig_id\tframeshifts_found\tannotation_file\tlength(bp)\tnumber_of_genes\twas_circular\n"
+            "final_mitogenome\tNo frameshift found\tfinal_mitogenome.gb\t16000\t37\tTrue\n"
+        )
+        runs = mas.discover_assembler_runs([root])
+        self.assertEqual(len(runs), 1)
+        row = mas.parse_mitohifi_run(runs[0], THRESHOLDS, mas.collect_input_files([root]))
+        self.assertEqual(row["num_genes"], "")
+        self.assertEqual(row["num_cds"], "")
+
+
+class PrefixBoundaryTests(unittest.TestCase):
+    """The shared anchoring primitive: a prefix must end at a name/component
+    boundary, so it never matches the curated variants built on top of it."""
+
+    PARENT = "OG750.hifi.241004.v323mitohifi"
+
+    def test_curated_variant_does_not_match_its_parent(self):
+        for variant in ("_collapsed", "reseed", "reseed_rgj"):
+            path = Path(f"/w/{self.PARENT}{variant}.annotation_stats.csv")
+            self.assertFalse(mas.path_carries_prefix(path, self.PARENT), variant)
+
+    def test_own_files_match(self):
+        self.assertTrue(
+            mas.path_carries_prefix(Path(f"/w/{self.PARENT}.contigs_stats.tsv"), self.PARENT))
+        self.assertTrue(
+            mas.path_carries_prefix(Path(f"/w/{self.PARENT}"), self.PARENT))
+        self.assertTrue(
+            mas.path_carries_prefix(Path(f"/w/{self.PARENT}/mtdna/final.fasta"), self.PARENT))
+
+    def test_child_prefix_matches_only_its_own_files(self):
+        child = f"{self.PARENT}_collapsed"
+        self.assertTrue(
+            mas.path_carries_prefix(Path(f"/w/{child}.annotation_stats.csv"), child))
+        self.assertFalse(
+            mas.path_carries_prefix(Path(f"/w/{self.PARENT}.contigs_stats.tsv"), child))
 
 
 if __name__ == "__main__":

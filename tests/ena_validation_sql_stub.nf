@@ -17,8 +17,7 @@ workflow {
     inputs = channel.of(tuple(meta, [status, flatfile]))
     settings = [
         validation_mode: 'pipeline',
-        validation_attempt: 'stub', webin_requested: false,
-        workflow_run_name: 'stub', workflow_session_id: 'stub', pipeline_revision: 'stub'
+        validation_attempt: 'stub', webin_requested: false
     ]
 
     ENA_VALIDATION_RESULT(inputs, settings)

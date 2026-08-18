@@ -65,8 +65,15 @@ COMMENT ON COLUMN ena_locus_registry.gene_serial IS
     '<tech prefix>_<og numeric:06d><gene_serial:03d> per candidate.';
 
 -- ena_candidate_loci keeps rendered tags, now under any registered prefix.
+-- Guarded on the table existing: the chain is replayed in full on every run of
+-- bin/apply_ena_migrations.py, and 010_drop_ena_locus_tables.sql drops this
+-- table, so a database already past 010 reaches here with nothing to alter.
 DO $$
 BEGIN
+    IF to_regclass('ena_candidate_loci') IS NULL THEN
+        RETURN;
+    END IF;
+
     IF EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conrelid = to_regclass('ena_candidate_loci')
@@ -78,12 +85,14 @@ BEGIN
     ALTER TABLE ena_candidate_loci
         ADD CONSTRAINT ena_candidate_loci_locus_tag_check
         CHECK (locus_tag ~ '^[A-Z][A-Z0-9]{2,11}_[0-9]{9}$');
+
+    EXECUTE $comment$
+        COMMENT ON COLUMN ena_candidate_loci.locus_tag IS
+            'Tag as submitted for this candidate, under the prefix registered to '
+            'its technology study.'
+    $comment$;
 END
 $$;
-
-COMMENT ON COLUMN ena_candidate_loci.locus_tag IS
-    'Tag as submitted for this candidate, under the prefix registered to its '
-    'technology study.';
 
 -- Selection is per (specimen, technology). Because each technology has its own
 -- study accession, the existing primary key (ena_study_accession, og_id) is

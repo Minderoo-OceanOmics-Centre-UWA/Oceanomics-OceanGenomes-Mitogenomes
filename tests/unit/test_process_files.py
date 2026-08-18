@@ -153,10 +153,10 @@ def _feature_lows(text):
 
 
 class ProcessTblOrderingTests(unittest.TestCase):
-    """Emma's string sort has to be undone before locus tags are allocated.
+    """Emma's string sort has to be undone before anything downstream reads it.
 
-    The allocator numbers loci by walking the feature table, so whatever order
-    reaches it is the order the published tags carry.
+    The submission pipeline allocates locus tags by walking the feature table,
+    so whatever order leaves here is the order the published tags carry.
     """
 
     def _process(self, tbl=UNSORTED_TBL, seq=None, genetic_code=2):
@@ -214,6 +214,69 @@ class ProcessTblOrderingTests(unittest.TestCase):
         self.assertIn("\t\t\ttransl_except\t(pos:10350,aa:TERM)", block)
         # and it is the ND4L block, not whichever CDS happened to sort there
         self.assertTrue(any("subunit 4L" in line for line in block))
+
+    def _with_start_note(self, tbl, cds_line, product_line):
+        """Add EMMA's non-standard-start note to the CDS whose product line matches."""
+        return tbl.replace(product_line, product_line + (
+            f"\t\t\tnote\t{process_files.START_NOTE_MARK} TTG\n"
+        ))
+
+    def test_start_transl_except_on_a_plus_strand_cds(self):
+        # ND4L runs 10053..10349 on the plus strand. Put a TTG at its first codon
+        # and mark it the way EMMA does; the initiation codon has to be declared
+        # as aa:Met so table2asn stops emitting a gap symbol for residue 1.
+        seq = list("A" * 16745)
+        seq[10053 - 1:10053 + 2] = list("TTG")
+        tbl = self._with_start_note(
+            UNSORTED_TBL, "10053\t10349\tCDS",
+            "\t\t\tproduct\tputative NADH dehydrogenase subunit 4L\n",
+        )
+        lines = self._process(tbl=tbl, seq="".join(seq)).splitlines()
+        cds = lines.index("10053\t10349\tCDS")
+        block = lines[cds:cds + 4]
+        self.assertIn("\t\t\ttransl_except\t(pos:10053..10055,aa:Met)", block)
+        self.assertTrue(any("subunit 4L" in line for line in block))
+
+    def test_start_transl_except_on_a_minus_strand_cds(self):
+        # ND6 is written 14279..13755, so its 5' end is the HIGH coordinate and
+        # the initiation codon is read off the reverse complement.
+        seq = list("A" * 16745)
+        seq[14277 - 1:14277 + 2] = list("CAA")   # revcomp -> TTG
+        tbl = self._with_start_note(
+            UNSORTED_TBL, "14279\t13755\tCDS",
+            "\t\t\tproduct\tNADH dehydrogenase subunit 6\n",
+        )
+        lines = self._process(tbl=tbl, seq="".join(seq)).splitlines()
+        cds = lines.index("14279\t13755\tCDS")
+        block = lines[cds:cds + 4]
+        self.assertIn("\t\t\ttransl_except\t(pos:complement(14277..14279),aa:Met)", block)
+        self.assertTrue(any("subunit 6" in line for line in block))
+
+    def test_canonical_start_codon_is_left_alone(self):
+        # A note can be stale or the codon already legal; only a codon outside the
+        # table's start set earns a transl_except.
+        seq = list("A" * 16745)
+        seq[10053 - 1:10053 + 2] = list("ATG")
+        tbl = self._with_start_note(
+            UNSORTED_TBL, "10053\t10349\tCDS",
+            "\t\t\tproduct\tputative NADH dehydrogenase subunit 4L\n",
+        )
+        self.assertNotIn("aa:Met", self._process(tbl=tbl, seq="".join(seq)))
+
+    def test_start_transl_except_needs_the_note(self):
+        # Without EMMA's note nothing is asserted, even though a run of A's is not
+        # a legal initiation codon.
+        self.assertNotIn("aa:Met", self._process(seq="A" * 16745))
+
+    def test_partial_start_cds_is_left_alone(self):
+        # A CDS already marked 5'-partial has no initiation codon to declare.
+        seq = list("A" * 16745)
+        seq[10053 - 1:10053 + 2] = list("TTG")
+        tbl = self._with_start_note(
+            UNSORTED_TBL, "10053\t10349\tCDS",
+            "\t\t\tproduct\tputative NADH dehydrogenase subunit 4L\n",
+        ).replace("10053\t10349\tCDS", "<10053\t10349\tCDS")
+        self.assertNotIn("aa:Met", self._process(tbl=tbl, seq="".join(seq)))
 
 
 class ProcessGffOrderingTests(unittest.TestCase):

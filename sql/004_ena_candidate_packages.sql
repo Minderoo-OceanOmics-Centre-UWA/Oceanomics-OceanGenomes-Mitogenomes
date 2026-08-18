@@ -145,22 +145,40 @@ CREATE TABLE IF NOT EXISTS ena_locus_registry (
     UNIQUE (og_id, canonical_gene, gene_occurrence)
 );
 
-CREATE TABLE IF NOT EXISTS ena_candidate_loci (
-    full_seqid TEXT NOT NULL REFERENCES ena_candidate_packages (full_seqid),
-    og_id TEXT NOT NULL,
-    gene_serial INTEGER NOT NULL,
-    locus_tag TEXT NOT NULL,
-    feature_key TEXT NOT NULL,
-    start_coordinate INTEGER,
-    end_coordinate INTEGER,
-    strand CHAR(1),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (og_id, gene_serial)
-        REFERENCES ena_locus_registry (og_id, gene_serial),
-    FOREIGN KEY (locus_tag)
-        REFERENCES ena_locus_registry (locus_tag),
-    PRIMARY KEY (full_seqid, feature_key)
-);
+-- Guarded because bin/apply_ena_migrations.py replays the whole ordered chain
+-- on every run.  006_ena_tech_aware_locus_tags.sql drops
+-- ena_locus_registry.locus_tag, so on a database that is already past 006 the
+-- locus_tag foreign key below cannot resolve and this statement aborts the
+-- migration.  A fresh database still gets the table, in the original shape and
+-- at the original point in the chain; a replayed one skips it, which costs
+-- nothing since 010_drop_ena_locus_tables.sql drops it a few migrations later.
+DO $loci$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = to_regclass('ena_locus_registry')
+          AND attname = 'locus_tag'
+          AND NOT attisdropped
+    ) THEN
+        CREATE TABLE IF NOT EXISTS ena_candidate_loci (
+            full_seqid TEXT NOT NULL REFERENCES ena_candidate_packages (full_seqid),
+            og_id TEXT NOT NULL,
+            gene_serial INTEGER NOT NULL,
+            locus_tag TEXT NOT NULL,
+            feature_key TEXT NOT NULL,
+            start_coordinate INTEGER,
+            end_coordinate INTEGER,
+            strand CHAR(1),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (og_id, gene_serial)
+                REFERENCES ena_locus_registry (og_id, gene_serial),
+            FOREIGN KEY (locus_tag)
+                REFERENCES ena_locus_registry (locus_tag),
+            PRIMARY KEY (full_seqid, feature_key)
+        );
+    END IF;
+END
+$loci$;
 
 CREATE TABLE IF NOT EXISTS ena_submission_selections (
     ena_study_accession TEXT NOT NULL,

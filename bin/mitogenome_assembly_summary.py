@@ -234,6 +234,8 @@ def strip_known_suffix(name: str) -> str:
         ".oatk_status.tsv",
         ".assembly_status.tsv",
         ".findmitoreference_status.tsv",
+        ".reference_candidates_status.tsv",
+        ".reference_ranking.tsv",
         ".scaffold_join.tsv",
         ".mito_depth.tsv",
         ".coverage.tsv",
@@ -325,6 +327,41 @@ def discover_sample_dirs(inputs: Iterable[Path]) -> list[Path]:
     return sorted(sample_dirs)
 
 
+# Tokens that mark the assembler-code field of an assembly prefix. Same tokens
+# classify_file keys on, because they are the same naming convention: the
+# mt_assembly_prefix's last dot-field is always <version><assembler>, e.g.
+# v323mitohifi, v323mitohifi_collapsed, getorg1770, getorg1770reseed_rgj, v10oatk.
+ASSEMBLER_PREFIX_TOKENS = ("mitohifi", "hifiasm", "getorg", "oatk")
+
+
+def has_assembler_token(field: str) -> bool:
+    lowered = field.lower()
+    return any(token in lowered for token in ASSEMBLER_PREFIX_TOKENS)
+
+
+def is_assembly_run_prefix(prefix: str) -> bool:
+    """Reject a prefix that is a real assembly prefix with a sidecar suffix glued on.
+
+    strip_known_suffix falls back to Path(name).stem for any suffix it does not
+    know, so a new per-run sidecar silently becomes an assembly of its own:
+    <prefix>.reference_ranking.tsv used to manufacture a whole extra row, reported
+    as `failed` because it has no FASTA, and inheriting its parent's annotation via
+    the substring join. That was 38 of 250 rows in the mitogenomes-missing-audit-6
+    cohort. Listing each new suffix in strip_known_suffix only fixes the ones we
+    already know about, so also reject structurally: if an EARLIER dot-field
+    carries the assembler token and the LAST one does not, the tail is a suffix,
+    not an assembly.
+
+    Deliberately conservative -- a prefix with no assembler token anywhere is left
+    alone rather than dropped, because losing a real assembly row is worse than
+    keeping a spurious one.
+    """
+    fields = prefix.split(".")
+    if len(fields) < 2 or has_assembler_token(fields[-1]):
+        return True
+    return not any(has_assembler_token(field) for field in fields[:-1])
+
+
 def discover_assembler_runs(inputs: Iterable[Path]) -> list[RunFiles]:
     runs: dict[tuple[str, str], RunFiles] = {}
     files = collect_input_files(inputs)
@@ -334,6 +371,11 @@ def discover_assembler_runs(inputs: Iterable[Path]) -> list[RunFiles]:
         if not assembler:
             continue
         prefix = infer_prefix(path, assembler)
+        # The file stays in the flat list collect_input_files returned, so
+        # files_for_run / reference_for_run can still see it; it just no longer
+        # spawns an assembly row of its own.
+        if not is_assembly_run_prefix(prefix):
+            continue
         key = (assembler, prefix)
         runs.setdefault(key, RunFiles(sample_from_prefix(prefix), prefix, assembler)).add(path)
 
@@ -380,20 +422,56 @@ def choose_final_fasta(files: Iterable[Path], assembler: str, prefix: str) -> Pa
     return sorted(candidates, key=score)[0]
 
 
-def parse_annotation_stats(files: Iterable[Path], prefix: str, sample_id: str) -> dict[str, str]:
+def annotation_row_prefix(row: dict[str, str]) -> str:
+    """Rebuild the assembly prefix an annotation_stats.csv row describes.
+
+    bin/annotation_stats.py splits the GFF stem into og_id/tech/seq_date/code/
+    annotation, so those four fields reassemble the mt_assembly_prefix exactly.
+    Returns "" when any component is blank -- which is what that script writes
+    when the stem is not 5 dot-fields -- so a degenerate row matches nothing
+    rather than matching everything.
+    """
+    og_id = first_value(row, ["sample", "sample_id", "og_id"])
+    tech = first_value(row, ["tech", "sequencing_type"])
+    seq_date = first_value(row, ["seq_date", "date"])
+    code = first_value(row, ["code", "assembly", "assembler", "mt_assembly_prefix"])
+    if not all((og_id, tech, seq_date, code)):
+        return ""
+    return f"{og_id}.{tech}.{seq_date}.{code}"
+
+
+def parse_annotation_stats(files: Iterable[Path], prefix: str) -> dict[str, str]:
+    """Gene counts for ONE assembly, from that assembly's own re-annotation.
+
+    Matching is exact, never a substring test. The old `og_id not in prefix` /
+    `code not in prefix` guards leaked badly in both directions: "OG5" is a
+    substring of "OG58", "OG8" of "OG810" and "OG848", "OG10" of "OG107", and
+    "getorg1770" of "getorg1770reseed" -- so one sample's annotation was reported
+    against another's assembly (45 rows of the mitogenomes-missing-audit-6 cohort
+    carried counts they never earned). Because the loop returned the FIRST match
+    over an unsorted rglob, which sample won was filesystem-order dependent too.
+    """
+    # EMMA renames its output to exactly <mt_assembly_prefix>.annotation_stats.csv
+    # (modules/local/upload_results/emma/main.nf), so the filename IS the join key.
+    # Sorted so a duplicate stage-in can never make the result order dependent.
+    candidates = sorted(
+        (path for path in files if path.name == f"{prefix}.annotation_stats.csv"),
+        key=lambda path: str(path),
+    )
     rows = []
-    for path in files:
-        if path.name.endswith(".annotation_stats.csv"):
-            rows.extend(read_table(path))
+    for path in candidates:
+        rows.extend(read_table(path))
+
+    if not rows:
+        # Fall back to the row's own contents for inputs that were not renamed,
+        # still requiring whole-prefix equality.
+        for path in sorted(
+            (path for path in files if path.name.endswith(".annotation_stats.csv")),
+            key=lambda path: str(path),
+        ):
+            rows.extend(row for row in read_table(path) if annotation_row_prefix(row) == prefix)
 
     for row in rows:
-        row_sample = first_value(row, ["sample", "sample_id", "og_id"])
-        row_code = first_value(row, ["code", "assembly", "assembler", "mt_assembly_prefix"])
-        if row_sample and row_sample != sample_id and row_sample not in prefix:
-            continue
-        if row_code and row_code not in prefix:
-            continue
-
         num_cds = first_numeric(row, ["num_cds"])
         num_trna = first_numeric(row, ["num_trna"])
         num_rrna = first_numeric(row, ["num_rrna"])
@@ -533,6 +611,20 @@ def is_reference_genbank(path: Path) -> bool:
     return False
 
 
+def path_carries_prefix(path: Path, prefix: str) -> bool:
+    """True when `path` is named for the assembly `prefix`, not merely for one
+    whose name starts with it.
+
+    A bare `prefix in str(path)` also matches every curated variant built from it
+    -- <prefix>_collapsed, <prefix>reseed, <prefix>reseed_rgj -- which pulls the
+    child's files into the parent's evidence pool. Require the prefix to end at a
+    filename or path-component boundary instead.
+    """
+    if path.name == prefix or path.name.startswith(f"{prefix}."):
+        return True
+    return any(part == prefix for part in path.parts)
+
+
 def files_for_run(files: Iterable[Path], run: "RunFiles") -> list[Path]:
     """Restrict a flat file list to those belonging to a single assembly run.
 
@@ -545,10 +637,9 @@ def files_for_run(files: Iterable[Path], run: "RunFiles") -> list[Path]:
     sample_id = run.sample_id
     matches = []
     for path in files:
-        text = str(path)
         if (
-            run.prefix in text
-            or f"/{sample_id}/" in text
+            path_carries_prefix(path, run.prefix)
+            or f"/{sample_id}/" in str(path)
             or path.name.startswith(f"{sample_id}.")
         ):
             matches.append(path)
@@ -622,15 +713,21 @@ def parse_mitohifi_stats(files: Iterable[Path]) -> dict[str, str]:
     final_row = final_rows[0] if final_rows else rows[0]
 
     length = first_numeric(final_row, ["final_length_bp", "length", "len", "size", "bp", "contig_length"])
-    genes = first_numeric(final_row, ["num_genes", "gene_count", "genes_count", "genes", "number_of_genes"])
     circular = parse_bool(first_value(final_row, ["circularised", "circularized", "circular", "is_circular", "was_circular"]))
     frameshift = parse_bool(first_value(final_row, ["frameshift_flag", "frameshift", "frameshifts", "frameshifts_found"]))
     mean_cov = first_numeric(final_row, ["mean_coverage", "avg_coverage", "average_coverage"])
 
     if length is not None:
         stats["final_length_bp"] = format_number(length)
-    if genes is not None:
-        stats["num_genes"] = format_number(genes)
+    # num_genes is deliberately NOT taken from contigs_stats' number_of_genes.
+    # That is MitoHiFi's own reference-guided annotation, which every assembly is
+    # re-annotated over by EMMA / MITOS2 downstream -- see the note at
+    # subworkflows/local/mitogenome_assembly/mitohifi/main.nf:64-68. Reading it
+    # here made num_genes and num_cds come from two different annotations of two
+    # different molecules: OG750's pre-collapse concatemer reported 56 genes
+    # counted over the 2.14x multimer, next to a num_cds from the collapsed
+    # monomer. Both counts now come from the same *.annotation_stats.csv row, and
+    # an assembly that never reached annotation reports neither.
     if circular:
         stats["circularised"] = circular
     if frameshift:
@@ -690,11 +787,48 @@ def anomaly_for_run(run: "RunFiles") -> dict[str, str]:
     return {}
 
 
+COLLAPSED_SUFFIX = "_collapsed"
+
+
+def collapse_child_evidence(run: "RunFiles", all_files: Iterable[Path]) -> dict[str, str]:
+    """Circularity / anomaly for a collapsed monomer, from the post-curation check.
+
+    COLLAPSE_CONCATEMER re-runs the circularity and length checks on the molecule
+    it produced, but writes the result under the PRE-collapse prefix
+    (<parent>.post_curation_check.tsv). So the monomer's own row -- keyed
+    <parent>_collapsed -- has no circularity evidence of its own at all, and would
+    be reported as non-circular despite the check having confirmed it is
+    (OG750: final_verdict_circular = True on a 15293 bp monomer).
+
+    Reach across to the parent for exactly this one file and nothing else.
+    Everything else stays strictly scoped to the run's own prefix; inheriting a
+    parent's evidence wholesale is the bug this is carved out of, not a pattern to
+    extend. It is sound here only because the check was measured ON the child.
+    """
+    if not run.prefix.endswith(COLLAPSED_SUFFIX):
+        return {}
+    parent = run.prefix[: -len(COLLAPSED_SUFFIX)]
+    for path in sorted(all_files, key=lambda item: str(item)):
+        if path.name != f"{parent}.post_curation_check.tsv":
+            continue
+        rows = read_table(path)
+        if not rows:
+            continue
+        row = rows[0]
+        evidence = {
+            "circularised": parse_bool(first_value(row, ["final_verdict_circular"])),
+            "anomaly_type": first_value(row, ["anomaly_type"]),
+            "length_anomaly": first_value(row, ["length_anomaly"]),
+        }
+        return {key: value for key, value in evidence.items() if value}
+    return {}
+
+
 def collapse_for_run(run: "RunFiles") -> dict[str, str] | None:
     """Read the concatemer-collapse report (<prefix>.concatemer_collapse.tsv) for
-    this run, if the auto-curation step ran. When action == collapsed, the
-    over-length concatemer has been rewritten to a monomer, so the summary should
-    report the collapsed length and drop the now-resolved length/repeat anomaly."""
+    this run, if the auto-curation step ran. The report is written under the
+    PRE-collapse prefix, so finding one on a run means this run is the molecule
+    the collapse acted on -- never the monomer it produced."""
     for path in run.files:
         if path.name.endswith(".concatemer_collapse.tsv"):
             rows = read_table(path)
@@ -703,17 +837,33 @@ def collapse_for_run(run: "RunFiles") -> dict[str, str] | None:
     return None
 
 
-def apply_collapse_override(row: dict[str, str], run: "RunFiles") -> None:
-    """If a concatemer was auto-collapsed, use the monomer length and clear the
-    length/anomaly flags so the resolved assembly is not re-flagged as over-length."""
+def apply_collapse_provenance(row: dict[str, str], run: "RunFiles") -> None:
+    """Mark a pre-collapse concatemer as superseded by the monomer it produced.
+
+    COLLAPSE_CONCATEMER renames a genuinely collapsed assembly to
+    <prefix>_collapsed.fasta, and every downstream stage forks on that basename,
+    so the monomer now carries its own identity end to end: its own publish dir,
+    its own mitogenome_data row (see the provenance rows in
+    workflows/oceangenomesmitogenomes.nf) and its own remap depth. It therefore
+    gets its own row here too, and this run is the superseded original.
+
+    This function used to write the monomer's length onto THIS row instead --
+    correct back when the curated monomer was filed under the original's name,
+    but since the fork it put the collapsed length (OG750: 15293) next to the
+    pre-collapse assembly's contig counts and reference stats, while the row that
+    was actually named for the monomer sat empty. So the length is left alone;
+    the row keeps its own real 32672 bp and is flagged superseded so it drops out
+    of the manual-review queue rather than being triaged twice.
+
+    A passthrough report means nothing was rewritten, no second row exists, and
+    the row is left untouched.
+    """
     collapse = collapse_for_run(run)
     if not collapse or (collapse.get("action") or "").strip().lower() != "collapsed":
         return
-    collapsed_length = (collapse.get("collapsed_length") or "").strip()
-    if collapsed_length.isdigit():
-        row["final_length_bp"] = collapsed_length
-    row["anomaly_type"] = "none"
-    row["length_anomaly"] = "no"
+    # Only the marker here. apply_qc rebuilds manual_review_reason from scratch and
+    # runs after this, so the reason itself is recorded in finalise_status.
+    row[SUPERSEDED_KEY] = "true"
 
 
 def getorg_circular_override(run: "RunFiles") -> str:
@@ -899,6 +1049,9 @@ FRAGMENTATION_REASONS = {
 # Row key holding the reasons that actually force manual_review. Not a summary
 # column, so it is dropped by the DictWriter (extrasaction="ignore") on write.
 BLOCKING_KEY = "_blocking_reason"
+# Row key marking an assembly that a curation step replaced with a molecule of its
+# own (currently only the concatemer collapse). Same deal: not a summary column.
+SUPERSEDED_KEY = "_superseded"
 
 
 def is_complete_core(row: dict[str, str], thresholds: Thresholds) -> bool:
@@ -950,6 +1103,8 @@ def finalise_status(row: dict[str, str], failed: bool = False) -> None:
     """Terminal QC verdict. Identical for every assembler so the column can be
     sorted / filtered / counted across a mixed cohort:
 
+      superseded     - a curation step replaced this assembly with one that has
+                       its own row, so this one is provenance, not a deliverable
       failed         - the assembler errored, or produced no final assembly
       manual_review  - a final assembly exists but a blocking reason stands
       complete       - a final assembly exists and nothing blocking survived QC
@@ -957,9 +1112,18 @@ def finalise_status(row: dict[str, str], failed: bool = False) -> None:
     Topology is deliberately NOT encoded here (an earlier GetOrganelle-only
     "circular" status made the column incomparable); read `circularised` for it.
 
+    `superseded` is checked first and beats every other verdict: a pre-collapse
+    concatemer is over-length and non-circular by definition, so triaging it
+    would mean reviewing the same molecule twice -- once as the raw concatemer
+    and once as the monomer that replaced it.
+
     Must run after apply_qc, which is what populates BLOCKING_KEY.
     """
-    if failed or not row["final_length_bp"]:
+    if row.get(SUPERSEDED_KEY):
+        row["status"] = "superseded"
+        row["manual_review_reason"] = add_reason(
+            row["manual_review_reason"], "superseded_by_collapse")
+    elif failed or not row["final_length_bp"]:
         row["status"] = "failed"
         row["manual_review_reason"] = add_reason(row["manual_review_reason"], "failed_run")
     elif row.get(BLOCKING_KEY):
@@ -998,12 +1162,13 @@ def parse_mitohifi_run(run: RunFiles, thresholds: Thresholds, all_files: Iterabl
     if accession:
         row["reference_accession"] = accession
 
-    row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
+    row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix).items() if value})
     row["numt_flag"] = "true" if has_numt_signal(run.files) else "false"
     row["reference_relevance"] = reference_relevance_for_run(run)
     row["reference_divergence"] = reference_divergence_for_run(run)
     row.update(anomaly_for_run(run))
-    apply_collapse_override(row, run)
+    row.update(collapse_child_evidence(run, all_files))
+    apply_collapse_provenance(row, run)
 
     apply_qc(row, thresholds)
     finalise_status(row)
@@ -1139,10 +1304,11 @@ def parse_getorganelle_run(run: RunFiles, thresholds: Thresholds, all_files: Ite
     if remap_cv is not None:
         row["coverage_cv"] = format_number(remap_cv)
 
-    row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
+    row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix).items() if value})
     row["numt_flag"] = "true" if has_numt_signal(run.files) else "false"
     row.update(anomaly_for_run(run))
-    apply_collapse_override(row, run)
+    row.update(collapse_child_evidence(run, all_files))
+    apply_collapse_provenance(row, run)
 
     # The GetOrganelle reseed reference (relabelled <prefix>.reference.gb, or the
     # published mtdna/reference_seed/NC_*.gb) is not tied to a run by classify_file,
@@ -1204,12 +1370,13 @@ def parse_oatk_run(run: RunFiles, thresholds: Thresholds, all_files: Iterable[Pa
         row["mean_coverage"] = format_number(mean_cov)
     if cov_cv is not None:
         row["coverage_cv"] = format_number(cov_cv)
-    row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix, run.sample_id).items() if value})
+    row.update({key: value for key, value in parse_annotation_stats(all_files, run.prefix).items() if value})
     row["numt_flag"] = "false"
     # Oatk is reference-free: no reference species/accession/divergence, so those
     # columns and the no_congeneric_reference gate stay empty by construction.
     row.update(anomaly_for_run(run))
-    apply_collapse_override(row, run)
+    row.update(collapse_child_evidence(run, all_files))
+    apply_collapse_provenance(row, run)
 
     apply_qc(row, thresholds)
     finalise_status(row)

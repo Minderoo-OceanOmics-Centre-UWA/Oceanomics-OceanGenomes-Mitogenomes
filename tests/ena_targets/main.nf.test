@@ -1,9 +1,9 @@
 nextflow_workflow {
-    name "Per-technology ENA study and locus-tag prefix resolution"
+    name "Per-technology ENA study resolution"
     script "./main.nf"
     workflow "ENA_TARGETS"
 
-    test("each technology resolves to its own child study and prefix") {
+    test("each technology resolves to its own child study") {
         when {
             workflow {
                 """
@@ -23,13 +23,12 @@ nextflow_workflow {
                 { assert resolved.hifi.ena_study == 'PRJEB123419' },
                 { assert resolved.hic.ena_study == 'PRJEB123420' },
                 { assert resolved.ilmn.ena_study == 'PRJEB123421' },
-                { assert resolved.hifi.ena_locus_prefix == 'OGMTHIFI' },
-                { assert resolved.hic.ena_locus_prefix == 'OGMTHIC' },
-                { assert resolved.ilmn.ena_locus_prefix == 'OGMTILMN' },
-                // Three studies, three prefixes: no two technologies may share
-                // either, or one is submitted under the other's namespace.
+                // Three technologies, three studies: no two may share one, or
+                // one technology's records are submitted under the other's study.
                 { assert resolved.values().collect { it.ena_study }.unique().size() == 3 },
-                { assert resolved.values().collect { it.ena_locus_prefix }.unique().size() == 3 }
+                // Locus tags are assigned by the downstream submission pipeline,
+                // so nothing here may attach a prefix to a candidate.
+                { assert resolved.values().every { !it.containsKey('ena_locus_prefix') } }
             )
         }
     }
@@ -48,8 +47,7 @@ nextflow_workflow {
         then {
             assertAll(
                 { assert workflow.success },
-                { assert workflow.out.resolved[0].ena_study == 'PRJEB123420' },
-                { assert workflow.out.resolved[0].ena_locus_prefix == 'OGMTHIC' }
+                { assert workflow.out.resolved[0].ena_study == 'PRJEB123420' }
             )
         }
     }

@@ -79,9 +79,8 @@ that matches your container/conda environment.
 | `--blast_db_dir` | ✔ | Directory used to cache the downloaded `taxdb.*` files; re-use between runs to avoid repeated downloads. |
 | `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
 | `--template_sbt` | ✔ | Submission template passed to `table2asn` when packaging GenBank artefacts. |
-| `--ena_validate_webin_test` | Optional | Validate every ready genome-context candidate package against the Webin test service (default `false`). |
+| `--ena_webin_validate` | Optional | Format-validate each EMBL flatfile with `ena-webin-cli -context sequence` (default `true`). This is the pipeline's last ENA gate; it needs no BioSample and never submits. |
 | `--ena_study_hifi`, `--ena_study_hic`, `--ena_study_ilmn` | ENA packaging | ENA child study written to each genome-context manifest, chosen by the candidate's technology (defaults `PRJEB123419`, `PRJEB123420`, `PRJEB123421`). The umbrella `PRJEB110568` is an UMBRELLA_PROJECT and cannot receive data. |
-| `--ena_locus_prefix_hifi`, `--ena_locus_prefix_hic`, `--ena_locus_prefix_ilmn` | ENA packaging | Locus-tag prefix registered to each child study (defaults `OGMTHIFI`, `OGMTHIC`, `OGMTILMN`). Gene serials are specimen level, so OG910 gene 1 is `OGMTHIFI_000910001` in the HiFi record and `OGMTHIC_000910001` in the Hi-C record. |
 | `--samplesheet_prefix` | Optional | Reserved for generated samplesheet naming in wrapper scripts. |
 | `--getorganelle_genedb_min_genes` | Optional | Minimum genes a reference must yield to build the reseed custom gene database (default `10`). Below this, the sample keeps its first-pass GetOrganelle assembly instead of reseeding. |
 | `--getorganelle_fromreads_args` | Optional | Override the default GetOrganelle from-reads arguments (default `-R 20 -w 95 --continue`). |
@@ -140,8 +139,11 @@ bin/stage_ena_pilot_input.sh
 Packages are written beneath
 `<outdir>/mitogenomes/OG910/OG910.hifi.241127.v3mitohifi/ena/package/`.
 A missing BioSample or uniform `mean_depth` blocks the manifest while retaining
-the generated sequence, annotation, locus-tag map, hashes, and structured
-blocker.
+the generated sequence, annotation, hashes, and structured blocker.
+
+The flatfile carries no `/locus_tag` on any feature. Locus tags are allocated and
+injected by the downstream submission pipeline, so `table2asn` reports
+`NO_LOCUS_TAGS` on every record and the pipeline treats that code as advisory.
 
 Apply the ENA migrations after the existing depth and validation migrations:
 
@@ -152,57 +154,11 @@ singularity exec \
   --config /home/tpeirce/postgresql_details/oceanomics.cfg
 ```
 
-Set `--ena_validate_webin_test true` to test-validate every ready candidate.
-This uses genome context and never submits.
-
-### Per-technology ENA package selection
-
-Run selection after the packages have been published. Every technology with a
-viable mitogenome is published to its own ENA child study, so selection runs
-within a technology: a specimen can be selected once as HiFi, once as Hi-C and
-once as Illumina, but never twice within one of those. Report mode is
-read-only:
-
-```bash
-nextflow run ena_selection.nf -profile singularity \
-  --ena_package_metadata '<outdir>/mitogenomes/OG*/*/ena/package/*.package_metadata.json' \
-  --ena_selection_mode report \
-  --outdir <outdir>
-```
-
-Within a technology, equivalent circular sequences are selected deterministically
-(newest sequencing date wins); distinct passing sequences produce
-`MANUAL_REVIEW_REQUIRED`. Identical sequences in two different technologies are
-both published, since they are separate assemblies from separate data. Resolve
-reviews with a TSV containing `og_id`, `selected_seqid`, `reviewer`, and
-`reason`, one row per specimen per technology; the technology is taken from
-`selected_seqid`, so a specimen may take up to three independent rows:
-
-```bash
-nextflow run ena_selection.nf -profile singularity \
-  --ena_package_metadata '<outdir>/mitogenomes/OG*/*/ena/package/*.package_metadata.json' \
-  --ena_selection_mode apply \
-  --ena_decision_file ena_selection_decisions.tsv \
-  --ena_selected_by tpeirce \
-  --sql_config /path/oceanomics.cfg \
-  --outdir <outdir>
-```
-
-Add `--ena_validate_webin_production true` to validate only applied selected
-packages against production Webin. This still runs `-validate`, never
-`-submit`. Apply mode first refreshes BioSample and uniform `mean_depth` from
-the database and rewrites only the manifest, readiness metadata, and checksums;
-it does not rerun assembly, annotation, or locus allocation. The refresh targets
-the published package recorded in `published_package_path`, not the staged copy
-in the task work directory, so the refreshed manifest is the one a submitter
-later reads.
-
-Apply mode also registers each selection in `ena_submission_selections` at
-`archive_status = 'NOT_SUBMITTED'`, which is what puts it on the
-`ena_submission_queue` view. Submission itself happens in a separate pipeline,
-because specimens stay under embargo long after assembly finishes; see
-[ENA submission handoff](ena_submission_handoff.md) for the contract between the
-two.
+`--ena_webin_validate` (on by default) format-validates every converted
+flatfile with `ena-webin-cli -context sequence`. That is where the pipeline
+stops, and passing it is what sets `submission_ready = true` on the validation
+record. Genome-context validation needs a registered BioSample, so it belongs to
+the downstream submission pipeline along with choosing and submitting a package.
 
 ENA conversion runs automatically for samples with no table2asn `ERROR`/`REJECT` or discrepancy-report `FATAL`.
 Warnings remain visible in MultiQC but do not block conversion. To add the credentialed production Webin check:
@@ -264,7 +220,22 @@ psql --dbname oceanomics --file sql/005_ena_validation_attempts_genome_context.s
 psql --dbname oceanomics --file sql/006_ena_tech_aware_locus_tags.sql
 psql --dbname oceanomics --file sql/007_insdc_biosample_accessions.sql
 psql --dbname oceanomics --file sql/008_ena_submission_queue.sql
+psql --dbname oceanomics --file sql/009_ena_locus_registry_canonical_order.sql
+psql --dbname oceanomics --file sql/010_drop_ena_locus_tables.sql
+psql --dbname oceanomics --file sql/011_drop_local_package_validation.sql
+psql --dbname oceanomics --file sql/012_drop_ena_selection_layer.sql
 ```
+
+`010` retires `ena_locus_registry` and `ena_candidate_loci` now that locus tags are assigned by
+the downstream submission pipeline. It copies both into `*_archive` tables first: the tags behind
+already-submitted records cannot be rebuilt from the flatfiles.
+
+`012` retires the selection layer for the same reason: choosing and submitting a package belongs to
+the downstream pipeline, so `ena_candidate_packages`, `ena_submission_selections` and the
+`ena_submission_queue` view are dropped, along with the package, production-Webin, checksum and
+run-provenance columns on `ena_validation_attempts`. That leaves `submission_ready` meaning what
+this pipeline can actually attest: the flatfile passed every gate. This drop is not reversible from
+the repository, so dump those three relations first if you want them.
 
 `bin/apply_ena_migrations.py --config <cfg>` applies the same list in order under an advisory lock
 and audits the schema before and after; `--check-only` reports the current state without changing
@@ -272,10 +243,10 @@ anything.
 
 `ena_validation_attempts` keeps one row per `(assembly_prefix, ena_study, validation_attempt)`.
 Rerunning under the same attempt token overwrites that row rather than adding a new one, so retrying
-a failed validation doesn't pile up history. Once the corresponding selection
-record for that study is marked submitted or accessioned it is frozen; later reruns
-under that same token are reported as `locked` and no longer change it. Bump
-`--ena_validation_attempt` (see below) when you want a genuinely separate, independently tracked attempt.
+a failed validation doesn't pile up history. Nothing freezes the row: submission state lives in the
+separate submission pipeline, so the latest validation of an assembly is always the one on record.
+Bump `--ena_validation_attempt` (see below) when you want a genuinely separate, independently
+tracked attempt.
 
 The PostgreSQL password remains in the protected SQL configuration file and is not written to ENA
 manifests or normalized result records. Webin credentials continue to come only from Nextflow secrets.

@@ -52,6 +52,33 @@ Initial release of nf-core/oceangenomesmitogenomes, created with the [nf-core](h
   obtainable — which keeps the extra NCBI calls off the large majority of a cohort. Controlled by
   `--enable_reference_reselection` (default true), `--n_reference_candidates`, `--reference_rank_read_subsample`.
   Degrades to the previous single-reference behaviour whenever a lookup fails or returns nothing usable.
+- The Oatk fallback now routes on **length-inflated** MitoHiFi assemblies too, and the post-assembly routing rules are one
+  predicate (`oatkFallbackReason`) rather than separate channels. A too-distant reference does not only truncate an
+  assembly, it can inflate one: OG56 (*Vincentia punctata*, a *Fowleria vaiulae* reference at 76.2% identity) came back
+  **circular with all 13 CDS** at 1.281x reference length, carrying a ~170 bp control-region unit in ~78.6 tandem copies.
+  The gene count sees nothing wrong with that molecule, the empty-FASTA fallback never fires, the sample is
+  `NON_CONGENERIC` rather than `CROSS_ORDER`, and `COLLAPSE_CONCATEMER` skips it because the anomaly is classified
+  `control_region_repeat` and not `concatemer` — so it fell through every existing route and was published as-is. Length
+  (from `MITOHIFI_CHECK_CIRCULARITY`'s `length_ratio`) is now checked as a second, independent measure of the same failure,
+  at or above `--mitogenome_oatk_length_ratio_threshold` (default 1.15), and a `MISMATCH` relevance verdict routes on its
+  own. `REFERENCE_RELEVANCE` is invoked inside the MitoHiFi subworkflow (aliased `REFERENCE_RELEVANCE_ROUTING`,
+  unpublished) so the verdict exists early enough to route on.
+  The length rule is **qualified** by that verdict and the gene rule deliberately is not: over-length alone is ambiguous,
+  since OG848/OG852/OG853 all run 1.12-1.33x against congeneric references that `PASS`, which is real length heteroplasmy
+  and not something a different assembler will fix — whereas OG2102 is `PASS` at 7 of 13 PCGs, so qualifying the gene rule
+  would have un-routed the sample that branch was built for. Every rule demands positive evidence, so a missing or
+  ungraded artefact leaves the assembly alone. Reasons are resolved before the channel mix, first match wins, because
+  every routed sample is stamped with the same Oatk prefix and a sample arriving twice would launch two OATK tasks writing
+  identical output names.
+- `REFERENCE_RANK` no longer substitutes a reference it did not actually choose. All five of OG56's candidates scored
+  `0.0000` with 0 mapped reads and the ranking still recorded `chosen=yes` against the first, so the assembly was built on
+  an arbitrary member of an all-zero tie — while the module claimed re-selection "can only improve on the previous
+  behaviour". A tie among zeros is the absence of a result, not a result. The three paths that reach a verdict without read
+  evidence (no candidate recruits anything, no reads subsampled, a lone unmapped candidate) now mark every row `chosen=no`,
+  record why in a new `status` column, and emit **empty** `chosen_reference` files; both assembly subworkflows test for
+  size and keep `findMitoReference`'s original pick. This affected 8 samples in `mitogenomes-missing-audit-6`
+  (OG56, OG81, OG750, OG801, OG2093, OG2202, OG2021, OG810). Deliberately **not** a routing signal: 7 of those 8 assembled
+  acceptably, so an all-zero ranking does not predict a bad assembly — only the post-assembly gate above decides that.
 - Gene-incomplete MitoHiFi assemblies now route to the reference-free Oatk fallback, not just empty ones. A reference too
   distant for read recruitment does not always yield *nothing*: it can drop the most divergent gene blocks and return a
   clean-looking but gene-incomplete molecule. OG2102 (*Rouleina attrita*, non-congeneric *Alepocephalus* reference) came
@@ -113,6 +140,63 @@ Initial release of nf-core/oceangenomesmitogenomes, created with the [nf-core](h
 
 ### `Fixed`
 
+- The ordered SQL migration chain can be replayed end to end again. `bin/apply_ena_migrations.py` reapplies every
+  file on each run and relies on them being idempotent, but four of them referenced schema that a later migration
+  had already removed, so a database part-way along the chain could not be brought forward at all -- the run aborted
+  on `004` and left the schema where it was. Each is now guarded on the object it needs still existing, so a fresh
+  database builds exactly as before while an advanced one skips the dead step:
+  - `001` built `ena_validation_exact_result_idx` on `result_digest`, which `012` drops. Skipped when the column is
+    gone; nothing is lost, since `002` drops that index and replaces it with `ena_validation_attempts_key_idx`.
+  - `004` created `ena_candidate_loci` with a foreign key onto `ena_locus_registry (locus_tag)`, and `006` drops that
+    column (`ERROR: column "locus_tag" referenced in foreign key constraint does not exist`). Skipped once the column
+    is gone; `010` drops the table a few migrations later regardless.
+  - `006` then altered `ena_candidate_loci` unconditionally, which fails once `010` has dropped it.
+  - `011` dropped three columns from `ena_validation_attempts` without first dropping `ena_validation_latest`. That
+    view is `SELECT DISTINCT ON (assembly_prefix) *`, and Postgres expands the `*` at creation time, so it depends on
+    every column and blocks the drop. It is now dropped and rebuilt around the change, as `012` already did. `011`
+    had never been run against a live database, so this was latent.
+  The integration test's migration list also omitted `010`, which meant `012` was exercised against an ordering that
+  cannot occur: `ena_candidate_loci` survived and its foreign key blocked the `ena_candidate_packages` drop.
+
+- Assembly-summary rows now describe the assembly they are named for. Four defects in
+  `bin/mitogenome_assembly_summary.py` shared one root cause -- association by unanchored substring test -- and between
+  them corrupted 84 of the 250 rows in the `mitogenomes-missing-audit-6` table:
+  - **Per-run sidecars no longer manufacture assemblies.** `strip_known_suffix` falls back to `Path(name).stem` for any
+    suffix it does not know, so `<prefix>.reference_ranking.tsv` and `<prefix>.reference_candidates_status.tsv` each
+    became an assembly of their own: **38 rows, 15% of the table**, every one reported `failed` for want of a FASTA and
+    inflating the failure count from 16 real failures to 54. Both suffixes are now listed, and `discover_assembler_runs`
+    also rejects structurally via `is_assembly_run_prefix` -- if an earlier dot-field carries the assembler token
+    (`mitohifi`/`hifiasm`, `getorg`, `oatk`) and the last one does not, the tail is a suffix, not an assembly -- so the
+    next sidecar nobody has written yet cannot reintroduce the bug. The file stays in the pool for `files_for_run`; it
+    just no longer spawns a row.
+  - **Gene counts are matched exactly, not by substring.** `parse_annotation_stats` joined with `og_id not in prefix` /
+    `code not in prefix`. `OG5` is a substring of `OG58`, `OG8` of `OG810` and `OG848`, `OG10` of `OG107`, and
+    `getorg1770` of `getorg1770reseed` -- so **45 rows reported counts they never earned** (OG5's 37 genes / 13 PCGs
+    propagated across the cohort) and 2 rows that did have their own annotation reported another sample's numbers:
+    `OG810.hic.260605.getorg1770reseed_rgj` showed 37/13/`no` where its own EMMA result was 25/10 with 12 missing genes.
+    Because the loop returned the first match over an unsorted `rglob`, which sample won was filesystem-order dependent.
+    The join is now on the filename EMMA writes (`<mt_assembly_prefix>.annotation_stats.csv`), falling back to whole-key
+    equality rebuilt from the row's own `og_id.tech.seq_date.code`; a degenerate row with blank fields matches nothing
+    rather than everything. `files_for_run` and `bin/multiqc_per_sample.py`'s `belongs_to_assembly` are anchored the same
+    way -- the latter was copying the collapsed monomer's annotation, depth and LCA tables into the *pre-collapse*
+    assembly's per-sample report (12 occurrences of `_collapsed` in OG750's).
+  - **`num_genes` and `num_cds` come from one annotation or from neither.** `parse_mitohifi_stats` populated `num_genes`
+    from `contigs_stats`' `number_of_genes`, which is MitoHiFi's own reference-guided annotation -- explicitly *not* the
+    pipeline's gene count (see `subworkflows/local/mitogenome_assembly/mitohifi/main.nf`). OG750 therefore reported 56
+    genes counted over its un-collapsed 2.14x concatemer beside a `num_cds` from the collapsed monomer. Both now come
+    from the same `*.annotation_stats.csv` row, and an assembly that never reached annotation reports neither: blank
+    means *not annotated*, which `is_complete_core` and `apply_qc` already treat as "not evaluated".
+  - **A collapsed concatemer is reported as two honest rows instead of one blended one.** `COLLAPSE_CONCATEMER` renames a
+    genuine collapse to `<prefix>_collapsed.fasta` and every downstream stage forks on that basename, so the monomer
+    already had its own publish dir, `mitogenome_data` row and remap depth -- but its FASTA was never staged into the
+    summary, leaving that row with no `final_length_bp` and a `failed` verdict, while `apply_collapse_override` wrote the
+    monomer's length onto the pre-collapse row. `COLLAPSE_CONCATEMER.out.fasta` and `.out.evidence` now reach
+    `ch_assembly_summary_files` (filtered to genuine collapses -- a passthrough emits `<prefix>.fasta`, which would
+    collide in the module's flat staging dir), `collapse_child_evidence` reads the monomer's circularity from the
+    post-curation check that is written under the *parent's* prefix, and the override is replaced by
+    `apply_collapse_provenance`, which marks the original with the new `superseded` status so it is not triaged twice.
+    OG750 goes from four wrong rows to two: `...v323mitohifi` `superseded` at its real 32672 bp, and
+    `...v323mitohifi_collapsed` `manual_review` at 15293 bp, circular, 32 genes / 11 PCGs, missing `TS2;TD;CO2;TK;ATP8`.
 - Reference-relevance check no longer flags good assemblies. It was calibrated on coral data (same genus ~99.6% identity,
   same family ~96.9%, wrong family ~81.5%) and applied unchanged to fish, whose mtDNA evolves far faster: in the
   `mitogenomes-missing-audit-5` run it called 27 assemblies `reference_mismatch`, **10 of them against a same-genus
@@ -186,3 +270,51 @@ Initial release of nf-core/oceangenomesmitogenomes, created with the [nf-core](h
 ### `Dependencies`
 
 ### `Deprecated`
+
+- Locus-tag allocation is no longer this pipeline's job. Tags are assigned and injected by a separate
+  downstream submission pipeline, so every file this one emits now carries **no** `/locus_tag` on any
+  feature: the `.tbl`, the `.gbf`, the `.embl.gz` and the collaborator `.gff`. The qualifier is absent
+  rather than blank because an empty `/locus_tag=""` fails both `table2asn` and Webin, so "blank" has
+  exactly one submittable spelling. Removed: `ALLOCATE_ENA_LOCUS_TAGS` and `bin/allocate_ena_locus_tags.py`,
+  the `<full_seqid>.locus_tag_mapping.tsv` artefact, the locus-tag rendering and GFF tagging in
+  `bin/ena_package.py`, the mapping-to-`ena_candidate_loci` round trip in `bin/select_ena_submission.py`,
+  and the `--ena_locus_prefix_{hifi,hic,ilmn}` params. `subworkflows/local/utils_ena_targets` still
+  resolves the per-technology ENA child study, just not a prefix. Deleting the allocator loses nothing
+  else: its `ena_specimen_accessions` upsert is duplicated in `select_ena_submission.py`, and its
+  OG-numeric collision guard is already enforced by the `og_numeric NOT NULL UNIQUE` and
+  `og_numeric = substring(og_id FROM 3)` constraints in `sql/004`. Two consequences worth knowing:
+  `table2asn` now reports `FATAL: NO_LOCUS_TAGS` on every record, which stays advisory in
+  `bin/parse_table2asn_validation.py` and must not be promoted back to fatal or it quarantines the whole
+  run; and dropping the mapping from the package changes `package_digest` for every candidate.
+  `sql/010_drop_ena_locus_tables.sql` retires `ena_locus_registry` and `ena_candidate_loci`, copying both
+  into `*_archive` tables first, since the serials behind already-published tags cannot be rebuilt from
+  the flat files. ENA-side locus-tag prefixes (`OGMTHIFI`, `OGMTHIC`, `OGMTILMN`) remain registered
+  against the three child studies and are recorded in `assets/ena/accessions.tsv` for the downstream
+  pipeline to use.
+
+- `submission_ready` now means what this pipeline can actually attest, and the ENA selection layer is gone.
+  The flag was hard-coded `false` by `bin/collate_ena_validation.py` and could only be earned later by a
+  production Webin validation on an already-`SELECTED` package, which the pipeline never ran: every row ever
+  written said `false`, including rows whose flatfile had passed every gate. It is now `true` exactly when the
+  flatfile cleared this pipeline's last gate (`ena-webin-cli -context sequence`), which is the point at which a
+  candidate is ready to hand to the submission pipeline. Selection and submission belong to that pipeline, so
+  `ena_selection.nf` is removed along with `SELECT_ENA_SUBMISSION`, `WEBIN_VALIDATE_GENOME`,
+  `RECORD_ENA_PACKAGE_VALIDATION`, `bin/select_ena_submission.py`, `bin/record_ena_package_validation.py`, and
+  the `--ena_selection_mode` / `--ena_decision_file` / `--ena_selected_by` / `--ena_package_metadata` /
+  `--ena_validate_webin_production` params. `sql/012_drop_ena_selection_layer.sql` drops
+  `ena_candidate_packages`, `ena_submission_selections` and the `ena_submission_queue` view, and restores
+  sql/001's original `CHECK (NOT submission_ready OR webin_status = 'PASS')`. The drop is irreversible from the
+  repo: dump those relations first if their contents matter. Existing rows are deliberately not backfilled and
+  are corrected on their next run.
+- The ENA validation record drops from 46 columns to 27, ending at `submission_ready`. Removed: `package_status`,
+  `webin_production_status` and the five `webin_*` production fields, `overall_status`, `package_digest`,
+  `flatfile_name`/`_sha256`/`_size`, `manifest_name`/`_sha256`/`_size`, `workflow_run_name`,
+  `workflow_session_id`, `pipeline_revision`, and `result_digest`. The production and package columns described
+  work this pipeline does not do and always collated as `NOT_RUN`; `overall_status` collapses into
+  `submission_ready` now that the two cannot disagree; the checksums and run provenance duplicate what the
+  package's own `package_metadata.json` and the Nextflow run report already record. `push_ena_validation_results.py`
+  also loses its cross-table freeze, which consulted the now-dropped `ena_submission_selections`: a rerun always
+  overwrites its `(assembly_prefix, ena_study, validation_attempt)` row, and the `locked` outcome is gone.
+  The two stale stub headers in `ENA_VALIDATION_RESULT` and `ENA_VALIDATION_SUMMARY`, which had drifted from the
+  real output and would have failed the uploader's column check on any `-stub-run`, are regenerated from the
+  column lists they mirror.

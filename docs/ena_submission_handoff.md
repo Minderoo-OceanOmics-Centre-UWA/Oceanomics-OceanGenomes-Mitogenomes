@@ -13,53 +13,100 @@ What follows from that is a division of ownership:
 
 | | Mitogenomes (this repo) | ENA-mito-genomes |
 |---|---|---|
-| Builds the EMBL flatfile, allocates locus tags, builds the Webin package | yes | no |
-| Validates the package locally and against Webin `-validate` | yes | no |
-| Decides *which* assembly represents a specimen in a technology | yes | no |
+| Builds the EMBL flatfile and the Webin package | yes | no |
+| Allocates locus tags and injects them into the flatfile | no | yes |
+| Format-validates the flatfile with Webin `-validate -context sequence` | yes | no |
+| Validates the package with Webin `-validate -context genome` | no | yes |
+| Decides *which* assembly represents a specimen in a technology | no | yes |
 | Applies the embargo gate | no | yes |
 | Calls `webin-cli -submit` | no | yes |
 | Records the resulting accessions | no | yes |
 
-The seam between them is one database view.
+The seam between them is the published package directory on disk, plus one
+boolean in the database.
+
+> **Changed 2026-08.** Selection used to live here, behind an
+> `ena_submission_queue` view backed by `ena_candidate_packages` and
+> `ena_submission_selections`. `sql/012_drop_ena_selection_layer.sql` drops all
+> three: choosing among candidates is a submission-time decision and belongs
+> with the embargo gate, in one place. What this repo now asserts is narrower and
+> per-candidate: this flatfile is well formed. The sections below describe the
+> replacement; the git history has the old contract if you need it.
 
 ## The contract
 
-**We guarantee**, for every row in `ena_submission_queue`:
+**We guarantee**, for every published package directory whose validation row is
+`submission_ready`:
 
-- an immutable package on disk at `package_path`, containing the gzipped EMBL flatfile, the
-  gzipped chromosome list, a complete Webin `genome`-context manifest, and `checksums.sha256`
-- locus tags already allocated, persisted in `ena_locus_registry`, and present in the flatfile
-- the package has passed local validation and its manifest names a BioSample that Webin can resolve
+- an immutable package on disk, containing the gzipped EMBL flatfile, the
+  gzipped chromosome list, a Webin `genome`-context manifest, `checksums.sha256`, and
+  `<full_seqid>.package_metadata.json`
+- a flatfile carrying **no** `/locus_tag` qualifier on any feature: tag allocation and injection
+  are yours, and the qualifier is absent rather than empty because an empty one fails validation
+- a flatfile that passed `ena-webin-cli -context sequence -validate`, which is what
+  `submission_ready` records
 - `full_seqid` is the `ASSEMBLYNAME` and is unique per assembly *and annotation version*, so a
   re-annotation is a new assembly rather than a collision
 
-The package directory also holds `<full_seqid>.fa` and a locus-tagged `<full_seqid>.gff`. Those are
-the collaborator handover pair, not submission inputs: the manifest never names them, and they are
-excluded from `package_digest` so they cannot make an unchanged submission look changed.
+**We no longer guarantee**, and this is the part to read twice:
+
+- **a resolvable BioSample.** The old queue filtered to `package_status = 'READY'`, so a package
+  whose accession was missing or NCBI-only never reached you. Nothing filters now. Read
+  `biosample_accession` from `package_metadata.json` and check it yourself: absent means
+  unregistered, `SAMN`/`SAMD` means registered at another INSDC archive and unusable at Webin, and
+  only `SAMEA` resolves. See [BioSample](#biosample) for why. A blocked package's manifest starts
+  with `# BLOCKED:` and carries no `SAMPLE` line, so it is also self-describing on disk.
+- **one package per specimen per technology.** Every viable assembly and annotation version is
+  published. Deduplicating them is now yours; see [Choosing among candidates](#choosing-among-candidates).
+
+The package directory also holds `<full_seqid>.fa`, `<full_seqid>.gff` and `<full_seqid>.tbl`. The
+FASTA and GFF are the collaborator handover pair, not submission inputs: the manifest never names
+them, and they are excluded from `package_digest` so they cannot make an unchanged submission look
+changed. The GFF is the annotator's own output, untouched; it carries no `locus_tag=` attribute for
+the same reason the flatfile does not.
 
 **You guarantee**:
 
-- you submit only what the queue lists, unmodified
+- you submit packages unmodified, apart from injecting locus tags
 - you close the row out afterwards (see [Writing back](#writing-back))
 
-## Reading the queue
+## Finding packages
 
-```sql
-SELECT og_id, tech, full_seqid, ena_study_accession, biosample_accession,
-       package_path, platform, mean_depth
-FROM ena_submission_queue
-WHERE embargo_status = 'Release'
-ORDER BY og_id, tech;
+Packages are published to:
+
+```
+<outdir>/mitogenomes/<og_id>/<assembly_prefix>/ena/package/
 ```
 
-The view already filters to `selection_status = 'SELECTED'`, `archive_status = 'NOT_SUBMITTED'`,
-`package_status = 'READY'` and `local_validation_status = 'PASS'`. It exposes `embargo_status` but
-deliberately does **not** filter on it, because embargo is your gate and should have exactly one
-owner. Everything else is already decided.
+so a glob over `*/*/ena/package/*.package_metadata.json` enumerates every candidate. Each metadata
+file is the package's own description and needs no join:
 
-Defined in `sql/008_ena_submission_queue.sql`.
+| field | use |
+|---|---|
+| `full_seqid` | the Webin `ASSEMBLYNAME`; unique per assembly *and* annotation version |
+| `og_id`, `assembly_prefix`, `annotation_version` | identity |
+| `study` | the ENA child study for this technology |
+| `biosample_accession` | check it yourself; see the contract above |
+| `platform`, `program`, `mean_depth`, `scientific_name`, `run_accessions` | manifest inputs, already resolved |
+| `sequence_sha256`, `normalised_circular_sha256` | equivalence; see below |
+| `package_digest` | changes when the ENA submission content changes, and only then |
+| `flatfile_validation` | status, reason, error/warning counts, webin-cli version |
 
-### This replaces the samplesheet dedup
+To restrict to candidates this pipeline vouches for, join on the validation table:
+
+```sql
+SELECT assembly_prefix, og_id, ena_study, webin_status, recorded_at
+FROM ena_validation_attempts
+WHERE submission_ready
+ORDER BY og_id, assembly_prefix;
+```
+
+`submission_ready` means the flatfile cleared every gate this pipeline runs, ending at the Webin
+format check. It does not mean chosen, unembargoed, or submitted. `ena_validation_latest` gives the
+most recent attempt per `assembly_prefix` if you do not want to reason about attempt tokens.
+Embargo comes from `sample.embargo_status`, and is your gate: it should have exactly one owner.
+
+### Choosing among candidates
 
 `workflow/00_create_mito_samplesheet.py:88-100` currently picks a candidate with:
 
@@ -68,53 +115,41 @@ ROW_NUMBER() OVER (PARTITION BY og_id, LOWER(tech)
                    ORDER BY seq_date_dt DESC NULLS LAST, seq_date DESC, code DESC)
 ```
 
-That is the newest row in `mitogenome_data`. Our selection
-(`bin/select_ena_submission.py`) instead picks among candidates that actually passed validation,
-treats two assemblies as equivalent only when their `normalised_circular_sha256` matches (a
-rotation- and strand-invariant digest, so a circular genome that starts at a different base is
-recognised as the same sequence), and refuses to choose when they genuinely differ, marking the
-specimen `MANUAL_REVIEW_REQUIRED`.
+That is the newest row in `mitogenome_data`, which disagrees with validation whenever the newest
+assembly is not the one that passed. Selecting on recency alone means you can submit a mitogenome
+nobody validated.
 
-The two disagree whenever the newest assembly is not the one that passed. Today that means you can
-submit a mitogenome nobody validated, and `MANUAL_REVIEW_REQUIRED` specimens are submitted anyway
-because nothing tells you they are contested. Rows needing review never appear in the view, which is
-the point of it.
+The approach this repo used before selection moved to you, worth reusing rather than rederiving:
+
+- consider only candidates whose validation row is `submission_ready`
+- select within a technology, never across: a specimen can legitimately be submitted once as HiFi,
+  once as Hi-C and once as Illumina, because those are separate assemblies from separate data
+- treat two candidates as the same sequence only when their `normalised_circular_sha256` matches.
+  That digest is rotation- and strand-invariant, so a circular genome assembled starting at a
+  different base is recognised as the same sequence rather than looking like a rival one
+- among equivalent candidates, take the newest sequencing date
+- when candidates genuinely differ, do not pick: flag the specimen for review. Silently taking the
+  newest is how a contested specimen gets submitted without anyone noticing
 
 Keep the `embargo_status = 'Release'` and `genbank_accession IS NULL` intent from the existing
 query; drop the `ROW_NUMBER` dedup entirely.
 
 ## Writing back
 
-Replace the update to `mitogenome_data.genbank_accession` in
-`workflow/07_push_submission_data_to_db.py`:
+There is no longer a table here for you to close out: `ena_submission_selections` went with the
+selection layer, so submission state is yours to keep, in whatever schema suits you. Two things
+worth carrying over from the design that was there:
 
-```sql
-UPDATE ena_submission_selections
-SET archive_status        = 'SUBMITTED',
-    ena_analysis_accession = %(erz)s,
-    submitted_at           = CURRENT_TIMESTAMP,
-    updated_at             = CURRENT_TIMESTAMP
-WHERE ena_study_accession = %(study)s
-  AND og_id               = %(og_id)s
-  AND archive_status      = 'NOT_SUBMITTED';
-```
+- key your own record on `full_seqid`, not `assembly_prefix`. `full_seqid` includes the annotation
+  version, so a re-annotation is a new submittable thing rather than a collision with one you have
+  already sent.
+- make the write idempotent with a predicate on your own status column, the way the
+  `archive_status = 'NOT_SUBMITTED'` predicate did. That is what makes a rerun after a partial
+  failure safe, and it preserves your existing `UPDATED` / `SKIPPED` / `CONFLICT_SKIPPED` /
+  `ROW_NOT_FOUND` outcomes unchanged.
 
-and, once ENA assigns the assembly accession:
-
-```sql
-UPDATE ena_submission_selections
-SET archive_status         = 'ACCESSION_ASSIGNED',
-    ena_assembly_accession = %(gca)s,
-    updated_at             = CURRENT_TIMESTAMP
-WHERE ena_study_accession = %(study)s AND og_id = %(og_id)s;
-```
-
-The `archive_status = 'NOT_SUBMITTED'` predicate makes the write idempotent, so your existing
-`UPDATED` / `SKIPPED` / `CONFLICT_SKIPPED` / `ROW_NOT_FOUND` outcomes carry over unchanged.
-
-This write is load-bearing beyond bookkeeping. `select_ena_submission.py` refuses to move a
-selection whose `archive_status` is anything other than `NOT_SUBMITTED`, so until you set it, a
-re-run of selection can silently repoint a specimen you have already submitted.
+Nothing in this repo reads that state back. `ena_validation_attempts` rows are overwritten freely on
+rerun and carry no submission status, so do not treat them as a submission ledger.
 
 Keep writing `mitogenome_data.genbank_accession` too if anything downstream reads it, but note that
 the column is named for GenBank and an ENA ERZ is not a GenBank accession.
@@ -124,10 +159,11 @@ the column is named for GenBank and an ENA ERZ is not a GenBank accession.
 With the per-technology studies live (below), three of the eight steps are no longer needed:
 
 - **03, project registration.** The studies exist. Read them from `assets/ena/accessions.tsv`.
-- **04, BioSample registration.** The manifest BioSample is already resolved and recorded in the
-  queue. See [BioSample](#biosample) for the part that is genuinely unsolved.
-- **05, manifest building and locus-tag injection.** The package is built. Read it, do not rebuild
-  it.
+- **04, BioSample registration.** The manifest BioSample is already resolved and recorded in
+  `package_metadata.json`, though verifying it resolves at Webin is now yours. See
+  [BioSample](#biosample) for the part that is genuinely unsolved.
+- **05, manifest building.** The package and its manifest are built. Read them, do not rebuild
+  them. Locus-tag injection is the one part of step 05 that stays yours.
 
 Steps 01, 02 and 06 survive, as does the duplicate-alias reuse logic (see
 [Worth keeping](#worth-keeping)).
@@ -157,19 +193,26 @@ that cannot be resolved by changing code on either side alone.
 
 ## Locus tags
 
-|  | this repo | ENA-mito-genomes |
-|---|---|---|
-| prefix | per technology, `OGMTHIFI` | the OG ID, `OG910` |
-| rendered tag | `OGMTHIFI_000910001` | `OG910_H00001` |
-| allocated by | `bin/allocate_ena_locus_tags.py`, DB registry under `pg_advisory_xact_lock` | in-memory, order of first `/gene=` appearance (`05:162-198`) |
-| injected into | the NCBI `.tbl`, before `table2asn` | the EMBL flatfile, after annotation |
-| stable across reruns | yes, persisted | no, positional |
+**Locus tags are yours, end to end.** This repo used to allocate them and inject them into the NCBI
+`.tbl` before `table2asn`; it no longer does. Nothing it produces carries a `/locus_tag`: not the
+`.tbl`, not the `.gbf`, not the `.embl.gz`, not the collaborator GFF. The qualifier is absent, not
+empty, because an empty `/locus_tag=""` fails both `table2asn` and Webin.
 
-`sql/006_ena_tech_aware_locus_tags.sql` constrains `ena_candidate_loci.locus_tag` to
-`^[A-Z][A-Z0-9]{2,11}_[0-9]{9}$`, which `OG910_H00001` does not satisfy. Injecting into the EMBL
-also means `table2asn` never sees the tags and cannot validate them.
+What that means in practice:
 
-Since tags are allocated long before embargo lifts, read them rather than deriving them.
+- Inject tags into the flatfile after you read the package, before `webin-cli -submit`.
+- The prefixes registered against the three child studies are in the table above and in
+  `assets/ena/accessions.tsv`. They stay registered and they are the ones to use; this repo simply
+  no longer resolves or applies them.
+- Feature order in the flatfile is stable and coordinate sorted. `bin/process_files.py`
+  (`sort_tbl_features`) re-sorts Emma's string-ordered output numerically, so numbering loci by
+  walking the record gives the same answer on every rerun of the same assembly.
+- `table2asn` reports `FATAL: NO_LOCUS_TAGS` for every record by design. This repo treats that code
+  as advisory (`bin/parse_table2asn_validation.py`); it is not a defect in the package.
+- The old registry tables (`ena_locus_registry`, `ena_candidate_loci`) are dropped by
+  `sql/010_drop_ena_locus_tables.sql`, with their contents preserved in `*_archive` tables. Those
+  archives are frozen history for records already submitted. Do not read them as a live source of
+  tags.
 
 ## BioSample
 
@@ -188,9 +231,11 @@ SAMN40589646   -> Failed to initialise validator ... sample is null
 
 See `sql/007_insdc_biosample_accessions.sql` for the full note. We widened the accession CHECK to
 `SAM(EA|N|D)` so the catalogue can be recorded, and express the unusability as
-`package_status = 'BLOCKED_NCBI_ONLY_BIOSAMPLE'`, which keeps those specimens out of the queue
-rather than letting them fail at submission time. `bin/audit_ena_readiness.py --check-ena-mirror`
-queries the EBI browser API per specimen if you want the current picture.
+`SAM(EA|N|D)` so the catalogue can be recorded. This repo used to express the unusability as
+`package_status = 'BLOCKED_NCBI_ONLY_BIOSAMPLE'` and filter those specimens out of the queue; with
+the queue gone, that check is yours, and the `# BLOCKED:` manifest is the on-disk signal.
+`bin/audit_ena_readiness.py --check-ena-mirror` queries the EBI browser API per specimen if you want
+the current picture.
 
 ## Manifest details worth not re-deriving
 
@@ -233,6 +278,7 @@ Things that repo does that this one does not, and that should survive the refact
 ## Questions for us
 
 1. Does anything downstream read `mitogenome_data.genbank_accession`, or can the ERZ live only in
-   `ena_submission_selections`?
-2. Do you want the queue to expose anything else, so you never have to join back to
-   `ena_candidate_packages` yourself?
+   your own tables?
+2. Is `package_metadata.json` plus `submission_ready` enough to build a manifest from, or is there
+   a field you would otherwise have to rederive? It is cheaper to add it to the metadata here than
+   for you to reconstruct it.

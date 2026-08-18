@@ -22,6 +22,9 @@ MIGRATIONS = [
     "007_insdc_biosample_accessions.sql",
     "008_ena_submission_queue.sql",
     "009_ena_locus_registry_canonical_order.sql",
+    "010_drop_ena_locus_tables.sql",
+    "011_drop_local_package_validation.sql",
+    "012_drop_ena_selection_layer.sql",
 ]
 
 
@@ -43,10 +46,11 @@ def audit(cursor) -> dict[str, object]:
         """
         SELECT
             to_regclass('public.ena_validation_attempts') IS NOT NULL,
-            to_regclass('public.ena_candidate_packages') IS NOT NULL,
-            to_regclass('public.ena_locus_registry') IS NOT NULL,
-            to_regclass('public.ena_submission_selections') IS NOT NULL,
-            to_regclass('public.ena_submission_queue') IS NOT NULL
+            to_regclass('public.ena_candidate_packages') IS NULL
+                AND to_regclass('public.ena_submission_selections') IS NULL
+                AND to_regclass('public.ena_submission_queue') IS NULL,
+            to_regclass('public.ena_locus_registry') IS NULL
+                AND to_regclass('public.ena_candidate_loci') IS NULL
         """
     )
     tables = cursor.fetchone()
@@ -61,17 +65,6 @@ def audit(cursor) -> dict[str, object]:
         """
     )
     mean_depth = cursor.fetchone()[0]
-    cursor.execute(
-        """
-        SELECT NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'ena_locus_registry'
-              AND column_name = 'locus_tag'
-        )
-        """
-    )
-    prefix_free_registry = cursor.fetchone()[0]
     measured_depth_rows = 0
     if mean_depth:
         cursor.execute(
@@ -84,12 +77,14 @@ def audit(cursor) -> dict[str, object]:
         measured_depth_rows = cursor.fetchone()[0]
     return {
         "validation_table": tables[0],
-        "candidate_table": tables[1],
-        "locus_table": tables[2],
-        "submission_table": tables[3],
-        "submission_queue_view": tables[4],
+        # Migration 012 retires the selection layer: choosing and submitting a
+        # package belongs to the downstream submission pipeline, so the absence
+        # of these three is the healthy state.
+        "selection_tables_dropped": tables[1],
+        # Migration 010 retires the locus tables: tag allocation belongs to the
+        # downstream submission pipeline, so their absence is the healthy state.
+        "locus_tables_dropped": tables[2],
         "mean_depth_column": mean_depth,
-        "prefix_free_registry": prefix_free_registry,
         "measured_depth_rows": measured_depth_rows,
     }
 
@@ -128,12 +123,9 @@ def main() -> int:
                                 after[key]
                                 for key in (
                                     "validation_table",
-                                    "candidate_table",
-                                    "locus_table",
-                                    "submission_table",
-                                    "submission_queue_view",
+                                    "selection_tables_dropped",
+                                    "locus_tables_dropped",
                                     "mean_depth_column",
-                                    "prefix_free_registry",
                                 )
                             ):
                                 raise RuntimeError("Post-migration ENA schema audit failed")

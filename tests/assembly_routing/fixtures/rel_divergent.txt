@@ -1,0 +1,1 @@
+DIVERGENT	reference covers the assembly but is distantly related; pid=76.2

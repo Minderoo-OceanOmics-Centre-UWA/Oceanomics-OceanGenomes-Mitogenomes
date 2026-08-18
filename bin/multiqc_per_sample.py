@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import functools
 import html
 import json
 import re
@@ -35,7 +36,9 @@ SAMPLE_RE = re.compile(r"(?<![A-Za-z0-9_-])(OG[0-9][A-Za-z0-9_-]*)(?![A-Za-z0-9_
 ASSEMBLY_RE = re.compile(
     r"(?<![A-Za-z0-9_-])"
     r"(?P<prefix>(?P<sample>OG[0-9][A-Za-z0-9_-]*)\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\."
-    r"(?:getorg[0-9A-Za-z_-]+|(?:v[0-9A-Za-z_-]+)?mitohifi[0-9A-Za-z_-]*))"
+    r"(?:getorg[0-9A-Za-z_-]+"
+    r"|(?:v[0-9A-Za-z_-]+)?mitohifi[0-9A-Za-z_-]*"
+    r"|(?:v[0-9A-Za-z_-]+)?oatk[0-9A-Za-z_-]*))"
     r"(?:\.emma[0-9A-Za-z_-]+)?"
 )
 TEXT_SUFFIXES = {
@@ -295,12 +298,28 @@ def discover_assembly_targets(files: list[Path]) -> list[AssemblyTarget]:
     return [AssemblyTarget(sample, sample) for sample in sorted(samples)]
 
 
+@functools.lru_cache(maxsize=None)
+def prefix_boundary_re(prefix: str) -> re.Pattern:
+    """Match `prefix` only where it ends an identifier.
+
+    A bare `prefix in text` also matches every curated variant built on top of it:
+    for target OG750.hifi.241004.v323mitohifi it matches
+    OG750.hifi.241004.v323mitohifi_collapsed, so the original assembly's report
+    absorbed the collapsed monomer's annotation, depth and LCA tables. Same for
+    getorg1770 against getorg1770reseed / getorg1770reseed_rgj.
+
+    Same lookaround character class as SAMPLE_RE / ASSEMBLY_RE, so "ends at a dot
+    or a path separator" means the same thing everywhere in this file.
+    """
+    return re.compile(rf"(?<![A-Za-z0-9_-]){re.escape(prefix)}(?![A-Za-z0-9_-])")
+
+
 def text_contains_sample(path: Path, sample: str) -> bool:
     return sample in text_for_matching(path)
 
 
 def text_contains_assembly(path: Path, target: AssemblyTarget) -> bool:
-    return target.prefix in text_for_matching(path)
+    return prefix_boundary_re(target.prefix).search(text_for_matching(path)) is not None
 
 
 def has_any_sample_id(path: Path) -> bool:
@@ -334,7 +353,7 @@ def belongs_to_assembly(path: Path, target: AssemblyTarget) -> bool:
         return True
     if is_common_file(path):
         return True
-    if target.prefix in str(path):
+    if prefix_boundary_re(target.prefix).search(str(path)):
         return True
     if text_contains_assembly(path, target):
         return True

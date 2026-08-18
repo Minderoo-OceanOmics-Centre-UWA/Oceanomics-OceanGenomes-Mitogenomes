@@ -19,25 +19,19 @@ except ImportError:  # Allows unit tests to inject a connection factory.
 INTEGER_COLUMNS = {
     "reject_count", "error_count", "warning_count", "info_count",
     "fatal_discrepancy_count", "nostop_count", "conversion_exit",
-    "preflight_exit", "webin_exit", "flatfile_size", "manifest_size",
-    "webin_error_count", "webin_warning_count",
+    "preflight_exit", "webin_exit",
 }
 
+# Same order as RECORD_COLUMNS in collate_ena_validation.py, so the two lists
+# can be diffed against each other when a column is added or removed.
 INSERT_COLUMNS = [
     "assembly_prefix", "og_id", "tech", "seq_date", "code", "ena_study",
     "validation_mode", "validation_attempt", "table2asn_status",
     "reject_count", "error_count", "warning_count", "info_count",
     "fatal_discrepancy_count", "nostop_count", "blocking_codes", "warning_codes",
     "conversion_status", "conversion_reason", "conversion_exit",
-    "preflight_status", "preflight_reason", "preflight_exit", "webin_status",
-    "webin_reason", "webin_exit", "submission_ready", "flatfile_name",
-    "package_status", "local_package_status", "webin_test_status",
-    "webin_production_status", "webin_error_count", "webin_warning_count",
-    "webin_error_codes", "webin_cli_version", "webin_test_report_path",
-    "webin_production_report_path", "overall_status", "package_digest",
-    "flatfile_sha256", "flatfile_size", "manifest_name", "manifest_sha256",
-    "manifest_size", "workflow_run_name", "workflow_session_id",
-    "pipeline_revision", "result_digest",
+    "preflight_status", "preflight_reason", "preflight_exit",
+    "webin_status", "webin_reason", "webin_exit", "submission_ready",
 ]
 
 
@@ -79,7 +73,7 @@ def read_record(path: Union[str, Path]) -> dict[str, object]:
             record[column] = value or None
     for required in ("assembly_prefix", "og_id", "validation_mode", "validation_attempt",
                      "table2asn_status", "conversion_status", "preflight_status",
-                     "webin_status", "result_digest"):
+                     "webin_status"):
         if record.get(required) is None:
             raise ValueError(f"Required ENA validation value is empty: {required}")
     return record
@@ -92,12 +86,12 @@ def upload_record(record: dict[str, object], db_config: dict[str, object], conne
     """Insert or overwrite the row for this (assembly_prefix, ena_study, validation_attempt).
 
     A rerun under the same key overwrites the previous attempt so failed
-    attempts don't pile up history rows. Rows freeze only after the associated
-    selected package for that study is explicitly submitted or assigned an accession.
+    attempts don't pile up history rows. Nothing freezes a row: submission is a
+    separate pipeline that owns its own state, so the latest validation of an
+    assembly is always the one recorded here.
 
-    Returns "inserted" (first row for this key), "updated" (overwrote a
-    non-archived attempt), or "locked" (the selected package is already
-    submitted/accessioned and the row was left untouched).
+    Returns "inserted" (first row for this key) or "updated" (overwrote an
+    earlier attempt).
     """
     connect = connect or (psycopg2.connect if psycopg2 is not None else None)
     if connect is None:
@@ -114,13 +108,6 @@ def upload_record(record: dict[str, object], db_config: dict[str, object], conne
             {set_clause},
             recorded_at = CURRENT_TIMESTAMP,
             attempt_count = ena_validation_attempts.attempt_count + 1
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM ena_submission_selections selection
-            WHERE selection.ena_study_accession = EXCLUDED.ena_study
-              AND selection.og_id = EXCLUDED.og_id
-              AND selection.archive_status IN ('SUBMITTED', 'ACCESSION_ASSIGNED')
-        )
         RETURNING id, (xmax = 0) AS inserted
     """
     connection = connect(**db_config)
@@ -134,8 +121,6 @@ def upload_record(record: dict[str, object], db_config: dict[str, object], conne
         raise
     finally:
         connection.close()
-    if row is None:
-        return "locked"
     return "inserted" if row[1] else "updated"
 
 
@@ -149,15 +134,10 @@ def main() -> int:
         result = upload_record(record, load_db_config(args.config_file))
         if result == "inserted":
             print(f"✅ Success: inserted ENA validation attempt for {record['assembly_prefix']}")
-        elif result == "updated":
-            print(
-                f"🔁 Updated ENA validation attempt for {record['assembly_prefix']} "
-                "(previous attempt was not submission-ready)"
-            )
         else:
             print(
-                f"🔒 Submission-ready record already exists for {record['assembly_prefix']}; "
-                "new attempt not recorded"
+                f"🔁 Updated ENA validation attempt for {record['assembly_prefix']} "
+                "(overwrote the previous attempt)"
             )
         return 0
     except Exception as error:

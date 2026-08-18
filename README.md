@@ -41,12 +41,13 @@ rapid wiring tests.
 - **Database integration** – push assembly metrics, annotation stats, and BLAST/LCA summaries to PostgreSQL (optional).
 - **QC and packaging** – evaluate validation criteria, build GenBank-ready bundles, run `table2asn`, and collect diagnostics.
 - **ENA candidates** – produce a complete genome-context package for every viable
-  assembly/annotation version, using full OceanOmics SeqIDs and stable
-  specimen-level gene serials rendered under the locus-tag prefix registered to
-  that candidate's technology (`OGMTHIFI_<OG><gene>`, `OGMTHIC_…`, `OGMTILMN_…`);
-  every technology with a viable mitogenome is published to its own ENA child
-  study, with one selected package per specimen per technology chosen and
-  production-validated later by `ena_selection.nf` without auto-submission.
+  assembly/annotation version, using full OceanOmics SeqIDs; the flat file carries
+  no `/locus_tag`, since tags are allocated and injected by the downstream
+  submission pipeline. Every technology with a viable mitogenome is published to
+  its own ENA child study. Choosing one package per specimen per technology and
+  submitting it belongs to the downstream submission pipeline; this pipeline
+  ends at the flatfile format check and reports the verdict as
+  `submission_ready`.
 - **Reporting** – collate MultiQC inputs, generate run-level reports, and write `pipeline_info/` provenance files.
 
 See `docs/images` for workflow logos and refer to `docs/output.md` for a stage-by-stage file manifest.

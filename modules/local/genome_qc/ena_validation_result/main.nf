@@ -31,10 +31,7 @@ process ENA_VALIDATION_RESULT {
         --ena-study '${ena_study}' \\
         --validation-mode '${settings.validation_mode}' \\
         --validation-attempt '${settings.validation_attempt}' \\
-        ${webin_arg} \\
-        --workflow-run-name '${settings.workflow_run_name ?: ''}' \\
-        --workflow-session-id '${settings.workflow_session_id ?: ''}' \\
-        --pipeline-revision '${settings.pipeline_revision ?: ''}'
+        ${webin_arg}
 
     printf '"%s":\n    python: "%s"\n    collate_ena_validation: "1.0.0"\n' \\
         "${task.process}" "\$(python --version | awk '{print \$2}')" > versions.yml
@@ -42,8 +39,8 @@ process ENA_VALIDATION_RESULT {
 
     stub:
     """
-    printf 'assembly_prefix\tog_id\ttech\tseq_date\tcode\tena_study\tvalidation_mode\tvalidation_attempt\ttable2asn_status\treject_count\terror_count\twarning_count\tinfo_count\tfatal_discrepancy_count\tnostop_count\tblocking_codes\twarning_codes\tconversion_status\tconversion_reason\tconversion_exit\tpreflight_status\tpreflight_reason\tpreflight_exit\twebin_status\twebin_reason\twebin_exit\tsubmission_ready\tflatfile_name\tflatfile_sha256\tflatfile_size\tmanifest_name\tmanifest_sha256\tmanifest_size\tworkflow_run_name\tworkflow_session_id\tpipeline_revision\tresult_digest\n' > '${meta.mt_assembly_prefix}.ena_validation_result.tsv'
-    printf '${meta.mt_assembly_prefix}\t${meta.id}\t\t\t\t${meta.ena_study ?: ''}\t${settings.validation_mode}\t${settings.validation_attempt}\tPASS\t0\t0\t0\t0\t0\t0\t\t\tPASS\tok\t0\tNOT_APPLICABLE\tnot_applicable\t\tPASS\tvalidated\t0\ttrue\tstub.embl.gz\tstub\t1\tstub.webin_manifest.txt\tstub\t1\tstub\tstub\tstub\tstub\n' >> '${meta.mt_assembly_prefix}.ena_validation_result.tsv'
+    printf 'assembly_prefix\tog_id\ttech\tseq_date\tcode\tena_study\tvalidation_mode\tvalidation_attempt\ttable2asn_status\treject_count\terror_count\twarning_count\tinfo_count\tfatal_discrepancy_count\tnostop_count\tblocking_codes\twarning_codes\tconversion_status\tconversion_reason\tconversion_exit\tpreflight_status\tpreflight_reason\tpreflight_exit\twebin_status\twebin_reason\twebin_exit\tsubmission_ready\n' > '${meta.mt_assembly_prefix}.ena_validation_result.tsv'
+    printf '${meta.mt_assembly_prefix}\t${meta.id}\t\t\t\t${meta.ena_study ?: ''}\t${settings.validation_mode}\t${settings.validation_attempt}\tPASS\t0\t0\t0\t0\t0\t0\t\t\tPASS\tok\t0\tNOT_APPLICABLE\tnot_applicable\t\tPASS\tvalidated\t0\ttrue\n' >> '${meta.mt_assembly_prefix}.ena_validation_result.tsv'
     printf '"%s":\n    python: "stub"\n    collate_ena_validation: "stub"\n' "${task.process}" > versions.yml
     """
 }

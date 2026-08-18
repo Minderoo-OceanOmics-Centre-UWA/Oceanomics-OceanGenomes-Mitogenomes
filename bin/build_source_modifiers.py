@@ -20,6 +20,8 @@ from pathlib import Path
 import pandas as pd
 import psycopg2
 
+from geo_loc_name_utils import resolve_geo_loc_name, unmapped_warning
+
 # -------------------------------
 # Load DB credentials from .cfg
 # -------------------------------
@@ -160,6 +162,24 @@ def convert_full_latlon(raw_value):
     return fallback_parse_latlon(raw_value)
 
 # ---------------------------
+# Source-modifier validation
+# ---------------------------
+# INSDC lat_lon: a latitude with a N/S hemisphere then a longitude with an E/W
+# hemisphere. Values that parse into something else (two latitudes, a missing
+# hemisphere, an out-of-range magnitude) reach table2asn as
+# SEQ_DESCR.LatLonFormat, and EMBOSS then demotes them to a stray /note on EMBL
+# conversion so ENA never sees a lat_lon at all. Catch them here instead.
+LATLON_RE = re.compile(r"^(\d+(?:\.\d+)?) ([NS]) (\d+(?:\.\d+)?) ([EW])$")
+
+def valid_lat_lon(value):
+    """True when `value` is a well-formed INSDC lat_lon within coordinate range."""
+    match = LATLON_RE.match(str(value).strip())
+    if not match:
+        return False
+    lat, _lat_hem, lon, _lon_hem = match.groups()
+    return float(lat) <= 90.0 and float(lon) <= 180.0
+
+# ---------------------------
 # DB query
 # ---------------------------
 def fetch_bankit_metadata(conn, og_id, tech):
@@ -183,7 +203,16 @@ def fetch_bankit_metadata(conn, og_id, tech):
             s.og_id AS isolate,
             COALESCE(t.tissue, 'Unknown') AS tissue_type,
             CASE
-                WHEN s.country IS NULL THEN 'Unknown'
+                -- A NULL country used to collapse straight to 'Unknown', discarding
+                -- any locality recorded alongside it. Some rows carry no country but
+                -- a locality that names one ('Israel, Elat, Gulf of Aquaba'), so pass
+                -- the locality through and let resolve_geo_loc_name promote its
+                -- leading token when that token is a controlled value.
+                WHEN s.country IS NULL OR s.country = '' THEN
+                    CASE
+                        WHEN s.location IS NULL OR s.location = '' THEN 'Unknown'
+                        ELSE s.location
+                    END
                 WHEN s.state IS NULL OR s.state = '' THEN
                     CASE
                         WHEN s.location IS NULL OR s.location = '' THEN s.country
@@ -278,11 +307,45 @@ def main():
     _unknown = df_exp["formatted_lat_lon"].str.strip().str.lower().eq("unknown")
     df_exp.loc[_unknown, "formatted_lat_lon"] = ""
 
-    # geo_loc_name (the 'country' modifier) must start with a value from NCBI's
-    # controlled country/ocean list. The DB query substitutes 'Unknown' when the
-    # country is missing, which NCBI rejects; blank it so the modifier is omitted.
-    _no_country = df_exp["country"].astype(str).str.strip().str.lower().eq("unknown")
-    df_exp.loc[_no_country, "country"] = ""
+    # A coordinate that survived parsing but is not a well-formed INSDC lat_lon
+    # (e.g. "25.51000 N 23.43000 S", two latitudes and no longitude) must not be
+    # emitted: table2asn flags it and EMBOSS then demotes it to a note, so the
+    # bad value reaches ENA disguised as free text. Drop it and say so loudly.
+    _bad_latlon = df_exp["formatted_lat_lon"].ne("") & ~df_exp["formatted_lat_lon"].apply(valid_lat_lon)
+    for _seqid, _value in zip(df_exp.loc[_bad_latlon, "SeqID"], df_exp.loc[_bad_latlon, "formatted_lat_lon"]):
+        print(f"⚠️  {_seqid}: lat_lon '{_value}' is not a valid INSDC coordinate; "
+              f"omitting the modifier. Fix the source record.", flush=True)
+    df_exp.loc[_bad_latlon, "formatted_lat_lon"] = ""
+
+    # geo_loc_name (the 'country' modifier) must start with a value from the INSDC
+    # controlled list, and it is one of only two mandatory fields in ENA checklist
+    # ERC000011. The sample table is rebuilt from a spreadsheet, so typos and
+    # long-form names ("Kingdom of Tonga", "Austalia") are translated here rather
+    # than corrected upstream, where the next refresh would undo the fix.
+    # Where the row records no country, a BioSample this project already registered
+    # for the same og_id may state one; failing that the INSDC 'not provided' term
+    # is written, because geo_loc_name is mandatory and omitting it fails sample
+    # registration outright.
+    _resolved = [
+        resolve_geo_loc_name(_country, _og_id)
+        for _country, _og_id in zip(df_exp["country"], df_exp["isolate"])
+    ]
+    df_exp["country"] = [value for value, _status in _resolved]
+    # An unmapped value is left untouched on purpose: table2asn then raises
+    # SEQ_DESCR.BadGeoLocNameCode and the validation gate quarantines this one
+    # assembly, which is safer than substituting a placeholder and silently
+    # replacing the recorded locality.
+    for _seqid, (_value, _status) in zip(df_exp["SeqID"], _resolved):
+        if _status == "unmapped":
+            print(unmapped_warning(_seqid, _value), flush=True)
+        elif _status == "derived":
+            # An inference from the locality text rather than a recorded country,
+            # so say so: it is the one value here that was not asserted by the DB.
+            print(f"ℹ️  {_seqid}: no country recorded; derived geo_loc_name "
+                  f"{_value!r} from the locality.", flush=True)
+        elif _status == "biosample":
+            print(f"ℹ️  {_seqid}: no country recorded; recovered geo_loc_name "
+                  f"{_value!r} from the registered NCBI BioSample.", flush=True)
 
     for _, row in df_exp.iterrows():
         full_seqid = row["SeqID"]

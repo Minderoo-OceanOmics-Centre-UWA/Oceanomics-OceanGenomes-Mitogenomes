@@ -295,28 +295,28 @@ this entire stage is skipped.
     `ena/<assembly_prefix>.webin_status.tsv`, `ena/webin_output/`: Submission-ready bundle and reports when
     `--ena_webin_validate` is enabled and Webin validation passes.
   - `ena/<assembly_prefix>.ena_validation_result.tsv`: normalized result for every submission gate, including
-    explicit `NOT_RUN`, `NOT_REQUESTED`, and `NOT_APPLICABLE` states and artefact checksums.
+    explicit `NOT_RUN`, `NOT_REQUESTED`, and `NOT_APPLICABLE` states. Its `submission_ready` column is `true`
+    when the flatfile cleared every gate this pipeline runs, which is the signal the submission pipeline consumes.
 - `ena/ena_validation_results_mqc.tsv`: batch-level ENA submission-readiness table included in MultiQC.
 - `sql_uploaded_data/<assembly_prefix>.ena_validation.upload.txt`: non-fatal PostgreSQL upload result.
 - `sql_uploaded_data/upload_results_summary_mqc.tsv`: final summary across pre-QC and ENA validation uploads.
 - `mitogenomes/<sample>/<assembly_prefix>/ena/package/`: the complete per-version
   genome-context candidate, including the full-SeqID EMBL flat file, chromosome
-  list, manifest, tagged TBL, locus-tag mapping, package metadata, local
-  validation result, and checksums. It also holds the collaborator handover pair,
-  `<full_seqid>.fa` and `<full_seqid>.gff`: the GFF carries `locus_tag=` on every
-  taggable feature and its `ID=`/`Parent=` are rebuilt from those tags, so it lines
-  up against the published INSDC record rather than against the annotator's own
-  identifiers. Send this directory, not `genbank/processed/`, whose GFF still keys
-  on Emma's UUIDs. `<full_seqid>.package_metadata.json` reports
-  `gff_locus_tag_coverage` so an untagged feature is visible without opening the
-  file; it never blocks an ENA submission.
-- `mitogenomes/<sample>/<assembly_prefix>/ena/validation/`: Webin test results
-  for candidates and production validation for the package selected for that
-  specimen and technology.
-- `ena/selection/ena_selection_report.tsv`: comparison outcome for all candidate
-  packages, grouped by specimen and technology.
-- `ena/selection/ena_selected_packages.tsv`: one row per selected package, one
-  per specimen per technology.
+  list, manifest, feature table, package metadata, and checksums. It also holds
+  the collaborator handover pair, `<full_seqid>.fa` and `<full_seqid>.gff`.
+  `<full_seqid>.package_metadata.json` carries the package's identity, digests
+  and a `flatfile_validation` block (status, reason, error and warning counts,
+  webin-cli version). It deliberately stores no readiness verdict and no
+  published path: readiness is derived from `biosample_accession`, which can
+  change without the package changing, and the durable location is whatever the
+  caller globbed. No feature in any of these files carries a `/locus_tag`:
+  tags are allocated and injected by the downstream ENA submission pipeline, so
+  the qualifier is absent rather than empty (an empty one fails validation).
+- `mitogenomes/<sample>/<assembly_prefix>/ena/validation/flatfile/`: the
+  sequence-context flatfile format check, run for every candidate. This is the
+  pipeline's last ENA gate, and a pass here sets `submission_ready = true` even
+  when the package is still waiting on a BioSample accession: the accession is
+  the submission pipeline's to resolve, not a defect in the flatfile.
 
 </details>
 
@@ -338,14 +338,14 @@ When `ena.nf` is used independently, it publishes the same per-sample `genbank/e
 When `--sql_config` is supplied and uploads are not skipped, the standalone runner uses the same uploader and
 emits the same `*.ena_validation.upload.txt` log. `ena_validation_attempts` holds one row per
 `(assembly_prefix, ena_study, validation_attempt)`: a rerun under the same key overwrites that row (`updated`,
-with `attempt_count` incremented) instead of adding history. The row freezes
-only when the corresponding selection record for that study is marked
-`SUBMITTED` or `ACCESSION_ASSIGNED`. Use a new `--ena_validation_attempt` token for a
-deliberately separate, independently tracked attempt.
-The explicit numbered SQL migrations in `sql/` create the validation, uniform
-depth, candidate-package, prefix-free locus-registry, and per-technology
-submission-selection structures.
-They are not run automatically by the pipeline.
+with `attempt_count` incremented) instead of adding history. Nothing freezes the
+row: submission state belongs to the separate submission pipeline, so the latest
+validation of an assembly is always the one recorded. Use a new
+`--ena_validation_attempt` token for a deliberately separate, independently
+tracked attempt.
+The explicit numbered SQL migrations in `sql/` create the validation and uniform
+depth structures, and retire the locus registry and the selection tables that
+this pipeline no longer populates. They are not run automatically by the pipeline.
 
 ### Standalone QC-only workflow (`qc_only_from_annotations.nf`)
 

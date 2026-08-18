@@ -7,18 +7,48 @@ import re
 from pathlib import Path
 
 
-VALIDATOR_RE = re.compile(r"^(REJECT|ERROR|WARNING|INFO):\s*[^[]*\[([^]]+)]\s*(.*)$")
+# table2asn writes the severity in mixed case ("Error: valid [SEQ_FEAT.StartCodon] ..."),
+# so this must be case-insensitive. Matching only upper case silently routed every
+# real finding into the UNPARSED/INFO fallback below, which made the gate report
+# PASS for every sample in a run regardless of what the .val actually said.
+VALIDATOR_RE = re.compile(r"^(REJECT|ERROR|WARNING|INFO):\s*[^[]*\[([^]]+)]\s*(.*)$",
+                          re.IGNORECASE)
 FATAL_RE = re.compile(r"(?:^|\s)FATAL(?::|\s|$)")
 FATAL_CODE_RE = re.compile(r"FATAL[:\s]+([^:\s]+)")
 
 # Discrepancy-report FATAL codes that are expected for organelle-only
-# submissions and shouldn't quarantine a sample. NO_LOCUS_TAGS fires for any
-# submission without a registered NCBI locus-tag prefix; GenBank/ENA do not
-# require locus tags on organelle genomes, so it's downgraded to advisory.
+# submissions and shouldn't quarantine a sample. NO_LOCUS_TAGS fires on EVERY
+# record this pipeline produces, by design: locus tags are assigned by the
+# downstream submission pipeline, so nothing here writes a /locus_tag and
+# table2asn always sees a tag-free feature table. GenBank/ENA do not require
+# locus tags on organelle genomes either. Do not promote this back to fatal --
+# it would quarantine every sample in the run.
 # MISSING_PROTEIN_ID fires on every sample because we deliberately omit
 # protein_id (EMMA's placeholder UUID isn't a real accession; ENA/GenBank
 # assign the real one at accessioning time), so it's expected, not an error.
 ADVISORY_DISCREPANCY_CODES = {"NO_LOCUS_TAGS", "MISSING_PROTEIN_ID"}
+
+# Validator codes that table2asn raises against NCBI submission rules which do
+# not apply to this pipeline's ENA route. They are demoted to WARNING so they
+# stay visible in the findings table without quarantining an otherwise good
+# assembly. Everything not listed here keeps the severity table2asn assigned.
+#
+# LatLonWater/LatLonGeoLocName: NCBI cross-checks the coordinate against a land
+#   polygon and complains that an offshore sample is "in water". ENA performs no
+#   such check, and these fire on most OceanOmics samples by their nature.
+# GeneXrefWithoutLocus: an artefact of deliberately shipping a locus_tag-free
+#   feature table, for the same reason NO_LOCUS_TAGS is advisory above.
+# OrganismIsUndefinedSpecies: NCBI wants a specific identifier appended to a
+#   'Genus sp.' name. ENA requires the opposite -- webin-cli rejects anything
+#   other than the bare submittable taxon (see species_name_utils
+#   .normalise_open_nomenclature), and validates these samples today. Acting on
+#   the NCBI advice here would break the ENA path.
+ADVISORY_VALIDATOR_CODES = {
+    "SEQ_DESCR.LatLonWater",
+    "SEQ_DESCR.LatLonGeoLocName",
+    "SEQ_FEAT.GeneXrefWithoutLocus",
+    "SEQ_DESCR.OrganismIsUndefinedSpecies",
+}
 
 
 def unique_join(values):
@@ -35,8 +65,14 @@ def parse_validator(path):
         match = VALIDATOR_RE.match(raw)
         if match:
             severity, code, message = match.groups()
+            severity = severity.upper()
+            if code in ADVISORY_VALIDATOR_CODES:
+                severity = "WARNING"
         else:
-            severity, code, message = "INFO", "UNPARSED", raw
+            # An unrecognised line means table2asn changed its output format, not
+            # that the record is clean. Surface it as a WARNING so it is visible
+            # in the findings table rather than being buried among INFO rows.
+            severity, code, message = "WARNING", "UNPARSED", raw
         findings.append((path.name, severity, code, message.replace("\t", " ")))
     return findings
 

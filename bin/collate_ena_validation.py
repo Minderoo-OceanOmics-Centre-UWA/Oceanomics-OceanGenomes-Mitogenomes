@@ -6,8 +6,6 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
-import hashlib
-import json
 from pathlib import Path
 
 
@@ -20,28 +18,13 @@ RECORD_COLUMNS = [
     "conversion_status", "conversion_reason", "conversion_exit",
     "preflight_status", "preflight_reason", "preflight_exit",
     "webin_status", "webin_reason", "webin_exit", "submission_ready",
-    "package_status", "local_package_status", "webin_test_status",
-    "webin_production_status", "webin_error_count", "webin_warning_count",
-    "webin_error_codes", "webin_cli_version", "webin_test_report_path",
-    "webin_production_report_path", "overall_status", "package_digest",
-    "flatfile_name", "flatfile_sha256", "flatfile_size",
-    "manifest_name", "manifest_sha256", "manifest_size",
-    "workflow_run_name", "workflow_session_id", "pipeline_revision",
-    "result_digest",
 ]
 
 MQC_COLUMNS = [
     "assembly_prefix", "og_id", "validation_mode", "ena_study",
     "table2asn_status", "conversion_status", "preflight_status",
     "webin_status", "webin_reason", "submission_ready",
-    "package_status", "local_package_status", "webin_test_status",
-    "webin_production_status", "overall_status",
     "validation_attempt",
-]
-
-DIGEST_COLUMNS = [
-    column for column in RECORD_COLUMNS
-    if column not in {"result_digest", "workflow_run_name", "workflow_session_id", "pipeline_revision"}
 ]
 
 
@@ -63,16 +46,6 @@ def read_status(path: Path) -> dict[str, str]:
     return row
 
 
-def file_metadata(path: Path | None) -> tuple[str, str, str]:
-    if path is None or not path.is_file():
-        return "", "", ""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return path.name, digest.hexdigest(), str(path.stat().st_size)
-
-
 def identity_from_prefix(prefix: str, og_id: str) -> tuple[str, str, str, str]:
     parts = prefix.split(".", 3)
     inferred_og = parts[0] if parts and parts[0] else og_id
@@ -82,11 +55,6 @@ def identity_from_prefix(prefix: str, og_id: str) -> tuple[str, str, str, str]:
     return inferred_og or og_id, tech, seq_date, code
 
 
-def digest_record(record: dict[str, str]) -> str:
-    payload = "\n".join(f"{column}={record.get(column, '')}" for column in DIGEST_COLUMNS)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 def _first(paths: list[Path], suffix: str) -> Path | None:
     return next((path for path in paths if path.name.endswith(suffix)), None)
 
@@ -94,35 +62,19 @@ def _first(paths: list[Path], suffix: str) -> Path | None:
 def build_record(
     input_paths: list[Path], *, assembly_prefix: str, og_id: str,
     ena_study: str, validation_mode: str, validation_attempt: str,
-    webin_requested: bool, workflow_run_name: str = "",
-    workflow_session_id: str = "", pipeline_revision: str = "",
+    webin_requested: bool,
 ) -> dict[str, str]:
     table_path = _first(input_paths, ".table2asn_status.tsv")
     conversion_path = _first(input_paths, ".ena_conversion_status.tsv")
     preflight_path = _first(input_paths, ".ena_preflight_status.tsv")
     preflight_check_path = _first(input_paths, ".ena_preflight_check.tsv")
     webin_path = _first(input_paths, ".webin_status.tsv")
-    webin_test_path = _first(input_paths, ".webin_test_status.tsv")
-    webin_production_path = _first(input_paths, ".webin_production_status.tsv")
-    local_package_path = _first(input_paths, ".local_validation.tsv")
-    package_metadata_path = _first(input_paths, ".package_metadata.json")
-    flatfile_path = next((p for p in input_paths if p.name.endswith(".embl.gz")), None)
-    manifest_path = _first(input_paths, ".webin_manifest.txt")
 
     table = read_status(table_path) if table_path else {}
     conversion = read_status(conversion_path) if conversion_path else {}
     preflight = read_status(preflight_path) if preflight_path else {}
     preflight_check = read_tsv_row(preflight_check_path) if preflight_check_path else {}
     webin = read_status(webin_path) if webin_path else {}
-    webin_test = read_status(webin_test_path) if webin_test_path else {}
-    webin_production = read_status(webin_production_path) if webin_production_path else {}
-    local_package = read_status(local_package_path) if local_package_path else {}
-    package_metadata = {}
-    if package_metadata_path:
-        try:
-            package_metadata = json.loads(package_metadata_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            package_metadata = {}
 
     if validation_mode == "validate":
         table_status = "NOT_APPLICABLE"
@@ -163,37 +115,16 @@ def build_record(
         webin_reason = "not_run"
 
     inferred_og, tech, seq_date, code = identity_from_prefix(assembly_prefix, og_id)
-    flat_name, flat_hash, flat_size = file_metadata(flatfile_path)
-    manifest_name, manifest_hash, manifest_size = file_metadata(manifest_path)
     gates_pass = (
         preflight_status == "PASS" if validation_mode == "validate"
         else table_status == "PASS" and conversion_status == "PASS"
     )
-    package_status = str(package_metadata.get("package_status") or "NOT_RUN")
-    local_package_status = local_package.get(
-        "status", str(package_metadata.get("local_validation_status") or "NOT_RUN")
-    )
-    webin_test_status = webin_test.get("status", "NOT_RUN")
-    webin_production_status = webin_production.get("status", "NOT_RUN")
-    # Selection for submission is deliberately decided outside this per-candidate
-    # collator, so a candidate can never become submission-ready here.
-    ready = "false"
-    if webin_production_status == "PASS":
-        overall_status = "PRODUCTION_VALIDATED"
-    elif webin_production_status not in {"NOT_RUN", "NOT_REQUESTED"}:
-        overall_status = webin_production_status
-    elif webin_test_status == "PASS":
-        overall_status = "WEBIN_TEST_PASS"
-    elif webin_test_status not in {"NOT_RUN", "NOT_REQUESTED"}:
-        overall_status = webin_test_status
-    elif package_status == "READY" and local_package_status == "PASS":
-        overall_status = "LOCAL_PACKAGE_READY"
-    elif package_status != "NOT_RUN":
-        overall_status = package_status
-    elif gates_pass and webin_status == "PASS":
-        overall_status = "LEGACY_SEQUENCE_VALIDATED"
-    else:
-        overall_status = "NOT_RUN"
+    # The flatfile format check (WEBIN_VALIDATE, -context sequence) is this
+    # pipeline's last gate.  A flatfile that clears every gate is ready to hand
+    # to the submission pipeline; selecting and submitting it is that pipeline's
+    # job, not something this record waits on.  Without the format check there
+    # is no readiness claim to make, so --ena_webin_validate false stays false.
+    ready = "true" if gates_pass and webin_status == "PASS" else "false"
 
     record = {column: "" for column in RECORD_COLUMNS}
     record.update({
@@ -224,37 +155,7 @@ def build_record(
         "webin_reason": webin_reason,
         "webin_exit": webin.get("webin_exit", ""),
         "submission_ready": ready,
-        "package_status": package_status,
-        "local_package_status": local_package_status,
-        "webin_test_status": webin_test_status,
-        "webin_production_status": webin_production_status,
-        "webin_error_count": webin_production.get(
-            "error_count", webin_test.get("error_count", "")
-        ),
-        "webin_warning_count": webin_production.get(
-            "warning_count", webin_test.get("warning_count", "")
-        ),
-        "webin_error_codes": webin_production.get(
-            "error_codes", webin_test.get("error_codes", "")
-        ),
-        "webin_cli_version": webin_production.get(
-            "webin_cli_version", webin_test.get("webin_cli_version", "")
-        ),
-        "webin_test_report_path": webin_test.get("report_path", ""),
-        "webin_production_report_path": webin_production.get("report_path", ""),
-        "overall_status": overall_status,
-        "package_digest": str(package_metadata.get("package_digest") or ""),
-        "flatfile_name": flat_name,
-        "flatfile_sha256": flat_hash,
-        "flatfile_size": flat_size,
-        "manifest_name": manifest_name,
-        "manifest_sha256": manifest_hash,
-        "manifest_size": manifest_size,
-        "workflow_run_name": workflow_run_name,
-        "workflow_session_id": workflow_session_id,
-        "pipeline_revision": pipeline_revision,
     })
-    record["result_digest"] = digest_record(record)
     return record
 
 
@@ -289,9 +190,6 @@ def command_record(args: argparse.Namespace) -> None:
         validation_mode=args.validation_mode,
         validation_attempt=args.validation_attempt,
         webin_requested=args.webin_requested,
-        workflow_run_name=args.workflow_run_name,
-        workflow_session_id=args.workflow_session_id,
-        pipeline_revision=args.pipeline_revision,
     )
     write_rows(Path(args.output), RECORD_COLUMNS, [record])
 
@@ -317,9 +215,6 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--validation-mode", required=True, choices=["pipeline", "convert_validate", "validate"])
     record.add_argument("--validation-attempt", required=True)
     record.add_argument("--webin-requested", action="store_true")
-    record.add_argument("--workflow-run-name", default="")
-    record.add_argument("--workflow-session-id", default="")
-    record.add_argument("--pipeline-revision", default="")
     record.set_defaults(func=command_record)
 
     summary = subparsers.add_parser("summary")

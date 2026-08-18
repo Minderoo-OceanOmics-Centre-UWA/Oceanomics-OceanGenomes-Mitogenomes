@@ -1,0 +1,28 @@
+LOCUS       complete               16500 bp    DNA              UNK 01-JAN-1980
+     CDS             100..190
+                     /gene="G1"
+     CDS             200..290
+                     /gene="G2"
+     CDS             300..390
+                     /gene="G3"
+     CDS             400..490
+                     /gene="G4"
+     CDS             500..590
+                     /gene="G5"
+     CDS             600..690
+                     /gene="G6"
+     CDS             700..790
+                     /gene="G7"
+     CDS             800..890
+                     /gene="G8"
+     CDS             900..990
+                     /gene="G9"
+     CDS             1000..1090
+                     /gene="G10"
+     CDS             1100..1190
+                     /gene="G11"
+     CDS             1200..1290
+                     /gene="G12"
+     CDS             1300..1390
+                     /gene="G13"
+//

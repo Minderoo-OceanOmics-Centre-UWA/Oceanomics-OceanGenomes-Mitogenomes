@@ -63,17 +63,34 @@ class CollateEnaValidationTests(unittest.TestCase):
             dict(sample=self.prefix, status=status, reason=reason, webin_exit=exit_code),
         )
 
-    def test_pass_record_and_artifact_provenance(self):
-        flatfile = self.root / f"{self.prefix}.embl.gz"
-        flatfile.write_bytes(b"flatfile")
-        manifest = self.root / f"{self.prefix}.webin_manifest.txt"
-        manifest.write_text("STUDY\tPRJEB1\n")
-        record = self.build([self.table(), self.conversion(), self.webin(), flatfile, manifest])
-        self.assertEqual(record["submission_ready"], "false")
+    def test_a_clean_flatfile_is_submission_ready(self):
+        """Every gate passed, so the record is ready for the submission pipeline."""
+        record = self.build([self.table(), self.conversion(), self.webin()])
         self.assertEqual(record["webin_status"], "PASS")
-        self.assertEqual(record["overall_status"], "LEGACY_SEQUENCE_VALIDATED")
-        self.assertEqual(len(record["flatfile_sha256"]), 64)
-        self.assertNotIn(str(self.root), record["flatfile_name"])
+        self.assertEqual(record["submission_ready"], "true")
+
+    def test_validate_mode_is_ready_on_preflight_plus_webin(self):
+        """In validate mode the preflight check stands in for table2asn/conversion."""
+        preflight = write_tsv(
+            self.root / f"{self.prefix}.ena_preflight_status.tsv",
+            dict(sample=self.prefix, status="PASS", reason="ok"),
+        )
+        record = self.build([preflight, self.webin()], validation_mode="validate")
+        self.assertEqual(record["table2asn_status"], "NOT_APPLICABLE")
+        self.assertEqual(record["preflight_status"], "PASS")
+        self.assertEqual(record["submission_ready"], "true")
+
+    def test_record_carries_no_provenance_or_package_columns(self):
+        """Selection, packaging and run provenance are not this record's business."""
+        record = self.build([self.table(), self.conversion(), self.webin()])
+        self.assertEqual(list(record), MODULE.RECORD_COLUMNS)
+        self.assertEqual(MODULE.RECORD_COLUMNS[-1], "submission_ready")
+        for absent in (
+            "overall_status", "package_status", "package_digest",
+            "webin_production_status", "flatfile_sha256", "manifest_sha256",
+            "workflow_run_name", "pipeline_revision", "result_digest",
+        ):
+            self.assertNotIn(absent, record)
 
     def test_table2asn_failure_skips_downstream(self):
         record = self.build([self.table("FAIL_TABLE2ASN", error_count=1, blocking_codes="SEQ_FEAT.NoStop")])
@@ -106,9 +123,11 @@ class CollateEnaValidationTests(unittest.TestCase):
                 self.assertEqual(record["submission_ready"], "false")
 
     def test_webin_disabled_is_explicit(self):
+        """Gates pass but there is no flatfile verdict, so no readiness claim."""
         record = self.build([self.table(), self.conversion()], webin_requested=False)
         self.assertEqual(record["webin_status"], "NOT_REQUESTED")
         self.assertEqual(record["webin_reason"], "not_requested")
+        self.assertEqual(record["submission_ready"], "false")
 
     def test_validate_mode_preflight_failure(self):
         status = write_tsv(
@@ -132,14 +151,6 @@ class CollateEnaValidationTests(unittest.TestCase):
         record = self.build([malformed])
         self.assertEqual(record["table2asn_status"], "MALFORMED_STATUS")
         self.assertEqual(record["conversion_status"], "SKIPPED_TABLE2ASN")
-
-    def test_digest_ignores_workflow_provenance_but_changes_with_result(self):
-        paths = [self.table(), self.conversion(), self.webin()]
-        first = self.build(paths, workflow_run_name="run1")
-        second = self.build(paths, workflow_run_name="run2", workflow_session_id="new")
-        failed = self.build([paths[0], paths[1], self.webin("FAIL_WEBIN", "bad", "1")])
-        self.assertEqual(first["result_digest"], second["result_digest"])
-        self.assertNotEqual(first["result_digest"], failed["result_digest"])
 
     def test_batch_summary_keeps_multiple_assemblies(self):
         rows = []

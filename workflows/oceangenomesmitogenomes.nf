@@ -520,10 +520,31 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_precollapse_original = ch_collapse_branched.concatemer
         .map { meta, fasta, _evidence -> [ meta.mt_assembly_run_prefix, meta, fasta ] }
 
-    // The collapse report feeds the assembly summary so a collapsed concatemer is
-    // reported at its monomer length rather than re-flagged as over-length.
+    // The collapse report feeds the assembly summary so the pre-collapse concatemer is
+    // recorded as superseded by the monomer rather than triaged a second time.
     ch_assembly_summary_files = ch_assembly_summary_files.mix(
         COLLAPSE_CONCATEMER.out.report.map { _meta, report -> report }
+    )
+
+    // The monomer carries its own <prefix>_collapsed identity end to end -- own publish
+    // dir, own mitogenome_data row, own remap depth -- so it gets its own summary row.
+    // Without its FASTA that row has no final_length_bp and the summary reports the
+    // curated assembly as `failed`; without the post-curation check it has no circularity
+    // evidence either, because that check is written under the PRE-collapse prefix.
+    //
+    // Filtered to genuine collapses, and the filter is load-bearing, not cosmetic: a
+    // passthrough emits <prefix>.fasta, whose name collides with the pre-collapse FASTA
+    // already staged into the summary module's flat mitogenome_summary_inputs/ dir.
+    ch_assembly_summary_files = ch_assembly_summary_files.mix(
+        COLLAPSE_CONCATEMER.out.fasta
+            .filter { _meta, fasta -> fasta.name.endsWith('_collapsed.fasta') }
+            .map { _meta, fasta -> fasta }
+    )
+    ch_assembly_summary_files = ch_assembly_summary_files.mix(
+        COLLAPSE_CONCATEMER.out.evidence
+            .join(COLLAPSE_CONCATEMER.out.report, by: 0)
+            .filter { _meta, _evidence, report -> collapseAction(report) == 'collapsed' }
+            .map { _meta, evidence, _report -> evidence }
     )
     ch_versions = ch_versions.mix(COLLAPSE_CONCATEMER.out.versions.first())
 

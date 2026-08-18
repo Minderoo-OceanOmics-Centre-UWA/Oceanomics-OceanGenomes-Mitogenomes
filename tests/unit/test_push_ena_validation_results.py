@@ -61,7 +61,7 @@ class PushEnaValidationTests(unittest.TestCase):
             assembly_prefix="OG1.hifi.260101.final", og_id="OG1", ena_study="PRJEB1",
             validation_mode="pipeline", validation_attempt="one", table2asn_status="PASS",
             conversion_status="PASS", preflight_status="NOT_APPLICABLE", webin_status="PASS",
-            submission_ready="true", reject_count="0", result_digest="a" * 64,
+            submission_ready="true", reject_count="0",
         )
         path = root / "record.tsv"
         with path.open("w", newline="") as handle:
@@ -84,7 +84,7 @@ class PushEnaValidationTests(unittest.TestCase):
         self.assertNotIn("validation_attempt = EXCLUDED", connection.cursor_instance.query)
         self.assertEqual(connection.cursor_instance.params["assembly_prefix"], record["assembly_prefix"])
 
-    def test_conflict_on_unready_attempt_is_updated(self):
+    def test_conflict_on_earlier_attempt_is_updated(self):
         with tempfile.TemporaryDirectory() as tmp:
             record = MODULE.read_record(self.make_record(Path(tmp)))
         connection = FakeConnection(row=(1, False))
@@ -92,13 +92,14 @@ class PushEnaValidationTests(unittest.TestCase):
             MODULE.upload_record(record, {}, connect=lambda **_kw: connection), "updated"
         )
 
-    def test_conflict_on_archived_canonical_is_locked(self):
+    def test_upsert_does_not_consult_the_retired_selection_tables(self):
+        """Submission state lives in a separate pipeline; nothing freezes a row here."""
         with tempfile.TemporaryDirectory() as tmp:
             record = MODULE.read_record(self.make_record(Path(tmp)))
-        connection = FakeConnection(row=None)
-        self.assertEqual(
-            MODULE.upload_record(record, {}, connect=lambda **_kw: connection), "locked"
-        )
+        connection = FakeConnection(row=(1, False))
+        MODULE.upload_record(record, {}, connect=lambda **_kw: connection)
+        self.assertNotIn("ena_submission_selections", connection.cursor_instance.query)
+        self.assertNotIn("WHERE NOT EXISTS", connection.cursor_instance.query)
 
     def test_database_failure_rolls_back_and_closes(self):
         with tempfile.TemporaryDirectory() as tmp:
