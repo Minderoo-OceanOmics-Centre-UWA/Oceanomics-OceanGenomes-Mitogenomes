@@ -65,7 +65,7 @@ process GEN_FILES_TABLE2ASN {
     def mgcode = meta.genetic_code ?: 2
     def effective_args = "-indir . -euk -J -t ${sample_sbt} -i ${sample_fa} -f ${sample_tbl} -w ${sample_cmt} -src-file ${sample_src} -o ${sample_out} -M n -j '[mgcode=${mgcode}] [location=mitochondrion] ${topology_mod}' -V vb -Z -W"
     """
-    prefix=${meta.mt_assembly_prefix ?: (meta.id ?: "stub")}
+    prefix=${meta.full_seqid ?: meta.mt_assembly_prefix ?: (meta.id ?: "stub")}
     : > \${prefix}.sqn
     : > \${prefix}.val
     : > \${prefix}.stats

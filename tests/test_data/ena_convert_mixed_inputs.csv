@@ -1,3 +1,3 @@
-sample,mt_assembly_prefix,gbf,table2asn_status
-ena_stub,ena_stub,ena_stub.gbf,ena_stub.table2asn_status.tsv
-ena_fail,ena_fail,ena_stub.gbf,ena_stub_fail.table2asn_status.tsv
+sample,mt_assembly_prefix,full_seqid,gbf,table2asn_status
+ena_stub,ena_stub.ilmn.260101.final,ena_stub.ilmn.260101.final.emma102,ena_stub.gbf,ena_stub.table2asn_status.tsv
+ena_fail,ena_fail.ilmn.260101.final,ena_fail.ilmn.260101.final.emma102,ena_stub.gbf,ena_stub_fail.table2asn_status.tsv

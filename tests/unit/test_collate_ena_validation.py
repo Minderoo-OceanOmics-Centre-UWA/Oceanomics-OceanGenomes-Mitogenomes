@@ -25,14 +25,14 @@ class CollateEnaValidationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        self.prefix = "OG123.hifi.260101.final"
+        self.prefix = "OG123.hifi.260101.final.emma102"
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def build(self, paths, **overrides):
         settings = dict(
-            assembly_prefix=self.prefix,
+            full_seqid=self.prefix,
             og_id="OG123",
             ena_study="PRJEB1",
             validation_mode="pipeline",
@@ -155,13 +155,32 @@ class CollateEnaValidationTests(unittest.TestCase):
     def test_batch_summary_keeps_multiple_assemblies(self):
         rows = []
         for suffix in ("a", "b"):
-            record = self.build([self.table()], assembly_prefix=f"OG123.hifi.260101.{suffix}")
+            record = self.build([self.table()], full_seqid=f"OG123.hifi.260101.final.{suffix}")
             path = self.root / f"{suffix}.ena_validation_result.tsv"
             MODULE.write_rows(path, MODULE.RECORD_COLUMNS, [record])
             rows.append(path)
         read = MODULE.read_records(rows)
-        self.assertEqual([row["assembly_prefix"] for row in read], ["OG123.hifi.260101.a", "OG123.hifi.260101.b"])
+        self.assertEqual([row["full_seqid"] for row in read],
+                         ["OG123.hifi.260101.final.a", "OG123.hifi.260101.final.b"])
         self.assertEqual(MODULE.expand_patterns([str(self.root / "*.ena_validation_result.tsv")]), rows)
+
+
+    def test_identity_split_carries_the_annotation(self):
+        record = self.build([self.table()])
+        self.assertEqual(
+            [record[column] for column in ("full_seqid", "og_id", "tech", "seq_date", "code", "annotation")],
+            ["OG123.hifi.260101.final.emma102", "OG123", "hifi", "260101", "final", "emma102"],
+        )
+
+    def test_seqid_without_annotation_leaves_code_intact(self):
+        record = self.build([self.table()], full_seqid="OG123.hifi.260101.final")
+        self.assertEqual(record["code"], "final")
+        self.assertEqual(record["annotation"], "")
+
+    def test_annotation_version_may_contain_dots(self):
+        record = self.build([self.table()], full_seqid="OG123.hifi.260101.final.emma1.0.2")
+        self.assertEqual(record["code"], "final")
+        self.assertEqual(record["annotation"], "emma1.0.2")
 
 
 if __name__ == "__main__":

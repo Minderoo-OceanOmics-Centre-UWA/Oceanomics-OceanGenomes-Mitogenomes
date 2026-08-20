@@ -8,7 +8,7 @@ process BUILD_ENA_CANDIDATE_PACKAGE {
         'tylerpeirce/psycopg2:0.1' }"
 
     input:
-    tuple val(meta), path(sample_fa), path(sample_tbl), path(sample_gff), path(embl_file), path(input_metadata), path(flatfile_status)
+    tuple val(meta), path(sample_fa), path(sample_tbl), path(sample_gff), path(sample_genes), path(embl_file), path(input_metadata), path(flatfile_status)
 
     output:
     tuple val(meta), path("package"), emit: package_dir
@@ -27,6 +27,7 @@ process BUILD_ENA_CANDIDATE_PACKAGE {
         --embl '${embl_file}' \
         --tbl '${sample_tbl}' \
         --gff '${sample_gff}' \
+        --genes '${sample_genes}' \
         ${flatfile_arg} \
         --outdir package
     printf '%s\n' '<tr><td>ENA candidate package</td><td><samp>ena_package.py build</samp></td><td>Builds a self-contained genome-context candidate package for ${meta.full_seqid}.</td></tr>' > 22_ena_candidate_package.tool_params_mqcrow.html
@@ -41,6 +42,7 @@ process BUILD_ENA_CANDIDATE_PACKAGE {
     cp '${sample_tbl}' 'package/${meta.full_seqid}.tbl'
     cp '${sample_fa}' 'package/${meta.full_seqid}.fa'
     cp '${sample_gff}' 'package/${meta.full_seqid}.gff'
+    cp '${sample_genes}' 'package/${meta.full_seqid}.genes.fa'
     printf '{"full_seqid":"${meta.full_seqid}","og_id":"${meta.id}","biosample_accession":"SAMEA1","sequence_sha256":"stub","normalised_circular_sha256":"stub","flatfile_validation":{"status":"PASS","reason":"validated","error_count":0,"warning_count":0,"webin_cli_version":"stub"}}\n' > 'package/${meta.full_seqid}.package_metadata.json'
     printf '%s\n' '<tr><td>ENA candidate package</td><td><samp>stub</samp></td><td>Stub candidate package for ${meta.full_seqid}.</td></tr>' > 22_ena_candidate_package.tool_params_mqcrow.html
     printf '"%s":\n    python: "stub"\n    ena_package: "stub"\n' "${task.process}" > versions.yml

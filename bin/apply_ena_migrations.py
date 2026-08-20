@@ -25,6 +25,9 @@ MIGRATIONS = [
     "010_drop_ena_locus_tables.sql",
     "011_drop_local_package_validation.sql",
     "012_drop_ena_selection_layer.sql",
+    "013_drop_ena_candidate_runs.sql",
+    "014_ena_validation_attempts_full_seqid.sql",
+    "015_ena_submissions.sql",
 ]
 
 
@@ -48,9 +51,12 @@ def audit(cursor) -> dict[str, object]:
             to_regclass('public.ena_validation_attempts') IS NOT NULL,
             to_regclass('public.ena_candidate_packages') IS NULL
                 AND to_regclass('public.ena_submission_selections') IS NULL
-                AND to_regclass('public.ena_submission_queue') IS NULL,
+                AND to_regclass('public.ena_submission_queue') IS NULL
+                AND to_regclass('public.ena_candidate_runs') IS NULL,
             to_regclass('public.ena_locus_registry') IS NULL
-                AND to_regclass('public.ena_candidate_loci') IS NULL
+                AND to_regclass('public.ena_candidate_loci') IS NULL,
+            to_regclass('public.ena_submissions') IS NOT NULL
+                AND to_regclass('public.ena_submission_status') IS NOT NULL
         """
     )
     tables = cursor.fetchone()
@@ -77,13 +83,18 @@ def audit(cursor) -> dict[str, object]:
         measured_depth_rows = cursor.fetchone()[0]
     return {
         "validation_table": tables[0],
-        # Migration 012 retires the selection layer: choosing and submitting a
-        # package belongs to the downstream submission pipeline, so the absence
-        # of these three is the healthy state.
+        # Migrations 012 and 013 retire the selection layer: choosing and
+        # submitting a package, and the run accessions that identify the
+        # raw-read submissions, belong to the downstream submission pipeline,
+        # so the absence of all four is the healthy state.
         "selection_tables_dropped": tables[1],
         # Migration 010 retires the locus tables: tag allocation belongs to the
         # downstream submission pipeline, so their absence is the healthy state.
         "locus_tables_dropped": tables[2],
+        # Migration 015 adds the submission ledger and the status view. This
+        # pipeline never writes them; the downstream submitter does, and it can
+        # only do that if they exist.
+        "submission_ledger": tables[3],
         "mean_depth_column": mean_depth,
         "measured_depth_rows": measured_depth_rows,
     }
@@ -125,6 +136,7 @@ def main() -> int:
                                     "validation_table",
                                     "selection_tables_dropped",
                                     "locus_tables_dropped",
+                                    "submission_ledger",
                                     "mean_depth_column",
                                 )
                             ):

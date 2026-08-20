@@ -9,6 +9,7 @@ workflow {
     meta = [
         id: 'ena_stub',
         mt_assembly_prefix: 'ena_stub',
+        full_seqid: 'ena_stub',
         ena_study: 'PRJEB123419'
     ]
     gbf = file("${projectDir}/test_data/ena_stub.gbf", checkIfExists: true)

@@ -263,9 +263,22 @@ class ProcessTblOrderingTests(unittest.TestCase):
         )
         self.assertNotIn("aa:Met", self._process(tbl=tbl, seq="".join(seq)))
 
-    def test_start_transl_except_needs_the_note(self):
-        # Without EMMA's note nothing is asserted, even though a run of A's is not
-        # a legal initiation codon.
+    def test_start_transl_except_without_the_note(self):
+        # EMMA only sometimes notes a non-standard start (it stayed silent on
+        # OG663's CTG-initiated ATP6), so the sequence has to be what triggers the
+        # declaration. The note the pipeline writes in EMMA's place names the codon.
+        seq = list("A" * 16745)
+        seq[10053 - 1:10053 + 2] = list("CTG")
+        lines = self._process(seq="".join(seq)).splitlines()
+        cds = lines.index("10053\t10349\tCDS")
+        block = lines[cds:cds + 4]
+        self.assertIn("\t\t\ttransl_except\t(pos:10053..10055,aa:Met)", block)
+        self.assertIn(f"\t\t\tnote\t{process_files.START_NOTE_MARK} CTG", block)
+
+    def test_implausible_start_codon_is_left_to_fail(self):
+        # AAA is an initiator in no mitochondrial code, so it reads as a broken CDS
+        # boundary or a bad base call rather than alternative initiation. Declaring
+        # aa:Met there would hide the problem, so it is left for table2asn to flag.
         self.assertNotIn("aa:Met", self._process(seq="A" * 16745))
 
     def test_partial_start_cds_is_left_alone(self):

@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 RECORD_COLUMNS = [
-    "assembly_prefix", "og_id", "tech", "seq_date", "code",
+    "full_seqid", "og_id", "tech", "seq_date", "code", "annotation",
     "ena_study", "validation_mode", "validation_attempt",
     "table2asn_status", "reject_count", "error_count", "warning_count",
     "info_count", "fatal_discrepancy_count", "nostop_count",
@@ -21,7 +21,7 @@ RECORD_COLUMNS = [
 ]
 
 MQC_COLUMNS = [
-    "assembly_prefix", "og_id", "validation_mode", "ena_study",
+    "full_seqid", "og_id", "annotation", "validation_mode", "ena_study",
     "table2asn_status", "conversion_status", "preflight_status",
     "webin_status", "webin_reason", "submission_ready",
     "validation_attempt",
@@ -46,13 +46,20 @@ def read_status(path: Path) -> dict[str, str]:
     return row
 
 
-def identity_from_prefix(prefix: str, og_id: str) -> tuple[str, str, str, str]:
-    parts = prefix.split(".", 3)
+def identity_from_seqid(full_seqid: str, og_id: str) -> tuple[str, str, str, str, str]:
+    """Split OG82.ilmn.240313.getorg1770.emma102 into its five identity fields.
+
+    The annotation version is the fifth field.  A four-field id (the standalone
+    ena.nf entry point can be handed an assembly prefix with no annotation)
+    yields an empty annotation rather than folding the annotation into code.
+    """
+    parts = full_seqid.split(".", 4)
     inferred_og = parts[0] if parts and parts[0] else og_id
     tech = parts[1] if len(parts) > 1 else ""
     seq_date = parts[2] if len(parts) > 2 else ""
     code = parts[3] if len(parts) > 3 else ""
-    return inferred_og or og_id, tech, seq_date, code
+    annotation = parts[4] if len(parts) > 4 else ""
+    return inferred_og or og_id, tech, seq_date, code, annotation
 
 
 def _first(paths: list[Path], suffix: str) -> Path | None:
@@ -60,7 +67,7 @@ def _first(paths: list[Path], suffix: str) -> Path | None:
 
 
 def build_record(
-    input_paths: list[Path], *, assembly_prefix: str, og_id: str,
+    input_paths: list[Path], *, full_seqid: str, og_id: str,
     ena_study: str, validation_mode: str, validation_attempt: str,
     webin_requested: bool,
 ) -> dict[str, str]:
@@ -114,7 +121,7 @@ def build_record(
     else:
         webin_reason = "not_run"
 
-    inferred_og, tech, seq_date, code = identity_from_prefix(assembly_prefix, og_id)
+    inferred_og, tech, seq_date, code, annotation = identity_from_seqid(full_seqid, og_id)
     gates_pass = (
         preflight_status == "PASS" if validation_mode == "validate"
         else table_status == "PASS" and conversion_status == "PASS"
@@ -128,11 +135,12 @@ def build_record(
 
     record = {column: "" for column in RECORD_COLUMNS}
     record.update({
-        "assembly_prefix": assembly_prefix,
+        "full_seqid": full_seqid,
         "og_id": inferred_og,
         "tech": tech,
         "seq_date": seq_date,
         "code": code,
+        "annotation": annotation,
         "ena_study": ena_study,
         "validation_mode": validation_mode,
         "validation_attempt": validation_attempt,
@@ -173,7 +181,7 @@ def read_records(paths: list[Path]) -> list[dict[str, str]]:
     for path in paths:
         with path.open(newline="") as handle:
             records.extend(csv.DictReader(handle, delimiter="\t"))
-    return sorted(records, key=lambda row: (row.get("assembly_prefix", ""), row.get("validation_attempt", "")))
+    return sorted(records, key=lambda row: (row.get("full_seqid", ""), row.get("validation_attempt", "")))
 
 
 def expand_patterns(patterns: list[str]) -> list[Path]:
@@ -184,7 +192,7 @@ def command_record(args: argparse.Namespace) -> None:
     paths = expand_patterns(args.input)
     record = build_record(
         paths,
-        assembly_prefix=args.assembly_prefix,
+        full_seqid=args.full_seqid,
         og_id=args.og_id,
         ena_study=args.ena_study,
         validation_mode=args.validation_mode,
@@ -209,7 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
     record = subparsers.add_parser("record")
     record.add_argument("--input", action="append", required=True)
     record.add_argument("--output", required=True)
-    record.add_argument("--assembly-prefix", required=True)
+    record.add_argument("--full-seqid", required=True)
     record.add_argument("--og-id", required=True)
     record.add_argument("--ena-study", default="")
     record.add_argument("--validation-mode", required=True, choices=["pipeline", "convert_validate", "validate"])

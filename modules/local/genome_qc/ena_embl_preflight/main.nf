@@ -15,7 +15,8 @@ process ENA_EMBL_PREFLIGHT {
     task.ext.when == null || task.ext.when
 
     script:
-    def prefix = meta.mt_assembly_prefix ?: meta.id
+    // Stem on the full seq id, like the flatfile and the Webin reports it feeds.
+    def prefix = meta.full_seqid ?: meta.mt_assembly_prefix ?: meta.id
     """
     set +e
     prefix="${prefix}"
@@ -69,7 +70,7 @@ process ENA_EMBL_PREFLIGHT {
     """
 
     stub:
-    def prefix = meta.mt_assembly_prefix ?: meta.id ?: 'stub'
+    def prefix = meta.full_seqid ?: meta.mt_assembly_prefix ?: meta.id ?: 'stub'
     """
     mkdir -p preflight
     cp "$embl_file" preflight/

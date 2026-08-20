@@ -191,9 +191,13 @@ study is resolved from the technology in its `mt_assembly_prefix`, and a row who
 To convert table2asn `.gbf` files and then validate them, create a CSV with these columns:
 
 ```csv
-sample,mt_assembly_prefix,gbf,table2asn_status
-OG1234,OG1234.mitohifi,/path/OG1234.mitohifi.gbf,/path/OG1234.mitohifi.table2asn_status.tsv
+sample,mt_assembly_prefix,full_seqid,gbf,table2asn_status
+OG1234,OG1234.mitohifi,OG1234.mitohifi.emma102,/path/OG1234.mitohifi.gbf,/path/OG1234.mitohifi.table2asn_status.tsv
 ```
+
+`full_seqid` is optional and defaults to `mt_assembly_prefix`. It is what the validation record and
+its database row are keyed on, so supply it whenever the flatfile was built from a named annotation;
+without it the record's `annotation` column is empty.
 
 The status file is mandatory. Only an exact table2asn `PASS` proceeds to conversion; failed or malformed statuses are
 reported as `SKIP_TABLE2ASN` and do not stop other samples.
@@ -224,6 +228,9 @@ psql --dbname oceanomics --file sql/009_ena_locus_registry_canonical_order.sql
 psql --dbname oceanomics --file sql/010_drop_ena_locus_tables.sql
 psql --dbname oceanomics --file sql/011_drop_local_package_validation.sql
 psql --dbname oceanomics --file sql/012_drop_ena_selection_layer.sql
+psql --dbname oceanomics --file sql/013_drop_ena_candidate_runs.sql
+psql --dbname oceanomics --file sql/014_ena_validation_attempts_full_seqid.sql
+psql --dbname oceanomics --file sql/015_ena_submissions.sql
 ```
 
 `010` retires `ena_locus_registry` and `ena_candidate_loci` now that locus tags are assigned by
@@ -237,14 +244,30 @@ run-provenance columns on `ena_validation_attempts`. That leaves `submission_rea
 this pipeline can actually attest: the flatfile passed every gate. This drop is not reversible from
 the repository, so dump those three relations first if you want them.
 
+`015` adds `ena_submissions`, the submission ledger, and the `ena_submission_status` view.
+Nothing in this pipeline writes or reads either one: validation must not depend on submission
+state. The table is written by the downstream submitter, keyed on `(full_seqid, webin_mode)`, and
+holds the submission status, the accessions ENA returns (`ERZ`, `GCA`, sequence, `ERS`), the
+BioSample the manifest actually carried, the locus tag prefix and the run accessions. See
+`docs/ena_submission_handoff.md` for the contract. `ena_submission_status` joins the latest
+validation attempt per `full_seqid` to that ledger, so one query says what is validated and what
+has happened to it since.
+
 `bin/apply_ena_migrations.py --config <cfg>` applies the same list in order under an advisory lock
 and audits the schema before and after; `--check-only` reports the current state without changing
 anything.
 
-`ena_validation_attempts` keeps one row per `(assembly_prefix, ena_study, validation_attempt)`.
+`014` re-keys `ena_validation_attempts` on `full_seqid` (the assembly prefix plus the annotation
+version, e.g. `OG82.ilmn.240313.getorg1770.emma102`) and gives the annotation its own column after
+`code`, matching the id every other ENA artifact already carries. It rebuilds the table, so rows
+written before it carry `full_seqid = assembly_prefix` and a NULL `annotation` until those
+assemblies are validated again.
+
+`ena_validation_attempts` keeps one row per `(full_seqid, ena_study, validation_attempt)`.
 Rerunning under the same attempt token overwrites that row rather than adding a new one, so retrying
-a failed validation doesn't pile up history. Nothing freezes the row: submission state lives in the
-separate submission pipeline, so the latest validation of an assembly is always the one on record.
+a failed validation doesn't pile up history. Re-annotating an assembly is a different `full_seqid`
+and therefore a new row, not an overwrite. Nothing freezes the row: submission state lives in the
+separate submission pipeline, so the latest validation of a sequence is always the one on record.
 Bump `--ena_validation_attempt` (see below) when you want a genuinely separate, independently
 tracked attempt.
 
@@ -254,8 +277,8 @@ manifests or normalized result records. Webin credentials continue to come only 
 To rerun Webin alone against existing compressed EMBL flat files, use:
 
 ```csv
-sample,mt_assembly_prefix,embl
-OG1234,OG1234.mitohifi,/path/OG1234.mitohifi.embl.gz
+sample,mt_assembly_prefix,full_seqid,embl
+OG1234,OG1234.mitohifi,OG1234.mitohifi.emma102,/path/OG1234.mitohifi.embl.gz
 ```
 
 ```bash

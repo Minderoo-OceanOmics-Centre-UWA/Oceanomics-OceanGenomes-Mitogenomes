@@ -695,20 +695,22 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
         // Attach the per-sample reference GenBank. RELABEL_REFERENCE_GB.out.gb carries the
         // MitoHiFi-prefixed meta (not the oatk one), so key on [id, sequencing_type, date].
-        // The true no-reference oatk path (ch_reference_branched.missing) has no relabelled
-        // reference, so remainder + the NO_REFERENCE placeholder keeps every oatk contig
-        // (check_getorganelle.py treats a zero-length reference as absent).
+        // The true no-reference oatk path (ch_direct_oatk_reads: ch_reference_branched.missing
+        // + the cross-order route) has no relabelled reference, so pair every such sample with
+        // an explicit NO_REFERENCE placeholder (check_getorganelle.py treats a zero-length
+        // reference as absent). RELABEL runs on ch_reference_resolved = keep + reselect, which
+        // is disjoint from ch_direct_oatk_reads, so the two contributors never double-key a
+        // sample; together they make ch_oatk_ref_keyed TOTAL over the assembled oatk contigs
+        // and the join below becomes a plain per-sample join (was a whole-run remainder wait).
         def no_reference_gb_oatk = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
         ch_oatk_ref_keyed = RELABEL_REFERENCE_GB.out.gb
             .map { m, gb -> [ [m.id, m.sequencing_type, m.date], gb ] }
+            .mix( ch_direct_oatk_reads
+                    .map { meta, _reads, _reason -> [ [meta.id, meta.sequencing_type, meta.date], no_reference_gb_oatk ] } )
         ch_oatk_check_in = ch_oatk_fa_gfa
             .map { m, fasta, gfa -> [ [m.id, m.sequencing_type, m.date], m, fasta, gfa ] }
-            .join(ch_oatk_ref_keyed, by: 0, remainder: true)
-            .filter { it[1] != null }   // keep oatk rows; drop reference-only remainder
-            .map { items ->
-                def ref = (items.size() > 4 && items[4] != null) ? items[4] : no_reference_gb_oatk
-                [ items[1], items[2], items[3], ref ]   // [meta, fasta, gfa, ref]
-            }
+            .join(ch_oatk_ref_keyed, by: 0)
+            .map { _key, m, fasta, gfa, ref -> [ m, fasta, gfa, ref ] }   // [meta, fasta, gfa, ref]
 
         OATK_CHECK ( ch_oatk_check_in )
 
@@ -720,12 +722,20 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         // `equals` the live one (same failure the reference join above documents). remainder:true
         // keeps the no-contig oatk (no evidence -> circular:null, empty FASTA filtered out of
         // annotation downstream).
+        // One verdict row per emitted oatk FASTA. OATK_CHECK runs on assembled contigs only
+        // (ch_oatk_fa_gfa), so the no-contig empties carry a null verdict, emitted here from the
+        // same local emptiness filter. That makes ch_oatk_circ_verdict TOTAL over OATK.out.fasta
+        // (and over OATK.out.log below), so both consumers use a plain per-sample join instead
+        // of a remainder join that waits on the whole run to close.
         ch_oatk_circ_verdict = OATK_CHECK.out.evidence
             .map { m, tsv -> [ m.mt_assembly_prefix.toString(), parseFinalVerdictCircular(tsv) ] }
+            .mix( OATK.out.fasta
+                    .filter { _m, fasta -> fasta.size() == 0 }
+                    .map { m, _fasta -> [ m.mt_assembly_prefix.toString(), null ] } )
 
         ch_oatk_fasta = OATK.out.fasta
             .map { m, fasta -> [ m.mt_assembly_prefix.toString(), m, fasta ] }
-            .join(ch_oatk_circ_verdict, by: 0, remainder: true)
+            .join(ch_oatk_circ_verdict, by: 0)
             .map { _prefix, m, fasta, circ -> [ m + [ circular: circ ], fasta ] }
 
         // Push input for oatk: the getorg_check.tsv evidence when OATK_CHECK ran (so the push
@@ -734,12 +744,21 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         // fail-loud path rather than vanishing. NOT OATK.out.log alone, which is the raw syncasm
         // log that matches no parser and silently wrote stats=NULL. The raw log stays in
         // ch_summary_files (below) for the summary / MultiQC.
+        // Evidence keyed per oatk sample, made TOTAL over OATK.out.log by pairing the no-contig
+        // empties (no OATK_CHECK evidence) with a null row so `ev ?: log` falls back to the raw
+        // oatk.log exactly as the old remainder path did -- but with a plain join that releases
+        // each sample immediately.
+        ch_oatk_evidence_keyed = OATK_CHECK.out.evidence
+            .map { m, ev -> [ m.mt_assembly_prefix.toString(), ev ] }
+            .mix( OATK.out.fasta
+                    .filter { _m, fasta -> fasta.size() == 0 }
+                    .map { m, _fasta -> [ m.mt_assembly_prefix.toString(), null ] } )
         ch_oatk_push_input = OATK.out.log
             .map { m, log -> [ m.mt_assembly_prefix.toString(), m, log ] }
-            .join(OATK_CHECK.out.evidence.map { m, ev -> [ m.mt_assembly_prefix.toString(), ev ] }, by: 0, remainder: true)
+            .join(ch_oatk_evidence_keyed, by: 0)
             .map { prefix, m, log, ev -> [ prefix, m, ev ?: log ] }
         ch_oatk_log = ch_oatk_push_input
-            .join(ch_oatk_circ_verdict, by: 0, remainder: true)
+            .join(ch_oatk_circ_verdict, by: 0)
             .map { _prefix, m, push_file, circ -> [ m + [ circular: circ ], push_file ] }
 
         // One evidence row per emitted oatk FASTA, never fewer. OATK_CHECK runs on the
@@ -788,19 +807,29 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     //   in UPLOAD_RESULTS; reference_gb in MITOGENOME_ANNOTATION) is enriched from the
     //   SAME verdict so those joins still match.
     //
+    // One verdict row per assembly this arm emits, never fewer. MITOHIFI_CHECK_CIRCULARITY
+    // runs on the `assembled` branch only, so the `failed` branch and the routed failures
+    // (ASSEMBLY_NO_RESULT) carry no evidence -- pair them here with a null verdict (unknown,
+    // not "not circular"). Both complements come from branches/channels already local at this
+    // point, so establishing totality costs no join and introduces no channel-close dependency.
+    // With ch_circ_verdict total over every left key below, those joins become plain per-sample
+    // joins that release each finished sample immediately instead of waiting for the whole run
+    // to close (the remainder-join barrier this replaces).
     ch_circ_verdict = MITOHIFI_CHECK_CIRCULARITY.out.evidence
         .map { meta, tsv -> [ meta, parseFinalVerdictCircular(tsv) ] }
+        .mix( ch_mitohifi_fasta_branched.failed.map { meta, _fasta -> [ meta, null ] } )
+        .mix( ch_routed_failure_fasta.map { meta, _fasta -> [ meta, null ] } )
 
     ch_assembly_fasta = MITOHIFI_MITOHIFI.out.fasta.mix(ch_routed_failure_fasta)
-        .join(ch_circ_verdict, by: 0, remainder: true)
+        .join(ch_circ_verdict, by: 0)
         .map { meta, fasta, circ -> [ meta + [ circular: circ ], fasta ] }
 
     ch_assembly_log = ch_assembly_log.mix(ch_routed_failure_log)
-        .join(ch_circ_verdict, by: 0, remainder: true)
+        .join(ch_circ_verdict, by: 0)
         .map { meta, log, circ -> [ meta + [ circular: circ ], log ] }
 
     ch_reference_gb = RELABEL_REFERENCE_GB.out.gb
-        .join(ch_circ_verdict, by: 0, remainder: true)
+        .join(ch_circ_verdict, by: 0)
         .map { meta, gb, circ -> [ meta + [ circular: circ ], gb ] }
 
     // One evidence row per emitted assembly FASTA, never fewer. MITOHIFI_CHECK_CIRCULARITY
@@ -878,6 +907,24 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // whole folder into <prefix>_collapsed/mtdna for genuinely collapsed samples.
     // Excludes MITOHIFI_AVERAGE_COVERAGE.out.stats: it shares a basename with the
     // corrected CHECK_CIRCULARITY stats, which overwrites it in the real mtdna dir.
+    // Sized with groupKey so an assembled sample's bundle releases as soon as its own files
+    // arrive instead of waiting for the whole run to close. A fully assembled (therefore
+    // reference-guided) sample contributes exactly nine files -- fasta, stats, gb, hifiasm log,
+    // command log, average coverage, corrected stats, circularity evidence and the divergence
+    // flag -- one per mixed channel, which is the maximum any sample reaches. groupKey emits
+    // each such bundle THE MOMENT it reaches nine, before the channel closes, so every bundle
+    // the collapse mirror can actually consume streams -- the collapse mirror only ever
+    // restages ASSEMBLED samples (a failed empty assembly has no molecule to collapse).
+    //
+    // This bundle's count is genuinely non-uniform (unlike the GetOrganelle/oatk bundles and
+    // the ENA record, which are exactly fixed): a FAILED assembly contributes fewer files (no
+    // coverage/check, no gb). Those failed bundles are never consumed downstream, but rather
+    // than drop them (a plain groupKey would, and a rare assembled sample missing one optional
+    // output would be dropped with it -- silent provenance loss), remainder:true flushes every
+    // short group at close, exactly as the bare groupTuple did. So this remainder is NOT the
+    // 2e anti-pattern: no consumed bundle is delayed by it -- assembled bundles already streamed
+    // at nine -- it only backstops the unused failed ones and guards against loss. Nine is the
+    // ceiling, so no sample overshoots and no bundle is ever split.
     ch_mtdna_files = MITOHIFI_MITOHIFI.out.fasta
         .mix( MITOHIFI_MITOHIFI.out.stats,
               MITOHIFI_MITOHIFI.out.gb,
@@ -887,17 +934,24 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
               MITOHIFI_CHECK_CIRCULARITY.out.stats,
               MITOHIFI_CHECK_CIRCULARITY.out.evidence,
               REFERENCE_DIVERGENCE.out.flag )
-        .map { meta, f -> [ meta.mt_assembly_run_prefix, f ] }
-        .groupTuple()
+        .map { meta, f -> [ groupKey(meta.mt_assembly_run_prefix, 9), f ] }
+        .groupTuple(remainder: true)
+        .map { key, files -> [ key.getGroupTarget(), files ] }
 
     // Fold the oatk fallback's mtdna files (assembly + circularity check) into the same
     // bundle, keyed by the oatk assembly prefix, so a genuinely collapsed oatk concatemer
     // gets its full provenance mirrored into <prefix>_collapsed/mtdna like the other
     // assemblers. Empty (no oatk fallback ran, or the fallback is disabled).
+    // Exactly two files per oatk sample (the contig + its circularity evidence, both now
+    // total over every oatk sample), so groupKey(prefix, 2) releases each bundle as soon as
+    // both arrive rather than at whole-run close. The count is uniform, so a plain groupTuple
+    // releases every sample and no close-time remainder is needed. Unwrap the GroupKey so the
+    // collapse mirror's key join still matches.
     ch_oatk_mtdna_files = ch_oatk_fasta
         .mix(ch_oatk_circularity_evidence)
-        .map { meta, f -> [ meta.mt_assembly_run_prefix, f ] }
+        .map { meta, f -> [ groupKey(meta.mt_assembly_run_prefix, 2), f ] }
         .groupTuple()
+        .map { key, files -> [ key.getGroupTarget(), files ] }
     ch_mtdna_files = ch_mtdna_files.mix(ch_oatk_mtdna_files)
 
 

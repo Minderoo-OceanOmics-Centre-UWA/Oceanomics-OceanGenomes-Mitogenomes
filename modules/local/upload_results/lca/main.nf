@@ -15,11 +15,13 @@ process PUSH_LCA_BLAST_RESULTS {
     path "versions.yml"                   , emit: versions
 
     script:
+    def args = task.ext.args ?: ''
     def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
-    def effective_args = "${config} ${meta.id} ${lca_results} ${blast_results}"
+    def effective_args = [args, config, meta.id, lca_results, blast_results].findAll { it?.toString()?.trim() }.join(' ')
     """
     # Push the results to SQL database
     push_lca_blast_results.py \\
+        $args \\
         $config \\
         ${meta.id} \\
         ${lca_results} \\
@@ -37,8 +39,9 @@ process PUSH_LCA_BLAST_RESULTS {
     """
     
     stub:
+    def args = task.ext.args ?: ''
     def mt_assembly_prefix = meta.mt_assembly_prefix ?: meta.id
-    def effective_args = "${config} ${meta.id} ${lca_results} ${blast_results}"
+    def effective_args = [args, config, meta.id, lca_results, blast_results].findAll { it?.toString()?.trim() }.join(' ')
     """
     : > ${mt_assembly_prefix}.lca_blast.upload.txt
     cat <<-END_TOOL_PARAMS > 13_push_lca_blast_results.tool_params_mqcrow.html

@@ -3,6 +3,69 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### `Added`
+
+- `assets/ena_not_run/`, the six NOT_RUN placeholder files the fixed-totality ENA record grouping
+  resolves with `checkIfExists: true`. They were referenced but never created, which aborted every
+  run during workflow construction. Their contents are inert: `collate_ena_validation.py` reads
+  only the real status-file suffixes and infers NOT_RUN from a stage's absence, so the placeholders
+  exist purely to make each sample's contributor count fixed and known.
+
+- `precomputed_mitogenome_assembly_fasta_oatk` and `precomputed_mitogenome_assembly_log_oatk` are
+  declared in `nextflow_schema.json`. They have worked from `nextflow.config` all along, but being
+  undeclared meant the schema validator flagged them as invalid input on every run.
+
+- `ena_submissions`, a submission ledger, plus the `ena_submission_status` view
+  (`sql/015_ena_submissions.sql`). Until now the database could say a flatfile cleared every gate
+  but not what happened to it afterwards: whether it was submitted, what ENA returned, or which
+  BioSample the manifest carried. That lived only as receipt XML under `receipts/<OG>/` in the
+  downstream submitter plus `mitogenome_data.genbank_accession`, which is keyed without the
+  annotation version and named for an archive that does not mint ERZ accessions. The ledger is
+  deliberately a separate table rather than columns on `ena_validation_attempts`: that table is
+  upserted with `DO UPDATE SET` across every non-key column, so an accession stored there would be
+  erased by the next validation rerun. Keyed on `(full_seqid, webin_mode)` so a re-annotation is a
+  new row and a test-service dry run cannot overwrite the production record; identity columns are
+  `GENERATED ALWAYS` from `full_seqid` so they cannot drift. It holds submission status
+  (`NOT_SUBMITTED`/`SUBMITTED`/`ACCESSION_ASSIGNED`/`FAILED`, with constraints requiring the
+  evidence each status claims), timing, receipt path and digest, the ENA accessions (`ERZ`, `GCA`,
+  sequence, `ERS`, `PRJEB`), the BioSample actually used and its source, the locus tag prefix, and
+  the run accessions. **This pipeline never writes or reads it** — validation must not depend on
+  submission state — so the writer is the downstream submitter; `docs/ena_submission_handoff.md`
+  carries the contract and the idempotent-upsert pattern.
+
+### `Changed`
+
+- The ENA study is one run-wide `--ena_study`, replacing `--ena_study_hifi`/`--ena_study_hic`/
+  `--ena_study_ilmn`. The per-technology child studies existed because the umbrella PRJEB110568
+  cannot receive data, so each technology needed its own study resolved from the candidate's
+  technology. The study is now created by the upstream pipeline and handed to this one as a single
+  accession, so technology no longer selects between studies.
+  `subworkflows/local/utils_ena_targets` collapses to `validateEnaStudy`/`enaStudyAnnotate`; there
+  is still no default, so a missing or non-`PRJEB` accession stops the run rather than validating
+  candidates against whatever the run fell back to. The strict `sequencing_type` check that lived
+  there is not lost: `platform_for_tech` in `bin/prepare_ena_metadata.py` already raises on any
+  unsupported technology, so the failure simply moves from channel-build time to task runtime.
+
+- ENA validation records are keyed on `full_seqid`, not the assembly prefix. What the pipeline validates is a
+  flatfile built from **one annotation of one assembly** (`OG82.ilmn.240313.getorg1770.emma102`), and the EMBL,
+  chromosome list, manifest, package and metadata JSON have always been named that way; only the validation record
+  used the 4-field `mt_assembly_prefix`. So a re-annotation overwrote the record for the annotation validated
+  before it (the upsert conflict target was `(assembly_prefix, ena_study, validation_attempt)`), both annotations
+  of one assembly collided in the `groupTuple` key that releases records, and no row could say which annotation
+  earned `submission_ready`. `assembly_prefix` is replaced by `full_seqid` in the record and in
+  `ena_validation_attempts`, the identity split gains a fifth field, and the annotation version sits in its own
+  `annotation` column after `code`. `<full_seqid>.ena_validation_result.tsv`, the Webin manifest/status/log and the
+  table2asn status/findings now share the stem the flatfile already had; publish directories are unchanged.
+  `ena.nf` takes an optional `full_seqid` CSV column, defaulting to `mt_assembly_prefix` (annotation then empty).
+- `sql/014_ena_validation_attempts_full_seqid.sql` rebuilds `ena_validation_attempts` for the new column order,
+  moves `ena_validation_attempts_key_idx` and `ena_validation_latest` onto `full_seqid`, and adds `annotation` to
+  the identity index. Rows written before it are carried over with `full_seqid = assembly_prefix` and a NULL
+  `annotation` (their annotation is not recoverable from the table) and are superseded the next time those
+  assemblies are validated. The `assembly_prefix`-dependent statements in `001`, `002`, `011` and `012` are now
+  guarded on that column still existing, so `bin/apply_ena_migrations.py` can keep replaying the whole chain.
+
 ## v2.0.0 - [2026-08-18]
 
 Second major release, and the first to carry the ENA submission path. Everything ENA-related below is new since
@@ -153,6 +216,57 @@ contents matter.
 
 ### `Fixed`
 
+- A CDS that initiates on an alternative start codon is now declared as such even when Emma says nothing about
+  it, so `SEQ_FEAT.StartCodon`/`SEQ_INST.BadProteinStart` stop quarantining otherwise clean assemblies.
+  `bin/process_files.py` has injected `transl_except (pos:...,aa:Met)` for non-canonical starts since v1.1.0, but
+  only for a CDS carrying Emma's `non-standard start codon` note. Emma writes that note inconsistently: it stayed
+  silent on `OG663.ilmn.240313.getorg1770`, whose ATP6 initiates on `CTG`, so the note gate vetoed the fix before
+  the sequence-level check could run and the sample failed the table2asn gate on those two errors alone. The note
+  is no longer consulted as a trigger -- the codon read off the assembly is -- and where Emma did not write one the
+  pipeline now writes `/note="non-standard start codon <CODON>"` itself so the flatfile records why the `aa:Met` is
+  there.
+  **The declaration is gated on the codon being a plausible initiator**, not merely on it being illegal under the
+  sample's own table. NCBI translates the initiator as Met whatever it is, but only for codons its Starts row marks
+  `M`, so an unrestricted rule would launder a mis-called CDS boundary or a single bad base call into a valid-looking
+  record. `PLAUSIBLE_MITO_STARTS` is the union of the Starts rows across the mitochondrial translation tables, read
+  out of the EMBOSS `EGC.*` data files shipped in the `seqret` container this pipeline already uses (tables 2, 3, 4,
+  5, 9, 13, 14, 21; the later 24 and 33 add nothing new): `TTA, TTG, CTG, ATT, ATC, ATA, ATG, GTG`. `CTG` is a start
+  in the mould/protozoan/coelenterate code, so OG663 clears; a start outside the union is left to fail validation and
+  be looked at by hand, and is logged with the gene name and the offending codon rather than passing silently.
+  Re-running the 20 assemblies of `batch-01` through the new code reproduces 19 feature tables byte for byte and
+  changes only OG663's, whose regenerated `.val` is empty.
+
+- `PREPARE_ENA_METADATA` no longer fails on every sample, so ENA candidate packages build again. The process
+  read `ena_candidate_runs`, the last table of the in-repo ENA selection layer that migrations `010`-`012`
+  retired; production never had it, so all 18 tasks of a run died with `relation "ena_candidate_runs" does not
+  exist`. `errorStrategy = 'ignore'` kept the run alive, but the metadata channel is joined into
+  `ch_ena_package_base`, so the join starved and `BUILD_ENA_CANDIDATE_PACKAGE` ran zero times. The read was dead
+  weight regardless: nothing in the repo or the schema ever wrote a run accession, so the query could only ever
+  return an empty list. `bin/prepare_ena_metadata.py` now emits `"run_accessions": []` as a constant, leaving the
+  on-disk JSON schema and every `bin/ena_package.py` reader unchanged; `RUN_REF` is simply omitted from the
+  manifest, which is the downstream submitter's to add since it owns the raw-read submissions to
+  `PRJEB123419/420/421`. The `--run-accession` CLI escape hatch on `ena_package.py` stays.
+  `sql/013_drop_ena_candidate_runs.sql` retires the table (no archive: it has never held a row), and the
+  `selection_tables_dropped` audit in `bin/apply_ena_migrations.py` now covers it, which is why a schema the
+  pipeline could not run against previously passed the post-migration audit clean.
+- A sample with no recorded collection date no longer fails the table2asn gate. `bin/build_source_modifiers.py`
+  filled a null `sample.date_collected` with the literal string `Unknown`, which table2asn rejects as
+  `SEQ_DESCR.BadCollectionDate` ("Collection_date format is not in DD-Mmm-YYYY format"). The validation gate counts
+  that as an `ERROR`, so one absent field quarantined an otherwise clean assembly -- `OG193.ilmn.240313.getorg1770`
+  failed on this and nothing else. It is not a rare case: 626 of the 1747 sequenced `og_id`s (36%) have no date.
+  The cell is now left empty, which omits the modifier, exactly as the `lat_lon` guard already does for a missing
+  coordinate. `collection_date` is not a required source qualifier in the ENA flatfile and this pipeline validates
+  with `-context sequence`, which registers no BioSample, so nothing downstream needs the field to be present.
+  **The INSDC missing-value terms are deliberately not used here.** `missing`, `not collected` and `not provided`
+  all pass table2asn and so look like the obvious fix, but they belong to the ENA *sample checklist* vocabulary
+  (ERC000011), not to the flatfile qualifier: ENA's own `CollectionDateQualifierCheck` (sequencetools 2.33.2, as
+  shipped in webin-cli 9.0.3) rejects all three, so adopting one would only move the failure from the first gate to
+  the last. An empty cell is the only value that clears both. A `valid_collection_date()` guard now sits beside
+  `valid_lat_lon()` and blanks anything that is not one of the three INSDC forms, logging the SeqID and the rejected
+  value. It also catches **future** dates, which both validators refuse (`Collection_date is in the future` /
+  `FutureDateException`): the `sample` table currently holds 60 day/month-transposed rows such as `2026-12-06`.
+  None of those are sequenced yet, so nothing is blocked today, but they would have failed on assembly; correcting
+  them is a database task, not a pipeline one.
 - The ordered SQL migration chain can be replayed end to end again. `bin/apply_ena_migrations.py` reapplies every
   file on each run and relies on them being idempotent, but four of them referenced schema that a later migration
   had already removed, so a database part-way along the chain could not be brought forward at all -- the run aborted

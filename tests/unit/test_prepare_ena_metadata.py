@@ -32,8 +32,6 @@ class FakeCursor:
             self.result = None if self.biosample is MISSING else [(self.biosample,)]
         elif "FROM mitogenome_data" in query:
             self.result = [(123.5,)]
-        elif "FROM ena_candidate_runs" in query:
-            self.result = [("ERR100",), ("ERR101",)]
         else:
             raise AssertionError(f"unexpected query: {query}")
 
@@ -103,10 +101,19 @@ class PrepareEnaMetadataTests(unittest.TestCase):
     def test_other_metadata_still_collected(self):
         metadata, _ = fetch("SAMN40589646")
         self.assertEqual(metadata["mean_depth"], 123.5)
-        self.assertEqual(metadata["run_accessions"], ["ERR100", "ERR101"])
+        self.assertEqual(metadata["run_accessions"], [])
         self.assertEqual(metadata["program"], "MitoHiFi 3")
         self.assertEqual(metadata["platform"], "PACBIO_SMRT")
 
+
+    def test_run_accessions_are_not_queried(self):
+        # Run accessions belong to the downstream submitter; ena_candidate_runs
+        # was retired with the rest of the selection layer and must not be read.
+        metadata, cursor = fetch("SAMN40589646")
+        self.assertEqual(metadata["run_accessions"], [])
+        self.assertFalse(
+            any("ena_candidate_runs" in query for query in cursor.queries)
+        )
 
     def test_program_mapping(self):
         self.assertEqual(MODULE.assembly_program("v323mitohifi"), "MitoHiFi 3.2.3")

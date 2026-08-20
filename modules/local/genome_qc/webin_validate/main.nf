@@ -24,7 +24,9 @@ process WEBIN_VALIDATE {
     task.ext.when == null || task.ext.when
 
     script:
-    def prefix = meta.mt_assembly_prefix ?: meta.id
+    // Stem on the full seq id so the manifest, status and log sit alongside
+    // the <full_seqid>.embl.gz that ENA_FLATFILE writes.
+    def prefix = meta.full_seqid ?: meta.mt_assembly_prefix ?: meta.id
     // Per-technology child study, resolved from the candidate by EnaTargets.
     def ena_study = meta.ena_study?.toString()?.trim()
     if (!ena_study) {
@@ -83,7 +85,7 @@ process WEBIN_VALIDATE {
     """
 
     stub:
-    def prefix = meta.mt_assembly_prefix ?: meta.id ?: 'stub'
+    def prefix = meta.full_seqid ?: meta.mt_assembly_prefix ?: meta.id ?: 'stub'
     """
     mkdir -p validated webin_output
     cp "$embl_file" validated/

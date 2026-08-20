@@ -415,6 +415,12 @@ def build_package(args: argparse.Namespace) -> int:
         packaged_gff = package_dir / f"{full_seqid}.gff"
         if Path(args.gff).resolve() != packaged_gff.resolve():
             shutil.copy2(args.gff, packaged_gff)
+    # Extracted gene sequences arrive named on the assembly prefix; renaming them
+    # onto full_seqid keeps every file in the package sharing one stem.
+    if getattr(args, "genes", None):
+        packaged_genes = package_dir / f"{full_seqid}.genes.fa"
+        if Path(args.genes).resolve() != packaged_genes.resolve():
+            shutil.copy2(args.genes, packaged_genes)
     primary_artifacts = sorted(
         path for path in package_dir.iterdir()
         if path.is_file()
@@ -463,6 +469,10 @@ def main() -> int:
     build.add_argument(
         "--gff",
         help="Processed annotation GFF; packaged verbatim for collaborators.",
+    )
+    build.add_argument(
+        "--genes",
+        help="Concatenated gene FASTA; packaged for collaborators as <full_seqid>.genes.fa.",
     )
     build.add_argument("--outdir", required=True)
     build.add_argument(

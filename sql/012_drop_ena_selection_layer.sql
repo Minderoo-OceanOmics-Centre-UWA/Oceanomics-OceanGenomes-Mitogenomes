@@ -34,7 +34,17 @@ BEGIN
         -- ena_validation_latest is SELECT DISTINCT ON (assembly_prefix) *, and
         -- Postgres expanded that * when the view was created.  It therefore
         -- depends on every column below and has to be dropped before them.
-        DROP VIEW IF EXISTS ena_validation_latest;
+        -- Only when the table still has the pre-014 shape: after 014 the view is
+        -- keyed on full_seqid, does not reference the columns touched below, and
+        -- nothing here would recreate it if it were dropped.
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE attrelid = to_regclass('ena_validation_attempts')
+              AND attname = 'assembly_prefix'
+              AND NOT attisdropped
+        ) THEN
+            DROP VIEW IF EXISTS ena_validation_latest;
+        END IF;
 
         ALTER TABLE ena_validation_attempts
             DROP CONSTRAINT IF EXISTS ena_validation_submission_ready_check;
@@ -74,11 +84,22 @@ BEGIN
             ADD CONSTRAINT ena_validation_submission_ready_check
                 CHECK (NOT submission_ready OR webin_status = 'PASS');
 
-        CREATE VIEW ena_validation_latest AS
-        SELECT DISTINCT ON (assembly_prefix)
-            *
-        FROM ena_validation_attempts
-        ORDER BY assembly_prefix, recorded_at DESC, id DESC;
+        -- 014 replaces assembly_prefix with full_seqid and owns the view from
+        -- then on; skip this once the rebuild has happened.
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE attrelid = to_regclass('ena_validation_attempts')
+              AND attname = 'assembly_prefix'
+              AND NOT attisdropped
+        ) THEN
+            EXECUTE $view$
+                CREATE VIEW ena_validation_latest AS
+                SELECT DISTINCT ON (assembly_prefix)
+                    *
+                FROM ena_validation_attempts
+                ORDER BY assembly_prefix, recorded_at DESC, id DESC
+            $view$;
+        END IF;
 
         COMMENT ON COLUMN ena_validation_attempts.submission_ready IS
             'True when the flatfile passed every gate this pipeline runs, ending at the '

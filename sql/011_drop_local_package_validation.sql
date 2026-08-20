@@ -36,7 +36,17 @@ BEGIN
         -- ena_validation_latest is SELECT DISTINCT ON (assembly_prefix) *, and
         -- Postgres expanded that * when the view was created, so it depends on
         -- every column below and has to be dropped before them.
-        DROP VIEW IF EXISTS ena_validation_latest;
+        -- Only when the table still has the pre-014 shape: after 014 the view is
+        -- keyed on full_seqid, does not reference the columns touched below, and
+        -- nothing here would recreate it if it were dropped.
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE attrelid = to_regclass('ena_validation_attempts')
+              AND attname = 'assembly_prefix'
+              AND NOT attisdropped
+        ) THEN
+            DROP VIEW IF EXISTS ena_validation_latest;
+        END IF;
 
         -- submission_ready is now earned by production Webin validation alone;
         -- the constraint has to go before the column it references.
@@ -54,11 +64,22 @@ BEGIN
 
         -- Rebuilt against the narrowed table.  012 drops and recreates it
         -- again; this migration still has to leave the schema whole on its own.
-        CREATE VIEW ena_validation_latest AS
-        SELECT DISTINCT ON (assembly_prefix)
-            *
-        FROM ena_validation_attempts
-        ORDER BY assembly_prefix, recorded_at DESC, id DESC;
+        -- 014 replaces assembly_prefix with full_seqid and owns the view from
+        -- then on, so skip this once the rebuild has happened.
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE attrelid = to_regclass('ena_validation_attempts')
+              AND attname = 'assembly_prefix'
+              AND NOT attisdropped
+        ) THEN
+            EXECUTE $latest$
+                CREATE VIEW ena_validation_latest AS
+                SELECT DISTINCT ON (assembly_prefix)
+                    *
+                FROM ena_validation_attempts
+                ORDER BY assembly_prefix, recorded_at DESC, id DESC
+            $latest$;
+        END IF;
     END IF;
 
     IF had_queue THEN

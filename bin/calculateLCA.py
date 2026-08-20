@@ -35,6 +35,33 @@ FISHBASE_DATABASES = {
     "fishbase_synonyms.parquet": "https://huggingface.co/datasets/cboettig/fishbase/resolve/main/data/fb/v24.07/parquet/synonyms.parquet?download=true",
 }
 
+
+def infer_taxon_db(taxon_id: str) -> str:
+    """staxids in BLAST output are always NCBI Taxonomy IDs."""
+    if not taxon_id or taxon_id == 'N/A':
+        return 'N/A'
+    return 'NCBI'
+
+
+def infer_accession_db(accession_id: str) -> str:
+    """Infer reference database from accession ID format."""
+    if not accession_id or accession_id == 'N/A':
+        return 'N/A'
+    if accession_id.startswith('NBDL'):
+        return 'NBDL'
+    if accession_id.startswith('OG'):
+        return 'OG'
+    if accession_id.startswith('gb'):
+        return 'GenBank'
+    if accession_id.startswith('dbj'):
+        return 'DDBJ'
+    if accession_id[0].isdigit():
+        return 'BOLD'
+    if accession_id.startswith('gi'):
+        return 'GenBank'
+    return 'unknown'
+
+
 # Column order for the two per-region LCA outputs, mirroring the taxaRaw and
 # taxaFinal dicts built in calculate_lca_assignments().
 #
@@ -48,7 +75,7 @@ TAXA_RAW_COLUMNS = [
     'seq_id', 'domain', 'phylum', 'class', 'order', 'family', 'genus',
     'specificEpithet', 'scientificName', 'scientificNameAuthorship', 'taxonRank',
     'taxonID', 'taxonID_db', 'verbatimIdentification', 'accession_id',
-    'accession_id_ref_db', 'percent_match', 'percent_query_cover',
+    'accession_id_ref_db', 'taxonRank_db', 'percent_match', 'percent_query_cover',
     'percent_query_cover_hsp', 'alignment_length', 'subject_length',
     'sequence_length', 'confidence_score', 'sequence_region', 'lca_run_date',
     'dna_sequence', 'identificationRemarks',
@@ -59,7 +86,7 @@ TAXA_FINAL_COLUMNS = [
     'class', 'order', 'family', 'genus', 'specificEpithet', 'scientificName',
     'scientificNameAuthorship', 'taxonRank', 'top_taxonID', 'taxonID_db',
     'top_verbatimIdentification', 'top_accession_id', 'accession_id_ref_db',
-    'top_percent_match', 'top_percent_query_cover', 'top_percent_query_cover_hsp',
+    'taxonRank_db', 'top_percent_match', 'top_percent_query_cover', 'top_percent_query_cover_hsp',
     'alignment_length', 'subject_length', 'sequence_length',
     'top_confidence_score', 'sequence_region', 'lca_run_date', 'dna_sequence',
     'identificationRemarks',
@@ -149,6 +176,11 @@ class NCBITaxdumpParser:
         self.taxid_to_parent = {}
         self.taxid_to_rank = {}
         self.taxid_to_name = {}
+        # Reverse index for hits whose reference sequence carries no staxid.
+        # Species rank only: it is the only rank looked up, and restricting it
+        # stops a genus-rank ID being attached to a species-rank row.
+        self.name_to_taxid = {}
+        self.ambiguous_names = set()
 
     def download_and_extract_taxdump(self) -> Path:
         """Download and extract NCBI taxdump if not already cached."""
@@ -236,7 +268,39 @@ class NCBITaxdumpParser:
                     if name_class == "scientific name":
                         self.taxid_to_name[taxid] = name
 
+                        # nodes.dmp is parsed first, so ranks are available here.
+                        if self.taxid_to_rank.get(taxid) == "species":
+                            if name in self.name_to_taxid:
+                                self.ambiguous_names.add(name)
+                            else:
+                                self.name_to_taxid[name] = taxid
+
         self.logger.info(f"Parsed {len(self.taxid_to_name)} scientific names")
+        self.logger.info(
+            f"Indexed {len(self.name_to_taxid)} species names for reverse lookup "
+            f"({len(self.ambiguous_names)} ambiguous, excluded)"
+        )
+
+    # Open-nomenclature qualifiers. NCBI holds ~36k species-rank placeholder
+    # nodes such as "Exocoetus sp.", each standing for one submitter's
+    # unidentified organism rather than a species concept. Matching one would
+    # claim our sequence is that particular record, and would attach a
+    # species-rank ID to a row we ourselves report at genus rank.
+    OPEN_NOMENCLATURE = frozenset({'sp.', 'spp.', 'cf.', 'aff.', 'nr.'})
+
+    def lookup_taxid(self, name: str) -> Optional[str]:
+        """Reverse lookup: NCBI scientific name -> taxid.
+
+        Returns None if the name is absent from NCBI, is not a plain binomial,
+        or is a homonym shared by more than one species. In each case no ID is
+        better than a misleading one.
+        """
+        if not name or name in self.ambiguous_names:
+            return None
+        parts = name.split()
+        if len(parts) != 2 or self.OPEN_NOMENCLATURE.intersection(parts):
+            return None
+        return self.name_to_taxid.get(name)
 
     def build_lineage(self, taxid: str) -> Optional[TaxonomicLineage]:
         """Build complete taxonomic lineage for a given taxid."""
@@ -465,6 +529,10 @@ class DatabaseManager:
         """
         return self.ncbi_parser.build_lineage(taxid)
 
+    def lookup_ncbi_taxid(self, name: str) -> Optional[str]:
+        """Recover an NCBI taxid from a scientific name, or None."""
+        return self.ncbi_parser.lookup_taxid(name)
+
 
 class SpeciesNameCorrector:
     """Handles species name corrections and standardization."""
@@ -514,6 +582,14 @@ class TaxonomicAssigner:
         self.worms_species = worms_species
         self.db_manager = db_manager
         self.logger = logging.getLogger(__name__)
+
+    def lookup_taxid(self, name: str) -> Optional[str]:
+        """Recover an NCBI taxid from a scientific name resolved elsewhere.
+
+        Used only to report an ID for hits whose reference sequence carried no
+        staxid. It has no bearing on the taxonomic assignment itself.
+        """
+        return self.db_manager.lookup_ncbi_taxid(name)
 
     def find_species_info(
         self, line_elements: List[str], taxid: Optional[str] = None
@@ -859,6 +935,20 @@ class BLASTLCAAnalyzer:
 
                         genus, species_part, source, lineage = species_info
 
+                        # Reference sequences from databases built without a
+                        # taxid map (custom OG/NBDL, some BOLD entries) have no
+                        # staxid, yet fishbase/WoRMS still resolve the name from
+                        # the subject title. Recover the ID from that name so the
+                        # row is not left with a species but no taxonID. A real
+                        # staxid is never overwritten, and this runs after the
+                        # assignment, so the lineage and LCA are untouched.
+                        taxon_id_db = infer_taxon_db(taxon_id)
+                        if taxon_id_db == 'N/A':
+                            recovered = self.assigner.lookup_taxid(lineage.species)
+                            if recovered:
+                                taxon_id = recovered
+                                taxon_id_db = 'NCBI:name-match'
+
                         hit_info = (
                             source,
                             pident,
@@ -871,6 +961,7 @@ class BLASTLCAAnalyzer:
                             subject_length,
                             evalue,
                             taxon_id,
+                            taxon_id_db,
                             query_coverage,
                             bitscore
                         )
@@ -946,8 +1037,11 @@ class BLASTLCAAnalyzer:
             top_qcovhsp = 0.0
             top_accession_id = "NA"
             top_taxon_id = "NA"
+            top_taxon_id_db = "N/A"
             top_evalue = "NA"
             top_verbatim_label = "NA"
+            top_alignment_length = "NA"
+            top_subject_length = "NA"
 
             species = "Unknown"
             genus = "Unknown"
@@ -969,6 +1063,7 @@ class BLASTLCAAnalyzer:
                 subject_length,
                 evalue,
                 taxon_id,
+                taxon_id_db,
                 query_coverage,
                 bitscore
             ) in sorted_hits:
@@ -983,8 +1078,11 @@ class BLASTLCAAnalyzer:
                         top_qcovhsp = qcovhsp
                         top_accession_id = accession_id
                         top_taxon_id = taxon_id
+                        top_taxon_id_db = taxon_id_db
                         top_evalue = evalue
                         top_verbatim_label = verbatim_label
+                        top_alignment_length = alignment_length
+                        top_subject_length = subject_length
                         try:
                             dna_seq = "not provided"
                             seq_len_value = asv_lengths.get(asv_name, "NA")
@@ -1044,10 +1142,11 @@ class BLASTLCAAnalyzer:
                                 'scientificNameAuthorship': author,
                                 'taxonRank': taxon_rank,
                                 'taxonID': taxon_id,
-                                'taxonID_db': source,
+                                'taxonID_db': taxon_id_db,
                                 'verbatimIdentification': verbatim_label,
                                 'accession_id': accession_id,
-                                'accession_id_ref_db': source,
+                                'accession_id_ref_db': infer_accession_db(accession_id),
+                                'taxonRank_db': source,
                                 'percent_match': pident,
                                 'percent_query_cover': qcov,
                                 'percent_query_cover_hsp': qcovhsp,
@@ -1085,8 +1184,8 @@ class BLASTLCAAnalyzer:
                 'numberOfUnq_BlastHits': i,
                 '%ID': top_pident,
                 'queryCoverage': top_qcov,
-                'species_in_LCA': ", ".join(species_lca.included_taxa),
-                'sources': ", ".join(sources)
+                'species_in_LCA': ", ".join(sorted(species_lca.included_taxa)),
+                'sources': ", ".join(sorted(sources))
             }
 
             results.append(new_row)
@@ -1129,7 +1228,11 @@ class BLASTLCAAnalyzer:
             taxaFinal.append(
                 {
                     'seq_id': asv_name,
-                    'species_in_LCA': ", ".join(species_lca.included_taxa),
+                    # Sorted because these are sets: set iteration order varies
+                    # between processes, and an unstable string would make an
+                    # identical re-run hash differently and insert a spurious
+                    # row instead of refreshing the existing one.
+                    'species_in_LCA': ", ".join(sorted(species_lca.included_taxa)),
                     'numberOfUnq_BlastHits': i,
                     'domain': domain_lca.assignment,
                     'phylum': phylum_lca.assignment,
@@ -1141,16 +1244,17 @@ class BLASTLCAAnalyzer:
                     'scientificName': species_lca.assignment,
                     'scientificNameAuthorship': author,
                     'taxonRank': taxon_rank,
-                    'top_taxonID': taxon_id,
-                    'taxonID_db': ", ".join(sources),
-                    'top_verbatimIdentification': verbatim_label,
-                    'top_accession_id': accession_id,
-                    'accession_id_ref_db': ", ".join(sources),
+                    'top_taxonID': top_taxon_id,
+                    'taxonID_db': top_taxon_id_db,
+                    'top_verbatimIdentification': top_verbatim_label,
+                    'top_accession_id': top_accession_id,
+                    'accession_id_ref_db': infer_accession_db(top_accession_id),
+                    'taxonRank_db': ", ".join(sorted(sources)),
                     'top_percent_match': top_pident,
                     'top_percent_query_cover': top_qcov,
                     'top_percent_query_cover_hsp': top_qcovhsp,
-                    'alignment_length': alignment_length,
-                    'subject_length': subject_length,
+                    'alignment_length': top_alignment_length,
+                    'subject_length': top_subject_length,
                     'sequence_length': seq_len_value,
                     'top_confidence_score': top_evalue,
                     'sequence_region': str(seq_type),

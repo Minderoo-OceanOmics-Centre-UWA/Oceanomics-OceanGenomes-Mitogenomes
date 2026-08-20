@@ -9,7 +9,7 @@ include { ENA_VALIDATION_RESULT  } from './modules/local/genome_qc/ena_validatio
 include { ENA_VALIDATION_SUMMARY } from './modules/local/genome_qc/ena_validation_summary'
 include { UPLOAD_ENA_RESULTS     } from './subworkflows/local/upload_results_mito'
 include { MULTIQC                } from './modules/nf-core/multiqc/main'
-include { enaTargetAnnotate; validateEnaTargets } from './subworkflows/local/utils_ena_targets/main'
+include { enaStudyAnnotate; validateEnaStudy } from './subworkflows/local/utils_ena_targets/main'
 
 def requiredValue(row, String column, rowLabel) {
     def value = row[column]?.toString()?.trim()
@@ -71,9 +71,9 @@ workflow {
     if (!params.ena_input) {
         error "--ena_input is required for the standalone ENA runner."
     }
-    // Each row's study is resolved from its own technology below; this only
-    // checks that all three child studies and prefixes are configured.
-    validateEnaTargets(params)
+    // Every row submits to the run's single study; this only checks that it is
+    // configured and well-formed.
+    validateEnaStudy(params)
     if (!params.outdir) {
         error "--outdir is required for the standalone ENA runner."
     }
@@ -92,15 +92,20 @@ workflow {
             def rowLabel = "row for sample '${row.sample ?: 'unknown'}'"
             def sample = safeIdentifier(requiredValue(row, 'sample', rowLabel), 'sample', rowLabel)
             def prefix = safeIdentifier(requiredValue(row, 'mt_assembly_prefix', rowLabel), 'mt_assembly_prefix', rowLabel)
-            def key = "${sample}\t${prefix}"
+            // full_seqid is the assembly prefix plus the annotation version, and it is
+            // what the validation record is keyed on. The column is optional: a sheet
+            // that omits it falls back to the assembly prefix, and the record then
+            // carries an empty annotation rather than a wrong one.
+            def full_seqid = row.full_seqid?.toString()?.trim()
+                ? safeIdentifier(row.full_seqid.toString().trim(), 'full_seqid', rowLabel)
+                : prefix
+            def key = "${sample}\t${full_seqid}"
             if (!seen_keys.add(key)) {
-                error "Duplicate sample/mt_assembly_prefix combination in ENA input: ${sample}/${prefix}"
+                error "Duplicate sample/full_seqid combination in ENA input: ${sample}/${full_seqid}"
             }
-            // The study is a per-row property: mt_assembly_prefix carries the
-            // technology in position 1, and each technology has its own child
-            // study. A row whose technology is unknown fails here rather than
-            // being validated against whatever study the run defaulted to.
-            tuple(row, enaTargetAnnotate(params, [id: sample, mt_assembly_prefix: prefix]))
+            // The run's study is carried on every row's meta so downstream
+            // steps all read the same value from one place.
+            tuple(row, enaStudyAnnotate(params, [id: sample, mt_assembly_prefix: prefix, full_seqid: full_seqid]))
         }
         .ifEmpty { error "ENA input CSV contains no data rows: ${input_sheet}" }
 
@@ -165,9 +170,9 @@ workflow {
     }
 
     ch_validation_inputs = ch_validation_files
-        .map { meta, validationFile -> tuple(meta.mt_assembly_prefix, meta, validationFile) }
+        .map { meta, validationFile -> tuple(meta.full_seqid ?: meta.mt_assembly_prefix, meta, validationFile) }
         .groupTuple(by: 0)
-        .map { _prefix, metas, validationFiles -> tuple(metas[0], validationFiles.flatten()) }
+        .map { _seqid, metas, validationFiles -> tuple(metas[0], validationFiles.flatten()) }
 
     // No ena_study here: it is per row now and read from meta.ena_study.
     validation_settings = [

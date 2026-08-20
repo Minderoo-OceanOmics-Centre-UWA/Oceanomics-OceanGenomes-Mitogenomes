@@ -33,6 +33,10 @@ process GETORGANELLE_GENEDB {
 
     output:
     tuple val(meta), path("${meta.mt_assembly_prefix}reseed.genedb.fasta"), emit: genes, optional: true
+    // Always-emitted per-sample readiness signal (ready=yes|no). The subworkflow branches the
+    // reseed fallback on this VALUE instead of testing the optional `genes` output for absence,
+    // so a not-ready sample is classified the moment its status arrives rather than at run close.
+    tuple val(meta), path("${meta.mt_assembly_prefix}reseed.genedb_status.tsv")             , emit: status
     tuple val(meta), path("02c_getorganelle_genedb.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                                                      , emit: versions
 
@@ -70,10 +74,18 @@ process GETORGANELLE_GENEDB {
     if [ "\$gene_count" -ge ${min_genes} ]; then
         mv ${prefix}.genedb.candidate.fasta ${prefix}.genedb.fasta
         genedb_status="built (\${gene_count} genes)"
+        genedb_ready=yes
     else
         genedb_status="skipped (\${gene_count} genes < ${min_genes} threshold)"
+        genedb_ready=no
         echo "WARN: ${meta.id} reference GenBank yielded only \${gene_count} genes (< ${min_genes}); custom gene database not built, reseed will fall back to first-pass." >&2
     fi
+
+    # Per-sample readiness signal so the subworkflow can branch the reseed fallback on a value
+    # rather than on the absence of the optional genes output.
+    printf 'sample\\tready\\tgene_count\\tmin_genes\\n%s\\t%s\\t%s\\t%s\\n' \\
+        '${meta.id}' "\$genedb_ready" "\$gene_count" '${min_genes}' \\
+        > ${prefix}.genedb_status.tsv
 
     cat <<-END_TOOL_PARAMS > 02c_getorganelle_genedb.tool_params_mqcrow.html
     <tr><td>GetOrganelle Gene Database</td><td><samp>extract_getorganelle_genedb.py ${gb} --types ${types}</samp></td><td>Builds a custom GetOrganelle label (gene) database from the reference for ${meta.id}: \${genedb_status}.</td></tr>
@@ -90,6 +102,7 @@ process GETORGANELLE_GENEDB {
     def prefix = "${meta.mt_assembly_prefix}reseed"
     """
     touch ${prefix}.genedb.fasta
+    printf 'sample\\tready\\tgene_count\\tmin_genes\\n${meta.id}\\tyes\\t13\\t10\\n' > ${prefix}.genedb_status.tsv
 
     cat <<-END_TOOL_PARAMS > 02c_getorganelle_genedb.tool_params_mqcrow.html
     <tr><td>GetOrganelle Gene Database</td><td><samp>extract_getorganelle_genedb.py ${gb} --types ${types}</samp></td><td>Builds a custom GetOrganelle label (gene) database from the reference for ${meta.id}.</td></tr>

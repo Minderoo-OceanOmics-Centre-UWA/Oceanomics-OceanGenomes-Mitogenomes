@@ -11,6 +11,7 @@ input:
   - gff: { type: file, description: GFF annotation file }
 output:
   - genes_dir: { type: directory, description: Extracted genes directory, pattern: "genes" }
+  - genes_fa: { type: file, description: Concatenated gene FASTA, pattern: "genes/*.genes.fa" }
 authors: ["Tyler Peirce"]
 maintainers: ["Tyler Peirce"]
 

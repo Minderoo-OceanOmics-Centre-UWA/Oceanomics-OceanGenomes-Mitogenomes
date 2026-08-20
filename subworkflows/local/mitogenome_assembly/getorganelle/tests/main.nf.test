@@ -10,9 +10,10 @@ nextflow_workflow {
     // Every process in this path has a stub block, so the cases run with -stub.
     // Reseed is skipped to keep the focus on the raw-read -> fastp ->
     // GetOrganelle path. The single supplied read pair never triggers CAT_FASTQ
-    // (needs >2 files), so the only tasks are GETORGANELLE_CONFIG, the optional
-    // FASTP, and GETORGANELLE_FROMREADS -- task count alone distinguishes
-    // "fastp ran" (3) from "fastp skipped/bypassed" (2).
+    // (needs >2 files), so the tasks are GETORGANELLE_CONFIG, the optional FASTP,
+    // GETORGANELLE_FROMREADS and the per-sample GETORGANELLE_CHECK (every assembly
+    // is now checked, including the reseed-skipped path) -- task count alone
+    // distinguishes "fastp ran" (4) from "fastp skipped/bypassed" (3).
 
     test("hic reads route through FASTP before assembly") {
 
@@ -38,8 +39,8 @@ nextflow_workflow {
         then {
             assertAll(
                 { assert workflow.success },
-                // FASTP ran: 3 tasks (config + fastp + fromreads) vs 2 without it.
-                { assert workflow.trace.succeeded().size() == 3 },
+                // FASTP ran: 4 tasks (config + fastp + fromreads + check) vs 3 without it.
+                { assert workflow.trace.succeeded().size() == 4 },
                 { assert workflow.trace.succeeded().any { it.name.contains(':FASTP') } },
                 // ... and a single assembly still comes out the other side.
                 { assert workflow.out.assembly_fasta.size() == 1 }
@@ -71,8 +72,9 @@ nextflow_workflow {
         then {
             assertAll(
                 { assert workflow.success },
-                // ilmn was already trimmed upstream: no FASTP, so only 2 tasks.
-                { assert workflow.trace.succeeded().size() == 2 },
+                // ilmn was already trimmed upstream: no FASTP, so 3 tasks
+                // (config + fromreads + check).
+                { assert workflow.trace.succeeded().size() == 3 },
                 { assert !workflow.trace.succeeded().any { it.name.contains(':FASTP') } },
                 { assert workflow.out.assembly_fasta.size() == 1 }
             )
@@ -103,7 +105,8 @@ nextflow_workflow {
         then {
             assertAll(
                 { assert workflow.success },
-                { assert workflow.trace.succeeded().size() == 2 },
+                // No FASTP for hic when skip_hic_fastp: 3 tasks (config + fromreads + check).
+                { assert workflow.trace.succeeded().size() == 3 },
                 { assert !workflow.trace.succeeded().any { it.name.contains(':FASTP') } }
             )
         }

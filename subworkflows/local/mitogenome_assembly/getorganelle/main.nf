@@ -98,6 +98,41 @@ def hasChosenReference(fasta, gb) {
     return fasta && gb && fasta.size() > 0 && gb.size() > 0
 }
 
+// Did REFERENCE_CANDIDATES return any candidate references for this sample? Read from its
+// always-emitted status TSV (status column == 'found'), so re-selection can branch on a
+// per-sample value instead of on the presence of the optional candidates output -- which
+// could only be classified once the channel closed. Defined at file scope so it resolves
+// inside the .map closures.
+def referenceCandidatesFound(statusFile) {
+    try {
+        def rows = statusFile.text.readLines().findAll { it?.trim() }
+        if (rows.size() < 2) return false
+        def idx = rows[0].split('\t').findIndexOf { it.trim() == 'status' }
+        if (idx < 0) return false
+        def cells = rows[1].split('\t', -1)
+        return idx < cells.size() && cells[idx].trim() == 'found'
+    } catch (ignored) {
+        return false
+    }
+}
+
+// Did GETORGANELLE_GENEDB build a usable gene database for this sample? Read from its
+// always-emitted status TSV (ready column == 'yes'), so the reseed fallback can branch on a
+// per-sample value rather than a remainder join against the optional genes output. A sample
+// whose reference was too sparsely annotated reports ready=no and falls back to its first pass.
+def genedbReady(statusFile) {
+    try {
+        def rows = statusFile.text.readLines().findAll { it?.trim() }
+        if (rows.size() < 2) return false
+        def idx = rows[0].split('\t').findIndexOf { it.trim() == 'ready' }
+        if (idx < 0) return false
+        def cells = rows[1].split('\t', -1)
+        return idx < cells.size() && cells[idx].trim().toLowerCase() == 'yes'
+    } catch (ignored) {
+        return false
+    }
+}
+
 // Is this divergence tier worth re-selecting a reference for? CONGENERIC already has
 // the best obtainable reference and UNKNOWN carries no evidence the reference is
 // poor. CROSS_ORDER is not special-cased here: GetOrganelle seeds from the reference
@@ -152,8 +187,20 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // Per-sample reference GenBank (findMitoReference, via RELABEL_REFERENCE_GB).
     // Only reseed candidates download one, so this is a partial channel; the
     // annotation subworkflow falls back to a fresh lookup / curated asset for the
-    // rest. Stays empty when the reseed stage is skipped.
+    // rest. Stays empty when the reseed stage is skipped. This is the EMITTED
+    // channel and stays partial on purpose -- REFERENCE_RELEVANCE (downstream) only
+    // grades samples that actually resolved a reference.
     ch_reference_gb = Channel.empty()
+    // Explicit NO_REFERENCE.gb placeholder rows ([meta, no_reference_gb]) for every
+    // sample that will NEVER resolve a real reference (kept first pass, coral reseed,
+    // seedless vertebrate, or the whole run when reseed is skipped). Emitted at the
+    // moment the branch decision is made so the GETORGANELLE_CHECK reference join below
+    // can be a plain per-sample join instead of a remainder join that waits on the
+    // whole run to close. Kept OUT of the emitted reference_gb above.
+    ch_reference_placeholders = Channel.empty()
+    // The empty placeholder reference. Hoisted here (from the check-join site) so both
+    // reseed branches AND the reseed-skipped else-branch can mix it in.
+    def no_reference_gb = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
 
      
     //
@@ -338,25 +385,40 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             ch_vert_route.reselect.map { meta, _ref_fasta, _ref_gb, _reads, _flag -> meta }
         )
 
+        // Branch the reselect samples on whether REFERENCE_CANDIDATES actually returned any
+        // candidates -- read from its always-emitted status (a per-sample VALUE), not from the
+        // presence/absence of the optional candidates output. This turns the old remainder join
+        // (which could not classify a no-candidate sample until the whole run closed) into a
+        // plain per-sample branch, so re-selection no longer holds the reseed fork open.
+        ch_reselect_branched = ch_vert_route.reselect
+            .join(REFERENCE_CANDIDATES.out.status.map { meta, s -> [ meta, referenceCandidatesFound(s) ] }, by: 0)
+            .branch { _meta, _ref_fasta, _ref_gb, _reads, _flag, found ->
+                rank: found
+                keep: true
+            }
+
         REFERENCE_RANK (
-            ch_vert_route.reselect
-                .map { meta, _ref_fasta, _ref_gb, reads, _flag -> [meta, reads] }
+            ch_reselect_branched.rank
+                .map { meta, _ref_fasta, _ref_gb, reads, _flag, _found -> [meta, reads] }
                 .join(REFERENCE_CANDIDATES.out.candidates, by: 0)
         )
 
-        // remainder:true keeps samples whose candidate lookup found nothing on their
-        // original reference, so re-selection never costs a sample its reseed.
+        // Resolve each vertebrate reseed to its reference. REFERENCE_RANK.out.reference is total
+        // over the `rank` branch (RANK runs on exactly those samples), so a plain join suffices;
+        // an empty chosen_reference means RANK declined to substitute, so keep the original.
+        // Samples with no candidates keep their original reference, and the keep-path reference
+        // is untouched. No remainder, no channel-close dependency.
         ch_vert_resolved = ch_vert_route.keep
-            .mix(ch_vert_route.reselect
-                .join(REFERENCE_RANK.out.reference, by: 0, remainder: true)
-                .filter { it[1] != null }   // drop any right-only remainder
-                .map { items ->
-                    def chosen_fasta = items.size() > 5 ? items[5] : null
-                    def chosen_gb    = items.size() > 6 ? items[6] : null
-                    hasChosenReference(chosen_fasta, chosen_gb)
-                        ? [ items[0], chosen_fasta, chosen_gb, items[3], items[4] ]
-                        : [ items[0], items[1], items[2], items[3], items[4] ]
-                })
+            .mix( ch_reselect_branched.keep
+                    .map { meta, ref_fasta, ref_gb, reads, flag, _found -> [meta, ref_fasta, ref_gb, reads, flag] } )
+            .mix( ch_reselect_branched.rank
+                    .map { meta, ref_fasta, ref_gb, reads, flag, _found -> [meta, ref_fasta, ref_gb, reads, flag] }
+                    .join(REFERENCE_RANK.out.reference, by: 0)
+                    .map { meta, ref_fasta, ref_gb, reads, flag, chosen_fasta, chosen_gb ->
+                        hasChosenReference(chosen_fasta, chosen_gb)
+                            ? [ meta, chosen_fasta, chosen_gb, reads, flag ]
+                            : [ meta, ref_fasta, ref_gb, reads, flag ]
+                    } )
 
         ch_vert_seed = ch_vert_resolved
             .map { meta, ref_fasta, _ref_gb, _reads, _flag -> [meta, ref_fasta] }   // [meta, seed]
@@ -372,6 +434,24 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         // Per-sample reference GenBank (vertebrates only). Coral annotation now picks
         // its reference from the DB by sequence, so corals need none here.
         ch_reference_gb = RELABEL_REFERENCE_GB.out.gb
+
+        // Totality for the GETORGANELLE_CHECK reference join: emit an explicit
+        // NO_REFERENCE.gb placeholder (keyed by lineage like the real references) for
+        // every sample that will never carry a RELABEL_REFERENCE_GB row --
+        //   * kept first passes (never reseed),
+        //   * coral reseeds (seed the curated coral DB; never RELABEL),
+        //   * vertebrate reseeds whose findMitoReference found nothing (no ref at all).
+        // Vertebrates WITH a reference but no gene database still carry the real RELABEL
+        // row (they fall back to first-pass via ch_reseed_seedless yet keep their
+        // resolved reference), so they are deliberately NOT placeheld here -- doing so
+        // would double-key them and duplicate the sample at the plain join. The
+        // vert-no-ref set is the exact complement of the non-empty filter at :311.
+        ch_reference_placeholders = ch_assessed.keep
+            .map { meta, _fasta, _log, _reads -> [ meta, no_reference_gb ] }
+            .mix( ch_reseed_branched.invert.map { meta, _fasta, _log, _reads -> [ meta, no_reference_gb ] } )
+            .mix( MITOHIFI_FINDMITOREFERENCE.out.reference
+                    .filter { _meta, ref_fasta, ref_gb -> !(ref_fasta.size() > 0 && ref_gb.size() > 0) }
+                    .map { meta, _ref_fasta, _ref_gb -> [ meta, no_reference_gb ] } )
 
         // --- Invertebrate (coral) reseed path: broad coral DB seed + label db. ---
         ch_coral_seed  = Channel.fromPath("${projectDir}/assets/coral_mito_refdb.fasta",       checkIfExists: true).first()
@@ -403,17 +483,28 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             ch_reseed_input // tuple val(meta), path(fastp), val(organelle_type), path(db), path(seed), path(genes)
         )
 
-        // Reseed candidates that could NOT be reseeded (no reference seed, or a
-        // reference too sparsely annotated to build a gene database): fall back to
-        // their first-pass result so no sample is dropped. Keyed off "ready"
-        // samples (those with both a seed and a gene database).
-        ch_reseed_ready = ch_seed.join(ch_genes, by: 0)
-            .map { meta, _seed, _genes -> [meta, true] }   // [meta, true]
+        // Reseed candidates that could NOT be reseeded (no reference seed, or a reference too
+        // sparsely annotated to build a gene database): fall back to their first-pass result so
+        // no sample is dropped. Readiness is now a per-sample VALUE, total over the whole reseed
+        // set and disjoint across its three sources, so the fallback is a plain join + filter
+        // rather than a remainder join that could not classify a not-ready sample until the run
+        // closed:
+        //   * inverts always carry seed + genes (curated coral assets)          -> ready
+        //   * vertebrates with a reference: ready iff GETORGANELLE_GENEDB built  -> its status
+        //   * vertebrates with no findMitoReference at all                       -> not ready
+        // (a vertebrate with a reference but a sparse gene database reports ready=no from GENEDB,
+        // so it falls back here while still keeping its resolved reference upstream.)
+        ch_reseed_readiness = ch_reseed_branched.invert
+                .map { meta, _fasta, _log, _reads -> [ meta, true ] }
+            .mix( GETORGANELLE_GENEDB.out.status.map { meta, s -> [ meta, genedbReady(s) ] } )
+            .mix( MITOHIFI_FINDMITOREFERENCE.out.reference
+                    .filter { _meta, ref_fasta, ref_gb -> !(ref_fasta.size() > 0 && ref_gb.size() > 0) }
+                    .map { meta, _ref_fasta, _ref_gb -> [ meta, false ] } )
 
         ch_reseed_fallback = ch_assessed.reseed
             .map { meta, fasta, log, _reads -> [meta, fasta, log] }
-            .join(ch_reseed_ready, by: 0, remainder: true)
-            .filter { it[3] == null }                      // not ready -> fall back
+            .join(ch_reseed_readiness, by: 0)
+            .filter { _meta, _fasta, _log, ready -> !ready }   // not ready -> fall back
             .map { meta, fasta, log, _ready -> [meta, fasta, log] }
 
         ch_reseed_seedless     = ch_reseed_fallback.map { meta, fasta, _log -> [meta, fasta] }
@@ -476,6 +567,11 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     } else {
         ch_assembly_fasta = GETORGANELLE_FROMREADS.out.fasta
         ch_assembly_log   = GETORGANELLE_FROMREADS.out.log
+        // No reseed => no reference is ever resolved; give every sample an explicit
+        // placeholder so the check-join below stays a plain per-sample join instead of
+        // a remainder join that waits for the whole run to close.
+        ch_reference_placeholders = GETORGANELLE_FROMREADS.out.fasta
+            .map { meta, _fasta -> [ meta, no_reference_gb ] }
     }
 
     //
@@ -539,22 +635,24 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     //
     // Join the reference by the LINEAGE key: one reference is resolved per sample and it is
     // the same reference whichever variant won, so it is not per-assembly. It also has to be
-    // a key that survives curation -- ch_reference_gb's meta predates both the meta.circular
+    // a key that survives curation -- the reference meta predates both the meta.circular
     // enrichment and the identity re-stamp above, so a whole-meta join would never match and
-    // an identity join would miss every renamed assembly. ch_reference_gb is partial
-    // (reseed/vertebrate samples only), so remainder + placeholder keeps every fasta sample.
-    // It is single-use, so this is its only consumer; the reference is then carried forward
+    // an identity join would miss every renamed assembly.
+    //
+    // Real references (RELABEL_REFERENCE_GB, partial) mixed with the per-sample placeholders
+    // emitted at each branch decision above make ch_ref_keyed TOTAL over ch_assembly_fasta --
+    // exactly one row per sample, no duplicates -- so a plain join classifies every sample the
+    // moment its own reference/placeholder arrives, instead of waiting for both channels to
+    // close (the remainder-join whole-run barrier this replaces). The placeholder set is built
+    // from channels already local at each branch, so establishing totality costs no join and
+    // introduces no channel-close dependency. Single-use: the reference is then carried forward
     // (through GETORGANELLE_JOIN's passthrough) rather than re-joined.
-    def no_reference_gb = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
-    ch_ref_keyed = ch_reference_gb.map { meta, ref -> [ meta.mt_assembly_run_prefix, ref ] }
+    ch_ref_keyed = ch_reference_gb.mix(ch_reference_placeholders)
+        .map { meta, ref -> [ meta.mt_assembly_run_prefix, ref ] }
     ch_fasta_ref = ch_assembly_fasta
         .map { meta, fasta -> [ meta.mt_assembly_run_prefix, meta, fasta ] }
-        .join(ch_ref_keyed, by: 0, remainder: true)
-        .filter { items -> items[1] != null }   // keep fasta rows; drop reference-only remainder
-        .map { items ->
-            def ref = items.size() > 3 ? items[3] : null
-            [ items[1], items[2], ref ]          // [meta, fasta, ref-or-null]
-        }
+        .join(ch_ref_keyed, by: 0)
+        .map { _key, meta, fasta, ref -> [ meta, fasta, ref ] }   // [meta, fasta, ref]
 
     //
     // MODULE: Reference-guided scaffold join. A multi-scaffold GetOrganelle result
@@ -569,7 +667,9 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_join_branched = ch_fasta_ref.branch { _meta, fasta, ref ->
         def multi = false
         try { multi = fasta.text.readLines().count { it.startsWith('>') } > 1 } catch (ignored) { multi = false }
-        rgj:    multi && ref != null
+        // ref is now always a file (the NO_REFERENCE.gb placeholder when none resolved),
+        // so "has a real reference" is ref.size() > 0, not ref != null.
+        rgj:    multi && ref.size() > 0
         direct: true
     }
 
@@ -679,11 +779,19 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // LINEAGE prefix -- it is this sample's assembly-run folder, not any one molecule's, and
     // the key has to survive the collapse rename so the mirror can restage the whole folder
     // into <prefix>_collapsed/mtdna for genuinely collapsed samples.
+    // Sized with groupKey so each sample's bundle releases as soon as its own three files
+    // (final assembly + GetOrganelle log + circularity/anomaly check) arrive, rather than
+    // waiting for the whole run to close. The count is EXACTLY 3 for every sample: all three
+    // channels derive from ch_getorg_check_in (one row each per sample), so no group is ever
+    // short and a plain groupTuple releases every sample -- no close-time remainder is needed
+    // or wanted. Unwrap the GroupKey back to the plain prefix so the collapse mirror's key
+    // join still matches.
     ch_mtdna_files = ch_assembly_fasta
         .mix( ch_assembly_log,
               GETORGANELLE_CHECK.out.evidence )
-        .map { meta, f -> [ meta.mt_assembly_run_prefix, f ] }
+        .map { meta, f -> [ groupKey(meta.mt_assembly_run_prefix, 3), f ] }
         .groupTuple()
+        .map { key, files -> [ key.getGroupTarget(), files ] }
 
     //
     // Emit outputs

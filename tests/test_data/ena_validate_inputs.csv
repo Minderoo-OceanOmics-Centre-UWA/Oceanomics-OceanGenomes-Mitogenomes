@@ -1,2 +1,2 @@
-sample,mt_assembly_prefix,embl
-ena_stub,ena_stub,ena_stub.embl.gz
+sample,mt_assembly_prefix,full_seqid,embl
+ena_stub,ena_stub.ilmn.260101.final,ena_stub.ilmn.260101.final.emma102,ena_stub.embl.gz

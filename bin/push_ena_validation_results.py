@@ -25,7 +25,7 @@ INTEGER_COLUMNS = {
 # Same order as RECORD_COLUMNS in collate_ena_validation.py, so the two lists
 # can be diffed against each other when a column is added or removed.
 INSERT_COLUMNS = [
-    "assembly_prefix", "og_id", "tech", "seq_date", "code", "ena_study",
+    "full_seqid", "og_id", "tech", "seq_date", "code", "annotation", "ena_study",
     "validation_mode", "validation_attempt", "table2asn_status",
     "reject_count", "error_count", "warning_count", "info_count",
     "fatal_discrepancy_count", "nostop_count", "blocking_codes", "warning_codes",
@@ -71,7 +71,7 @@ def read_record(path: Union[str, Path]) -> dict[str, object]:
             record[column] = value
         else:
             record[column] = value or None
-    for required in ("assembly_prefix", "og_id", "validation_mode", "validation_attempt",
+    for required in ("full_seqid", "og_id", "validation_mode", "validation_attempt",
                      "table2asn_status", "conversion_status", "preflight_status",
                      "webin_status"):
         if record.get(required) is None:
@@ -79,16 +79,18 @@ def read_record(path: Union[str, Path]) -> dict[str, object]:
     return record
 
 
-KEY_COLUMNS = {"assembly_prefix", "ena_study", "validation_attempt"}
+KEY_COLUMNS = {"full_seqid", "ena_study", "validation_attempt"}
 
 
 def upload_record(record: dict[str, object], db_config: dict[str, object], connect=None) -> str:
-    """Insert or overwrite the row for this (assembly_prefix, ena_study, validation_attempt).
+    """Insert or overwrite the row for this (full_seqid, ena_study, validation_attempt).
 
     A rerun under the same key overwrites the previous attempt so failed
-    attempts don't pile up history rows. Nothing freezes a row: submission is a
-    separate pipeline that owns its own state, so the latest validation of an
-    assembly is always the one recorded here.
+    attempts don't pile up history rows. The key carries the annotation version,
+    so re-annotating an assembly writes a new row instead of overwriting the
+    record for the annotation that was validated before. Nothing freezes a row:
+    submission is a separate pipeline that owns its own state, so the latest
+    validation of a sequence is always the one recorded here.
 
     Returns "inserted" (first row for this key) or "updated" (overwrote an
     earlier attempt).
@@ -103,7 +105,7 @@ def upload_record(record: dict[str, object], db_config: dict[str, object], conne
     query = f"""
         INSERT INTO ena_validation_attempts ({columns})
         VALUES ({placeholders})
-        ON CONFLICT (assembly_prefix, ena_study, validation_attempt)
+        ON CONFLICT (full_seqid, ena_study, validation_attempt)
         DO UPDATE SET
             {set_clause},
             recorded_at = CURRENT_TIMESTAMP,
@@ -133,10 +135,10 @@ def main() -> int:
         record = read_record(args.validation_record)
         result = upload_record(record, load_db_config(args.config_file))
         if result == "inserted":
-            print(f"✅ Success: inserted ENA validation attempt for {record['assembly_prefix']}")
+            print(f"✅ Success: inserted ENA validation attempt for {record['full_seqid']}")
         else:
             print(
-                f"🔁 Updated ENA validation attempt for {record['assembly_prefix']} "
+                f"🔁 Updated ENA validation attempt for {record['full_seqid']} "
                 "(overwrote the previous attempt)"
             )
         return 0

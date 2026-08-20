@@ -30,7 +30,7 @@ process ENA_VALIDATION_SUMMARY {
 
     stub:
     """
-    printf 'assembly_prefix\tog_id\tvalidation_mode\tena_study\ttable2asn_status\tconversion_status\tpreflight_status\twebin_status\twebin_reason\tsubmission_ready\tvalidation_attempt\n' > ena_validation_results_mqc.tsv
+    printf 'full_seqid\tog_id\tannotation\tvalidation_mode\tena_study\ttable2asn_status\tconversion_status\tpreflight_status\twebin_status\twebin_reason\tsubmission_ready\tvalidation_attempt\n' > ena_validation_results_mqc.tsv
     cp ena_validation_results_mqc.tsv ena_run_summary.tsv
     printf '"%s":\n    python: "stub"\n    collate_ena_validation: "stub"\n' "${task.process}" > versions.yml
     """

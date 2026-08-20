@@ -152,6 +152,17 @@ _DEFAULT_MITO_STARTS = ("ATG", "GTG")
 
 def mito_start_codons(genetic_code: int):
     return _MITO_STARTS_BY_CODE.get(int(genetic_code), _DEFAULT_MITO_STARTS)
+
+# Union of the initiation codons across every mitochondrial translation table,
+# read out of the EMBOSS EGC.* data files (tables 2, 3, 4, 5, 9, 13, 14, 21;
+# the later 24 and 33 add TTG/CTG/ATG/GTG, all already here).  A CDS starting on
+# one of these is initiating on a codon that is a documented start *somewhere*
+# in mitochondrial biology, so an alternative-initiation transl_except is a fair
+# reading even when the sample's own table does not list it.  A start outside
+# this set is far more likely a mis-called CDS boundary or a base-calling error
+# than a real alternative start, so those are left to fail table2asn validation
+# and get looked at by hand rather than being silently declared as Met.
+PLAUSIBLE_MITO_STARTS = ("TTA", "TTG", "CTG", "ATT", "ATC", "ATA", "ATG", "GTG")
 # Substring of EMMA's note ("...TAA stop codon is completed by the addition of
 # 3' A residues to the mRNA") that survives the 'putative ' strip. Its presence
 # marks a CDS whose stop is completed post-transcriptionally by polyadenylation.
@@ -207,10 +218,11 @@ def compute_transl_except_pos(start: int, end: int, seq: str, stops):
 
 def compute_start_transl_except_pos(start: int, end: int, seq: str, starts):
     """Mirror of compute_transl_except_pos for the 5' end. For a single-interval
-    CDS (1-based; start>end means minus strand), return the transl_except 'pos:'
-    expression covering the initiation codon when that codon is not one the
-    genetic code accepts as a start, else None. `starts` is the start-codon tuple
-    for this sample's genetic code (see mito_start_codons).
+    CDS (1-based; start>end means minus strand), return (pos, codon) where pos is
+    the transl_except 'pos:' expression covering the initiation codon and codon is
+    that codon on the coding strand, when the codon is not one the genetic code
+    accepts as a start; else None. `starts` is the start-codon tuple for this
+    sample's genetic code (see mito_start_codons).
 
     table2asn raises SEQ_FEAT.StartCodon when a complete CDS begins on a codon
     outside the table's start set, and then emits a gap symbol rather than an
@@ -218,6 +230,10 @@ def compute_start_transl_except_pos(start: int, end: int, seq: str, starts):
     Declaring the codon as aa:Met is the INSDC way to record a genuine
     alternative initiation codon, and clears both. Marking the CDS 5'-partial
     would also silence table2asn but would misrepresent a complete gene.
+
+    The codon comes back with the position so the caller can decide whether it is
+    a plausible initiator at all (see PLAUSIBLE_MITO_STARTS) and can name it in
+    the note it writes.
     """
     n = len(seq)
     if start <= end:                         # plus strand; 5' end at low coord
@@ -227,7 +243,7 @@ def compute_start_transl_except_pos(start: int, end: int, seq: str, starts):
         codon = seq[lo - 1:hi]               # coding-strand bases
         if codon in starts:
             return None
-        return f"{lo}..{hi}"
+        return f"{lo}..{hi}", codon
     else:                                    # minus strand; 5' end at high coord
         hi, lo = start, start - 2
         if lo < 1 or hi > n:
@@ -235,7 +251,17 @@ def compute_start_transl_except_pos(start: int, end: int, seq: str, starts):
         codon = _revcomp(seq[lo - 1:hi])     # coding-strand bases
         if codon in starts:
             return None
-        return f"complement({lo}..{hi})"
+        return f"complement({lo}..{hi})", codon
+
+def product_of(qual_lines):
+    """Name a CDS by its /product qualifier, for log messages. Falls back to the
+    gene name and then to a placeholder, since neither is guaranteed present."""
+    for key in ('product', 'gene'):
+        for q in qual_lines:
+            cols = q.split('\t')
+            if len(cols) >= 2 and cols[-2] == key:
+                return cols[-1]
+    return 'CDS'
 
 def _tbl_interval(line: str):
     """Return (start, end) if line opens a feature interval, else None.
@@ -301,6 +327,10 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
         lines = f_in.read().splitlines()
 
     out, added, added_start = [], 0, 0
+    # CDS whose start EMMA never commented on, and CDS left failing validation
+    # because their start codon is not a plausible initiator; both are logged so
+    # they are visible without reading the .val.
+    unnoted_start, implausible_start = 0, 0
     i, n = 0, len(lines)
     while i < n:
         cols = lines[i].split('\t')
@@ -333,13 +363,27 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
             partial_start = ic[0].startswith('<')
             # Only single-interval CDS are handled (mitochondrial genes are single-exon);
             # joined features are passed through untouched to avoid mis-locating the codon.
-            if (seq is not None and has_start_note and not has_te_met
+            # EMMA only sometimes notes a non-standard start, so the note cannot
+            # gate this -- the sequence itself decides. What the note does not
+            # tell us either way is whether the codon is a credible initiator, so
+            # that is checked against PLAUSIBLE_MITO_STARTS instead.
+            if (seq is not None and not has_te_met
                     and not partial_start and not extra_intervals):
-                pos = compute_start_transl_except_pos(int(ic[0].lstrip('<>')),
-                                                      int(ic[1].lstrip('<>')), seq, starts)
-                if pos:
-                    out.append(f"\t\t\ttransl_except\t(pos:{pos},aa:Met)")
-                    added_start += 1
+                found = compute_start_transl_except_pos(int(ic[0].lstrip('<>')),
+                                                        int(ic[1].lstrip('<>')), seq, starts)
+                if found:
+                    pos, codon = found
+                    if codon in PLAUSIBLE_MITO_STARTS:
+                        out.append(f"\t\t\ttransl_except\t(pos:{pos},aa:Met)")
+                        added_start += 1
+                        if not has_start_note:
+                            out.append(f"\t\t\tnote\t{START_NOTE_MARK} {codon}")
+                            unnoted_start += 1
+                    else:
+                        implausible_start += 1
+                        log(f"⚠️  {product_of(qual)} starts on {codon}, which no "
+                            f"mitochondrial code lists as an initiator -- leaving it "
+                            f"for table2asn to flag rather than declaring aa:Met")
             if seq is not None and has_note and not has_te and not extra_intervals:
                 pos = compute_transl_except_pos(int(ic[0].lstrip('<>')),
                                                 int(ic[1].lstrip('<>')), seq, stops)
@@ -365,7 +409,9 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
     with open(output_file, 'w') as f_out:
         f_out.write('\n'.join(out) + '\n')
     log(f"✅ Processed TBL/GB: {output_file} "
-        f"(transl_except aa:TERM added to {added} CDS, aa:Met to {added_start} CDS)")
+        f"(transl_except aa:TERM added to {added} CDS, aa:Met to {added_start} CDS, "
+        f"{unnoted_start} of those unnoted by EMMA; "
+        f"{implausible_start} CDS left with an implausible start codon)")
 
 def sort_gff_records(lines):
     """Order GFF loci by position, mirroring sort_tbl_features.

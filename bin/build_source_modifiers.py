@@ -15,6 +15,7 @@ import os
 import re
 import argparse
 import configparser
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -179,6 +180,40 @@ def valid_lat_lon(value):
     lat, _lat_hem, lon, _lon_hem = match.groups()
     return float(lat) <= 90.0 and float(lon) <= 180.0
 
+# INSDC collection_date, in the three forms both gates accept: DD-Mmm-YYYY,
+# Mmm-YYYY and YYYY. Anything else is SEQ_DESCR.BadCollectionDate at table2asn,
+# which the validation gate counts as an ERROR and quarantines the assembly for.
+#
+# There is deliberately no missing-value term here. 'missing', 'not collected'
+# and 'not provided' all pass table2asn, so they look like the obvious fix, but
+# they belong to the ENA *sample checklist* vocabulary (ERC000011), not to the
+# flatfile qualifier: ENA's own CollectionDateQualifierCheck (sequencetools, the
+# validator ena-webin-cli runs) rejects every one of them. Adopting one would
+# just move the failure from the first gate to the last. collection_date is not
+# a required source qualifier in the ENA flatfile, so where no date is recorded
+# the cell is left empty and the modifier is simply omitted -- the same
+# resolution valid_lat_lon uses, and the only one that clears both gates.
+COLLECTION_DATE_RE = re.compile(
+    r"^(?:(?:\d{1,2}-)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-)?\d{4}$"
+)
+
+def valid_collection_date(value):
+    """True when `value` is a well-formed INSDC collection_date that is not in the future."""
+    text = str(value).strip()
+    if not COLLECTION_DATE_RE.match(text):
+        return False
+    # Both validators also reject a date later than today (table2asn:
+    # "Collection_date is in the future"; ENA: FutureDateException). The sample
+    # table carries day/month-transposed rows such as 2026-12-06 that parse
+    # cleanly but land in the future, so the format check alone is not enough.
+    for fmt in ("%d-%b-%Y", "%b-%Y", "%Y"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+        return parsed.date() <= date.today()
+    return False
+
 # ---------------------------
 # DB query
 # ---------------------------
@@ -261,7 +296,11 @@ def main():
     # Format dates
     df["Collection_date"] = pd.to_datetime(df["date_collected"], errors="coerce")
     df["Collection_date"] = df["Collection_date"].dt.strftime("%d-%b-%Y")
-    df["Collection_date"] = df["Collection_date"].fillna("Unknown")
+    # An unrecorded date leaves the cell empty, which omits the modifier. It used
+    # to be filled with the literal "Unknown", which table2asn rejects outright as
+    # SEQ_DESCR.BadCollectionDate -- see valid_collection_date above for why no
+    # missing-value term is substituted instead.
+    df["Collection_date"] = df["Collection_date"].fillna("")
     df = df.drop(columns=["date_collected"])
 
     # Write raw metadata
@@ -316,6 +355,20 @@ def main():
         print(f"⚠️  {_seqid}: lat_lon '{_value}' is not a valid INSDC coordinate; "
               f"omitting the modifier. Fix the source record.", flush=True)
     df_exp.loc[_bad_latlon, "formatted_lat_lon"] = ""
+
+    # Same treatment for a date that is present but not submittable -- a future
+    # date, or anything that is not one of the three INSDC forms. Unlike
+    # geo_loc_name this is not mandatory anywhere on the ENA flatfile route, so an
+    # omitted date costs nothing, whereas a bad one fails the gate for the whole
+    # assembly. Most samples reaching here simply have no date recorded at all;
+    # that is already an empty cell and is passed over silently rather than
+    # warned about on every record.
+    df_exp["Collection_date"] = df_exp["Collection_date"].fillna("").astype(str).str.strip()
+    _bad_date = df_exp["Collection_date"].ne("") & ~df_exp["Collection_date"].apply(valid_collection_date)
+    for _seqid, _value in zip(df_exp.loc[_bad_date, "SeqID"], df_exp.loc[_bad_date, "Collection_date"]):
+        print(f"⚠️  {_seqid}: Collection_date '{_value}' is not a submittable INSDC "
+              f"date; omitting the modifier. Fix the source record.", flush=True)
+    df_exp.loc[_bad_date, "Collection_date"] = ""
 
     # geo_loc_name (the 'country' modifier) must start with a value from the INSDC
     # controlled list, and it is one of only two mandatory fields in ENA checklist

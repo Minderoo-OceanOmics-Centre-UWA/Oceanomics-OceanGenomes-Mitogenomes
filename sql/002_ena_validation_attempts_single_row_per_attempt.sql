@@ -18,19 +18,51 @@ BEGIN;
 -- one, then the most recently recorded attempt. Deletes every row that has
 -- some other row in its group with a strictly "greater" (submission_ready,
 -- recorded_at, id) tuple, which always leaves exactly one survivor per group.
-DELETE FROM ena_validation_attempts a
-USING ena_validation_attempts b
-WHERE a.assembly_prefix = b.assembly_prefix
-  AND a.ena_study = b.ena_study
-  AND a.validation_attempt = b.validation_attempt
-  AND (b.submission_ready, b.recorded_at, b.id) > (a.submission_ready, a.recorded_at, a.id);
+DO $dedupe$
+BEGIN
+    -- 014 replaces assembly_prefix with full_seqid.  bin/apply_ena_migrations.py
+    -- replays the whole chain on every run, so this legacy statement has to
+    -- stand down on a database that is already past 014.
+    IF EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = to_regclass('ena_validation_attempts')
+          AND attname = 'assembly_prefix'
+          AND NOT attisdropped
+    ) THEN
+        EXECUTE $dedupe_sql$
+            DELETE FROM ena_validation_attempts a
+            USING ena_validation_attempts b
+            WHERE a.assembly_prefix = b.assembly_prefix
+              AND a.ena_study = b.ena_study
+              AND a.validation_attempt = b.validation_attempt
+              AND (b.submission_ready, b.recorded_at, b.id) > (a.submission_ready, a.recorded_at, a.id)
+        $dedupe_sql$;
+    END IF;
+END
+$dedupe$;
 
 DROP INDEX IF EXISTS ena_validation_exact_result_idx;
 
 ALTER TABLE ena_validation_attempts
     ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 1;
 
-CREATE UNIQUE INDEX IF NOT EXISTS ena_validation_attempts_key_idx
-    ON ena_validation_attempts (assembly_prefix, ena_study, validation_attempt);
+DO $key_idx$
+BEGIN
+    -- 014 replaces assembly_prefix with full_seqid.  bin/apply_ena_migrations.py
+    -- replays the whole chain on every run, so this legacy statement has to
+    -- stand down on a database that is already past 014.
+    IF EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = to_regclass('ena_validation_attempts')
+          AND attname = 'assembly_prefix'
+          AND NOT attisdropped
+    ) THEN
+        EXECUTE $key_sql$
+            CREATE UNIQUE INDEX IF NOT EXISTS ena_validation_attempts_key_idx
+                ON ena_validation_attempts (assembly_prefix, ena_study, validation_attempt)
+        $key_sql$;
+    END IF;
+END
+$key_idx$;
 
 COMMIT;

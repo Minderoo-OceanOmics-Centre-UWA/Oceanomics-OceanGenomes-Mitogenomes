@@ -89,6 +89,7 @@ class EnaValidationDatabaseIntegrationTests(unittest.TestCase):
                     "010_drop_ena_locus_tables.sql",
                     "011_drop_local_package_validation.sql",
                     "012_drop_ena_selection_layer.sql",
+                    "014_ena_validation_attempts_full_seqid.sql",
                 ):
                     cursor.execute(_migration_sql(migration))
 
@@ -103,7 +104,8 @@ class EnaValidationDatabaseIntegrationTests(unittest.TestCase):
 
             record = {column: None for column in uploader.INSERT_COLUMNS}
             record.update(
-                assembly_prefix="OG1.hifi.260101.final", og_id="OG1", ena_study="PRJEB1",
+                full_seqid="OG1.hifi.260101.final.emma102", og_id="OG1",
+                annotation="emma102", ena_study="PRJEB1",
                 validation_mode="pipeline", validation_attempt="integration",
                 table2asn_status="PASS", conversion_status="FAIL",
                 preflight_status="NOT_APPLICABLE", webin_status="NOT_RUN",
@@ -147,6 +149,194 @@ class EnaValidationDatabaseIntegrationTests(unittest.TestCase):
                         "UPDATE ena_validation_attempts"
                         " SET submission_ready = TRUE, webin_status = 'FAIL_WEBIN'"
                     )
+        finally:
+            connection.rollback()
+            connection.close()
+
+    def test_submission_ledger_records_what_happened_after_validation(self):
+        """015: the ledger the downstream submitter closes a sequence out in.
+
+        Deliberately a separate table from ena_validation_attempts, which is
+        upserted with DO UPDATE SET across every non-key column: an accession
+        stored there would be erased by the next validation rerun.
+        """
+        try:
+            import psycopg2
+        except ImportError:
+            self.skipTest("psycopg2 is not installed")
+
+        seqid = "OG82.ilmn.240313.getorg1770.emma102"
+        connection = psycopg2.connect(os.environ["ENA_TEST_DB_DSN"])
+        schema = f"ena_submissions_test_{uuid.uuid4().hex}"
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f'CREATE SCHEMA "{schema}"')
+                cursor.execute(f'SET search_path TO "{schema}"')
+                for migration in (
+                    "001_create_ena_validation_attempts.sql",
+                    "002_ena_validation_attempts_single_row_per_attempt.sql",
+                    "004_ena_candidate_packages.sql",
+                    "005_ena_validation_attempts_genome_context.sql",
+                    "006_ena_tech_aware_locus_tags.sql",
+                    "010_drop_ena_locus_tables.sql",
+                    "011_drop_local_package_validation.sql",
+                    "012_drop_ena_selection_layer.sql",
+                    "014_ena_validation_attempts_full_seqid.sql",
+                    "015_ena_submissions.sql",
+                ):
+                    cursor.execute(_migration_sql(migration))
+
+                cursor.execute(
+                    """
+                    INSERT INTO ena_validation_attempts (
+                        full_seqid, og_id, tech, seq_date, code, annotation, ena_study,
+                        validation_mode, validation_attempt, table2asn_status,
+                        conversion_status, preflight_status, webin_status, submission_ready
+                    ) VALUES (
+                        %s, 'OG82', 'ilmn', '240313', 'getorg1770', 'emma102', 'PRJEB123421',
+                        'pipeline', 'initial', 'PASS', 'PASS', 'NOT_APPLICABLE', 'PASS', TRUE
+                    )
+                    """,
+                    (seqid,),
+                )
+
+                # Validated but never submitted reads NOT_SUBMITTED, not NULL.
+                cursor.execute(
+                    "SELECT submission_status, ena_analysis_accession"
+                    " FROM ena_submission_status WHERE full_seqid = %s",
+                    (seqid,),
+                )
+                self.assertEqual(cursor.fetchone(), ("NOT_SUBMITTED", None))
+
+                cursor.execute(
+                    """
+                    INSERT INTO ena_submissions (
+                        full_seqid, webin_mode, submission_status, submitted_at, submitted_by,
+                        receipt_path, receipt_sha256, webin_cli_version, ena_study_accession,
+                        ena_analysis_accession, biosample_accession, biosample_source,
+                        locus_tag_prefix, run_accessions
+                    ) VALUES (
+                        %s, 'production', 'ACCESSION_ASSIGNED', CURRENT_TIMESTAMP, 'tester',
+                        '/receipts/OG82/receipt.xml', %s, '9.0.3', 'PRJEB123421',
+                        'ERZ26543210', 'SAMN40589646', 'sample.ncbi_biosample_id',
+                        'OGMITO01', ARRAY['ERR13579246', 'ERR13579247']
+                    )
+                    """,
+                    (seqid, "a" * 64),
+                )
+
+                # Identity is GENERATED ALWAYS: the submitter writes full_seqid only.
+                cursor.execute(
+                    "SELECT og_id, tech, seq_date, code, annotation FROM ena_submissions"
+                    " WHERE full_seqid = %s",
+                    (seqid,),
+                )
+                self.assertEqual(
+                    cursor.fetchone(), ("OG82", "ilmn", "240313", "getorg1770", "emma102")
+                )
+
+                # A dotted annotation version stays whole rather than truncating at the dot.
+                cursor.execute(
+                    "INSERT INTO ena_submissions (full_seqid) VALUES (%s)",
+                    ("OG5.hifi.260101.final.emma1.0.2",),
+                )
+                cursor.execute(
+                    "SELECT code, annotation FROM ena_submissions WHERE og_id = 'OG5'"
+                )
+                self.assertEqual(cursor.fetchone(), ("final", "emma1.0.2"))
+
+                # A test-service dry run cannot overwrite the production record.
+                cursor.execute(
+                    """
+                    INSERT INTO ena_submissions (
+                        full_seqid, webin_mode, submission_status, submitted_at,
+                        ena_analysis_accession
+                    ) VALUES (%s, 'test', 'SUBMITTED', CURRENT_TIMESTAMP, 'ERZ99999999')
+                    """,
+                    (seqid,),
+                )
+                cursor.execute(
+                    "SELECT webin_mode, ena_analysis_accession FROM ena_submissions"
+                    " WHERE full_seqid = %s ORDER BY webin_mode",
+                    (seqid,),
+                )
+                self.assertEqual(
+                    cursor.fetchall(),
+                    [("production", "ERZ26543210"), ("test", "ERZ99999999")],
+                )
+
+                # The later accessions land on a second pass, in place.
+                cursor.execute(
+                    """
+                    INSERT INTO ena_submissions (
+                        full_seqid, webin_mode, submission_status, submitted_at,
+                        ena_analysis_accession, ena_sequence_accession
+                    ) VALUES (
+                        %s, 'production', 'ACCESSION_ASSIGNED', CURRENT_TIMESTAMP,
+                        'ERZ26543210', 'OU123456.1'
+                    )
+                    ON CONFLICT (full_seqid, webin_mode) DO UPDATE SET
+                        ena_sequence_accession = EXCLUDED.ena_sequence_accession,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING (xmax <> 0) AS updated
+                    """,
+                    (seqid,),
+                )
+                self.assertTrue(cursor.fetchone()[0], "upsert should update in place")
+
+                cursor.execute(
+                    "SELECT submission_status, ena_analysis_accession, ena_sequence_accession,"
+                    " biosample_accession, locus_tag_prefix"
+                    " FROM ena_submission_status WHERE full_seqid = %s",
+                    (seqid,),
+                )
+                self.assertEqual(
+                    cursor.fetchone(),
+                    (
+                        "ACCESSION_ASSIGNED",
+                        "ERZ26543210",
+                        "OU123456.1",
+                        "SAMN40589646",
+                        "OGMITO01",
+                    ),
+                )
+
+                # Every status has to carry the evidence it claims, and every
+                # accession has to look like the archive that mints it.
+                rejected = (
+                    ("ACCESSION_ASSIGNED without an accession",
+                     "INSERT INTO ena_submissions (full_seqid, submission_status, submitted_at)"
+                     " VALUES ('OG9.ilmn.260101.final.emma102', 'ACCESSION_ASSIGNED', CURRENT_TIMESTAMP)"),
+                    ("SUBMITTED without submitted_at",
+                     "INSERT INTO ena_submissions (full_seqid, submission_status)"
+                     " VALUES ('OG9.ilmn.260101.final.emma102', 'SUBMITTED')"),
+                    ("FAILED without a reason",
+                     "INSERT INTO ena_submissions (full_seqid, submission_status)"
+                     " VALUES ('OG9.ilmn.260101.final.emma102', 'FAILED')"),
+                    ("status outside the vocabulary",
+                     "INSERT INTO ena_submissions (full_seqid, submission_status)"
+                     " VALUES ('OG9.ilmn.260101.final.emma102', 'DONE')"),
+                    ("webin_mode outside the vocabulary",
+                     "INSERT INTO ena_submissions (full_seqid, webin_mode)"
+                     " VALUES ('OG9.ilmn.260101.final.emma102', 'staging')"),
+                    ("a full_seqid that is not an OG id",
+                     "INSERT INTO ena_submissions (full_seqid) VALUES ('not-an-og-id')"),
+                    ("a GenBank accession in the ERZ column",
+                     "INSERT INTO ena_submissions (full_seqid, ena_analysis_accession)"
+                     " VALUES ('OG9.ilmn.260101.final.emma102', 'OQ123456')"),
+                    ("a malformed BioSample",
+                     "INSERT INTO ena_submissions (full_seqid, biosample_accession)"
+                     " VALUES ('OG9.ilmn.260101.final.emma102', 'SAMX123')"),
+                    ("an analysis accession among the runs",
+                     "INSERT INTO ena_submissions (full_seqid, run_accessions)"
+                     " VALUES ('OG9.ilmn.260101.final.emma102', ARRAY['ERZ1234'])"),
+                )
+                for label, statement in rejected:
+                    with self.subTest(rejects=label):
+                        cursor.execute("SAVEPOINT rejected_row")
+                        with self.assertRaises(psycopg2.errors.CheckViolation):
+                            cursor.execute(statement)
+                        cursor.execute("ROLLBACK TO SAVEPOINT rejected_row")
         finally:
             connection.rollback()
             connection.close()

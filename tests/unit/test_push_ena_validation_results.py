@@ -58,7 +58,8 @@ class PushEnaValidationTests(unittest.TestCase):
     def make_record(self, root):
         row = {column: "" for column in MODULE.INSERT_COLUMNS}
         row.update(
-            assembly_prefix="OG1.hifi.260101.final", og_id="OG1", ena_study="PRJEB1",
+            full_seqid="OG1.hifi.260101.final.emma102", og_id="OG1", annotation="emma102",
+            ena_study="PRJEB1",
             validation_mode="pipeline", validation_attempt="one", table2asn_status="PASS",
             conversion_status="PASS", preflight_status="NOT_APPLICABLE", webin_status="PASS",
             submission_ready="true", reject_count="0",
@@ -82,7 +83,9 @@ class PushEnaValidationTests(unittest.TestCase):
         self.assertIn("ON CONFLICT", connection.cursor_instance.query)
         self.assertIn("DO UPDATE", connection.cursor_instance.query)
         self.assertNotIn("validation_attempt = EXCLUDED", connection.cursor_instance.query)
-        self.assertEqual(connection.cursor_instance.params["assembly_prefix"], record["assembly_prefix"])
+        self.assertEqual(connection.cursor_instance.params["full_seqid"], record["full_seqid"])
+        self.assertIn("ON CONFLICT (full_seqid, ena_study, validation_attempt)", connection.cursor_instance.query)
+        self.assertEqual(connection.cursor_instance.params["annotation"], "emma102")
 
     def test_conflict_on_earlier_attempt_is_updated(self):
         with tempfile.TemporaryDirectory() as tmp:

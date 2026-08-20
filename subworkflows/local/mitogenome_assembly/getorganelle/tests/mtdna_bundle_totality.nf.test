@@ -1,0 +1,27 @@
+nextflow_workflow {
+
+    name "Test Plan 2f mtdna collapsed-mirror bundle groupKey sizing"
+    script "./mtdna_bundle_totality.nf"
+    workflow "MTDNA_BUNDLE_TOTALITY"
+    tag "subworkflows"
+    tag "getorganelle"
+    tag "mtdna_bundle"
+
+    // Guards Plan 2f: the mtdna bundle releases per sample (fixed groupKey size, plain
+    // groupTuple, no close-time remainder) instead of a bare groupTuple whole-run barrier.
+
+    test("getorg bundle = 3 files/sample, oatk = 2 files/sample, one bundle per sample") {
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // one bundle per sample (5 getorg, 4 oatk), none lost/merged
+                { assert workflow.out.getorg_bundle.size() == 5 },
+                { assert workflow.out.oatk_bundle.size() == 4 },
+                // every bundle is the fixed size => groupKey released it on its own
+                { assert workflow.out.getorg_bundle.every { it[1] == 3 } },
+                { assert workflow.out.oatk_bundle.every { it[1] == 2 } }
+            )
+        }
+    }
+}

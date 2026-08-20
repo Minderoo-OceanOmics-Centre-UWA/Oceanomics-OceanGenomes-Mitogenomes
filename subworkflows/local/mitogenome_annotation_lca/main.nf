@@ -59,6 +59,20 @@ def countAnnotatedRegions(files) {
     }
 }
 
+// Did SELECT_CORAL_REFERENCE pick a reference for this sample? Its status line starts
+// with SELECTED / SELECTED_LOW_CONFIDENCE when a DB record aligned (and a reference.gb
+// was written), or NONE when nothing did. Read the always-emitted status so the fixer
+// can branch on a per-sample VALUE rather than a remainder join against the optional
+// reference output. Defined at file scope so it resolves inside the .map/.filter closures.
+def coralReferenceSelected(statusFile) {
+    try {
+        def line = statusFile.text.readLines().find { it?.trim() }
+        return line?.split('\t', -1)?.first()?.trim()?.toUpperCase()?.startsWith('SELECTED') ?: false
+    } catch (ignored) {
+        return false
+    }
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MITOGENOME ANNOTATION AND LCA WORKFLOW
@@ -222,12 +236,16 @@ workflow MITOGENOME_ANNOTATION {
     ch_fix_selected = ch_fix_base.join(ch_selected_ref)
         .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }
 
-    // Fallback: a FIX sample for which the selector emitted no reference (no DB
-    // record aligned) gets the bundled curated anthozoan reference.
-    ch_sel_keys = ch_selected_ref.map { meta, _ref -> [meta, true] }
+    // Fallback: a FIX sample for which the selector emitted no reference (status NONE:
+    // no DB record aligned) gets the bundled curated anthozoan reference. The unselected
+    // set is read from SELECT_CORAL_REFERENCE.out.status, which is emitted for EVERY FIX
+    // sample, so this is a plain per-sample join (the sample falls back the moment its own
+    // status arrives) rather than a remainder join that waits for the whole run to close.
+    ch_coral_ref_unselected = SELECT_CORAL_REFERENCE.out.status
+        .filter { _meta, status_file -> !coralReferenceSelected(status_file) }
+        .map { meta, _status_file -> [meta, true] }
     ch_curated_ref = Channel.fromPath("${projectDir}/assets/anthozoa_reference.gb", checkIfExists: true).first()
-    ch_fix_fallback = ch_fix_base.join(ch_sel_keys, remainder: true)
-        .filter { it[0] != null && it[1] != null && it[-1] == null }   // FIX sample, selector emitted nothing
+    ch_fix_fallback = ch_fix_base.join(ch_coral_ref_unselected, by: 0)
         .map { meta, genome, bed, _flag -> [meta, genome, bed] }
         .combine(ch_curated_ref)
         .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }

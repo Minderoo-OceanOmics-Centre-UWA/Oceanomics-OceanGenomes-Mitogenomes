@@ -13,7 +13,7 @@ process PARSE_TABLE2ASN_VALIDATION {
     path "versions.yml", emit: versions
 
     script:
-    prefix = meta.mt_assembly_prefix ?: meta.id
+    prefix = meta.full_seqid ?: meta.mt_assembly_prefix ?: meta.id
     """
     parse_table2asn_validation.py \\
         --sample '${prefix}' \\
@@ -27,7 +27,7 @@ process PARSE_TABLE2ASN_VALIDATION {
     """
 
     stub:
-    prefix = meta.mt_assembly_prefix ?: meta.id
+    prefix = meta.full_seqid ?: meta.mt_assembly_prefix ?: meta.id
     """
     printf 'sample\tsource\tseverity\tcode\tmessage\n' > ${prefix}.table2asn_findings.tsv
     printf 'sample\tstatus\treject_count\terror_count\twarning_count\tinfo_count\tfatal_discrepancy_count\tnostop_count\tblocking_codes\twarning_codes\n${prefix}\tPASS\t0\t0\t0\t0\t0\t0\t\t\n' > ${prefix}.table2asn_status.tsv

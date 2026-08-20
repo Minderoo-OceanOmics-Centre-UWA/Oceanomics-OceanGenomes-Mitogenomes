@@ -3,8 +3,8 @@
 import psycopg2
 import pandas as pd
 import numpy as np
+import argparse
 import configparser
-import sys
 from pathlib import Path
 
 def load_db_config(config_file):
@@ -147,12 +147,36 @@ lca_column_headers = [
     "phylum", "class", "order", "family", "genus", "specificEpithet",
     "scientificName", "scientificNameAuthorship", "taxonRank", "top_taxonID",
     "taxonID_db", "top_verbatimIdentification", "top_accession_id", "accession_id_ref_db",
+    "taxonRank_db",
     "top_percent_match", "top_percent_query_cover", "top_percent_query_cover_hsp", "alignment_length",
     "subject_length", "sequence_length", "top_confidence_score", "sequence_region", "lca_run_date",
     "dna_sequence", "identificationRemarks"
 ]
 
-def process_lca(lca_file, sample, db_params):
+# The group --force prunes: everything this sample/region has ever recorded.
+LCA_HISTORY_KEY = ["og_id", "tech", "seq_date", "code", "annotation", "region"]
+
+
+def prune_superseded_lca(cursor, written):
+    """Delete lca rows this run did not produce, per sample/region it touched.
+
+    `written` maps an LCA_HISTORY_KEY tuple to the set of lca_run_date values this
+    run wrote for it. A row whose content matched has just had its date refreshed
+    to the current run's, so anything left on another date is a superseded result.
+    """
+    where = " AND ".join(f'"{c}" = %s' for c in LCA_HISTORY_KEY)
+    query = (
+        f"DELETE FROM lca WHERE {where} "
+        f'AND "lca_run_date"::text <> ALL(%s)'
+    )
+    deleted = 0
+    for key, run_dates in written.items():
+        cursor.execute(query, list(key) + [[str(d) for d in run_dates]])
+        deleted += cursor.rowcount
+    return deleted
+
+
+def process_lca(lca_file, sample, db_params, force=False):
     print(f"📂 Reading LCA file: {lca_file}")
     # df = pd.read_csv(lca_file, sep='\t', header=True, names=lca_column_headers).replace({np.nan: None})
     # header=0 means a 0-byte file raises EmptyDataError rather than parsing to an empty
@@ -175,7 +199,9 @@ def process_lca(lca_file, sample, db_params):
 
     df[['og_id', 'tech', 'seq_date', 'code', 'annotation']] = df['seq_id'].str.split('.', expand=True)
     success, failure = 0, 0
-    
+    # HISTORY_KEY tuple -> set of lca_run_date values written for it, used by --force.
+    written = {}
+
     with psycopg2.connect(**db_params) as conn:
         cursor = conn.cursor()
         for _, row in df.iterrows():
@@ -205,6 +231,7 @@ def process_lca(lca_file, sample, db_params):
                 taxon_id_db,
                 top_accession_id,
                 accession_id_ref_db,
+                taxon_rank_db,
                 top_percent_match,
                 top_percent_query_cover,
                 top_percent_query_cover_hsp,
@@ -237,6 +264,7 @@ def process_lca(lca_file, sample, db_params):
                 %(taxon_id_db)s,
                 %(top_accession_id)s,
                 %(accession_id_ref_db)s,
+                %(taxon_rank_db)s,
                 %(top_percent_match)s,
                 %(top_percent_query_cover)s,
                 %(top_percent_query_cover_hsp)s,
@@ -245,31 +273,14 @@ def process_lca(lca_file, sample, db_params):
                 %(sequence_length)s,
                 %(top_confidence_score)s
             )
-            ON CONFLICT (og_id, tech, seq_date, code, annotation, region, lca_run_date)
+            -- Rows are keyed by content (content_hash is set by the
+            -- lca_content_hash trigger), so a conflict means this run reproduced
+            -- an existing result exactly. The only thing left to record is that
+            -- it was seen again; a differing result hashes differently and is
+            -- inserted as a new row rather than overwriting the old one.
+            ON CONFLICT ON CONSTRAINT lca_content_unique
             DO UPDATE SET
-                species_in_lca          = EXCLUDED.species_in_lca,
-                number_unq_blast_hits = EXCLUDED.number_unq_blast_hits,
-                domain                     = EXCLUDED.domain,
-                phylum                     = EXCLUDED.phylum,
-                class                      = EXCLUDED.class,
-                "order"                    = EXCLUDED."order",
-                family                     = EXCLUDED.family,
-                genus                      = EXCLUDED.genus,
-                specific_epiphet           = EXCLUDED.specific_epiphet,
-                species                    = EXCLUDED.species,
-                scientific_name_authorship = EXCLUDED.scientific_name_authorship,
-                taxon_rank                 = EXCLUDED.taxon_rank,
-                top_taxon_id                   = EXCLUDED.top_taxon_id,
-                taxon_id_db                = EXCLUDED.taxon_id_db,
-                top_accession_id               = EXCLUDED.top_accession_id,
-                accession_id_ref_db        = EXCLUDED.accession_id_ref_db,
-                top_percent_match              = EXCLUDED.top_percent_match,
-                top_percent_query_cover        = EXCLUDED.top_percent_query_cover,
-                top_percent_query_cover_hsp    = EXCLUDED.top_percent_query_cover_hsp,
-                alignment_length           = EXCLUDED.alignment_length,
-                subject_length             = EXCLUDED.subject_length,
-                sequence_length            = EXCLUDED.sequence_length,
-                top_confidence_score           = EXCLUDED.top_confidence_score;
+                lca_run_date = EXCLUDED.lca_run_date;
             """
 
             # params: 1:1 mapping between placeholders and df column names
@@ -300,6 +311,7 @@ def process_lca(lca_file, sample, db_params):
                 "taxon_id_db": row_dict.get("taxonID_db"),
                 "top_accession_id": row_dict.get("top_accession_id"),
                 "accession_id_ref_db": row_dict.get("accession_id_ref_db"),
+                "taxon_rank_db": row_dict.get("taxonRank_db"),
                 "top_percent_match": row_dict.get("top_percent_match"),
                 "top_percent_query_cover": row_dict.get("top_percent_query_cover"),
                 "top_percent_query_cover_hsp": row_dict.get("top_percent_query_cover_hsp"),
@@ -313,24 +325,49 @@ def process_lca(lca_file, sample, db_params):
             try:
                 cursor.execute(upsert_query, params)
                 success += 1
+                key = tuple(params[c] for c in LCA_HISTORY_KEY)
+                written.setdefault(key, set()).add(params["lca_run_date"])
             except Exception as e:
                 failure += 1
                 print(f"❌ LCA row failed ({row_dict.get('seq_id')}): {e}")
 
+        # Prune only after every row landed: deleting around a failure could drop
+        # the older result without its replacement having been written.
+        if force and failure == 0:
+            pruned = prune_superseded_lca(cursor, written)
+            print(f"🧹 --force: deleted {pruned} superseded lca rows")
+        elif force:
+            print("⚠️ Skipping --force prune: upload had failures.")
+
     print(f"✅ LCA upload complete: {success} rows succeeded, {failure} failed")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
-        print("Usage:\n  push_lca_blast_results.py <config_file> <sample> <lca_results> <blast_results>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Upload filtered BLAST hits and LCA assignments for one sample."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "After uploading, delete lca rows for the same sample/region that this "
+            "run did not produce, so only the current result is kept. Off by "
+            "default: superseded results are preserved alongside the new ones. "
+            "Does not affect blast_filtered_lca, which overwrites in place and "
+            "keeps no history."
+        ),
+    )
+    parser.add_argument("config_file")
+    parser.add_argument("sample")
+    parser.add_argument("lca_results")
+    parser.add_argument("blast_results")
+    args = parser.parse_args()
 
-    config_path, sample_id, lca_path, blast_path = sys.argv[1:5]
-    db_config = load_db_config(config_path)
+    db_config = load_db_config(args.config_file)
 
     print("\n🔄 Starting BLAST processing...")
-    process_blast(blast_path, sample_id, db_config)
+    process_blast(args.blast_results, args.sample, db_config)
 
     print("\n🔄 Starting LCA processing...")
-    process_lca(lca_path, sample_id, db_config)
+    process_lca(args.lca_results, args.sample, db_config, force=args.force)
 
     print("\n🎉 All processing complete.")

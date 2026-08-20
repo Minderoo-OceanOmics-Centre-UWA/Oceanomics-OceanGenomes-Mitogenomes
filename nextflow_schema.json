@@ -262,23 +262,11 @@
                     "default": true,
                     "description": "Format-validate each EMBL flatfile with webin-cli -context sequence. This is the pipeline's final ENA gate."
                 },
-                "ena_study_hifi": {
+                "ena_study": {
                     "type": "string",
-                    "default": "PRJEB123419",
+                    "default": null,
                     "pattern": "^PRJEB[0-9]+$",
-                    "description": "ENA child study for HiFi candidates. The umbrella PRJEB110568 cannot receive data."
-                },
-                "ena_study_hic": {
-                    "type": "string",
-                    "default": "PRJEB123420",
-                    "pattern": "^PRJEB[0-9]+$",
-                    "description": "ENA child study for Hi-C candidates."
-                },
-                "ena_study_ilmn": {
-                    "type": "string",
-                    "default": "PRJEB123421",
-                    "pattern": "^PRJEB[0-9]+$",
-                    "description": "ENA child study for Illumina candidates."
+                    "description": "ENA study every candidate in the run submits to. Created by the upstream pipeline; there is no default to fall back to."
                 },
                 "ena_mode": {
                     "type": "string",
@@ -532,6 +520,14 @@
                 "precomputed_mitogenome_assembly_log_hifi": {
                     "type": "string",
                     "description": "Glob of precomputed MitoHiFi logs used when the HiFi branch is skipped."
+                },
+                "precomputed_mitogenome_assembly_fasta_oatk": {
+                    "type": "string",
+                    "description": "Glob of precomputed Oatk assembly FASTA files used when the GetOrganelle branch is skipped and Oatk fallbacks were produced by an earlier run."
+                },
+                "precomputed_mitogenome_assembly_log_oatk": {
+                    "type": "string",
+                    "description": "Glob of precomputed Oatk circularity-check TSVs (*oatk*.getorg_check.tsv) used when the GetOrganelle branch is skipped."
                 },
                 "precomputed_mitogenome_circularity_evidence_hifi": {
                     "type": "string",

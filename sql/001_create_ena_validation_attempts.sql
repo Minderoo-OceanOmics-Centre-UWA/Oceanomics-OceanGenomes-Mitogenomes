@@ -69,8 +69,24 @@ CREATE INDEX IF NOT EXISTS ena_validation_attempts_identity_idx
 CREATE INDEX IF NOT EXISTS ena_validation_attempts_recorded_at_idx
     ON ena_validation_attempts (recorded_at DESC);
 
-CREATE OR REPLACE VIEW ena_validation_latest AS
-SELECT DISTINCT ON (assembly_prefix)
-    *
-FROM ena_validation_attempts
-ORDER BY assembly_prefix, recorded_at DESC, id DESC;
+DO $latest$
+BEGIN
+    -- 014 replaces assembly_prefix with full_seqid.  bin/apply_ena_migrations.py
+    -- replays the whole chain on every run, so this legacy statement has to
+    -- stand down on a database that is already past 014.
+    IF EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = to_regclass('ena_validation_attempts')
+          AND attname = 'assembly_prefix'
+          AND NOT attisdropped
+    ) THEN
+        EXECUTE $view$
+            CREATE OR REPLACE VIEW ena_validation_latest AS
+            SELECT DISTINCT ON (assembly_prefix)
+                *
+            FROM ena_validation_attempts
+            ORDER BY assembly_prefix, recorded_at DESC, id DESC
+        $view$;
+    END IF;
+END
+$latest$;

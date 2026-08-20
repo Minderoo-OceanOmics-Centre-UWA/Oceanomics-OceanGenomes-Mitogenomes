@@ -352,6 +352,28 @@ class CollaboratorArtefactTests(unittest.TestCase):
             self.assertIn(f"{self.seqid}.fa\n", checksums)
             self.assertIn(f"{self.seqid}.gff\n", checksums)
 
+    def test_package_carries_the_genes_fasta_renamed_onto_full_seqid(self):
+        """The extractor names it on the assembly prefix; the package uses full_seqid.
+
+        Every other file in the directory shares that stem, and a collaborator
+        should not have to know that this one file was keyed differently.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            genes_text = f">{self.seqid}|1-6|+|COX1 [organism=x]\nAACCGT\n"
+            genes = root / "OG910.hifi.241127.v3mitohifi.genes.fa"
+            genes.write_text(genes_text)
+            package = root / "package"
+            args = self.build_args(root, package, genes=str(genes))
+            self.assertEqual(MODULE.build_package(args), 0)
+
+            self.assertEqual(
+                (package / f"{self.seqid}.genes.fa").read_text(), genes_text
+            )
+            self.assertIn(
+                f"{self.seqid}.genes.fa\n", (package / "checksums.sha256").read_text()
+            )
+
     def test_package_holds_no_locus_tag_mapping(self):
         """The mapping TSV is gone: nothing in this pipeline allocates tags."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -375,8 +397,13 @@ class CollaboratorArtefactTests(unittest.TestCase):
                 "##gff-version 3\n"
                 f"{self.seqid}\tEmma\tgene\t1\t68\t.\t+\t.\tID=uuid-gene-tf;Name=TF\n"
             )
+            genes = root / "OG910.hifi.241127.v3mitohifi.genes.fa"
+            genes.write_text(f">{self.seqid}|1-6|+|COX1\nAACCGT\n")
             digests = []
-            for name, extra in (("without", {}), ("with", {"gff": str(gff)})):
+            for name, extra in (
+                ("without", {}),
+                ("with", {"gff": str(gff), "genes": str(genes)}),
+            ):
                 package = root / name
                 MODULE.build_package(self.build_args(root, package, **extra))
                 digests.append(

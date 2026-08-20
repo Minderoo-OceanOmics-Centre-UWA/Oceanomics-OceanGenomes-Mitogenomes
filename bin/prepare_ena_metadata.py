@@ -84,17 +84,6 @@ def fetch_metadata(connection, args: argparse.Namespace) -> dict[str, object]:
         # BLOCKED_METADATA instead of WAITING_FOR_BIOSAMPLE.
         biosample = (sample_row[0] or "").strip() if sample_row else ""
         biosample = biosample or None
-        cursor.execute(
-            """
-            SELECT run_accession
-            FROM ena_candidate_runs
-            WHERE full_seqid = %s
-              AND contribution_role IN ('primary', 'polishing')
-            ORDER BY run_accession
-            """,
-            (args.full_seqid,),
-        )
-        runs = [row[0] for row in cursor.fetchall()]
     return {
         "schema_version": 1,
         "og_id": args.og_id,
@@ -108,7 +97,11 @@ def fetch_metadata(connection, args: argparse.Namespace) -> dict[str, object]:
         "program": assembly_program(args.code),
         "platform": platform_for_tech(args.tech),
         "scientific_name": args.scientific_name,
-        "run_accessions": runs,
+        # Run accessions belong to the downstream submission pipeline, which
+        # owns the raw-read submissions to PRJEB123419/420/421. Nothing in this
+        # schema records them, so an empty list is emitted and RUN_REF is left
+        # out of the manifest for the submitter to add.
+        "run_accessions": [],
     }
 
 

@@ -5,7 +5,7 @@
 */
 // Helper functions
 include { softwareVersionsToYAML    } from '../../nf-core/utils_nfcore_pipeline'
-include { enaTargetAnnotate; validateEnaTargets } from '../utils_ena_targets/main'
+include { enaStudyAnnotate; validateEnaStudy } from '../utils_ena_targets/main'
 
 // Mitogenome assembly
 include { BUILD_SOURCE_MODIFIERS} from '../../../modules/local/genome_qc/build_source_modifiers'
@@ -44,9 +44,9 @@ workflow MITOGENOME_QC {
     def sql_config_file = file(params.sql_config, checkIfExists: true)
     def template_sbt_file = file(params.template_sbt, checkIfExists: true)
 
-    // Fail on a mis-set study/prefix pair before any candidate is packaged, not
+    // Fail on a missing or malformed study before any candidate is packaged, not
     // at the point one is about to be submitted under the wrong namespace.
-    validateEnaTargets(params)
+    validateEnaStudy(params)
 
     // Per-sample circularity verdict (resolved at the QC gate) carried as a value
     // so the table2asn topology/completeness modifiers reflect the real assembly,
@@ -66,10 +66,9 @@ workflow MITOGENOME_QC {
             error "Annotated SeqID '${full_seqid}' does not belong to specimen ${meta.id}"
         }
         def annotation_version = full_seqid.tokenize('.').last()
-        // The ENA study is a property of the candidate's sequencing technology,
-        // resolved once here so every ENA step downstream reads the same value
-        // from meta and no join key changes shape.
-        def meta_ext = enaTargetAnnotate(params, meta + [
+        // The run's ENA study is attached once here so every ENA step downstream
+        // reads the same value from meta and no join key changes shape.
+        def meta_ext = enaStudyAnnotate(params, meta + [
             full_seqid: full_seqid,
             annotation_version: annotation_version,
             scientific_name: species
@@ -178,19 +177,41 @@ workflow MITOGENOME_QC {
 
     // ERROR/REJECT validator findings and FATAL discrepancy findings quarantine
     // only that sample. Warnings remain visible but continue to ENA conversion.
-    ch_table2asn_pass = GEN_FILES_TABLE2ASN.out.gbf_file
+    // Branch (not filter) so the quarantined complement is available locally: it is the exact
+    // set of samples ENA_FLATFILE / package / Webin never run for, and it lets each of those
+    // optional stages emit an explicit per-sample NOT_RUN row below, making the ENA validation
+    // record a FIXED-size group that releases per sample (no close-time remainder). gbf_file is
+    // a required table2asn output, so pass + quarantined partition every sample exactly.
+    ch_table2asn_branched = GEN_FILES_TABLE2ASN.out.gbf_file
         .join(PARSE_TABLE2ASN_VALIDATION.out.status, by: 0)
-        .filter { _meta, _gbf, status_file ->
+        .branch { _meta, _gbf, status_file ->
             def rows = status_file.readLines()
-            rows.size() > 1 && rows[1].split('\\t', -1)[1] == 'PASS'
+            pass: rows.size() > 1 && rows[1].split('\\t', -1)[1] == 'PASS'
+            fail: true
         }
-        .map { meta, gbf, _status_file -> tuple(meta, gbf) }
+    ch_table2asn_pass = ch_table2asn_branched.pass.map { meta, gbf, _status_file -> tuple(meta, gbf) }
+    // Quarantined metas: no ENA_FLATFILE, package or Webin runs for these.
+    ch_ena_quarantined = ch_table2asn_branched.fail.map { meta, _gbf, _status_file -> meta }
 
     ENA_FLATFILE(ch_table2asn_pass)
     ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.status.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.checks.collect { it[1] })
     ch_versions = ch_versions.mix(ENA_FLATFILE.out.versions.first())
+
+    // ENA_FLATFILE writes the .embl(.gz) -- and therefore package + Webin run -- ONLY when
+    // conversion_status == PASS (the module gzips the flat file solely on PASS). Branch its
+    // always-emitted status so "converted" vs "conversion failed" is a local per-sample value,
+    // giving the exact complement for the embl / package / Webin NOT_RUN rows below without a
+    // remainder join. Samples that reached ENA_FLATFILE but did not convert have no embl,
+    // package or Webin outputs, exactly like the quarantined ones.
+    ch_flatfile_status_branched = ENA_FLATFILE.out.status.branch { _meta, status_file ->
+        def rows = status_file.readLines()
+        pass: rows.size() > 1 && rows[1].split('\\t', -1)[1] == 'PASS'
+        fail: true
+    }
+    ch_ena_no_embl = ch_ena_quarantined
+        .mix( ch_flatfile_status_branched.fail.map { meta, _status_file -> meta } )
 
     // Flat file format check first: it is the pipeline's last ENA gate, and the
     // package records its verdict, so the build has to see the result. The
@@ -213,6 +234,8 @@ workflow MITOGENOME_QC {
         // GFF only: FORMAT_FILES.out.gff also carries the fasta, and staging the
         // same basename twice would collide in the task work directory.
         .join(FORMAT_FILES.out.gff.map { meta, _sample_fa, sample_gff -> [ meta, sample_gff ] }, by: 0)
+        // Concatenated gene FASTA only: genes_dir would also stage the per-CDS singles.
+        .join(EXTRACT_GENES_GFF.out.genes_fa, by: 0)
         .join(ENA_FLATFILE.out.embl_file, by: 0)
         .join(PREPARE_ENA_METADATA.out.metadata, by: 0)
 
@@ -225,39 +248,58 @@ workflow MITOGENOME_QC {
     ch_multiqc_files = ch_multiqc_files.mix(BUILD_ENA_CANDIDATE_PACKAGE.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(BUILD_ENA_CANDIDATE_PACKAGE.out.versions.first())
 
-    // Collate every reached gate into one durable record per assembly. Missing
-    // downstream files become explicit NOT_RUN/NOT_REQUESTED values rather than
-    // silently dropping a quarantined sample.
-    ch_ena_validation_files = PARSE_TABLE2ASN_VALIDATION.out.status
-        .mix(ENA_FLATFILE.out.status)
-        .mix(ENA_FLATFILE.out.checks)
-        .mix(ENA_FLATFILE.out.embl_file)
-        .mix(BUILD_ENA_CANDIDATE_PACKAGE.out.metadata)
+    // Collate every reached gate into one durable record per assembly. Each optional
+    // contributor is made TOTAL by emitting an explicit per-sample NOT_RUN row for the samples
+    // it did not run on, so EVERY sample contributes the SAME fixed number of files:
+    //   PARSE status (always) + conversion status + conversion checks + embl + package metadata
+    //   [+ Webin status + Webin manifest]  =  5  (or 7 with --ena_webin_validate).
+    // With the count fixed and known, a constant groupKey releases each sample's record the
+    // moment its own files arrive -- no bare groupTuple, and NO close-time remainder -- so a
+    // quarantined or conversion-failed sample streams exactly like a fully-passing one.
+    //
+    // Complements are local per-sample sets (no remainder join): conversion status + checks run
+    // for every table2asn PASS, so their NOT_RUN complement is the quarantined set; embl,
+    // package and Webin run only when conversion PASSed, so their complement is quarantined +
+    // conversion-failed (ch_ena_no_embl).
+    //
+    // The NOT_RUN placeholders are named so collate_ena_validation.py IGNORES them: it reads
+    // only the .table2asn_status.tsv / .ena_conversion_status.tsv / .webin_status.tsv suffixes
+    // and already infers NOT_RUN / SKIPPED / NOT_REQUESTED from a stage's ABSENCE. The record is
+    // therefore byte-identical to the bare-groupTuple version -- collate sees the same real
+    // status files and the same absences; the placeholders only make the group size fixed.
+    def notrun_flatfile_status  = file("${projectDir}/assets/ena_not_run/flatfile_status.not_run",  checkIfExists: true)
+    def notrun_flatfile_checks  = file("${projectDir}/assets/ena_not_run/flatfile_checks.not_run",  checkIfExists: true)
+    def notrun_flatfile_embl    = file("${projectDir}/assets/ena_not_run/flatfile_embl.not_run",    checkIfExists: true)
+    def notrun_package_metadata = file("${projectDir}/assets/ena_not_run/package_metadata.not_run", checkIfExists: true)
+    def notrun_webin_status     = file("${projectDir}/assets/ena_not_run/webin_status.not_run",     checkIfExists: true)
+    def notrun_webin_manifest   = file("${projectDir}/assets/ena_not_run/webin_manifest.not_run",   checkIfExists: true)
+
+    ch_ena_validation_files = PARSE_TABLE2ASN_VALIDATION.out.status                              // always, all samples
+        .mix( ENA_FLATFILE.out.status )                                                          // conversion status: PASS set
+        .mix( ch_ena_quarantined.map { meta -> [ meta, notrun_flatfile_status ] } )              //   + NOT_RUN: quarantined
+        .mix( ENA_FLATFILE.out.checks )                                                          // conversion checks: PASS set
+        .mix( ch_ena_quarantined.map { meta -> [ meta, notrun_flatfile_checks ] } )              //   + NOT_RUN: quarantined
+        .mix( ENA_FLATFILE.out.embl_file )                                                       // embl: converted set
+        .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_flatfile_embl ] } )                    //   + NOT_RUN: quarantined + conv-failed
+        .mix( BUILD_ENA_CANDIDATE_PACKAGE.out.metadata )                                         // package metadata: converted set
+        .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_package_metadata ] } )                 //   + NOT_RUN: quarantined + conv-failed
+    def ena_record_slots = (params.ena_webin_validate as boolean) ? 7 : 5
     if (params.ena_webin_validate) {
         ch_ena_validation_files = ch_ena_validation_files
-            .mix(WEBIN_VALIDATE.out.status)
-            .mix(WEBIN_VALIDATE.out.manifest)
+            .mix( WEBIN_VALIDATE.out.status )                                                     // Webin status: converted set
+            .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_webin_status ] } )                  //   + NOT_RUN: quarantined + conv-failed
+            .mix( WEBIN_VALIDATE.out.manifest )                                                   // Webin manifest: converted set
+            .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_webin_manifest ] } )                //   + NOT_RUN: quarantined + conv-failed
     }
 
-    // NOTE: a bare groupTuple, so no sample's record is built until every sample has cleared
-    // QC. That is tolerable ONLY because this is the tail of the subworkflow -- table2asn,
-    // the flatfile conversion, the package build and Webin all run per sample and are not
-    // held by it, and ENA_VALIDATION_SUMMARY below collects across the whole run anyway.
-    // Contrast the assembly-upload channel in the parent workflow, where the same operator
-    // sat mid-pipeline and stopped every finished sample from reaching QC at all.
-    //
-    // Do NOT "fix" this with a groupKey carrying a constant size: the per-sample file count
-    // genuinely varies. ENA_FLATFILE only runs on samples that passed table2asn
-    // (ch_table2asn_pass above), BUILD_ENA_CANDIDATE_PACKAGE only on those whose whole join
-    // chain matched, and WEBIN_VALIDATE only under --ena_webin_validate. A too-large size
-    // makes groupTuple never emit for a quarantined sample and silently lose it; a too-small
-    // one emits an incomplete record.
-    // Sizing this correctly means first making each optional contributor emit an explicit
-    // NOT_RUN row per sample -- which is the shape the comment above already assumes.
+    // Fixed, known contributor count per sample -> constant groupKey + plain groupTuple, so
+    // every sample (passing, quarantined or conversion-failed) releases its record on its own
+    // as soon as its `ena_record_slots` files arrive. ENA_VALIDATION_SUMMARY below still
+    // collects across the whole run.
     ch_ena_validation_inputs = ch_ena_validation_files
-        .map { meta, validation_file -> tuple(meta.mt_assembly_prefix, meta, validation_file) }
+        .map { meta, validation_file -> tuple( groupKey(meta.full_seqid ?: meta.mt_assembly_prefix, ena_record_slots), meta, validation_file ) }
         .groupTuple(by: 0)
-        .map { _prefix, metas, validation_files -> tuple(metas[0], validation_files.flatten()) }
+        .map { _key, metas, validation_files -> tuple(metas[0], validation_files.flatten()) }
 
     // No ena_study here: it is per candidate now and read from meta.ena_study.
     ena_validation_settings = [

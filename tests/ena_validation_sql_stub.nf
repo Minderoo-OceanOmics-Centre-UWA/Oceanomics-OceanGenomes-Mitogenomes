@@ -9,6 +9,7 @@ workflow {
     meta = [
         id: 'ena_stub',
         mt_assembly_prefix: 'ena_stub.hifi.260101.final',
+        full_seqid: 'ena_stub.hifi.260101.final.emma102',
         ena_study: 'PRJEB123419'
     ]
     status = file("${projectDir}/test_data/ena_stub.table2asn_status.tsv", checkIfExists: true)
