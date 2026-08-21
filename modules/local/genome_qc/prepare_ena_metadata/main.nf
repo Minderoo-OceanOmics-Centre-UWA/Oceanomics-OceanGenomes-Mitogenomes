@@ -41,7 +41,7 @@ process PREPARE_ENA_METADATA {
 
     stub:
     """
-    printf '{"schema_version":1,"og_id":"${meta.id}","assembly_prefix":"${meta.mt_assembly_prefix}","annotation_version":"${meta.annotation_version}","full_seqid":"${meta.full_seqid}","study":"${meta.ena_study}","biosample_accession":"SAMEA1","biosample_source":"stub","mean_depth":100,"program":"stub 1.0","platform":"${meta.sequencing_type == "hifi" ? "PACBIO_SMRT" : "ILLUMINA"}","scientific_name":"${meta.scientific_name}","run_accessions":[]}\n' > '${meta.full_seqid}.ena_input_metadata.json'
+    printf '{"schema_version":2,"og_id":"${meta.id}","assembly_prefix":"${meta.mt_assembly_prefix}","annotation_version":"${meta.annotation_version}","full_seqid":"${meta.full_seqid}","validation_study":"${meta.ena_study}","mean_depth":100,"program":"stub 1.0","platform":"${meta.sequencing_type == "hifi" ? "PACBIO_SMRT" : "ILLUMINA"}","scientific_name":"${meta.scientific_name}"}\n' > '${meta.full_seqid}.ena_input_metadata.json'
     printf '"%s":\n    python: "stub"\n    prepare_ena_metadata: "stub"\n' "${task.process}" > versions.yml
     """
 }

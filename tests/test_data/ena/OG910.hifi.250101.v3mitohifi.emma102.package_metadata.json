@@ -1,7 +1,4 @@
 {
-  "biosample_accession": "SAMEA1",
-  "full_seqid": "OG910.hifi.250101.v3mitohifi.emma102",
-  "normalised_circular_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "flatfile_validation": {
     "error_count": 0,
     "reason": "validated",
@@ -9,7 +6,27 @@
     "warning_count": 0,
     "webin_cli_version": "9.0.3"
   },
+  "full_seqid": "OG910.hifi.250101.v3mitohifi.emma102",
+  "manifest": {
+    "ASSEMBLYNAME": "OG910.hifi.250101.v3mitohifi.emma102",
+    "ASSEMBLY_TYPE": "clone or isolate",
+    "CHROMOSOME_LIST": "OG910.hifi.250101.v3mitohifi.emma102.chromosome_list.tsv.gz",
+    "COVERAGE": "100",
+    "DESCRIPTION": "Choerodon rubescens mitochondrial genome",
+    "FLATFILE": "OG910.hifi.250101.v3mitohifi.emma102.embl.gz",
+    "MOLECULETYPE": "genomic DNA",
+    "PLATFORM": "PACBIO_SMRT",
+    "PROGRAM": "MitoHiFi 3.2.3"
+  },
+  "normalised_circular_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "og_id": "OG910",
+  "schema_version": 3,
   "sequence_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-  "study": "PRJEB110568"
+  "specimen": {
+    "isolate": "OG910",
+    "mol_type": "genomic DNA",
+    "organelle": "mitochondrion",
+    "organism": "Choerodon rubescens"
+  },
+  "validation_study": "PRJEB110568"
 }

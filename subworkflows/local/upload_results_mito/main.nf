@@ -11,6 +11,7 @@ include { PUSH_MTDNA_ANNOTATION_RESULTS } from '../../../modules/local/upload_re
 include { PUSH_LCA_BLAST_RESULTS        } from '../../../modules/local/upload_results/lca'
 include { PUSH_LCA_RAW_RESULTS          } from '../../../modules/local/upload_results/lca_raw'
 include { PUSH_ENA_VALIDATION_RESULTS   } from '../../../modules/local/upload_results/ena_validation'
+include { PUSH_QC_VALIDATOR             } from '../../../modules/local/upload_results/qc_validator'
 include { UPLOAD_RESULTS_SUMMARY        } from '../../../modules/local/upload_results/summary'
 include { EVALUATE_QC_CONDITIONS        } from '../../../modules/local/evaluate_qc_conditions'
 include { QC_SUMMARY                    } from '../../../modules/local/multiqc/qc_summary'
@@ -412,17 +413,28 @@ workflow UPLOAD_ENA_RESULTS {
 
     PUSH_ENA_VALIDATION_RESULTS(ena_validation_records, sql_config)
 
+    // Second species-ID validator. A sample that cleared every QC gate
+    // (submission_ready = true) has been checked harder by the pipeline than a
+    // second reviewer would manage, so the pipeline signs off as
+    // lca_validation.validator_2. Independent of the call above -- different
+    // table, no ordering dependency -- and it never overwrites a validator_2
+    // that a human already filled in.
+    PUSH_QC_VALIDATOR(ena_validation_records, sql_config)
+
     ch_all_upload_status_files = prior_upload_status_files
         .mix(PUSH_ENA_VALIDATION_RESULTS.out.upload.map { _meta, upload -> upload })
+        .mix(PUSH_QC_VALIDATOR.out.upload.map { _meta, upload -> upload })
 
     UPLOAD_RESULTS_SUMMARY(ch_all_upload_status_files.collect())
 
     ch_multiqc_files = ch_multiqc_files
         .mix(PUSH_ENA_VALIDATION_RESULTS.out.tool_params.collect { it[1] })
+        .mix(PUSH_QC_VALIDATOR.out.tool_params.collect { it[1] })
         .mix(UPLOAD_RESULTS_SUMMARY.out.summary)
         .mix(UPLOAD_RESULTS_SUMMARY.out.tool_params)
     ch_versions = ch_versions
         .mix(PUSH_ENA_VALIDATION_RESULTS.out.versions.first())
+        .mix(PUSH_QC_VALIDATOR.out.versions.first())
         .mix(UPLOAD_RESULTS_SUMMARY.out.versions)
 
     emit:

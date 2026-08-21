@@ -43,7 +43,7 @@ process BUILD_ENA_CANDIDATE_PACKAGE {
     cp '${sample_fa}' 'package/${meta.full_seqid}.fa'
     cp '${sample_gff}' 'package/${meta.full_seqid}.gff'
     cp '${sample_genes}' 'package/${meta.full_seqid}.genes.fa'
-    printf '{"full_seqid":"${meta.full_seqid}","og_id":"${meta.id}","biosample_accession":"SAMEA1","sequence_sha256":"stub","normalised_circular_sha256":"stub","flatfile_validation":{"status":"PASS","reason":"validated","error_count":0,"warning_count":0,"webin_cli_version":"stub"}}\n' > 'package/${meta.full_seqid}.package_metadata.json'
+    printf '{"full_seqid":"${meta.full_seqid}","og_id":"${meta.id}","schema_version":3,"manifest":{"ASSEMBLYNAME":"${meta.full_seqid}"},"specimen":{"organism":"${meta.scientific_name}"},"sequence_sha256":"stub","normalised_circular_sha256":"stub","flatfile_validation":{"status":"PASS","reason":"validated","error_count":0,"warning_count":0,"webin_cli_version":"stub"}}\n' > 'package/${meta.full_seqid}.package_metadata.json'
     printf '%s\n' '<tr><td>ENA candidate package</td><td><samp>stub</samp></td><td>Stub candidate package for ${meta.full_seqid}.</td></tr>' > 22_ena_candidate_package.tool_params_mqcrow.html
     printf '"%s":\n    python: "stub"\n    ena_package: "stub"\n' "${task.process}" > versions.yml
     """

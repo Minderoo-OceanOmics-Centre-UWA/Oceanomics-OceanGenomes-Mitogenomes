@@ -16,22 +16,21 @@ from pathlib import Path
 
 
 FULL_SEQID_PATTERN = re.compile(r"^(OG[0-9]+)[.][A-Za-z0-9._-]+$")
-# BioSample accessions are INSDC-wide: SAMEA (EBI), SAMN (NCBI), SAMD (DDBJ).
-# OceanOmics registers specimens at NCBI, so every accession the database holds
-# is SAMN. INSDC sharing mirrors those records into EBI BioSamples -- the ENA
-# browser resolves them -- but webin-cli resolves SAMPLE against ENA's own
-# submission sample service, which only knows samples registered through Webin.
-# Verified against ena-webin-cli 9.0.3 -context genome -validate -test:
-#   SAMEA132129018 -> "Submission(s) validated successfully."
-#   SAMN40589646   -> "Failed to initialise validator ... sample is null"
-# So a SAMN is a real registration that ENA cannot reference yet, which is a
-# different situation from a specimen with no BioSample and from a malformed
-# value. Keep the three apart so the blocked report says which action is needed.
-INSDC_BIOSAMPLE_PATTERN = re.compile(r"SAM(?:EA|N|D)[0-9]+")
-ENA_BIOSAMPLE_PATTERN = re.compile(r"SAMEA[0-9]+")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 VALID_BASES = frozenset("ACGTRYSWKMBDHVN")
 PLATFORMS = frozenset({"PACBIO_SMRT", "ILLUMINA"})
+# Qualifiers of the EMBL source feature that a submitter would otherwise have to
+# re-derive from the database. Order is the order they appear in the flatfile.
+SOURCE_QUALIFIERS = (
+    "organism",
+    "organelle",
+    "mol_type",
+    "isolate",
+    "tissue_type",
+    "geo_loc_name",
+    "collection_date",
+    "lat_lon",
+)
 
 
 def full_seqid_og_id(full_seqid: str) -> str:
@@ -175,10 +174,48 @@ def chromosome_list_text(full_seqid: str) -> str:
     return f"{full_seqid}\tMT\tCircular-Chromosome\tMitochondrion\n"
 
 
-def manifest_text(
+def source_qualifiers(embl_path: Path) -> dict[str, str]:
+    """Specimen facts read back out of the packaged flatfile's source feature.
+
+    Read from the flatfile rather than re-queried from the database so the
+    package cannot disagree with itself: what is recorded here is exactly what
+    was submitted.  A qualifier the flatfile does not carry is left out rather
+    than emitted empty, so absent is distinguishable from blank.
+    """
+    opener = gzip.open if embl_path.suffix == ".gz" else open
+    entries: list[str] = []
+    in_source = False
+    with opener(embl_path, "rt") as handle:
+        for raw in handle:
+            if not raw.startswith("FT"):
+                continue
+            body = raw[5:].rstrip("\n")
+            if raw[5:6] != " ":
+                # A feature key starts in column 6; source is the first feature,
+                # so the next key after it ends the block.
+                if in_source:
+                    break
+                in_source = bool(body.split()) and body.split()[0] == "source"
+                continue
+            if not in_source:
+                continue
+            stripped = body.strip()
+            if stripped.startswith("/"):
+                entries.append(stripped)
+            elif entries:
+                # A value long enough to wrap continues on the following line.
+                entries[-1] = f"{entries[-1]} {stripped}"
+    wanted = set(SOURCE_QUALIFIERS)
+    found: dict[str, str] = {}
+    for entry in entries:
+        match = re.fullmatch(r'/([A-Za-z_]+)="?(.*?)"?', entry)
+        if match and match.group(1) in wanted:
+            found[match.group(1)] = match.group(2)
+    return {name: found[name] for name in SOURCE_QUALIFIERS if name in found}
+
+
+def manifest_fields(
     *,
-    study: str,
-    biosample: str,
     full_seqid: str,
     coverage: float | None,
     program: str,
@@ -186,49 +223,33 @@ def manifest_text(
     flatfile_name: str,
     chromosome_list_name: str,
     scientific_name: str,
-    run_accessions: list[str] | None = None,
-) -> str:
+) -> dict[str, str]:
+    """The Webin genome-context manifest keys this pipeline can actually fill.
+
+    STUDY, SAMPLE and RUN_REF are deliberately absent: the study and the sample
+    are registered by the submission pipeline and the runs belong to the raw-read
+    submissions, so none of the three is known here.  A key whose value does not
+    validate is omitted rather than emitted wrong, and never fails the build:
+    the package is still worth handing over without it.
+    """
     full_seqid_og_id(full_seqid)
-    if not study.strip():
-        raise ValueError("STUDY is required")
-    accession = biosample.strip()
-    if not ENA_BIOSAMPLE_PATTERN.fullmatch(accession):
-        if INSDC_BIOSAMPLE_PATTERN.fullmatch(accession):
-            raise ValueError(
-                f"BioSample {accession} is registered outside ENA and cannot be "
-                "referenced by a Webin submission; register the specimen in ENA "
-                "or ask ENA to broker the existing accession"
-            )
-        raise ValueError(f"Invalid or missing ENA BioSample accession: {biosample!r}")
-    if coverage is None or not math.isfinite(float(coverage)) or float(coverage) < 0:
-        raise ValueError(f"COVERAGE must be a finite non-negative mean depth: {coverage}")
-    if not program.strip():
-        raise ValueError("PROGRAM is required")
+    fields: dict[str, str] = {
+        "ASSEMBLYNAME": full_seqid,
+        "ASSEMBLY_TYPE": "clone or isolate",
+    }
+    if coverage is not None and math.isfinite(float(coverage)) and float(coverage) >= 0:
+        fields["COVERAGE"] = f"{float(coverage):g}"
+    if program.strip():
+        fields["PROGRAM"] = program.strip()
     platforms = [value.strip() for value in platform.split(",") if value.strip()]
-    invalid_platforms = [value for value in platforms if value not in PLATFORMS]
-    if not platforms or invalid_platforms:
-        raise ValueError(f"Invalid PLATFORM value(s): {platform!r}")
-    fields = [
-        ("STUDY", study.strip()),
-        ("SAMPLE", accession),
-        ("ASSEMBLYNAME", full_seqid),
-        ("ASSEMBLY_TYPE", "clone or isolate"),
-        ("COVERAGE", f"{float(coverage):g}"),
-        ("PROGRAM", program.strip()),
-        ("PLATFORM", ",".join(platforms)),
-        ("MOLECULETYPE", "genomic DNA"),
-        ("DESCRIPTION", f"{scientific_name.strip()} mitochondrial genome"),
-    ]
-    runs = sorted(set(run_accessions or []))
-    if runs:
-        fields.append(("RUN_REF", ",".join(runs)))
-    fields.extend(
-        [
-            ("FLATFILE", flatfile_name),
-            ("CHROMOSOME_LIST", chromosome_list_name),
-        ]
-    )
-    return "".join(f"{key}\t{value}\n" for key, value in fields)
+    if platforms and not [value for value in platforms if value not in PLATFORMS]:
+        fields["PLATFORM"] = ",".join(platforms)
+    fields["MOLECULETYPE"] = "genomic DNA"
+    if scientific_name.strip():
+        fields["DESCRIPTION"] = f"{scientific_name.strip()} mitochondrial genome"
+    fields["FLATFILE"] = flatfile_name
+    fields["CHROMOSOME_LIST"] = chromosome_list_name
+    return fields
 
 
 def refresh_package(
@@ -252,31 +273,30 @@ def refresh_package(
     full_seqid = str(metadata["full_seqid"])
     embl = package_dir / f"{full_seqid}.embl.gz"
     chromosomes = package_dir / f"{full_seqid}.chromosome_list.tsv.gz"
-    manifest = package_dir / f"{full_seqid}.manifest.txt"
-    blocker = ""
-    try:
-        text = manifest_text(
-            study=str(metadata.get("study") or ""),
-            biosample=str(metadata.get("biosample_accession") or ""),
-            full_seqid=full_seqid,
-            coverage=metadata.get("mean_depth"),
-            program=str(metadata.get("program") or ""),
-            platform=str(metadata.get("platform") or ""),
-            flatfile_name=embl.name,
-            chromosome_list_name=chromosomes.name,
-            scientific_name=str(metadata.get("scientific_name") or ""),
-            run_accessions=list(metadata.get("run_accessions") or []),
-        )
-    except ValueError as error:
-        blocker = str(error)
-        text = (
-            f"# BLOCKED: {blocker}\n"
-            f"STUDY\t{metadata.get('study') or ''}\n"
-            f"ASSEMBLYNAME\t{full_seqid}\n"
-            f"FLATFILE\t{embl.name}\n"
-            f"CHROMOSOME_LIST\t{chromosomes.name}\n"
-        )
-    manifest.write_text(text)
+    # A package built under an earlier schema is carried forward rather than
+    # left half-refreshed: the retired keys go, the study is renamed to what it
+    # always was, and the specimen block is read back off the flatfile.
+    if int(metadata.get("schema_version") or 0) < 3:
+        if "study" in metadata:
+            metadata["validation_study"] = metadata.pop("study")
+        for retired in ("biosample_accession", "biosample_source", "run_accessions"):
+            metadata.pop(retired, None)
+        metadata["schema_version"] = 3
+    if embl.exists():
+        metadata["specimen"] = source_qualifiers(embl)
+    metadata["manifest"] = manifest_fields(
+        full_seqid=full_seqid,
+        coverage=metadata.get("mean_depth"),
+        program=str(metadata.get("program") or ""),
+        platform=str(metadata.get("platform") or ""),
+        flatfile_name=embl.name,
+        chromosome_list_name=chromosomes.name,
+        scientific_name=str(metadata.get("scientific_name") or ""),
+    )
+    # Packages built before the manifest moved into the metadata still carry a
+    # standalone manifest file; leaving it would keep a stale copy in the
+    # checksums of a package that has just been refreshed.
+    (package_dir / f"{full_seqid}.manifest.txt").unlink(missing_ok=True)
     metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     primary_artifacts = sorted(
         path
@@ -285,7 +305,6 @@ def refresh_package(
         and (
             path.name.endswith(".embl.gz")
             or path.name.endswith(".chromosome_list.tsv.gz")
-            or path.name.endswith(".manifest.txt")
             or path.name.endswith(".tbl")
         )
     )
@@ -315,8 +334,7 @@ def build_package(args: argparse.Namespace) -> int:
             ("assembly_prefix", "assembly_prefix"),
             ("annotation_version", "annotation_version"),
             ("full_seqid", "full_seqid"),
-            ("study", "study"),
-            ("biosample", "biosample_accession"),
+            ("study", "validation_study"),
             ("coverage", "mean_depth"),
             ("program", "program"),
             ("platform", "platform"),
@@ -325,8 +343,6 @@ def build_package(args: argparse.Namespace) -> int:
             current = getattr(args, argument, None)
             if current in (None, "") and supplied_metadata.get(key) is not None:
                 setattr(args, argument, supplied_metadata[key])
-        if not args.run_accession:
-            args.run_accession = list(supplied_metadata.get("run_accessions") or [])
     required_arguments = (
         "og_id",
         "assembly_prefix",
@@ -350,16 +366,33 @@ def build_package(args: argparse.Namespace) -> int:
     package_dir.mkdir(parents=True, exist_ok=True)
     embl_name = f"{full_seqid}.embl.gz"
     chromosome_name = f"{full_seqid}.chromosome_list.tsv.gz"
-    manifest_name = f"{full_seqid}.manifest.txt"
     write_gzip_copy(Path(args.embl), package_dir / embl_name)
     with (package_dir / chromosome_name).open("wb") as raw:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as handle:
             handle.write(chromosome_list_text(full_seqid).encode("ascii"))
-    manifest_error = ""
-    try:
-        manifest = manifest_text(
-            study=args.study,
-            biosample=args.biosample or "",
+    metadata = {
+        # 2: dropped package_status, metadata_blocker and published_package_path;
+        # added flatfile_validation.  The durable path is the caller's to know.
+        # 3: the standalone <full_seqid>.manifest.txt is gone and this file is the
+        # whole handoff.  "manifest" renders the Webin genome-context keys this
+        # pipeline can fill, so a submitter reads them under the names Webin uses;
+        # "specimen" carries the source-feature facts so the flatfile need not be
+        # parsed for them.  STUDY, SAMPLE and RUN_REF are absent because the
+        # study, the sample and the read submissions are registered downstream,
+        # so biosample_accession and run_accessions went with them.  "study" is
+        # "validation_study": it is the study sequence-context validation ran
+        # against, never a submission target.
+        "schema_version": 3,
+        "full_seqid": full_seqid,
+        "og_id": og_id,
+        "assembly_prefix": args.assembly_prefix,
+        "annotation_version": args.annotation_version,
+        "validation_study": args.study,
+        "mean_depth": args.coverage,
+        "program": args.program,
+        "platform": args.platform,
+        "scientific_name": args.scientific_name,
+        "manifest": manifest_fields(
             full_seqid=full_seqid,
             coverage=args.coverage,
             program=args.program,
@@ -367,34 +400,8 @@ def build_package(args: argparse.Namespace) -> int:
             flatfile_name=embl_name,
             chromosome_list_name=chromosome_name,
             scientific_name=args.scientific_name,
-            run_accessions=args.run_accession,
-        )
-    except ValueError as error:
-        manifest_error = str(error)
-        manifest = (
-            f"# BLOCKED: {manifest_error}\n"
-            f"STUDY\t{args.study}\n"
-            f"ASSEMBLYNAME\t{full_seqid}\n"
-            f"FLATFILE\t{embl_name}\n"
-            f"CHROMOSOME_LIST\t{chromosome_name}\n"
-        )
-    (package_dir / manifest_name).write_text(manifest)
-    metadata = {
-        # 2: dropped package_status, metadata_blocker and published_package_path;
-        # added flatfile_validation.  Readiness is derived from
-        # biosample_accession and the durable path is the caller's to know.
-        "schema_version": 2,
-        "full_seqid": full_seqid,
-        "og_id": og_id,
-        "assembly_prefix": args.assembly_prefix,
-        "annotation_version": args.annotation_version,
-        "study": args.study,
-        "biosample_accession": args.biosample or None,
-        "mean_depth": args.coverage,
-        "program": args.program,
-        "platform": args.platform,
-        "scientific_name": args.scientific_name,
-        "run_accessions": sorted(set(args.run_accession or [])),
+        ),
+        "specimen": source_qualifiers(package_dir / embl_name),
         "sequence_length": len(sequence),
         "sequence_sha256": sequence_sha,
         "normalised_circular_sha256": circular_sha,
@@ -427,7 +434,6 @@ def build_package(args: argparse.Namespace) -> int:
         and (
             path.name.endswith(".embl.gz")
             or path.name.endswith(".chromosome_list.tsv.gz")
-            or path.name.endswith(".manifest.txt")
             or path.name.endswith(".tbl")
         )
     )
@@ -458,13 +464,14 @@ def main() -> int:
     build.add_argument("--full-seqid")
     build.add_argument("--fasta", required=True)
     build.add_argument("--embl", required=True)
-    build.add_argument("--study")
-    build.add_argument("--biosample", default="")
+    build.add_argument(
+        "--study",
+        help="Study sequence-context validation ran against; recorded as validation_study.",
+    )
     build.add_argument("--coverage", type=float)
     build.add_argument("--program")
     build.add_argument("--platform")
     build.add_argument("--scientific-name")
-    build.add_argument("--run-accession", action="append", default=[])
     build.add_argument("--tbl")
     build.add_argument(
         "--gff",

@@ -80,7 +80,7 @@ that matches your container/conda environment.
 | `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
 | `--template_sbt` | ✔ | Submission template passed to `table2asn` when packaging GenBank artefacts. |
 | `--ena_webin_validate` | Optional | Format-validate each EMBL flatfile with `ena-webin-cli -context sequence` (default `true`). This is the pipeline's last ENA gate; it needs no BioSample and never submits. |
-| `--ena_study_hifi`, `--ena_study_hic`, `--ena_study_ilmn` | ENA packaging | ENA child study written to each genome-context manifest, chosen by the candidate's technology (defaults `PRJEB123419`, `PRJEB123420`, `PRJEB123421`). The umbrella `PRJEB110568` is an UMBRELLA_PROJECT and cannot receive data. |
+| `--ena_study` | ENA validation | ENA study the run validates against, recorded in each package as `validation_study`. There is no default. It is not a submission target: the study an assembly is submitted into is the BioProject the downstream submission pipeline registers, so this value never reaches a submission manifest. |
 | `--samplesheet_prefix` | Optional | Reserved for generated samplesheet naming in wrapper scripts. |
 | `--getorganelle_genedb_min_genes` | Optional | Minimum genes a reference must yield to build the reseed custom gene database (default `10`). Below this, the sample keeps its first-pass GetOrganelle assembly instead of reseeding. |
 | `--getorganelle_fromreads_args` | Optional | Override the default GetOrganelle from-reads arguments (default `-R 20 -w 95 --continue`). |
@@ -121,7 +121,7 @@ and `nhmmscan`.
 
 Every viable assembly/annotation version produces a self-contained ENA
 genome-context candidate package during the sequencing run. The full OceanOmics
-SeqID is retained in the EMBL entry, chromosome list, manifest, and filenames.
+SeqID is retained in the EMBL entry, chromosome list, package metadata, and filenames.
 The chromosome-list row uses the reusable chromosome name `MT`:
 
 ```text
@@ -138,8 +138,11 @@ bin/stage_ena_pilot_input.sh
 
 Packages are written beneath
 `<outdir>/mitogenomes/OG910/OG910.hifi.241127.v3mitohifi/ena/package/`.
-A missing BioSample or uniform `mean_depth` blocks the manifest while retaining
-the generated sequence, annotation, hashes, and structured blocker.
+`<full_seqid>.package_metadata.json` is the single file the submission pipeline
+reads: its `manifest` block holds the Webin genome-context keys under the names
+Webin uses, and its `specimen` block holds the flatfile's source-feature facts.
+`STUDY`, `SAMPLE` and `RUN_REF` are not in it, because the study, the sample and
+the read submissions are registered downstream.
 
 The flatfile carries no `/locus_tag` on any feature. Locus tags are allocated and
 injected by the downstream submission pipeline, so `table2asn` reports
@@ -172,9 +175,9 @@ nextflow run main.nf \
   --ena_webin_validate true
 ```
 
-Each candidate's study is resolved from its sequencing technology
-(`--ena_study_hifi` / `--ena_study_hic` / `--ena_study_ilmn`), so no study is
-passed on the command line.
+Every candidate in a run validates against one study, passed as `--ena_study`.
+It has no default, so a run without it stops rather than validating against
+whatever it fell back to.
 
 The password is stored in Nextflow's secret store rather than a parameter or params file. The pipeline invokes
 Webin with `-validate` only and never submits records. Individual Webin failures are written to the sample's
@@ -248,7 +251,7 @@ the repository, so dump those three relations first if you want them.
 Nothing in this pipeline writes or reads either one: validation must not depend on submission
 state. The table is written by the downstream submitter, keyed on `(full_seqid, webin_mode)`, and
 holds the submission status, the accessions ENA returns (`ERZ`, `GCA`, sequence, `ERS`), the
-BioSample the manifest actually carried, the locus tag prefix and the run accessions. See
+BioSample the submission actually carried, the locus tag prefix and the run accessions. See
 `docs/ena_submission_handoff.md` for the contract. `ena_submission_status` joins the latest
 validation attempt per `full_seqid` to that ledger, so one query says what is validated and what
 has happened to it since.

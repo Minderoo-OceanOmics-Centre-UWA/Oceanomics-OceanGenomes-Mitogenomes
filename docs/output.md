@@ -301,30 +301,59 @@ this entire stage is skipped.
     when the flatfile cleared every gate this pipeline runs, which is the signal the submission pipeline consumes.
 - `ena/ena_validation_results_mqc.tsv`: batch-level ENA submission-readiness table included in MultiQC.
 - `sql_uploaded_data/<full_seqid>.ena_validation.upload.txt`: non-fatal PostgreSQL upload result.
+- `sql_uploaded_data/<full_seqid>.qc_validator.upload.txt`: non-fatal result of the
+  second-validator write described below.
 - `sql_uploaded_data/upload_results_summary_mqc.tsv`: final summary across pre-QC and ENA validation uploads.
 - `mitogenomes/<sample>/<assembly_prefix>/ena/package/`: the complete per-version
   genome-context candidate, including the full-SeqID EMBL flat file, chromosome
-  list, manifest, feature table, package metadata, and checksums. It also holds
+  list, feature table, package metadata, and checksums. It also holds
   the collaborator handover pair, `<full_seqid>.fa` and `<full_seqid>.gff`.
-  `<full_seqid>.package_metadata.json` carries the package's identity, digests
-  and a `flatfile_validation` block (status, reason, error and warning counts,
-  webin-cli version). It deliberately stores no readiness verdict and no
-  published path: readiness is derived from `biosample_accession`, which can
-  change without the package changing, and the durable location is whatever the
-  caller globbed. No feature in any of these files carries a `/locus_tag`:
+  `<full_seqid>.package_metadata.json` is the whole handoff: identity, digests, a
+  `flatfile_validation` block (status, reason, error and warning counts, webin-cli
+  version), a `manifest` block rendering the Webin genome-context keys this
+  pipeline can fill under the names Webin uses, and a `specimen` block of the
+  flatfile's source-feature facts. There is no standalone manifest file. `STUDY`,
+  `SAMPLE` and `RUN_REF` are absent from the `manifest` block by design: the
+  study, the sample and the read submissions are registered by the downstream
+  submission pipeline, so nothing here could be more than a guess at them. The
+  metadata also stores no readiness verdict and no published path: the durable
+  location is whatever the caller globbed. No feature in any of these files
+  carries a `/locus_tag`:
   tags are allocated and injected by the downstream ENA submission pipeline, so
   the qualifier is absent rather than empty (an empty one fails validation).
 - `mitogenomes/<sample>/<assembly_prefix>/ena/validation/flatfile/`: the
   sequence-context flatfile format check, run for every candidate. This is the
-  pipeline's last ENA gate, and a pass here sets `submission_ready = true` even
-  when the package is still waiting on a BioSample accession: the accession is
-  the submission pipeline's to resolve, not a defect in the flatfile.
+  pipeline's last ENA gate, and a pass here sets `submission_ready = true`. It is
+  also the only artefact webin-cli has checked: the genome-context keys in the
+  package metadata are never put to Webin here, because genome-context validation
+  resolves `SAMPLE` first and the sample is registered downstream.
 
 </details>
 
 These artefacts provide the material required to submit validated mitogenomes to GenBank and ENA. Table2asn or Webin
 findings do not stop a large batch: the affected sample is reported and omitted from the corresponding downstream
 submission-ready channel.
+
+#### Automatic second validator
+
+A mitogenome needs two validators recorded in `lca_validation` before it is OK to submit.
+`SPECIES_VALIDATION` fills the first (`validator = 'nf-core'`) when the nominal species ID is
+found in the BLAST results. `PUSH_QC_VALIDATOR` fills the second: any sample reaching
+`submission_ready = true`, i.e. it cleared table2asn, the EMBL flat-file conversion and the
+webin-cli format check, gets `validator_2 = 'QCd-nf-core'`.
+
+Two properties of that write are deliberate and load-bearing:
+
+- **It never overwrites.** The `UPDATE` is guarded on `validator_2` being NULL or blank, and
+  there is no `--force` flag. A human reviewer who already signed off stays recorded, because
+  the whole point of the column is that a second, independent validator looked at the sample.
+- **It never inserts.** With no `lca_validation` row there is no first validator either, so a
+  lone `validator_2` would be meaningless. The missing row is logged instead.
+
+Because `submission_ready` is `false` whenever `--ena_webin_validate false` is set, the second
+validator is simply not recorded in runs with the format check switched off. The per-sample
+outcome (`validator_2_set`, `preserved`, `not_ready`, `no_row`, `failed`) appears in the
+`Validator 2` column of the MultiQC SQL upload summary.
 
 When `ena.nf` is used independently, it publishes the same per-sample `genbank/ena/` bundle and also writes:
 

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `Added`
 
+- `PUSH_QC_VALIDATOR` (`bin/push_qc_validator.py`, `modules/local/upload_results/qc_validator/`),
+  which records the pipeline as the *second* species-ID validator in `lca_validation`. A
+  mitogenome needs two validators signed off before it is OK to submit; the pipeline already
+  filled the first (`validator = 'nf-core'`, from the LCA/BLAST check in `SPECIES_VALIDATION`)
+  and the second was a manual step that bottlenecked every batch. Any sample reaching
+  `submission_ready = true` — table2asn PASS, EMBL flat-file conversion PASS, and the webin-cli
+  format check PASS — now gets `validator_2 = 'QCd-nf-core'` written automatically from
+  `UPLOAD_ENA_RESULTS`, off the same `<full_seqid>.ena_validation_result.tsv` that
+  `PUSH_ENA_VALIDATION_RESULTS` consumes.
+
+  The write is deliberately one-way. The `UPDATE` is guarded on `validator_2` being NULL or
+  blank and there is **no `--force`**: the column exists to record that a second, independent
+  validator looked at the sample, so clobbering a human's sign-off is never the right move. It
+  also never INSERTs — with no `lca_validation` row there is no first validator either, and a
+  lone `validator_2` would mean nothing — so a missing row is logged and skipped. Failures are
+  non-fatal (`set +e` / `exit 0` / `UPLOAD_EXIT=`), like every other push module. Note that
+  `submission_ready` is always `false` under `--ena_webin_validate false`, so the second
+  validator is not recorded in runs with the format check switched off.
+
 - `assets/ena_not_run/`, the six NOT_RUN placeholder files the fixed-totality ENA record grouping
   resolves with `checkIfExists: true`. They were referenced but never created, which aborted every
   run during workflow construction. Their contents are inert: `collate_ena_validation.py` reads
@@ -20,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ena_submissions`, a submission ledger, plus the `ena_submission_status` view
   (`sql/015_ena_submissions.sql`). Until now the database could say a flatfile cleared every gate
   but not what happened to it afterwards: whether it was submitted, what ENA returned, or which
-  BioSample the manifest carried. That lived only as receipt XML under `receipts/<OG>/` in the
+  BioSample the submission was registered against. That lived only as receipt XML under `receipts/<OG>/` in the
   downstream submitter plus `mitogenome_data.genbank_accession`, which is keyed without the
   annotation version and named for an archive that does not mint ERZ accessions. The ledger is
   deliberately a separate table rather than columns on `ena_validation_attempts`: that table is
@@ -36,6 +55,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries the contract and the idempotent-upsert pattern.
 
 ### `Changed`
+
+- The SQL upload summary gained a `Validator 2` column (`qc_validator` in
+  `upload_results_summary.tsv`), reporting per sample whether `validator_2` was set, was
+  preserved because someone already signed off, was skipped as not submission-ready, or found no
+  `lca_validation` row. `compile_upload_report.py`'s `ENA_STEP` constant became the
+  `SEQID_KEYED_STEPS` set, since two steps are now named after `meta.full_seqid` and both need
+  the annotation token reconciled away before grouping — without that the new file would have
+  produced a second, half-empty row per assembly.
+
+- `<full_seqid>.manifest.txt` is gone and `<full_seqid>.package_metadata.json` is the whole ENA
+  handoff. The standalone manifest could never be correct: `STUDY` is the BioProject the
+  submission pipeline registers, `SAMPLE` is the BioSample it registers, and `RUN_REF` belongs to
+  the raw-read submissions, so three of its twelve keys were values this pipeline does not have.
+  Every published package was in fact the four-key `# BLOCKED` stub, and webin-cli had never
+  checked one: genome-context validation resolves `SAMPLE` before anything else, so the only
+  webin-checked artefact is, and always was, the sequence-context `<full_seqid>.webin_manifest.txt`
+  under `ena/validation/flatfile/`. Package metadata goes to `schema_version` 3: a `manifest` block
+  renders the nine keys this pipeline can fill, under the names Webin uses, so the submitter reads
+  one file and adds its own three; a `specimen` block carries the flatfile's source-feature facts
+  (organism, isolate, tissue, geo, date, lat_lon where present), read back off the packaged EMBL so
+  the two can never disagree; `study` becomes `validation_study`, which is what it always was, the
+  study sequence-context validation ran against and never a submission target; and
+  `biosample_accession`, `biosample_source` and `run_accessions` are dropped along with
+  `ena_package.py`'s `--biosample` and `--run-accession`. A field that fails validation is now
+  omitted from the `manifest` block instead of collapsing the whole manifest to a stub.
+  `prepare_ena_metadata.py` goes to `schema_version` 2 and no longer queries
+  `sample.ncbi_biosample_id`. `package_digest` and `checksums.sha256` change for every package,
+  which is correct: the contents changed. `refresh_package` carries an older package forward rather
+  than leaving a hybrid, and deletes a legacy manifest file if it finds one.
+  `docs/ena_submission_handoff.md` is rewritten against this shape. It was written in the same
+  commit that changed the behaviour underneath it, so it still described the retired
+  per-technology child studies, a manifest to read rather than build, and a BioSample field to
+  check; its `in the flatfile?` column also read as permission to omit manifest keys, which it
+  never was, since webin-cli checks the manifest and the flatfile independently. Every example
+  in it is now copied from a real package rather than composed.
 
 - The ENA study is one run-wide `--ena_study`, replacing `--ena_study_hifi`/`--ena_study_hic`/
   `--ena_study_ilmn`. The per-technology child studies existed because the umbrella PRJEB110568

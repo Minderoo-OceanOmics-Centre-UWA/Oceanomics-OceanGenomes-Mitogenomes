@@ -15,8 +15,7 @@ SPEC.loader.exec_module(MODULE)
 class FakeCursor:
     """Dispatch on the queried table so query order is not baked into the test."""
 
-    def __init__(self, biosample):
-        self.biosample = biosample
+    def __init__(self):
         self.queries = []
         self.result = None
 
@@ -28,9 +27,7 @@ class FakeCursor:
 
     def execute(self, query, values):
         self.queries.append(" ".join(query.split()))
-        if "FROM sample" in query:
-            self.result = None if self.biosample is MISSING else [(self.biosample,)]
-        elif "FROM mitogenome_data" in query:
+        if "FROM mitogenome_data" in query:
             self.result = [(123.5,)]
         else:
             raise AssertionError(f"unexpected query: {query}")
@@ -43,18 +40,15 @@ class FakeCursor:
 
 
 class FakeConnection:
-    def __init__(self, biosample):
-        self.cursor_instance = FakeCursor(biosample)
+    def __init__(self):
+        self.cursor_instance = FakeCursor()
 
     def cursor(self):
         return self.cursor_instance
 
 
-MISSING = object()
-
-
-def fetch(biosample):
-    connection = FakeConnection(biosample)
+def fetch():
+    connection = FakeConnection()
     args = Namespace(
         og_id="OG910",
         assembly_prefix="OG910.hifi.241127.v3mitohifi",
@@ -70,50 +64,35 @@ def fetch(biosample):
 
 
 class PrepareEnaMetadataTests(unittest.TestCase):
-    def test_reads_biosample_from_sample_table(self):
-        # sample.ncbi_biosample_id is the source of truth; the derived
-        # ena_specimen_accessions cache must not be consulted.
-        metadata, cursor = fetch("SAMN40589646")
-        self.assertEqual(metadata["biosample_accession"], "SAMN40589646")
-        self.assertEqual(metadata["biosample_source"], "sample.ncbi_biosample_id")
-        self.assertTrue(any("FROM sample" in query for query in cursor.queries))
-        self.assertFalse(
-            any("ena_specimen_accessions" in query for query in cursor.queries)
-        )
+    def test_the_submitter_owned_accessions_are_not_recorded(self):
+        """The BioSample, the study target and the runs are registered downstream.
 
-    def test_unregistered_specimen_normalises_to_none(self):
-        # Unregistered specimens hold '' or whitespace rather than NULL. These
-        # must read as absent so the package is WAITING_FOR_BIOSAMPLE rather
-        # than BLOCKED_METADATA.
-        for raw in ("", "   ", None):
-            with self.subTest(raw=raw):
-                metadata, _ = fetch(raw)
-                self.assertIsNone(metadata["biosample_accession"])
+        Carrying a BioSample here produced a SAMPLE key webin could not resolve
+        and a package that read as blocked on something this pipeline could fix.
+        """
+        metadata, cursor = fetch()
+        for absent in (
+            "biosample_accession",
+            "biosample_source",
+            "run_accessions",
+            "study",
+        ):
+            self.assertNotIn(absent, metadata)
+        for table in ("FROM sample", "ena_specimen_accessions", "ena_candidate_runs"):
+            self.assertFalse(any(table in query for query in cursor.queries))
 
-    def test_missing_sample_row_is_not_an_error(self):
-        metadata, _ = fetch(MISSING)
-        self.assertIsNone(metadata["biosample_accession"])
-
-    def test_surrounding_whitespace_is_stripped(self):
-        metadata, _ = fetch("  SAMN40589646 ")
-        self.assertEqual(metadata["biosample_accession"], "SAMN40589646")
+    def test_the_study_is_recorded_as_the_validation_study(self):
+        """--ena_study names the study validation ran against, not a target."""
+        metadata, _ = fetch()
+        self.assertEqual(metadata["validation_study"], "PRJEB123419")
+        self.assertEqual(metadata["schema_version"], 2)
 
     def test_other_metadata_still_collected(self):
-        metadata, _ = fetch("SAMN40589646")
+        metadata, _ = fetch()
         self.assertEqual(metadata["mean_depth"], 123.5)
-        self.assertEqual(metadata["run_accessions"], [])
         self.assertEqual(metadata["program"], "MitoHiFi 3")
         self.assertEqual(metadata["platform"], "PACBIO_SMRT")
-
-
-    def test_run_accessions_are_not_queried(self):
-        # Run accessions belong to the downstream submitter; ena_candidate_runs
-        # was retired with the rest of the selection layer and must not be read.
-        metadata, cursor = fetch("SAMN40589646")
-        self.assertEqual(metadata["run_accessions"], [])
-        self.assertFalse(
-            any("ena_candidate_runs" in query for query in cursor.queries)
-        )
+        self.assertEqual(metadata["scientific_name"], "Choerodon rubescens")
 
     def test_program_mapping(self):
         self.assertEqual(MODULE.assembly_program("v323mitohifi"), "MitoHiFi 3.2.3")

@@ -67,41 +67,22 @@ def fetch_metadata(connection, args: argparse.Namespace) -> dict[str, object]:
         )
         depth_row = cursor.fetchone()
         mean_depth = depth_row[0] if depth_row else None
-        # sample.ncbi_biosample_id is the source of truth for the specimen's
-        # BioSample. ena_specimen_accessions is a derived cache that goes stale
-        # whenever sample is edited, so it is not read here.
-        cursor.execute(
-            """
-            SELECT ncbi_biosample_id
-            FROM sample
-            WHERE og_id = %s
-            """,
-            (args.og_id,),
-        )
-        sample_row = cursor.fetchone()
-        # Unregistered specimens hold '' rather than NULL; an empty string would
-        # otherwise read as "present but malformed" and mislabel the package
-        # BLOCKED_METADATA instead of WAITING_FOR_BIOSAMPLE.
-        biosample = (sample_row[0] or "").strip() if sample_row else ""
-        biosample = biosample or None
+    # The BioSample and the run accessions are not fetched: the submission
+    # pipeline registers the sample and owns the raw-read submissions, so the
+    # SAMPLE and RUN_REF manifest keys are its to supply and nothing recorded
+    # here could be more than a guess at them.
     return {
-        "schema_version": 1,
+        # 2: dropped biosample_accession, biosample_source and run_accessions.
+        "schema_version": 2,
         "og_id": args.og_id,
         "assembly_prefix": args.assembly_prefix,
         "annotation_version": args.annotation_version,
         "full_seqid": args.full_seqid,
-        "study": args.study,
-        "biosample_accession": biosample,
-        "biosample_source": "sample.ncbi_biosample_id",
+        "validation_study": args.study,
         "mean_depth": mean_depth,
         "program": assembly_program(args.code),
         "platform": platform_for_tech(args.tech),
         "scientific_name": args.scientific_name,
-        # Run accessions belong to the downstream submission pipeline, which
-        # owns the raw-read submissions to PRJEB123419/420/421. Nothing in this
-        # schema records them, so an empty list is emitted and RUN_REF is left
-        # out of the manifest for the submitter to add.
-        "run_accessions": [],
     }
 
 
@@ -115,7 +96,11 @@ def main() -> int:
     parser.add_argument("--tech", required=True)
     parser.add_argument("--seq-date", required=True)
     parser.add_argument("--code", required=True)
-    parser.add_argument("--study", required=True)
+    parser.add_argument(
+        "--study",
+        required=True,
+        help="Study used for sequence-context validation, recorded as validation_study.",
+    )
     parser.add_argument("--scientific-name", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()

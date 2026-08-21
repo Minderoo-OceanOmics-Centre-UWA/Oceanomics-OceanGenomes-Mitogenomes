@@ -130,6 +130,8 @@ custom_data:
         title: "Assembly ID"
       og_id:
         title: "Sample"
+      annotation_version:
+        title: "Annotation version"
       assembly:
         title: "Assembly"
       annotation:
@@ -142,6 +144,8 @@ custom_data:
         title: "LCA raw"
       ena_validation:
         title: "ENA validation"
+      qc_validator:
+        title: "Validator 2"
 
   ena_validation_results:
     section_name: "ENA submission readiness"

@@ -31,10 +31,8 @@ class EnaPackageTests(unittest.TestCase):
             MODULE.sequence_digests(rotated)[0],
         )
 
-    def test_manifest_uses_existing_full_seqid_and_mean_depth(self):
-        text = MODULE.manifest_text(
-            study="PRJEB123419",
-            biosample="SAMEA123",
+    def manifest(self, **overrides):
+        fields = dict(
             full_seqid="OG910.hifi.241127.v3mitohifi.emma102",
             coverage=123.5,
             program="MitoHiFi 3.2.3",
@@ -43,9 +41,105 @@ class EnaPackageTests(unittest.TestCase):
             chromosome_list_name="record.chromosome_list.tsv.gz",
             scientific_name="Choerodon rubescens",
         )
-        self.assertIn("ASSEMBLYNAME\tOG910.hifi.241127.v3mitohifi.emma102\n", text)
-        self.assertIn("COVERAGE\t123.5\n", text)
-        self.assertIn("ASSEMBLY_TYPE\tclone or isolate\n", text)
+        fields.update(overrides)
+        return MODULE.manifest_fields(**fields)
+
+    def test_manifest_uses_existing_full_seqid_and_mean_depth(self):
+        fields = self.manifest()
+        self.assertEqual(
+            fields["ASSEMBLYNAME"], "OG910.hifi.241127.v3mitohifi.emma102"
+        )
+        self.assertEqual(fields["COVERAGE"], "123.5")
+        self.assertEqual(fields["ASSEMBLY_TYPE"], "clone or isolate")
+        self.assertEqual(
+            fields["DESCRIPTION"], "Choerodon rubescens mitochondrial genome"
+        )
+
+    def test_manifest_omits_the_keys_the_submitter_owns(self):
+        """STUDY, SAMPLE and RUN_REF are registered downstream, so we do not guess.
+
+        Emitting them empty or as a placeholder would read as a value this
+        pipeline had and could not fill, which is a different claim.
+        """
+        for key in ("STUDY", "SAMPLE", "RUN_REF"):
+            self.assertNotIn(key, self.manifest())
+
+    def test_an_unusable_value_drops_only_its_own_key(self):
+        """A bad field must not cost the eight good ones next to it."""
+        self.assertNotIn("PLATFORM", self.manifest(platform="OXFORD_NANOPORE"))
+        self.assertNotIn("COVERAGE", self.manifest(coverage=None))
+        self.assertNotIn("COVERAGE", self.manifest(coverage=float("nan")))
+        self.assertNotIn("COVERAGE", self.manifest(coverage=-1.0))
+        self.assertNotIn("PROGRAM", self.manifest(program="  "))
+        self.assertNotIn("DESCRIPTION", self.manifest(scientific_name=""))
+        for fields in (
+            self.manifest(platform="OXFORD_NANOPORE"),
+            self.manifest(coverage=None),
+        ):
+            self.assertEqual(
+                fields["ASSEMBLYNAME"], "OG910.hifi.241127.v3mitohifi.emma102"
+            )
+            self.assertEqual(fields["FLATFILE"], "record.embl.gz")
+            self.assertEqual(fields["MOLECULETYPE"], "genomic DNA")
+
+    def test_specimen_facts_come_from_the_packaged_flatfile(self):
+        """Read back off the flatfile so the two can never disagree."""
+        with tempfile.TemporaryDirectory() as tmp:
+            embl = Path(tmp) / "record.embl"
+            embl.write_text(
+                "FH   Key             Location/Qualifiers\n"
+                "FH\n"
+                "FT   source          1..16631\n"
+                'FT                   /organism="Ophthalmolepis lineolata"\n'
+                'FT                   /organelle="mitochondrion"\n'
+                'FT                   /mol_type="genomic DNA"\n'
+                'FT                   /isolate="OG51"\n'
+                'FT                   /tissue_type="Gills"\n'
+                'FT                   /geo_loc_name="Australia: WA, New Year Island"\n'
+                'FT                   /collection_date="29-Mar-2023"\n'
+                "FT   gene            1..68\n"
+                'FT                   /gene="TF"\n'
+            )
+            self.assertEqual(
+                MODULE.source_qualifiers(embl),
+                {
+                    "organism": "Ophthalmolepis lineolata",
+                    "organelle": "mitochondrion",
+                    "mol_type": "genomic DNA",
+                    "isolate": "OG51",
+                    "tissue_type": "Gills",
+                    "geo_loc_name": "Australia: WA, New Year Island",
+                    "collection_date": "29-Mar-2023",
+                },
+            )
+
+    def test_a_wrapped_qualifier_is_rejoined(self):
+        """EMBL wraps a long value across lines; half of one is not the value."""
+        with tempfile.TemporaryDirectory() as tmp:
+            embl = Path(tmp) / "record.embl"
+            embl.write_text(
+                "FT   source          1..6\n"
+                'FT                   /geo_loc_name="Australia: New South Wales,\n'
+                'FT                   Changte Shoal, east of Coffs Harbour"\n'
+                'FT                   /isolate="OG193"\n'
+            )
+            self.assertEqual(
+                MODULE.source_qualifiers(embl)["geo_loc_name"],
+                "Australia: New South Wales, Changte Shoal, east of Coffs Harbour",
+            )
+
+    def test_an_absent_qualifier_is_left_out_not_blanked(self):
+        """Most specimens have no lat_lon; an empty one would read as recorded."""
+        with tempfile.TemporaryDirectory() as tmp:
+            embl = Path(tmp) / "record.embl"
+            embl.write_text(
+                "FT   source          1..6\n"
+                'FT                   /organism="Testus organismus"\n'
+                'FT                   /isolate="OG5"\n'
+            )
+            qualifiers = MODULE.source_qualifiers(embl)
+            self.assertNotIn("lat_lon", qualifiers)
+            self.assertEqual(qualifiers["isolate"], "OG5")
 
     def test_build_package(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -68,12 +162,10 @@ class EnaPackageTests(unittest.TestCase):
                 fasta=str(fasta),
                 embl=str(embl),
                 study="PRJEB123419",
-                biosample="SAMEA123",
                 coverage=100.0,
                 program="MitoHiFi 3.2.3",
                 platform="PACBIO_SMRT",
                 scientific_name="Choerodon rubescens",
-                run_accession=[],
                 outdir=str(package),
             )
             self.assertEqual(MODULE.build_package(args), 0)
@@ -85,16 +177,23 @@ class EnaPackageTests(unittest.TestCase):
             metadata = json.loads(
                 (package / f"{seqid}.package_metadata.json").read_text()
             )
-            # Status fields the package deliberately does not store: readiness
-            # is derived from biosample_accession (it changes without the file
-            # changing), and the durable path is the caller's to know.
+            # Status fields the package deliberately does not store: the
+            # durable path is the caller's to know, and the BioSample, study and
+            # run accessions belong to the submission pipeline.
             for absent in (
                 "local_validation_status",
                 "package_status",
                 "metadata_blocker",
                 "published_package_path",
+                "biosample_accession",
+                "biosample_source",
+                "run_accessions",
+                "study",
             ):
                 self.assertNotIn(absent, metadata)
+            self.assertEqual(metadata["schema_version"], 3)
+            self.assertEqual(metadata["validation_study"], "PRJEB123419")
+            self.assertEqual(list(package.glob("*.manifest.txt")), [])
             self.assertEqual(list(package.glob("*.local_validation.tsv")), [])
             # No --flatfile-status supplied, so no verdict is invented.
             self.assertEqual(
@@ -130,12 +229,10 @@ class EnaPackageTests(unittest.TestCase):
                 fasta=str(fasta),
                 embl=str(embl),
                 study="PRJEB123419",
-                biosample="SAMEA123",
                 coverage=100.0,
                 program="MitoHiFi 3.2.3",
                 platform="PACBIO_SMRT",
                 scientific_name="Choerodon rubescens",
-                run_accession=[],
                 outdir=str(package),
                 flatfile_status=str(status),
             )
@@ -163,14 +260,20 @@ class EnaPackageTests(unittest.TestCase):
             },
         )
 
-    def test_missing_biosample_builds_blocked_artifacts(self):
+    def test_refresh_rewrites_the_manifest_and_clears_a_legacy_file(self):
+        """A package built before the manifest moved into the metadata."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fasta = root / "input.fa"
             fasta.write_text(">x\nAACCGT\n")
             seqid = "OG5.ilmn.260101.getorg1770.emma102"
             embl = root / "input.embl"
-            embl.write_text(f"ID   {seqid};\nAC * _{seqid}\n//\n")
+            embl.write_text(
+                f"ID   {seqid};\nAC * _{seqid}\n"
+                "FT   source          1..6\n"
+                'FT                   /organism="Testus organismus"\n'
+                "//\n"
+            )
             package = root / "package"
             args = Namespace(
                 og_id="OG5",
@@ -180,68 +283,35 @@ class EnaPackageTests(unittest.TestCase):
                 fasta=str(fasta),
                 embl=str(embl),
                 study="PRJEB123419",
-                biosample="",
                 coverage=5.0,
                 program="GetOrganelle 1.7.7.1",
                 platform="ILLUMINA",
                 scientific_name="Testus organismus",
-                run_accession=[],
                 outdir=str(package),
             )
             MODULE.build_package(args)
-            metadata = json.loads(
+            self.assertEqual(
+                json.loads((package / f"{seqid}.package_metadata.json").read_text())[
+                    "specimen"
+                ],
+                {"organism": "Testus organismus"},
+            )
+            legacy = package / f"{seqid}.manifest.txt"
+            legacy.write_text("STUDY\tPRJEB110568\n")
+            sequence_digest = json.loads(
                 (package / f"{seqid}.package_metadata.json").read_text()
-            )
-            self.assertIsNone(metadata["biosample_accession"])
-            sequence_digest = metadata["sequence_sha256"]
-            refreshed = MODULE.refresh_package(
-                package, {"biosample_accession": "SAMEA123"}
-            )
-            self.assertEqual(refreshed["biosample_accession"], "SAMEA123")
+            )["sequence_sha256"]
+
+            refreshed = MODULE.refresh_package(package, {"mean_depth": 42.0})
+            self.assertEqual(refreshed["manifest"]["COVERAGE"], "42")
             self.assertEqual(refreshed["sequence_sha256"], sequence_digest)
-            self.assertIn(
-                "SAMPLE\tSAMEA123",
-                (package / f"{seqid}.manifest.txt").read_text(),
+            self.assertFalse(legacy.exists())
+            self.assertNotIn(
+                f"{seqid}.manifest.txt", (package / "checksums.sha256").read_text()
             )
 
-    def manifest_with_biosample(self, biosample):
-        return MODULE.manifest_text(
-            study="PRJEB123419",
-            biosample=biosample,
-            full_seqid="OG910.hifi.241127.v3mitohifi.emma102",
-            coverage=123.5,
-            program="MitoHiFi 3.2.3",
-            platform="PACBIO_SMRT",
-            flatfile_name="record.embl.gz",
-            chromosome_list_name="record.chromosome_list.tsv.gz",
-            scientific_name="Choerodon rubescens",
-        )
-
-    def test_manifest_requires_an_ena_registered_biosample(self):
-        # webin resolves SAMPLE against ENA's submission sample service, which
-        # only knows Webin-registered samples. Verified against
-        # ena-webin-cli 9.0.3 -context genome -validate -test: SAMEA132129018
-        # validates, SAMN40589646 fails with "sample is null".
-        self.assertIn(
-            "SAMPLE\tSAMEA132129018\n",
-            self.manifest_with_biosample("SAMEA132129018"),
-        )
-
-    def test_manifest_rejects_biosample_registered_outside_ena(self):
-        for accession in ("SAMN40589646", "SAMD00000001"):
-            with self.subTest(accession=accession):
-                with self.assertRaises(ValueError) as caught:
-                    self.manifest_with_biosample(accession)
-                self.assertIn("registered outside ENA", str(caught.exception))
-
-    def test_manifest_rejects_non_biosample_values(self):
-        for accession in ("", "SAMX123", "SAMN", "SAMN123x", "SRS123456", "123456"):
-            with self.subTest(accession=accession):
-                with self.assertRaises(ValueError) as caught:
-                    self.manifest_with_biosample(accession)
-                self.assertIn("Invalid or missing", str(caught.exception))
-
-    def test_ncbi_only_biosample_blocks_with_its_own_status(self):
+    def test_refresh_carries_an_older_package_forward(self):
+        """An on-disk schema 2 package gains the new shape rather than a hybrid."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fasta = root / "input.fa"
@@ -258,33 +328,34 @@ class EnaPackageTests(unittest.TestCase):
                 fasta=str(fasta),
                 embl=str(embl),
                 study="PRJEB123419",
-                biosample="SAMN40589646",
                 coverage=5.0,
                 program="GetOrganelle 1.7.7.1",
                 platform="ILLUMINA",
                 scientific_name="Testus organismus",
-                run_accession=[],
                 outdir=str(package),
             )
             MODULE.build_package(args)
-            metadata = json.loads(
-                (package / f"{seqid}.package_metadata.json").read_text()
-            )
-            self.assertEqual(metadata["biosample_accession"], "SAMN40589646")
-            # A blocked manifest must never carry a SAMPLE line webin would reject.
-            manifest = (package / f"{seqid}.manifest.txt").read_text()
-            self.assertTrue(manifest.startswith("# BLOCKED:"))
-            self.assertNotIn("SAMPLE\t", manifest)
+            metadata_path = package / f"{seqid}.package_metadata.json"
+            stale = json.loads(metadata_path.read_text())
+            stale["schema_version"] = 2
+            stale["study"] = stale.pop("validation_study")
+            stale["biosample_accession"] = "SAMN40589646"
+            stale["biosample_source"] = "sample.ncbi_biosample_id"
+            stale["run_accessions"] = []
+            del stale["manifest"]
+            metadata_path.write_text(json.dumps(stale, indent=2, sort_keys=True))
 
-            # Brokering the specimen into ENA unblocks it in place.
-            refreshed = MODULE.refresh_package(
-                package, {"biosample_accession": "SAMEA132129018"}
-            )
-            self.assertEqual(refreshed["biosample_accession"], "SAMEA132129018")
-            self.assertIn(
-                "SAMPLE\tSAMEA132129018",
-                (package / f"{seqid}.manifest.txt").read_text(),
-            )
+            refreshed = MODULE.refresh_package(package)
+            self.assertEqual(refreshed["schema_version"], 3)
+            self.assertEqual(refreshed["validation_study"], "PRJEB123419")
+            for retired in (
+                "study",
+                "biosample_accession",
+                "biosample_source",
+                "run_accessions",
+            ):
+                self.assertNotIn(retired, refreshed)
+            self.assertEqual(refreshed["manifest"]["PLATFORM"], "ILLUMINA")
 
 
 class CollaboratorArtefactTests(unittest.TestCase):
@@ -307,12 +378,10 @@ class CollaboratorArtefactTests(unittest.TestCase):
             fasta=str(fasta),
             embl=str(embl),
             study="PRJEB123419",
-            biosample="SAMEA123",
             coverage=100.0,
             program="MitoHiFi 3.2.3",
             platform="PACBIO_SMRT",
             scientific_name="Choerodon rubescens",
-            run_accession=[],
             outdir=str(package),
         )
         for key, value in overrides.items():

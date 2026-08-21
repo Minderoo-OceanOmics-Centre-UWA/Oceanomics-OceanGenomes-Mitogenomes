@@ -109,6 +109,13 @@ This workflow parses each annotation basename as
 `lca_validation.validated_species_name` on
 `(og_id, tech, seq_date, code, annotation)`, and uses that validated species in processed file headers.
 
+Submission needs two validators recorded in `lca_validation`. `SPECIES_VALIDATION` fills
+`validator = 'nf-core'` from the LCA/BLAST species check; `PUSH_QC_VALIDATOR` fills
+`validator_2 = 'QCd-nf-core'` for any sample that reaches `submission_ready = true`, having
+cleared table2asn, the EMBL flat-file conversion and the webin-cli format check. An existing
+`validator_2` is never overwritten and a missing row is never inserted. See
+[docs/output.md](docs/output.md) for details.
+
 ### Stub run for wiring/tests
 
 ```bash

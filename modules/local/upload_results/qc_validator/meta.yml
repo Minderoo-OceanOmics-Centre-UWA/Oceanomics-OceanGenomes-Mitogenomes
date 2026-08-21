@@ -1,0 +1,13 @@
+name: push_qc_validator
+description: Record the pipeline as lca_validation.validator_2 for samples that cleared every QC gate, without failing the batch.
+keywords: [lca_validation, validator, postgresql, upload]
+input:
+  - meta: { type: map, description: Sample metadata }
+  - validation_record: { type: file, description: Normalized per-assembly ENA validation record }
+  - config: { type: file, description: PostgreSQL configuration }
+output:
+  - upload: { type: file, description: Non-fatal SQL upload log, pattern: "*.qc_validator.upload.txt" }
+  - tool_params: { type: file, description: MultiQC tool-parameter row }
+  - versions: { type: file, description: Tool versions, pattern: "versions.yml" }
+authors: ["Tyler Peirce"]
+maintainers: ["Tyler Peirce"]

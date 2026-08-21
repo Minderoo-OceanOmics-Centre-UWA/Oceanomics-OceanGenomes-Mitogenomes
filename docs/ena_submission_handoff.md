@@ -13,22 +13,28 @@ second is not ours to trigger. The handover point is a directory on disk.
 
 | | Mitogenomes (this repo) | ENA-mito-genomes |
 |---|---|---|
-| Builds the EMBL flatfile, chromosome list and Webin manifest | yes | no |
+| Builds the EMBL flatfile and chromosome list | yes | no |
 | Format-validates the flatfile (`webin-cli -context sequence -validate`) | yes | no |
+| Builds the submission manifest | no | yes |
 | Allocates and injects locus tags | no | yes |
 | Decides which assembly represents a specimen | no | yes |
 | Applies the embargo gate | no | yes |
 | Calls `webin-cli -context genome -submit` | no | yes |
 | Records the resulting accessions | defines the table | writes it |
 
+The mito pipeline only ever uses `-context sequence -validate` run
+against the flatfile, and it validates the flatfile only, never submission metadata.
+Genome-context validation cannot be run here at all: it resolves `SAMPLE` against ENA's
+submission sample service before it checks anything else, and the sample is registered
+downstream.
+
 ## Finding packages
 
 ```
-<outdir>/mitogenomes/<og_id>/<assembly_prefix>/ena/package/
+s3://ocom-oceangenomes/analysed-data/mitogenomes/curated/<og_id>/<assembly_prefix>/
 ```
 
-A glob over `*/*/ena/package/*.package_metadata.json` enumerates every candidate. Each package
-describes itself; no database join is needed to build a manifest from it.
+Each package describes itself; reading one needs no database join.
 
 ## What is in a package
 
@@ -38,17 +44,14 @@ Every file is named on `full_seqid`, so the whole package shares one stem.
 |---|---|
 | `<full_seqid>.embl.gz` | the flatfile. Webin `FLATFILE` input |
 | `<full_seqid>.chromosome_list.tsv.gz` | Webin `CHROMOSOME_LIST` input |
-| `<full_seqid>.manifest.txt` | the Webin `genome`-context manifest, already built |
-| `<full_seqid>.package_metadata.json` | every value the manifest was built from |
+| `<full_seqid>.package_metadata.json` | the handoff: everything this pipeline knows about the submission |
 | `<full_seqid>.tbl` | NCBI feature table, kept for provenance |
 | `<full_seqid>.fa` | sequence, collaborator handover |
 | `<full_seqid>.gff` | annotation as the annotator produced it, collaborator handover |
 | `<full_seqid>.genes.fa` | per-gene sequences (CDS, tRNA, rRNA), collaborator handover |
 | `checksums.sha256` | sha256 of every other file in the directory |
 
-The `.fa`, `.gff` and `.genes.fa` are **not** submission inputs. The manifest never names them and
-they are excluded from `package_digest`, so a change to them cannot make an unchanged submission
-look changed.
+The `.fa`, `.gff` and `.genes.fa` are **not** submission inputs. 
 
 The chromosome list is a single row:
 
@@ -56,133 +59,179 @@ The chromosome list is a single row:
 <full_seqid>	MT	Circular-Chromosome	Mitochondrion
 ```
 
-## The manifest is already built
+## Building the manifest
 
-Read it, do not rebuild it. Injecting locus tags into the flatfile is the only edit needed before
-`-submit`.
+The mito pipeline does not write a manifest. It cannot write a correct one: three of the
+Webin genome-context keys are values only you hold.
 
+- **`STUDY`** is the BioProject you register and submit into.
+- **`SAMPLE`** is the BioSample you register for the specimen.
+- **`RUN_REF`** names the raw-read submissions, which are yours.
+
+So `package_metadata.json` is the whole handoff. Its `manifest` block holds the nine keys
+this pipeline can fill, already under the names Webin uses, so building the manifest is
+copying that block out as tab-separated lines and adding your own three. Injecting locus
+tags into the flatfile or an accompanying list is the only edit needed to the package itself before `-submit`.
+
+The `manifest` block from batch-01 OG51:
+
+```json
+"manifest": {
+  "ASSEMBLYNAME": "OG51.ilmn.240313.getorg1770.emma102",
+  "ASSEMBLY_TYPE": "clone or isolate",
+  "CHROMOSOME_LIST": "OG51.ilmn.240313.getorg1770.emma102.chromosome_list.tsv.gz",
+  "COVERAGE": "1698.16",
+  "DESCRIPTION": "Ophthalmolepis lineolata mitochondrial genome",
+  "FLATFILE": "OG51.ilmn.240313.getorg1770.emma102.embl.gz",
+  "MOLECULETYPE": "genomic DNA",
+  "PLATFORM": "ILLUMINA",
+  "PROGRAM": "GetOrganelle 1.7.7.0"
+}
 ```
-STUDY	PRJEB123419
-SAMPLE	SAMEA132129018
-ASSEMBLYNAME	OG2124.hifi.260421.v323mitohifi.emma102
-ASSEMBLY_TYPE	clone or isolate
-COVERAGE	192.749
-PROGRAM	MitoHiFi 3.2.3
-PLATFORM	PACBIO_SMRT
-MOLECULETYPE	genomic DNA
-DESCRIPTION	Ateleopus japonicus mitochondrial genome
-FLATFILE	OG2124.hifi.260421.v323mitohifi.emma102.embl.gz
-CHROMOSOME_LIST	OG2124.hifi.260421.v323mitohifi.emma102.chromosome_list.tsv.gz
-```
 
-`RUN_REF` is emitted when the package carries run accessions. `run_accessions` is empty in the
-packages we publish, so if ENA wants run references, supplying them is yours.
+`FLATFILE` and `CHROMOSOME_LIST` are bare filenames, relative to the package directory.
+
+A key whose value would not validate is left out rather than written wrong, so treat the
+block as authoritative about what it contains and not as a fixed set of nine. In practice
+all nine are present; a missing one means the pipeline had nothing trustworthy to put
+there.
 
 ## Where each manifest value comes from
 
-If you build your own manifest rather than reading ours, this is the mapping. The short version:
-**take submission identifiers and the Webin-vocabulary strings from the JSON; the flatfile already
-carries everything about the specimen itself.**
+The manifest and the flatfile are independent webin-cli inputs. What the flatfile carries
+does not license omitting anything from the manifest: every key above is required in the
+manifest whatever the flatfile says, and the two are checked separately.
 
-| manifest key | `package_metadata.json` field | in the flatfile? |
-|---|---|---|
-| `STUDY` | `study` | no |
-| `SAMPLE` | `biosample_accession` (check it, see below) | no |
-| `ASSEMBLYNAME` | `full_seqid` | yes, `ID` line and `AC * _` entry name |
-| `ASSEMBLY_TYPE` | fixed, `clone or isolate` | no |
-| `COVERAGE` | `mean_depth` | no |
-| `PROGRAM` | `program` | only as free text, see the warning below |
-| `PLATFORM` | `platform` | only as free text, see the warning below |
-| `MOLECULETYPE` | fixed, `genomic DNA` | yes, `ID` line and `/mol_type` |
-| `DESCRIPTION` | built from `scientific_name` | not verbatim, see the warning below |
-| `FLATFILE` | `<full_seqid>.embl.gz` | n/a |
-| `CHROMOSOME_LIST` | `<full_seqid>.chromosome_list.tsv.gz` | n/a |
+| manifest key | source |
+|---|---|
+| `STUDY` | yours, the registered BioProject |
+| `SAMPLE` | yours, the registered BioSample |
+| `RUN_REF` | yours, if ENA asks for run references |
+| `ASSEMBLYNAME` | `manifest.ASSEMBLYNAME`, which is `full_seqid` |
+| `ASSEMBLY_TYPE` | `manifest.ASSEMBLY_TYPE`, fixed at `clone or isolate` |
+| `COVERAGE` | `manifest.COVERAGE`, the `%g` render of `mean_depth` |
+| `PROGRAM` | `manifest.PROGRAM` |
+| `PLATFORM` | `manifest.PLATFORM` |
+| `MOLECULETYPE` | `manifest.MOLECULETYPE`, fixed at `genomic DNA` |
+| `DESCRIPTION` | `manifest.DESCRIPTION`, built from `scientific_name` |
+| `FLATFILE` | `manifest.FLATFILE` |
+| `CHROMOSOME_LIST` | `manifest.CHROMOSOME_LIST` |
 
 Notes that matter:
 
 - **`full_seqid` is the `ASSEMBLYNAME`**, and it includes the annotation version, so a
-  re-annotation is a new assembly rather than a collision with one you already sent. It is also
-  the filename stem and the flatfile `ID` line identifier, so all three agree by construction.
-- **The flatfile already carries every specimen fact**, so none of it needs re-deriving: organism
-  (`OS` and `/organism`, normalised so `Genus sp` reads `Genus sp.`), topology (`circular` on the
-  `ID` line), molecule type, sequence length, and a full `source` feature with `/organelle`,
-  `/isolate`, `/tissue_type`, `/geo_loc_name`, `/lat_lon` and `/collection_date`. `/lat_lon` and
-  `/collection_date` are omitted rather than filled with a placeholder when the specimen has no
-  valid value.
+  re-annotation is a new assembly rather than a collision with one you already sent. It is
+  also the filename stem and the flatfile `ID` line identifier, so all three agree by
+  construction.
+- **You never need to re-derive a specimen fact.** The `specimen` block carries the
+  qualifiers of the flatfile's `source` feature, read back out of the flatfile that was
+  packaged, so the JSON and the flatfile cannot disagree. Neither the database nor the
+  flatfile needs consulting for organism, isolate, tissue, place or date:
+
+  ```json
+  "specimen": {
+    "collection_date": "29-Mar-2023",
+    "geo_loc_name": "Australia: WA, New Year Island",
+    "isolate": "OG51",
+    "mol_type": "genomic DNA",
+    "organelle": "mitochondrion",
+    "organism": "Ophthalmolepis lineolata",
+    "tissue_type": "Gills"
+  }
+  ```
+
+  A qualifier the specimen has no valid value for is **absent, not empty**: OG51 has no
+  `/lat_lon`, so there is no `lat_lon` key. `organism` is normalised, so `Genus sp` reads `Genus sp.`.
+
+- **The flatfile carries no study, sample, run or coverage.** The first three are not in
+  the package either; they are yours. Coverage is `manifest.COVERAGE`. What the flatfile
+  does carry:
 
   ```
-  ID   OG2124.hifi.260421.v323mitohifi.emma102; SV 1; circular; genomic DNA; STD; UNC; 16650 BP.
+  ID   OG51.ilmn.240313.getorg1770.emma102; SV 1; circular; genomic DNA; STD; UNC; 16631 BP.
   XX
   AC   ;
   XX
-  AC * _OG2124.hifi.260421.v323mitohifi.emma102
+  AC * _OG51.ilmn.240313.getorg1770.emma102
   XX
-  DE   Ateleopus japonicus mitochondrion, complete genome
+  DE   Ophthalmolepis lineolata mitochondrion, complete genome
   XX
-  OS   Ateleopus japonicus
+  OS   Ophthalmolepis lineolata
   XX
   CC   ##Assembly-Data-START##
-  CC   Assembly Method       :: MitoHifi v.3.2.3
-  CC   Sequencing Technology :: PacBio HiFi
+  CC   Assembly Method       :: GetOrganelle v.1.7.7.0
+  CC   Sequencing Technology :: Illumina
   CC   ##Assembly-Data-END##
   ...
-  FT   source          1..16650
-  FT                   /organism="Ateleopus japonicus"
+  FT   source          1..16631
+  FT                   /organism="Ophthalmolepis lineolata"
   FT                   /organelle="mitochondrion"
   FT                   /mol_type="genomic DNA"
-  FT                   /isolate="OG2124"
+  FT                   /isolate="OG51"
   FT                   /tissue_type="Gills"
-  FT                   /geo_loc_name="Australia: EEZ"
-  FT                   /lat_lon="21.57628 S 156.49365 E"
-  FT                   /collection_date="25-Oct-2025"
+  FT                   /geo_loc_name="Australia: WA, New Year Island"
+  FT                   /collection_date="29-Mar-2023"
   ```
 
-  `AC   ;` is a deliberate empty placeholder, not a missing accession. ENA requires exactly one
-  `AC` block, and `AC   ;` and `AC * _<entry>` are not interchangeable.
+  `AC   ;` is a deliberate empty placeholder, not a missing accession. ENA requires exactly
+  one `AC` block, and `AC   ;` and `AC * _<entry>` are not interchangeable.
 
-- **The flatfile carries no study, sample, run or coverage.** Those exist only in the JSON.
-- **Do not substitute the flatfile's `CC ##Assembly-Data##` strings for `PROGRAM` and
-  `PLATFORM`.** They describe the same facts in a different vocabulary: the flatfile says
-  `MitoHifi v.3.2.3` and `PacBio HiFi`, the manifest needs `MitoHiFi 3.2.3` and `PACBIO_SMRT`.
-  Webin only accepts `PACBIO_SMRT` or `ILLUMINA`. Likewise the flatfile `DE` line
-  (`… mitochondrion, complete genome`) is not the manifest `DESCRIPTION`
-  (`… mitochondrial genome`). Take all three from the JSON.
+- **Three fields legitimately differ between the flatfile and the manifest**, so do not
+  substitute one for the other. They are the same facts in two vocabularies:
+
+  | fact | flatfile | manifest |
+  |---|---|---|
+  | assembler | `GetOrganelle v.1.7.7.0` (`CC Assembly Method`) | `GetOrganelle 1.7.7.0` |
+  | platform | `Illumina` (`CC Sequencing Technology`) | `ILLUMINA` |
+  | description | `… mitochondrion, complete genome` (`DE`) | `… mitochondrial genome` |
+
+  Webin accepts only `PACBIO_SMRT` or `ILLUMINA` for `PLATFORM`. Take all three from the
+  `manifest` block; they are already in Webin vocabulary there.
 
 ## `package_metadata.json`
 
 | field | meaning |
 |---|---|
-| `schema_version` | `2` |
+| `schema_version` | `3` |
 | `full_seqid` | the `ASSEMBLYNAME`; unique per assembly *and* annotation version |
 | `og_id`, `assembly_prefix`, `annotation_version` | identity |
-| `study` | the ENA child study recorded for this assembly's technology |
-| `biosample_accession` | may be `null`; check it yourself, see below |
-| `mean_depth` | manifest `COVERAGE` |
-| `program`, `platform`, `scientific_name` | manifest inputs in Webin vocabulary |
-| `run_accessions` | empty; run references are yours to add |
+| `validation_study` | the study `--ena_study` named for the run, used only to make sequence-context validation execute. **Not a submission target**, see below |
+| `mean_depth` | full-precision coverage; `manifest.COVERAGE` is its `%g` render |
+| `program`, `platform`, `scientific_name` | the values `manifest` renders, kept as this pipeline's own record |
+| `manifest` | the Webin genome-context keys this pipeline can fill, under Webin's names |
+| `specimen` | the flatfile `source` feature qualifiers, so you need not parse the flatfile |
 | `sequence_length` | length in bases, matches the `ID` line |
 | `sequence_sha256` | sha256 of the bases, uppercased, whitespace stripped |
 | `normalised_circular_sha256` | rotation- and strand-invariant sequence identity |
 | `flatfile_validation` | nested: `status`, `reason`, `error_count`, `warning_count`, `webin_cli_version` |
 | `package_digest` | changes when the ENA submission content changes, and only then |
 
-`package_digest` is a sha256 over the digest listing of the `.embl.gz`, `.chromosome_list.tsv.gz`,
-`.manifest.txt` and `.tbl`. The gzipped files are written with `mtime=0` and an empty stored
-filename so their bytes are reproducible and the digest is stable across reruns of the same
-assembly. `checksums.sha256` is separate and covers every file in the directory except itself.
+**Do not put `validation_study` in a manifest.** It is whatever `--ena_study` was set to
+when the run executed, and sequence-context validation never resolves it, so nothing
+checks that it is submittable. It is `PRJEB110568`, the OceanOmics umbrella
+project, which by definition cannot receive data: copying it into a `STUDY` line gets the
+submission rejected. The field is recorded for provenance, not for reuse.
+
+`package_digest` is a sha256 over the digest listing of the `.embl.gz`,
+`.chromosome_list.tsv.gz` and `.tbl`. Those three files, and nothing else. The gzipped
+files are written with `mtime=0` and an empty stored filename so their bytes are
+reproducible and the digest is stable across reruns of the same assembly.
+`checksums.sha256` is separate and covers every file in the directory except itself.
 
 The webin-cli version that validated the flatfile is recorded in
 `flatfile_validation.webin_cli_version`.
 
 ## BioSample
 
-**Read `biosample_accession` and check it before you submit.** Nothing upstream filters on it.
+Registering the specimen is yours, end to end. This pipeline records no BioSample: the
+package carries none, nothing here filters on one, and the `SAMPLE` line is yours to
+write. What follows is what we learned about that step, because it is easy to get wrong.
 
-webin-cli resolves the manifest `SAMPLE` against ENA's own submission sample service, which knows
-only samples registered through Webin, not the EBI BioSamples mirror the ENA browser serves. So:
+webin-cli resolves `SAMPLE` against ENA's own submission sample service, which knows only
+samples registered through Webin, not the EBI BioSamples mirror the ENA browser serves.
+So:
 
-- absent or `null` means unregistered
-- `SAMN` / `SAMD` means registered at another INSDC archive and **unusable at Webin**
+- `SAMN` / `SAMD` means registered at another INSDC archive, and is **unusable at Webin**
 - only `SAMEA` resolves
 
 Verified against `ena-webin-cli 9.0.3`, `-context genome -validate -test`:
@@ -192,30 +241,15 @@ SAMEA132129018 -> Submission(s) validated successfully.
 SAMN40589646   -> Failed to initialise validator ... sample is null
 ```
 
-A package that fails this check is self-describing on disk. Its manifest starts with a
-`# BLOCKED:` line carrying the reason, and keeps only four keys, with no `SAMPLE`:
-
-```
-# BLOCKED: Invalid or missing ENA BioSample accession: ''
-STUDY	PRJEB123419
-ASSEMBLYNAME	OG2124.hifi.260421.v323mitohifi.emma102
-FLATFILE	OG2124.hifi.260421.v323mitohifi.emma102.embl.gz
-CHROMOSOME_LIST	OG2124.hifi.260421.v323mitohifi.emma102.chromosome_list.tsv.gz
-```
-
-**Expect this to be the common case.** As of 2026-08-20, all 219 published packages under
-`/scratch/pawsey1348/tpeirce` are blocked: `biosample_accession` is `null` in 202 of them and
-`SAMN…` in the rest, and none is `SAMEA`. Until specimens are registered through Webin, no
-package is submittable. `bin/audit_ena_readiness.py --check-ena-mirror` queries the EBI browser
-API per specimen if you want the current picture.
+The `specimen` block in each package is the specimen record to register from: it is
+exactly what was submitted in the flatfile, so a sample registered from it cannot
+contradict the assembly it belongs to.
 
 ## More than one package per specimen
 
-Every viable assembly and annotation version is published. Nothing deduplicates them, so choosing
+Every viable assembly and annotation version is published to the s3 bucket. Nothing deduplicates them, so choosing
 between candidates is yours. Two things make it tractable:
 
-- **Select within a technology, never across.** A specimen can legitimately be submitted once as
-  HiFi, once as Hi-C and once as Illumina; those are separate assemblies from separate data.
 - **Use `normalised_circular_sha256` for equivalence.** It is rotation- and strand-invariant, so a
   circular genome assembled starting at a different base, or on the other strand, is recognised as
   the same sequence rather than looking like a rival one. Two candidates whose digests match are
@@ -230,11 +264,10 @@ fails both `table2asn` and Webin. Allocation and injection are yours, end to end
 
 Two things that help:
 
-- Feature order in the flatfile is stable and coordinate sorted. `bin/process_files.py`
-  (`sort_tbl_features`) re-sorts the annotator's string-ordered output numerically, so numbering
+- Feature order in the flatfile is stable and coordinate sorted. Numbering
   loci by walking the record gives the same answer on every rerun of the same assembly.
 - `table2asn` reports `FATAL: NO_LOCUS_TAGS` for every record by design. This pipeline treats that
-  code as advisory (`bin/parse_table2asn_validation.py`); it is not a defect in the package.
+  code as advisory.
 
 ## What we vouch for
 
@@ -246,8 +279,8 @@ ORDER BY og_id, full_seqid;
 ```
 
 `submission_ready` means the flatfile cleared every gate this pipeline runs, ending at the Webin
-format check. It does **not** mean chosen, unembargoed, submittable, or submitted: a
-`submission_ready` package can still be BioSample-blocked. `ena_validation_latest` gives the most
+format check. It does **not** mean chosen, unembargoed, submittable, or submitted: the study, the
+sample and the runs are all still ahead of it. `ena_validation_latest` gives the most
 recent attempt per `full_seqid` if you do not want to reason about attempt tokens.
 
 Embargo comes from `sample.embargo_status` and is your gate; it should have exactly one owner.
@@ -292,11 +325,11 @@ WHERE ena_submissions.submission_status <> 'ACCESSION_ASSIGNED';
 | `submission_status` | `NOT_SUBMITTED` / `SUBMITTED` / `ACCESSION_ASSIGNED` / `FAILED`. Constraints enforce the evidence: `SUBMITTED` and `ACCESSION_ASSIGNED` need `submitted_at`, `ACCESSION_ASSIGNED` needs `ena_analysis_accession`, `FAILED` needs `error_message` |
 | `submitted_at`, `submitted_by`, `webin_cli_version` | when, by whom, with which client |
 | `receipt_path`, `receipt_sha256` | where the Webin receipt XML lives and its digest, so the row can be traced back to the evidence on disk |
-| `ena_study_accession` | `PRJEB…`, the per-technology child study it actually went to |
+| `ena_study_accession` | `PRJEB…`, the BioProject you registered and submitted into |
 | `ena_analysis_accession` | `ERZ…`, what webin-cli returns at submit time |
 | `ena_assembly_accession`, `ena_sequence_accession` | `GCA_…` and `OU/LR…`, assigned later; fill them in on a second pass |
 | `ena_sample_accession` | `ERS…`, only when a Webin sample was actually registered |
-| `biosample_accession`, `biosample_source` | the BioSample the **manifest carried**, and where it came from. A `SAMN` here is a record that the specimen was NCBI-registered only |
+| `biosample_accession`, `biosample_source` | the BioSample **you registered or reused**, and where it came from. A `SAMN` here is a record that the specimen was NCBI-registered only, and so was not resolvable at Webin |
 | `locus_tag_prefix` | the prefix registered at project creation |
 | `run_accessions` | `ERR`/`SRR`/`DRR` runs the assembly came from |
 
@@ -311,7 +344,7 @@ Two things worth knowing about the current submitter before wiring it up:
   not have that problem, but the value it writes has to be looked up by `full_seqid`.
 - `04_create_biosample.py` skips Webin sample registration whenever `ncbi_biosample_id` is set,
   which is exactly the `SAMN` value webin-cli cannot resolve. Until that changes,
-  `ena_sample_accession` stays NULL and `biosample_source` reads `sample.ncbi_biosample_id` —
+  `ena_sample_accession` stays NULL and `biosample_source` reads `sample.ncbi_biosample_id`,
   and the ledger will make that visible rather than leaving it implicit.
 
 `ena_validation_attempts` rows are still overwritten freely on rerun and carry no submission
@@ -323,7 +356,8 @@ column is named for GenBank and an ENA ERZ is not a GenBank accession.
 ## Questions for us
 
 1. Does anything downstream read `mitogenome_data.genbank_accession`, or can the ERZ live only in
-   your own tables?
-2. Is `package_metadata.json` enough to build a manifest from, or is there a field you would
-   otherwise have to rederive? It is cheaper to add it to the metadata here than for you to
-   reconstruct it.
+   your own tables? I think that `mitogenome_data.genbank_accession` can remain as is for now but
+   all new ENA upload values live in our new table.
+2. `package_metadata.json` is meant to be enough to build a manifest from, once you add
+   `STUDY`, `SAMPLE` and `RUN_REF`. If a field is still missing, tell me: it is cheaper to
+   add it to the metadata in the mito pipeline than for you to reconstruct it.
