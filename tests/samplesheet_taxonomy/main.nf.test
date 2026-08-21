@@ -1,0 +1,60 @@
+nextflow_workflow {
+    name "The --input_dir branch builds the enriched samplesheet with a taxdump"
+    script "../../subworkflows/local/prepare_samplesheet/main.nf"
+    config "./nextflow.config"
+    workflow "PREPARE_SAMPLESHEET"
+    options "-stub"
+
+    // CREATE_SAMPLESHEET_ENRICHED gained a fourth input (the NCBI taxdump that
+    // backs up the species table when it has no match for a sample's nominal
+    // name). Nextflow only checks a process call's arity when that branch runs,
+    // and no other test takes the --input_dir path, so this pins the wiring --
+    // including the aliased DOWNLOAD_TAXONKIT_DB, which the annotation
+    // subworkflow already invokes under its own name.
+
+    test("a taxdump directory is wired through to the samplesheet process") {
+        when {
+            params {
+                sql_config = "$projectDir/tests/test_data/samplesheet_meta/with_taxonomy.csv"
+                taxonkit_db_dir = "$outputDir/taxonkit"
+            }
+            workflow {
+                """
+                input[0] = null
+                input[1] = "\${projectDir}/tests/test_data/read_preparation/*.fastq.gz"
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().any { it.name.contains('CREATE_SAMPLESHEET_ENRICHED') } },
+                { assert workflow.trace.tasks().any { it.name.contains('DOWNLOAD_TAXONKIT_DB_SAMPLESHEET') } }
+            )
+        }
+    }
+
+    test("no taxonkit_db_dir still builds a samplesheet, without the taxdump") {
+        when {
+            params {
+                sql_config = "$projectDir/tests/test_data/samplesheet_meta/with_taxonomy.csv"
+                taxonkit_db_dir = null
+            }
+            workflow {
+                """
+                input[0] = null
+                input[1] = "\${projectDir}/tests/test_data/read_preparation/*.fastq.gz"
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.tasks().any { it.name.contains('CREATE_SAMPLESHEET_ENRICHED') } },
+                { assert !workflow.trace.tasks().any { it.name.contains('DOWNLOAD_TAXONKIT_DB') } }
+            )
+        }
+    }
+}

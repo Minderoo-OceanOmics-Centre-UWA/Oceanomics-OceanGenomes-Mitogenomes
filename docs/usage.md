@@ -91,9 +91,12 @@ that matches your container/conda environment.
 | `--skip_hic_fastp` | Optional | Skip fastp trimming of raw Hi-C reads before GetOrganelle (default `false`). Override the fastp arguments with `--hic_fastp_args`. |
 | `--force_db_overwrite` | Optional | Overwrite existing `mitogenome_data` rows on SQL upload instead of the default insert-only behaviour (default `false`). |
 | `--translation_table` | Optional | Mitochondrial genetic code for vertebrate/unresolved samples (default `2`). Invertebrate codes are derived per-sample from the taxonomic `class` column (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4), so this no longer forces a single code across the whole run. |
+| `--allow_unknown_taxonomy` | Optional | Continue with a warning when a sample's taxonomic `class` is `unknown` (default `false`, i.e. the run aborts). An unknown class is treated as vertebrate by every downstream chooser, so this is for deliberate one-offs only. |
 
 `--input_dir` mode requires `--sql_config` because the enriched samplesheet generator queries
-OceanOmics metadata. When running with `--input`, you can omit `--sql_config`, but upload/QC stages
+OceanOmics metadata. Pass `--taxonkit_db_dir` as well: the generator falls back to the NCBI
+taxdump for samples the `species` table cannot resolve, and without it those samples fail the
+taxonomy check. When running with `--input`, you can omit `--sql_config`, but upload/QC stages
 are then skipped with a warning.
 
 ### Reference-free Oatk fallback
@@ -385,7 +388,15 @@ A valid CSV must match the schema in `assets/schema_input.json`:
   `nominal_species_id`, `invertebrates`, `class`, and `reference_species_id`.
 - `class` (NCBI taxonomic class, e.g. `Actinopteri`, `Anthozoa`) and `invertebrates` together determine the
   per-sample mitochondrial genetic code used for annotation (e.g. Cnidaria → 4). In `--input_dir` mode these are
-  resolved automatically from `nominal_species_id`; in `--input` mode supply `class` for correct invertebrate codes.
+  resolved automatically from `nominal_species_id`: first from the OceanOmics `species` table, then from the NCBI
+  taxdump (`--taxonkit_db_dir`) when the table has no match. In `--input` mode supply `class` yourself.
+- **`class` is required in practice.** A missing or `unknown` class aborts the run before any assembly work, because
+  it is indistinguishable from "vertebrate" downstream (genetic code 2, EMMA instead of MITOS2, the curated fish
+  BLAST DB, the vertebrate tRNA completeness expectation). The error names every offending sample; fix them in the
+  published `<outdir>/samplesheet/samplesheet.csv` (`taxonomy_resolution.tsv` alongside it shows where each lineage
+  came from) and re-run with `--input`, or pass `--allow_unknown_taxonomy` to proceed with a warning.
+- A blank `family`/`order` only warns: it stops the reference-divergence check grading beyond `NON_CONGENERIC`, so
+  the `CROSS_ORDER` route to reference-free assembly cannot fire.
 - When a sample has multiple libraries (e.g. several Illumina lanes), repeat the row with the same
   `sample` and `sequencing_type`. The pipeline concatenates the reads before downstream processing.
 

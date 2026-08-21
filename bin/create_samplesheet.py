@@ -13,6 +13,7 @@ from pathlib import Path
 import psycopg2
 
 from species_name_utils import normalise_open_nomenclature
+from taxdump_lineage import TaxdumpLineage
 
 
 # NCBI classes treated as invertebrates for downstream BLAST DB selection and
@@ -465,6 +466,100 @@ def query_species_info(cursor, sample_id):
     )
 
 
+def resolve_species_info(cursor, sample_id, resolver=None):
+    """
+    (nominal_species_id, class, family, order, reference_species_id, source).
+
+    The OceanOmics species table is authoritative and tried first. It only holds
+    curated taxa, though, and a miss there is not benign: 'unknown' class makes
+    is_invertebrate() return 'false', which silently picks the vertebrate genetic
+    code, EMMA over MITOS2 and the curated (fish) BLAST DB. So anything the table
+    leaves blank is filled in from the NCBI taxdump when one is available.
+
+    `source` is 'db', 'db+taxdump', 'taxdump' or 'unresolved', and is reported for
+    the run rather than written to the samplesheet -- see the meta-shape warning in
+    subworkflows/local/prepare_samplesheet: a new optional column changes every
+    meta map and silently breaks joins on resume.
+    """
+    (nominal_species_id, tax_class, tax_family, tax_order,
+     reference_species_id) = query_species_info(cursor, sample_id)
+
+    db_had_class = tax_class != "unknown"
+    missing = (not db_had_class) or (not tax_family) or (not tax_order)
+    if not missing:
+        return (nominal_species_id, tax_class, tax_family, tax_order,
+                reference_species_id, 'db')
+
+    lineage = {}
+    if resolver is not None and nominal_species_id and nominal_species_id != "unknown":
+        try:
+            lineage = resolver.lineage_for_name(nominal_species_id)
+        except Exception as exc:
+            print(f"Warning: taxdump lookup failed for {sample_id} "
+                  f"('{nominal_species_id}'): {exc}", file=sys.stderr)
+
+    if lineage:
+        if not db_had_class and lineage.get('class'):
+            tax_class = lineage['class']
+        tax_family = tax_family or lineage.get('family', '')
+        tax_order = tax_order or lineage.get('order', '')
+        # An NCBI scientific name is a better findMitoReference query than the raw
+        # nominal name, which is what the blank fallback would otherwise leave us.
+        reference_species_id = reference_species_id or lineage.get('matched_name', '')
+
+    if tax_class == "unknown":
+        source = 'unresolved'
+    elif db_had_class and lineage:
+        source = 'db+taxdump'
+    elif db_had_class:
+        source = 'db'
+    else:
+        source = 'taxdump'
+
+    return (nominal_species_id, tax_class, tax_family, tax_order,
+            reference_species_id, source)
+
+
+RESOLUTION_COLUMNS = ('sample', 'nominal_species_id', 'class', 'family', 'order',
+                      'reference_species_id', 'source')
+
+
+def write_resolution_report(path, rows):
+    """Per-sample taxonomy provenance, deduplicated by sample."""
+    if not path:
+        return
+    seen = set()
+    with open(path, 'w', newline='') as handle:
+        writer = csv.writer(handle, delimiter='\t')
+        writer.writerow(RESOLUTION_COLUMNS)
+        for row in rows:
+            if row['sample'] in seen:
+                continue
+            seen.add(row['sample'])
+            writer.writerow([row.get(column, '') for column in RESOLUTION_COLUMNS])
+
+
+def report_unresolved(rows):
+    """Print the samples whose class never resolved. The run is aborted on these
+    by prepare_samplesheet; the sheet is still written so the rows can be fixed."""
+    unresolved = []
+    seen = set()
+    for row in rows:
+        if row['source'] == 'unresolved' and row['sample'] not in seen:
+            seen.add(row['sample'])
+            unresolved.append(row)
+    if not unresolved:
+        return
+    print(f"\nWARNING: taxonomic class could not be resolved for "
+          f"{len(unresolved)} sample(s):", file=sys.stderr)
+    for row in unresolved:
+        print(f"  {row['sample']}\tnominal_species_id='{row['nominal_species_id']}'",
+              file=sys.stderr)
+    print("These rows are written to the samplesheet as 'unknown'. Fix the nominal "
+          "species name (or the species table), or edit the class/family/order "
+          "columns by hand and re-run with --input.\n", file=sys.stderr)
+
+
 def is_invertebrate(tax_class):
     return 'true' if tax_class in INVERT_CLASSES else 'false'
 
@@ -474,11 +569,24 @@ def parse_args():
     parser.add_argument("--output", required=True, help="Output samplesheet CSV path.")
     parser.add_argument("--sql-config", required=False, default=None, help="Optional path to SQL config file.")
     parser.add_argument("--input-files", nargs="*", default=None, help="Optional explicit list of input files.")
+    parser.add_argument("--taxdump-dir", required=False, default=None,
+                        help="Optional NCBI taxdump directory (nodes.dmp/names.dmp). Used to "
+                             "resolve class/family/order when the species table has no match.")
+    parser.add_argument("--resolution-report", required=False, default=None,
+                        help="Where to write the per-sample taxonomy provenance table "
+                             "(default: taxonomy_resolution.tsv next to --output).")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
+    # Next to the samplesheet, not in the working directory: the two belong
+    # together, and a cwd-relative default leaks the file into whatever directory
+    # the caller happened to be in.
+    if not args.resolution_report:
+        args.resolution_report = os.path.join(
+            os.path.dirname(os.path.abspath(args.output)), "taxonomy_resolution.tsv")
 
     if args.input_files:
         file_list = [os.path.abspath(f) for f in args.input_files]
@@ -521,6 +629,7 @@ def main():
         with open(args.output, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(header)
+        write_resolution_report(args.resolution_report, [])
         return 0
 
     samples = group_files_by_sample(file_list)
@@ -534,6 +643,17 @@ def main():
             cursor = conn.cursor()
         except Exception as exc:
             print(f"Error connecting to database: {exc}", file=sys.stderr)
+
+    resolver = None
+    if args.taxdump_dir:
+        candidate = TaxdumpLineage(args.taxdump_dir)
+        if candidate.available:
+            resolver = candidate
+        else:
+            print(f"Warning: --taxdump-dir '{args.taxdump_dir}' has no nodes.dmp/names.dmp; "
+                  f"taxonomy fallback disabled", file=sys.stderr)
+
+    resolution_rows = []
 
     with open(args.output, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
@@ -574,8 +694,18 @@ def main():
                 assembly_prefix = f"{cleaned_id}.{sequencing_type}.{date}"
 
             (nominal_species_id, tax_class, tax_family, tax_order,
-             reference_species_id) = query_species_info(cursor, cleaned_id)
+             reference_species_id, tax_source) = resolve_species_info(
+                cursor, cleaned_id, resolver)
             invertebrates = is_invertebrate(tax_class)
+            resolution_rows.append({
+                'sample': cleaned_id,
+                'nominal_species_id': nominal_species_id,
+                'class': tax_class,
+                'family': tax_family,
+                'order': tax_order,
+                'reference_species_id': reference_species_id,
+                'source': tax_source,
+            })
 
             def write_row(r1, r2, single_end,
                           row_completion_date=None, row_date=None, row_assembly_prefix=None):
@@ -646,6 +776,9 @@ def main():
         cursor.close()
     if conn is not None:
         conn.close()
+
+    write_resolution_report(args.resolution_report, resolution_rows)
+    report_unresolved(resolution_rows)
 
     return 0
 

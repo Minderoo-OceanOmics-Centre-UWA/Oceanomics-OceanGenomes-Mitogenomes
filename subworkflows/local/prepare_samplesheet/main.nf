@@ -9,6 +9,7 @@
 */
 
 include { CREATE_SAMPLESHEET_ENRICHED } from '../../../modules/local/create_samplesheet_enriched'
+include { DOWNLOAD_TAXONKIT_DB as DOWNLOAD_TAXONKIT_DB_SAMPLESHEET } from '../../../modules/local/download_taxonkit_db'
 include { samplesheetToList         } from 'plugin/nf-schema'
 
 // Resolve the NCBI mitochondrial genetic code (translation table) for a sample
@@ -46,6 +47,68 @@ def isUnassignedReadFile(readPath) {
     return base.contains('unassigned')
 }
 
+// A samplesheet value that carries no information: null, blank, the empty list
+// nf-schema substitutes for an absent column, or the literal 'unknown' that
+// create_samplesheet.py writes when it could not resolve the taxon.
+def isUnresolvedTaxon(value) {
+    def s = (value == null) ? '' : value.toString().trim()
+    if (value instanceof Collection) {
+        s = value.isEmpty() ? '' : value.join(' ').trim()
+    }
+    return !s || s.equalsIgnoreCase('unknown')
+}
+
+// Abort the run when any sample's taxonomic class is unresolved.
+//
+// 'unknown' is not a neutral value downstream: is_invertebrate() reads it as
+// 'false', so the sample silently gets the vertebrate genetic code (table 2),
+// EMMA instead of MITOS2, the curated fish BLAST DB instead of nt, and the
+// vertebrate 22-tRNA completeness expectation. A coral run this way produces
+// results that look normal and are wrong, so failing loudly is the only safe
+// behaviour. Override with --allow_unknown_taxonomy for a deliberate one-off.
+//
+// A blank family/order with a known class only degrades the reference-divergence
+// tiering (everything collapses to NON_CONGENERIC, so the CROSS_ORDER route to
+// reference-free assembly cannot fire), which warns rather than fails.
+def validateTaxonomy(sample_list) {
+    def unresolved = []
+    def partial = []
+    sample_list.each { sample_record ->
+        def meta = sample_record[0]
+        if (!(meta instanceof Map)) return
+        def label = "${meta.id}${meta.nominal_species_id ? " (nominal_species_id='${meta.nominal_species_id}')" : ''}"
+        if (isUnresolvedTaxon(meta.class)) {
+            if (!unresolved.contains(label)) unresolved << label
+        }
+        else if (isUnresolvedTaxon(meta.family) || isUnresolvedTaxon(meta.order)) {
+            if (!partial.contains(label)) partial << label
+        }
+    }
+
+    if (partial) {
+        log.warn "Samplesheet has no family/order for ${partial.size()} sample(s); the reference-divergence check cannot grade beyond NON_CONGENERIC for these: ${partial.join(', ')}"
+    }
+
+    if (!unresolved) return
+
+    def sheet = params.outdir ? "${params.outdir}/samplesheet/samplesheet.csv" : "the samplesheet/ directory under --outdir"
+    def message = """Taxonomic class is unresolved for ${unresolved.size()} sample(s):
+  ${unresolved.join('\n  ')}
+An unknown class is treated as a vertebrate downstream (genetic code 2, EMMA, curated BLAST DB), which silently produces wrong results. The enriched samplesheet has been written to ${sheet} (see taxonomy_resolution.tsv alongside it): fix the nominal species name in the database, or fill in the class/family/order columns by hand and re-run with --input.
+Set --allow_unknown_taxonomy to run anyway."""
+
+    if (params.allow_unknown_taxonomy) {
+        log.warn message
+        return
+    }
+    // error() from inside a channel operator surfaces on the console only as
+    // "Unexpected error [InvocationTargetException]", with the message buried in
+    // .nextflow.log under a stack trace. Print it first so the sample list is
+    // actually readable, then abort.
+    log.error message
+    error "Taxonomic class is unresolved for ${unresolved.size()} sample(s); see the message above."
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     SUBWORKFLOW TO INITIALISE PIPELINE
@@ -75,11 +138,24 @@ workflow PREPARE_SAMPLESHEET {
             .collect()
 
 
+        // The NCBI taxdump backs up the species table when it has no match for a
+        // sample's nominal name. storeDir makes this a cache hit whenever the
+        // annotation subworkflow has already pulled the same dump.
+        def taxdump_ch = Channel.value([])
+        if (params.taxonkit_db_dir) {
+            DOWNLOAD_TAXONKIT_DB_SAMPLESHEET(Channel.value("taxdump"))
+            taxdump_ch = DOWNLOAD_TAXONKIT_DB_SAMPLESHEET.out.db_files
+        }
+        else {
+            log.warn "No --taxonkit_db_dir set: class/family/order come from the species table only, so unmatched samples will fail the taxonomy check."
+        }
+
         // Create enriched samplesheet from directory
         CREATE_SAMPLESHEET_ENRICHED(
             input_files_ch,
             "samplesheet.csv",
-            params.sql_config
+            params.sql_config,
+            taxdump_ch
         )
 
         samplesheet_ch = CREATE_SAMPLESHEET_ENRICHED.out.samplesheet
@@ -97,6 +173,12 @@ workflow PREPARE_SAMPLESHEET {
                 samplesheetToList(samplesheet_file, "${projectDir}/assets/schema_input.json")
             }
             .flatMap { sample_list ->
+                // Stop the run before any assembly work when a sample's class did
+                // not resolve. Checked on the whole list so one message names every
+                // offending sample. The enriched samplesheet has already been
+                // published by this point, so the rows can be corrected by hand.
+                validateTaxonomy(sample_list)
+
                 // Convert each sample record to the expected format
                 // (findResults drops any record returned as null, e.g. unassigned reads)
                 sample_list.findResults { sample_record ->

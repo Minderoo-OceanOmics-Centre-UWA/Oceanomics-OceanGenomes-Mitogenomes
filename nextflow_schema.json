@@ -501,6 +501,10 @@
                     "default": true,
                     "description": "Drop 'unassigned' read files (reads that failed HiFi barcode demultiplexing) during samplesheet parsing so they are never assembled into a sample."
                 },
+                "allow_unknown_taxonomy": {
+                    "type": "boolean",
+                    "description": "Continue with a warning when a sample's taxonomic class is 'unknown'. By default the run is aborted, because an unknown class is treated as a vertebrate downstream (genetic code 2, EMMA, curated BLAST DB) and silently produces wrong results."
+                },
                 "precomputed_mitogenome_assembly_fasta_getorg": {
                     "type": "string",
                     "description": "Glob of precomputed GetOrganelle assembly FASTA files used when the GetOrganelle branch is skipped."

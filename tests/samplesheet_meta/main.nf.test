@@ -103,4 +103,63 @@ nextflow_workflow {
             )
         }
     }
+
+    // An unresolved class is not a neutral value: is_invertebrate() reads it as
+    // 'false', so the sample silently takes the vertebrate genetic code, EMMA over
+    // MITOS2 and the curated fish BLAST DB. The run must stop before any of that.
+    test("an unknown class aborts the run and names the sample") {
+        when {
+            params {
+                allow_unknown_taxonomy = false
+            }
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/unknown_class.csv", checkIfExists: true)
+                def sheet = file("unknown_class.csv")
+                sheet.text = template.text.replace('__PROJECT_DIR__', "\${projectDir}")
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.failed },
+                // error() inside a channel operator only prints InvocationTargetException, so
+                // the sample list is logged separately; that log line is what has to reach
+                // the console for the message to be actionable.
+                { assert workflow.stdout.any { it.contains('Taxonomic class is unresolved') } },
+                { assert workflow.stdout.any { it.contains("OGCORAL (nominal_species_id='Acropora tenuis')") } },
+                // The resolved sample must not be named as a problem.
+                { assert !workflow.stdout.any { it.contains("OGFISH (nominal_species_id='Lutjanus quinquelineatus')") } }
+            )
+        }
+    }
+
+    test("--allow_unknown_taxonomy downgrades the abort to a warning") {
+        when {
+            params {
+                allow_unknown_taxonomy = true
+            }
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/unknown_class.csv", checkIfExists: true)
+                def sheet = file("unknown_class.csv")
+                sheet.text = template.text.replace('__PROJECT_DIR__', "\${projectDir}")
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
+            assertAll(
+                { assert workflow.success },
+                { assert metas.keySet().toSorted() == ['OGCORAL', 'OGFISH'] },
+                { assert metas.OGCORAL.class == 'unknown' }
+            )
+        }
+    }
 }

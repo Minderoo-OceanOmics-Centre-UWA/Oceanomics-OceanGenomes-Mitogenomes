@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `Added`
 
+- The run now aborts when a sample's taxonomic `class` is unresolved, and `class`/`family`/`order`
+  resolve from the NCBI taxdump when the `species` table has no match for the sample's nominal
+  name.
+
+  `unknown` was never a neutral value. `is_invertebrate()` maps it to `false`, so an unresolved
+  sample silently took the vertebrate path through every chooser downstream: genetic code 2
+  instead of 4/9, EMMA instead of MITOS2 (and no `ROTATE_ORIGIN`), the curated fish BLAST DB
+  instead of `nt`, the 82.0 rather than 88.0 reference-relevance threshold, and the vertebrate
+  22-tRNA completeness expectation pushed to the database as a QC verdict. A coral run that way
+  produces results that look normal and are wrong. `PREPARE_SAMPLESHEET` now checks the whole
+  parsed sheet before any work is dispatched and fails with every offending sample named;
+  `--allow_unknown_taxonomy` downgrades it to a warning for a deliberate one-off. A blank
+  `family`/`order` with a known class only warns, since it degrades the reference-divergence
+  tiering rather than flipping invert/vertebrate routing.
+
+  The samplesheet is still written and published before the abort — it is the artefact to
+  correct — and now lands in `<outdir>/samplesheet/` (the existing `withName: CREATE_SAMPLESHEET`
+  selector is a full match and never covered `CREATE_SAMPLESHEET_ENRICHED`, which had been
+  publishing to `<outdir>/create/`).
+
+- `bin/taxdump_lineage.py`, a stdlib-only `nodes.dmp`/`names.dmp` resolver, wired into
+  `CREATE_SAMPLESHEET_ENRICHED` as a fourth input from the already-cached
+  `DOWNLOAD_TAXONKIT_DB` (aliased, `storeDir` makes it a cache hit). The species table only
+  holds curated taxa, so it misses valid names outright: `OG85` / *Epinephelides armatus*
+  resolved to `unknown` from the database and now resolves to Actinopteri / Serranidae /
+  Perciformes. Lookup is by scientific name, tries the binomial then the genus, refuses
+  cross-kingdom homonyms, and skips NCBI's open-nomenclature placeholder nodes
+  (`Acropora sp.`) in favour of the genus. The curated database still wins wherever it has an
+  answer; the taxdump only fills blanks. Per-sample provenance is written to
+  `taxonomy_resolution.tsv` next to the samplesheet rather than to a new samplesheet column,
+  which would have changed every `meta` map's shape and silently emptied joins on resume.
+
 - `PUSH_QC_VALIDATOR` (`bin/push_qc_validator.py`, `modules/local/upload_results/qc_validator/`),
   which records the pipeline as the *second* species-ID validator in `lca_validation`. A
   mitogenome needs two validators signed off before it is OK to submit; the pipeline already

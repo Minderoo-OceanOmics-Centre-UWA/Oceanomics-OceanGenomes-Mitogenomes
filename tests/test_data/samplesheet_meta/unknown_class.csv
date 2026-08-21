@@ -1,0 +1,3 @@
+sample,sequencing_type,single_end,original_id,date,assembly_prefix,nominal_species_id,reference_species_id,class,invertebrates,fastq_1,fastq_2
+OGFISH,hifi,true,,250101,OGFISH.hifi.250101,Lutjanus quinquelineatus,Lutjanus quinquelineatus,Actinopteri,false,__PROJECT_DIR__/tests/test_data/read_preparation/OGSINGLE.hifi.250101.fastq.gz,
+OGCORAL,hifi,true,OGCORAL,250101,OGCORAL.hifi.250101,Acropora tenuis,Acropora tenuis,unknown,false,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
