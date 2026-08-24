@@ -546,6 +546,8 @@ if __name__ == "__main__":
                 for c in DEPTH_COLUMNS
             )
             upsert_query = f"""
+            -- og_num is a generated column maintained by the DB (SUBSTRING(og_id FROM 3)).
+            -- It is intentionally absent from this column list: naming it here would error.
             INSERT INTO mitogenome_data (
                 og_id, tech, seq_date, code, stats, length, avg_coverage, avg_base_coverage,
                 {depth_columns_sql}, depth_measured_at

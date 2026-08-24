@@ -102,6 +102,8 @@ if __name__ == "__main__":
                 seq_date = str(seq_date)
 
             upsert_query = """
+            -- og_num is a generated column maintained by the DB (SUBSTRING(og_id FROM 3)).
+            -- It is intentionally absent from this column list: naming it here would error.
             INSERT INTO mitogenome_data (
                 og_id, tech, seq_date, code, annotation, extra_genes, missing_genes, order_correct, passed, length_emma, seqlength_12s,
                 seqlength_16s, seqlength_co1, cds_no, trna_no, rrna_no, rrna12s,

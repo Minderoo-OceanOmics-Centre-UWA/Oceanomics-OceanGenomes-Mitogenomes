@@ -88,6 +88,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `Changed`
 
+- `apply_ena_migrations.py` now applies each migration exactly once, recording it in a
+  `public.schema_migrations` ledger (filename, sha256, applied_at) and skipping anything already
+  there. It used to re-execute the whole list on every invocation. Every migration is written to be
+  idempotent so that was survivable, but not harmless: `003`'s label-only backfill has no date guard,
+  so each run stamped `legacy_getorg_kmer` onto whatever rows happened to have a NULL `depth_method`
+  at the time. That hit the same five current-era rows twice and had to be undone by hand both times.
+  Any future migration inherited the same blast radius — a one-column change quietly mutating
+  unrelated data.
+
+  `--baseline` records the listed migrations as applied without running them, to onboard a database
+  they were already applied to, and refuses once the ledger is non-empty. A migration whose file has
+  changed since it was applied is now an error rather than a silent re-run, since the database no
+  longer matches the file; `--force` downgrades it to a warning. `--check-only` reports the pending
+  list.
+
+- `sql/018_mitogenome_data_og_num_first.sql` puts `og_num` back as column 1 of `mitogenome_data`.
+  `016` had to drop and re-add the column to make it generated, which moved it to position 91, and
+  the position was deliberate. PostgreSQL cannot reorder columns, so `018` rebuilds the table with
+  the columns declared in the wanted order: it copies the rows, refuses to commit a short copy,
+  recreates the index, re-points the three inbound foreign keys from `lca`, `lca_raw_results` and
+  `lca_validation`, re-grants `SELECT` to `readonly` and restores the column comments. The `_1`
+  suffixes on the constraint and index names are preserved deliberately — the unsuffixed names still
+  belong to the `mitogenome_data_SS260818` snapshot. The audit now also requires `og_num` to be
+  column 1, since a rebuild that moves it is the same accident that lost the generation expression
+  the first time.
+
+- `sql/017_lca_content_addressed_rows.sql` writes down a schema change that had only ever been
+  applied by hand: the `content_hash` and `taxon_rank_db` columns on `lca` and `lca_raw_results`,
+  the `lca_set_content_hash()` trigger function and its four triggers, both unique keys swapped
+  from `lca_run_date` to `content_hash`, and both foreign keys renamed off the ambiguous shared
+  `fk_mitogenome`. The code half shipped in `55321df`, the same commit that added migrations 014
+  and 015, so the ENA side was captured and this side was not.
+
+  It mattered because `push_lca_blast_results.py` and `push_lca_raw_results.py` name
+  `lca_content_unique` and `lca_raw_results_content_unique` as `ON CONFLICT` targets, so a database
+  rebuilt from `sql/` failed on the first LCA upload of a run. Every step is guarded, so applying
+  it to the existing database is a verified no-op: no column, constraint, index, trigger or
+  `content_hash` value changed. `apply_ena_migrations.py` now audits for it.
+
+- `sql/016_mitogenome_data_og_num_generated.sql` restores `mitogenome_data.og_num` as a stored
+  generated column, `(SUBSTRING(og_id FROM 3))::integer`, matching `sample`, `draft_genomes`,
+  `lca`, `lca_raw_results` and the `mitogenome_data_SS260818` snapshot, all of which are 100%
+  populated. The live table had become a plain nullable column with no default, no generation
+  expression and no trigger, and nothing writes it: neither `push_mtdna_assm_results.py` nor
+  `push_emma_annotation_results.py` lists it in their upserts, so it was populated on 28 of 289
+  rows, all of them pre-dating the loss. `mitogenome_submission_view` selects `og_num` and was
+  reading NULL for most of the pipeline's own output as a result.
+
+  PostgreSQL 14 cannot convert a column in place, so the migration drops and re-adds it, guarded
+  so a re-run is a no-op. Safe here because `og_num` is in no key, index or foreign key, and no
+  view depends on the live table's copy. Side effect: `og_num` moves to the last column position,
+  where it already sits in `sample` and `draft_genomes`. `apply_ena_migrations.py` now audits the
+  generation expression, so a table that loses it again fails the post-migration check instead of
+  quietly filling with NULLs.
+
 - The SQL upload summary gained a `Validator 2` column (`qc_validator` in
   `upload_results_summary.tsv`), reporting per sample whether `validator_2` was set, was
   preserved because someone already signed off, was skipped as not submission-ready, or found no

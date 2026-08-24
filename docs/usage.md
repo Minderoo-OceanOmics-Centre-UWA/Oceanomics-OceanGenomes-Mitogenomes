@@ -80,6 +80,8 @@ that matches your container/conda environment.
 | `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
 | `--template_sbt` | ✔ | Submission template passed to `table2asn` when packaging GenBank artefacts. |
 | `--ena_webin_validate` | Optional | Format-validate each EMBL flatfile with `ena-webin-cli -context sequence` (default `true`). This is the pipeline's last ENA gate; it needs no BioSample and never submits. |
+| `--webin_validate_timeout_seconds` | Optional | Per-attempt wall-clock bound on the `webin-cli -validate` call (default `900`). A healthy call returns in seconds; the bound stops a hung ENA request from consuming the task's whole allocation. |
+| `--webin_validate_max_attempts` | Optional | How many times `WEBIN_VALIDATE` calls `webin-cli` before giving up (default `3`). Only timeouts and infrastructure failures are retried; a validation failure is deterministic and stops immediately. |
 | `--ena_study` | ENA validation | ENA study the run validates against, recorded in each package as `validation_study`. There is no default. It is not a submission target: the study an assembly is submitted into is the BioProject the downstream submission pipeline registers, so this value never reaches a submission manifest. |
 | `--samplesheet_prefix` | Optional | Reserved for generated samplesheet naming in wrapper scripts. |
 | `--getorganelle_genedb_min_genes` | Optional | Minimum genes a reference must yield to build the reseed custom gene database (default `10`). Below this, the sample keeps its first-pass GetOrganelle assembly instead of reseeding. |
@@ -237,6 +239,9 @@ psql --dbname oceanomics --file sql/012_drop_ena_selection_layer.sql
 psql --dbname oceanomics --file sql/013_drop_ena_candidate_runs.sql
 psql --dbname oceanomics --file sql/014_ena_validation_attempts_full_seqid.sql
 psql --dbname oceanomics --file sql/015_ena_submissions.sql
+psql --dbname oceanomics --file sql/016_mitogenome_data_og_num_generated.sql
+psql --dbname oceanomics --file sql/017_lca_content_addressed_rows.sql
+psql --dbname oceanomics --file sql/018_mitogenome_data_og_num_first.sql
 ```
 
 `010` retires `ena_locus_registry` and `ena_candidate_loci` now that locus tags are assigned by
@@ -259,9 +264,41 @@ BioSample the submission actually carried, the locus tag prefix and the run acce
 validation attempt per `full_seqid` to that ledger, so one query says what is validated and what
 has happened to it since.
 
-`bin/apply_ena_migrations.py --config <cfg>` applies the same list in order under an advisory lock
-and audits the schema before and after; `--check-only` reports the current state without changing
-anything.
+`016` restores `mitogenome_data.og_num` as a stored generated column, `(SUBSTRING(og_id FROM 3))::integer`,
+which is what `sample`, `draft_genomes`, `lca` and `lca_raw_results` already use. The live table had
+lost the generation expression and become a plain nullable column that nothing writes, so it was
+populated on 28 of 289 rows. PostgreSQL cannot convert a column in place, so the migration drops and
+re-adds it: the values are all recomputed from `og_id`, and `og_num` moves to the last column position.
+Do not name `og_num` in any `INSERT` or `UPDATE` column list; a generated column rejects it.
+
+`017` records the content-addressing rework of `lca` and `lca_raw_results`: the `content_hash`
+and `taxon_rank_db` columns, the `lca_set_content_hash()` trigger function and its two triggers,
+the swap of both unique keys from `lca_run_date` to `content_hash`, and the rename of both
+foreign keys off the ambiguous `fk_mitogenome`. That change was applied directly to the live
+database around 2026-08-20 and never written down, while the code half of it shipped in
+`55321df`. It is a no-op against the live database and is what lets a rebuilt one satisfy the
+`ON CONFLICT ON CONSTRAINT lca_content_unique` / `lca_raw_results_content_unique` targets that
+`push_lca_blast_results.py` and `push_lca_raw_results.py` name. `content_hash` is
+trigger-maintained: never name it in an `INSERT` or `UPDATE` column list.
+
+`018` puts `og_num` back as column 1 of `mitogenome_data`, where it was before `016`. `016` had
+to drop and re-add the column to make it generated, which moved it to last. PostgreSQL cannot
+reorder columns, so `018` rebuilds the table, copies the rows, re-points the three inbound
+foreign keys and re-grants `readonly`. The `_1` suffixes on `mitogenome_data_pkey_1`,
+`mitogenome_data_unique_1` and `mitogenome_data_depth_method_idx_1` are deliberate and preserved:
+the unsuffixed names still belong to the `mitogenome_data_SS260818` snapshot. **Run it only when
+no pipeline is writing to `mitogenome_data`** — it is one transaction, but the foreign-key swap
+will block or fail against an in-flight push.
+
+`bin/apply_ena_migrations.py --config <cfg>` applies the pending migrations from that list, in order,
+under an advisory lock, and audits the schema before and after. It records each one in
+`public.schema_migrations` (filename, sha256, applied_at) and skips anything already recorded, so a
+migration runs exactly once. `--check-only` reports the current state and the pending list without
+changing anything. `--baseline` records every listed migration as applied *without running any of
+it*, for onboarding a database they were already applied to; it refuses once the ledger is
+non-empty. Editing a migration after it has been applied is an error — the database no longer
+matches the file — so the runner fails on checksum drift unless you pass `--force`; write a new
+migration instead.
 
 `014` re-keys `ena_validation_attempts` on `full_seqid` (the assembly prefix plus the annotation
 version, e.g. `OG82.ilmn.240313.getorg1770.emma102`) and gives the annotation its own column after
