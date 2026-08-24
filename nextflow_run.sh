@@ -9,6 +9,19 @@ OUT_DIR="$BASE/mitogenomes-missing-audit-3"
 mkdir -p "$OUT_DIR"
 
 OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
+
+# Stage the backup scripts alongside the results and bake this run's outdir into
+# them, so the backup is a no-argument `sbatch $OUT_DIR/backup_scripts/backup.sh`
+# once the pipeline finishes.
+mkdir -p "$OUT_DIR/backup_scripts"
+command cp -r "$RUN_DIR/backup_scripts/." "$OUT_DIR/backup_scripts/"
+sed -i "s|^RUNDIR_DEFAULT=.*|RUNDIR_DEFAULT=\"$OUT_DIR\"|" "$OUT_DIR/backup_scripts/backup.sh"
+
+if ! grep -q "^RUNDIR_DEFAULT=\"$OUT_DIR\"$" "$OUT_DIR/backup_scripts/backup.sh"; then
+    echo "WARNING: could not bake RUNDIR into $OUT_DIR/backup_scripts/backup.sh;" \
+         "run it with -r $OUT_DIR"
+fi
+
 # Change to output directory to run Nextflow there
 cd $OUT_DIR
 
@@ -59,9 +72,20 @@ nextflow -log $OUT_DIR/nextflow.log \
 # affecting the run's exit status. Inherits this script's NXF_HOME + modules.
 if [ -z "${OCEANOMICS_SKIP_COST:-}" ]; then
     COST_SCRIPT="$RUN_DIR/compute-audit/nf_workflow_cost.sh"
+
     if [ -f "$COST_SCRIPT" ]; then
         mkdir -p "$OUT_DIR/pipeline_info"
-        bash "$COST_SCRIPT" "$OUT_DIR" "$OUT_DIR/pipeline_info/compute_usage.csv" \
-            || echo "compute cost: accounting failed (non-fatal)"
+
+        COST_LOG="$OUT_DIR/pipeline_info/compute_cost.log"
+
+        if bash "$COST_SCRIPT" \
+            "$OUT_DIR" \
+            "$OUT_DIR/pipeline_info/compute_usage.csv" \
+            >"$COST_LOG" 2>&1
+        then
+            echo "compute cost: accounting complete"
+        else
+            echo "compute cost: accounting failed (non-fatal); see $COST_LOG"
+        fi
     fi
 fi
