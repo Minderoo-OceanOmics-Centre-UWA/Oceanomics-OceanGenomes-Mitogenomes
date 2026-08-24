@@ -262,6 +262,18 @@
                     "default": true,
                     "description": "Format-validate each EMBL flatfile with webin-cli -context sequence. This is the pipeline's final ENA gate."
                 },
+                "webin_validate_timeout_seconds": {
+                    "type": "integer",
+                    "default": 900,
+                    "minimum": 30,
+                    "description": "Per-attempt wall-clock bound on the webin-cli -validate call. A healthy call returns in seconds; this stops a hung ENA request from consuming the whole task allocation."
+                },
+                "webin_validate_max_attempts": {
+                    "type": "integer",
+                    "default": 3,
+                    "minimum": 1,
+                    "description": "How many times WEBIN_VALIDATE calls webin-cli before giving up. Only timeouts and infrastructure failures are retried; a validation failure is deterministic and stops immediately."
+                },
                 "ena_study": {
                     "type": "string",
                     "default": null,

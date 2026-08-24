@@ -47,27 +47,70 @@ process WEBIN_VALIDATE {
         printf 'FLATFILE\t%s\n' "${embl_file.name}"
     } > "\${manifest}"
 
-    ena-webin-cli \\
-        -context sequence \\
-        -manifest "\${manifest}" \\
-        -inputDir . \\
-        -outputDir webin_output \\
-        -userName "\$WEBIN_USERNAME" \\
-        -passwordEnv WEBIN_PASSWORD \\
-        -validate > "\${log_file}" 2>&1
-    webin_rc=\$?
-
+    # A hung ENA request used to sit until Slurm killed the whole task: in
+    # batch-02 one OG16 call burned its entire 4 h walltime, and the automatic
+    # task retry then passed in 4 s. So bound each call and retry transient
+    # failures here, where a second attempt costs seconds rather than hours.
+    #
+    # The container ships busybox timeout, not GNU coreutils (verified against
+    # quay.io/biocontainers/ena-webin-cli:9.0.3): positional seconds only, no
+    # --signal/--kill-after long options, and a timeout exits 143 (128+SIGTERM)
+    # rather than GNU's 124. Both codes are matched so the conda path, which
+    # does supply GNU timeout, behaves identically.
+    webin_timeout_s=${params.webin_validate_timeout_seconds}
+    max_attempts=${params.webin_validate_max_attempts}
+    attempts=0
+    webin_rc=0
     webin_status="PASS"
     reason="validated"
-    if [ "\${webin_rc}" -ne 0 ]; then
-        if grep -RqiE 'validation[^[:alnum:]]*(error|fail)|(^|[^[:alpha:]])(ERROR|INVALID)([^[:alpha:]]|\$)' webin_output "\${log_file}" 2>/dev/null; then
+
+    while [ "\${attempts}" -lt "\${max_attempts}" ]; do
+        attempts=\$((attempts + 1))
+
+        # Reset per-attempt state: the classifier below greps webin_output, so a
+        # report left behind by a failed attempt would misclassify a later one.
+        rm -rf webin_output
+        mkdir -p webin_output
+        : > "\${log_file}"
+
+        timeout -k 30 "\${webin_timeout_s}" ena-webin-cli \\
+            -context sequence \\
+            -manifest "\${manifest}" \\
+            -inputDir . \\
+            -outputDir webin_output \\
+            -userName "\$WEBIN_USERNAME" \\
+            -passwordEnv WEBIN_PASSWORD \\
+            -validate > "\${log_file}" 2>&1
+        webin_rc=\$?
+
+        if [ "\${webin_rc}" -eq 0 ]; then
+            webin_status="PASS"
+            reason="validated"
+            break
+        fi
+
+        if [ "\${webin_rc}" -eq 143 ] || [ "\${webin_rc}" -eq 124 ]; then
+            webin_status="FAIL_INFRASTRUCTURE"
+            reason="webin_timeout"
+        elif grep -RqiE 'validation[^[:alnum:]]*(error|fail)|(^|[^[:alpha:]])(ERROR|INVALID)([^[:alpha:]]|\$)' webin_output "\${log_file}" 2>/dev/null; then
+            # Deterministic: the flatfile itself is rejected, so retrying the
+            # same input cannot change the answer.
             webin_status="FAIL_WEBIN"
             reason="validation_failed"
+            break
         else
             webin_status="FAIL_INFRASTRUCTURE"
             reason="webin_or_network_failure"
         fi
-    fi
+
+        if [ "\${attempts}" -lt "\${max_attempts}" ]; then
+            sleep \$((30 * attempts))
+        fi
+    done
+
+    # Attempt count goes in the log, not the status TSV: the TSV schema is read
+    # by bin/collate_ena_validation.py and is deliberately left unchanged.
+    printf 'webin-cli attempts: %s (last exit %s)\n' "\${attempts}" "\${webin_rc}" >> "\${log_file}"
 
     if [ "\${webin_status}" = "PASS" ]; then
         cp "$embl_file" validated/

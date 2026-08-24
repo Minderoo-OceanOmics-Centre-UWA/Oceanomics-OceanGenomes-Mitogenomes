@@ -152,6 +152,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assemblies are validated. The `assembly_prefix`-dependent statements in `001`, `002`, `011` and `012` are now
   guarded on that column still existing, so `bin/apply_ena_migrations.py` can keep replaying the whole chain.
 
+### `Fixed`
+
+- A walltime kill on `GETORGANELLE_RESEED` is retried again. Its `withName` block in
+  `conf/base.config` overrode the global error strategy and narrowed "transient" to exit 137
+  (OOM) alone, so exit 140 -- what Slurm returns when a task exceeds its time allocation --
+  fell straight through to `ignore` on attempt 1, with `maxRetries = 2` never spent.
+  `GETORGANELLE_RESEED` was the only process carrying that override; `GETORGANELLE_FROMREADS`
+  next to it has always inherited the global policy, which counts 130..145 as transient.
+
+  It cost a real assembly: in `batch-02`, `OG28.ilmn.231024` timed out at 16 h and was ignored,
+  leaving `mitogenomes/OG28/OG28.ilmn.231024.getorg1770reseed/mtdna/` holding nothing but
+  `reference_seed/` -- no FASTA, no GFA, and therefore no downstream annotation for that library.
+  The override is deleted rather than widened, so the two GetOrganelle processes now resolve to
+  one retry policy and 137 stays covered because it sits inside 130..145. Note the second attempt
+  gains only 8 hours (`Math.min(24, 16 * task.attempt).h`, capped by `max_time = 24.h`): samples
+  that exceed 16 h are usually not converging rather than running slightly long, so expect the
+  retry to buy a verdict rather than an assembly.
+
+- `WEBIN_VALIDATE` bounds each `webin-cli` call with `timeout` and retries transient failures
+  in-script, controlled by `--webin_validate_timeout_seconds` (default 900) and
+  `--webin_validate_max_attempts` (default 3). The call was previously unbounded, so a hung
+  ENA request could only end when Slurm killed the whole task: `OG16` in `batch-02` spent its
+  entire 4 h allocation inside a call that normally returns in about 5 seconds, and the
+  automatic task retry then passed in 4.
+
+  Only timeouts and infrastructure failures are retried, with a 30 s/60 s backoff; a
+  `FAIL_WEBIN` verdict is deterministic and breaks out immediately rather than re-running a
+  rejected flatfile. `webin_output` is cleared between attempts, since the classifier greps it
+  and a report left by an earlier attempt would misclassify a later one. The process still
+  ends `exit 0` and the `.webin_status.tsv` schema is unchanged -- a failing task would drop
+  the non-optional `manifest`/`status`/`log`/`reports` emits and erase the sample from the ENA
+  collation instead of recording it as failed -- so the only new value is the `webin_timeout`
+  reason, and the attempt count goes to the log.
+
+  The biocontainer ships **busybox** `timeout`, not GNU coreutils: it takes positional seconds
+  with no `--signal`/`--kill-after`, and it exits **143** on timeout rather than GNU's 124. The
+  module matches both codes so the `conda` path, which does supply GNU `timeout`, behaves the
+  same.
+
 ## v2.0.0 - [2026-08-18]
 
 Second major release, and the first to carry the ENA submission path. Everything ENA-related below is new since
