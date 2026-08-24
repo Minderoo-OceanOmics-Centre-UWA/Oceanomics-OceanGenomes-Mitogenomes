@@ -31,6 +31,7 @@ MIGRATIONS = [
     "016_mitogenome_data_og_num_generated.sql",
     "017_lca_content_addressed_rows.sql",
     "018_mitogenome_data_og_num_first.sql",
+    "019_ena_validation_attempts_recompute_submission_ready.sql",
 ]
 
 

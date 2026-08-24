@@ -71,7 +71,7 @@ process WEBIN_VALIDATE {
         # report left behind by a failed attempt would misclassify a later one.
         rm -rf webin_output
         mkdir -p webin_output
-        : > "\${log_file}"
+        : >| "\${log_file}"
 
         timeout -k 30 "\${webin_timeout_s}" ena-webin-cli \\
             -context sequence \\
@@ -80,7 +80,7 @@ process WEBIN_VALIDATE {
             -outputDir webin_output \\
             -userName "\$WEBIN_USERNAME" \\
             -passwordEnv WEBIN_PASSWORD \\
-            -validate > "\${log_file}" 2>&1
+            -validate >| "\${log_file}" 2>&1
         webin_rc=\$?
 
         if [ "\${webin_rc}" -eq 0 ]; then

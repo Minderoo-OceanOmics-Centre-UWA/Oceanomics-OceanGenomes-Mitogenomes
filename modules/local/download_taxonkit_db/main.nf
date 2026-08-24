@@ -10,8 +10,10 @@ process DOWNLOAD_TAXONKIT_DB {
     path("taxonkit_dbs"), emit: db_files
    
     script:
-    db_dir = params.taxonkit_db_dir 
+    db_dir = params.taxonkit_db_dir
     """
+    set -euo pipefail
+
     mkdir -p taxonkit_dbs
 
     # Check if files already exist
