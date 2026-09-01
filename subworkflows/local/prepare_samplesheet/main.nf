@@ -15,24 +15,23 @@ include { samplesheetToList         } from 'plugin/nf-schema'
 // Resolve the NCBI mitochondrial genetic code (translation table) for a sample
 // from its taxonomic class. Mitochondrial codes differ by lineage, and the wrong
 // code mistranslates CDS in MITOS2 annotation and QC protein translation:
-//   * Cnidaria (corals, anemones, jellyfish, hydroids) use the Coelenterate code (4),
+//   * Cnidaria (corals, anemones, jellyfish, hydroids) and Porifera (sponges) use
+//     the Coelenterate/Mold code (4) -- see InvertTaxonGroups (lib/) for why these
+//     two groups are handled together,
 //   * echinoderms and flatworms use the Echinoderm/Flatworm code (9),
-//   * any other invertebrate falls back to the Coelenterate code (4): in practice
-//     the only invertebrates routed through this pipeline are cnidarians, so an
-//     unrecognised invertebrate class is far more likely to be one of those than
-//     a code-5 invertebrate. (Add an explicit class above if that ever changes.)
+//   * any other invertebrate (Mollusca, Arthropoda, Annelida, Nematoda, etc.)
+//     falls back to the standard Invertebrate Mitochondrial code (5),
 //   * vertebrates (and anything unresolved) fall back to defaultCode (vertebrate, 2).
 def mitoGeneticCode(taxClass, isInvert, defaultCode) {
-    def c = (taxClass ?: '').toString().trim().toLowerCase()
-    if (c in ['anthozoa', 'hydrozoa', 'scyphozoa', 'cubozoa', 'staurozoa', 'myxozoa', 'polypodiozoa']) {
+    if (InvertTaxonGroups.isReducedTrna(taxClass)) {
         return 4
     }
-    if (c in ['asteroidea', 'ophiuroidea', 'echinoidea', 'holothuroidea', 'crinoidea',
-              'rhabditophora', 'trematoda', 'cestoda', 'monogenea', 'turbellaria']) {
+    def c = (taxClass ?: '').toString().trim().toLowerCase()
+    if (c in InvertTaxonGroups.ECHINODERM_FLATWORM_CLASSES) {
         return 9
     }
     if (isInvert) {
-        return 4
+        return 5
     }
     return defaultCode
 }

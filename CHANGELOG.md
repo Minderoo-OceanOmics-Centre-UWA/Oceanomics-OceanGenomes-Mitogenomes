@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `Added`
 
+- Invertebrate annotation now generalises beyond Cnidaria to Mollusca, Echinodermata,
+  Arthropoda (Crustacea, Pycnogonida) and Porifera, instead of running every invertebrate
+  through coral-tuned machinery. `mitoGeneticCode()` gains a bilaterian invertebrate default
+  (NCBI code 5, previously 4) and a Porifera Coelenterate-code (4) entry alongside Cnidaria;
+  `ROTATE_ORIGIN` re-origins each sample against its own phylum-appropriate curated cox1 panel
+  (`assets/cox1_{mollusca,arthropoda,echinodermata}.faa`, new) instead of the coral-only
+  `cox1_anthozoa.faa` for every invertebrate; `REFERENCE_RELEVANCE`'s 88.0 identity floor is now
+  Cnidaria-only, with everything else defaulting to the vertebrate 82.0 as an untuned starting
+  point. `ANNOTATION_QC_GATE`/`CORAL_ANNOTATION_FIX` stay Cnidaria-only rather than guessing an
+  equivalent for other phyla -- the nad5 group I intron they repair is a Hexacorallia-specific
+  trait, absent in Octocorallia and not the same failure mode Porifera's own (cox1, lineage-
+  specific) group I introns present; non-Cnidarian invertebrate MITOS2 output now merges straight
+  through untouched. New `InvertTaxonGroups` (`lib/`) centralises the class groupings both the
+  samplesheet and annotation subworkflow read.
+
 - The run now aborts when a sample's taxonomic `class` is unresolved, and `class`/`family`/`order`
   resolve from the NCBI taxdump when the `species` table has no match for the sample's nominal
   name.

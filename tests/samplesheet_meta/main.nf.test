@@ -104,6 +104,37 @@ nextflow_workflow {
         }
     }
 
+    test("non-coral invertebrate classes resolve their own genetic codes") {
+        // Pins mitoGeneticCode()'s generalisation beyond Cnidaria: Mollusca and
+        // Arthropoda (Crustacea + Pycnogonida) default to the standard Invertebrate
+        // code (5), not the Coelenterate code (4) corals use; Echinodermata keeps
+        // code 9; Porifera groups with Cnidaria on code 4 (see InvertTaxonGroups).
+        when {
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/with_taxonomy_inverts.csv", checkIfExists: true)
+                def sheet = file("with_taxonomy_inverts.csv")
+                sheet.text = template.text.replace('__PROJECT_DIR__', "\${projectDir}")
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
+            assertAll(
+                { assert workflow.success },
+                { assert metas.OGMOLLUSC.genetic_code == 5 },
+                { assert metas.OGCRUST.genetic_code == 5 },
+                { assert metas.OGPYCNO.genetic_code == 5 },
+                { assert metas.OGECHINO.genetic_code == 9 },
+                { assert metas.OGSPONGE.genetic_code == 4 },
+                { assert metas.values().every { it.invertebrates == true } }
+            )
+        }
+    }
+
     // An unresolved class is not a neutral value: is_invertebrate() reads it as
     // 'false', so the sample silently takes the vertebrate genetic code, EMMA over
     // MITOS2 and the curated fish BLAST DB. The run must stop before any of that.

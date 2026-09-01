@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 import argparse
-import psycopg2
 import csv
 import configparser
 import sys
+
+try:
+    import psycopg2
+except ImportError:  # Allows unit tests to inject a connection factory.
+    psycopg2 = None
 
 from species_name_utils import normalise_open_nomenclature
 
@@ -18,7 +22,7 @@ def load_db_config(config_file):
         'user': config.get('postgres', 'user'),
         'password': config.get('postgres', 'password'),
         'host': config.get('postgres', 'host'),
-        'port': config.getint('postgres', 'port')    
+        'port': config.getint('postgres', 'port')
     }
 
 def concatenate_files(file_list, output_file):
@@ -209,22 +213,26 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
 
     # Get nominal_species_id from DB
     db_species = get_species_for_ogid(db_params, og_id)
-    if db_species is None:
-        print(f"[WARN] OG ID '{og_id}' nominal species not found in database.")
-        return
+    has_nominal_species = db_species is not None
 
-    # This value becomes the /organism= in the ENA flatfile (via lca_results.tsv
-    # -> evaluate_qc_conditions.py -> FORMAT_FILES --species -> process_files.py),
-    # and is also what gets stored in lca_validation.validated_species_name. ENA
-    # rejects 'Genus sp' and 'Genus spp.' as not submittable, so normalise to the
-    # 'Genus sp.' form here rather than at the point of use.
-    normalised_species = normalise_open_nomenclature(db_species)
-    if normalised_species != db_species:
-        print(f"[INFO] Normalised nominal species '{db_species}' -> '{normalised_species}'")
-        db_species = normalised_species
+    if has_nominal_species:
+        # This value becomes the /organism= in the ENA flatfile (via lca_results.tsv
+        # -> evaluate_qc_conditions.py -> FORMAT_FILES --species -> process_files.py),
+        # and is also what gets stored in lca_validation.validated_species_name. ENA
+        # rejects 'Genus sp' and 'Genus spp.' as not submittable, so normalise to the
+        # 'Genus sp.' form here rather than at the point of use.
+        normalised_species = normalise_open_nomenclature(db_species)
+        if normalised_species != db_species:
+            print(f"[INFO] Normalised nominal species '{db_species}' -> '{normalised_species}'")
+            db_species = normalised_species
 
-    # Normalise once
-    db_species_norm = normalise_name(db_species)
+        # Normalise once
+        db_species_norm = normalise_name(db_species)
+    else:
+        print(
+            f"[WARN] OG ID '{og_id}' nominal species not found in database — "
+            "species match columns will be recorded as N/A."
+        )
 
     # Load BLAST results
     blast_blob = load_blast_species_set(f"blast_combined.{prefix}.tsv")
@@ -248,6 +256,11 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
                 # If the column isn't present or is empty, skip this row
                 continue
 
+            if not has_nominal_species:
+                # Nothing to compare the LCA/BLAST hits against.
+                writer.writerow([og_id, species_in_lca_raw, "N/A", "N/A", "N/A"])
+                continue
+
             # Split on commas and normalise each species name
             species_list_norm = [
                 normalise_name(s)
@@ -267,6 +280,25 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
             writer.writerow([og_id, species_in_lca_raw, db_species, match, in_blast])
 
     print(f"[INFO] Results written to: {output_file}")
+
+    if not has_nominal_species:
+        # No nominal species to compare against, but the sample was still
+        # processed: record an lca_validation row with no species match so
+        # it isn't silently absent from the table, and so PUSH_LCA_BLAST_RESULTS
+        # (fed by this task's lca_combined/blast_combined outputs) still runs.
+        print(
+            f"[INFO] OG ID '{og_id}' has no nominal_species_id — recording "
+            "lca_validation row with no species match."
+        )
+        key = parse_assembly_key_from_blast(f"blast_combined.{prefix}.tsv")
+        if key is None:
+            print(
+                "❌ Could not derive (og_id, tech, seq_date, code, annotation) from "
+                f"blast_combined.{prefix}.tsv — skipping lca_validation upsert."
+            )
+        else:
+            upsert_lca_validation(db_params, key, None, validator="nf-core", force=force)
+        return
 
     # Push the validation result to the lca_validation table. We only write a
     # row when the sample is validated (Found_in_blast_YN = Yes for at least

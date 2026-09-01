@@ -76,14 +76,40 @@ PRODUCT = {
     "RNR2": "16S ribosomal RNA",
 }
 
+# EMMA-style tRNA gene suffix (as produced by map_gene_name, e.g. "TW", "TS1",
+# "TL2") -> 3-letter amino acid, for tRNA /product strings ("tRNA-Trp(UCA)").
+TRNA_AA = {
+    "A": "Ala", "R": "Arg", "N": "Asn", "D": "Asp", "C": "Cys",
+    "Q": "Gln", "E": "Glu", "G": "Gly", "H": "His", "I": "Ile",
+    "L1": "Leu", "L2": "Leu", "K": "Lys", "M": "Met", "F": "Phe",
+    "P": "Pro", "S1": "Ser", "S2": "Ser", "T": "Thr", "W": "Trp",
+    "Y": "Tyr", "V": "Val",
+}
+
+
+def trna_product(emma_name, anticodon):
+    """Return an EMMA-style tRNA /product string, e.g. 'tRNA-Trp(UCA)'.
+
+    Falls back to a bare gene-name product if the suffix or anticodon isn't
+    recognised -- a cosmetic field should never fail the run.
+    """
+    suffix = emma_name[1:] if emma_name.startswith("T") else emma_name
+    aa = TRNA_AA.get(suffix)
+    if aa and anticodon:
+        return f"tRNA-{aa}({anticodon})"
+    return f"tRNA-{emma_name}"
+
 
 def map_gene_name(raw):
-    """Return (emma_name, feature_type, frag) for a MITOS2 BED feature name.
+    """Return (emma_name, feature_type, frag, anticodon) for a MITOS2 BED
+    feature name.
 
     feature_type is one of 'CDS', 'rRNA', 'tRNA'. ``frag`` is the MITOS
     fragment/exon part label ('a', 'b', '0', '1', ...) when the feature is one
-    piece of a split gene, else None. Returns (None, None, None) for names we
-    don't recognise (kept out of the EMMA contract rather than guessed).
+    piece of a split gene, else None. ``anticodon`` is the tRNA anticodon in
+    RNA form (e.g. 'UCA' from trnW(tca)), else None. Returns
+    (None, None, None, None) for names we don't recognise (kept out of the
+    EMMA contract rather than guessed).
 
     MITOS labels the exons of an intron-split gene with a trailing part suffix:
     a hyphen + letter (e.g. nad5-a, nad5-b) or an underscore + number
@@ -92,21 +118,23 @@ def map_gene_name(raw):
     parts map to the same EMMA gene and capture ``frag`` so the exons can later
     be concatenated in transcript order.
     """
-    # Strip the anticodon parens first (e.g. trnW(tca) -> trnW), then peel off
-    # any MITOS fragment/exon suffix.
+    # Capture and strip the anticodon parens first (e.g. trnW(tca) -> trnW),
+    # then peel off any MITOS fragment/exon suffix.
+    anticodon_m = re.search(r"\(([a-zA-Z]+)\)$", raw.strip())
+    anticodon = anticodon_m.group(1).upper().replace("T", "U") if anticodon_m else None
     bare_full = re.sub(r"\(.*?\)$", "", raw.strip())
     m = re.search(r"[-_](\d+|[a-z])$", bare_full)
     frag = m.group(1) if m else None
     bare = re.sub(r"[-_](?:\d+|[a-z])$", "", bare_full)
 
     if bare in PCG_MAP:
-        return PCG_MAP[bare], "CDS", frag
+        return PCG_MAP[bare], "CDS", frag, None
     if bare in RRNA_MAP:
-        return RRNA_MAP[bare], "rRNA", frag
+        return RRNA_MAP[bare], "rRNA", frag, None
     if bare.startswith("trn"):
         # trnF -> TF, trnL2 -> TL2, trnS1 -> TS1
-        return "T" + bare[3:].upper(), "tRNA", frag
-    return None, None, None
+        return "T" + bare[3:].upper(), "tRNA", frag, anticodon
+    return None, None, None, None
 
 
 def _frag_key(frag):
@@ -140,13 +168,14 @@ def parse_bed(bed_path):
             if len(cols) < 6:
                 continue
             chrom, start, end, raw_name, _score, strand = cols[:6]
-            emma_name, ftype, frag = map_gene_name(raw_name)
+            emma_name, ftype, frag, anticodon = map_gene_name(raw_name)
             if emma_name is None:
                 continue
             start1, end = int(start) + 1, int(end)
             features.setdefault(emma_name, []).append({
                 "chrom": chrom, "start": start1, "end": end,
                 "strand": strand, "ftype": ftype, "frag": frag,
+                "anticodon": anticodon,
             })
     for exons in features.values():
         exons.sort(key=lambda e: _frag_key(e["frag"]))
@@ -203,6 +232,63 @@ def write_gff(gff_path, features, chrom, seq_len, species, is_circular):
                 attrs_feat = (f"ID={feat_id};Parent=gene-{emma_name};"
                               f"Name=MT-{emma_name};Product={product}{feat_note}")
                 out.write(f"{chrom}\tmitos\t{ftype}\t{e['start']}\t{feat_end}\t.\t{strand}\t.\t{attrs_feat}\n")
+
+
+def _tbl_intervals(exons, seq_len):
+    """Return the ordered list of (start, end) interval pairs for a .tbl
+    feature block, in transcript order.
+
+    Each exon's own start/end are plus-strand-referenced (as parse_bed and
+    reorigin_features leave them; strand is tracked separately). start > end
+    marks a feature that straddles the circular origin -- split into the two
+    NCBI-tbl continuation intervals (start, seq_len) then (1, end), the same
+    join syntax the format already uses for a multi-exon gene, so no separate
+    Note is needed the way write_gff needs one for GFF3. A minus-strand
+    interval is then written high..low (reversing the wrap-split order too),
+    matching how EMMA's own .tbl encodes strand -- there is no strand column.
+
+    ``exons`` must already be in MITOS transcript (part) order (parse_bed
+    guarantees this), so multi-exon output here lists each exon's interval(s)
+    in that same order without needing to re-sort.
+    """
+    pairs = []
+    for e in exons:
+        lo, hi, strand = e["start"], e["end"], e["strand"]
+        plus_pts = [(lo, hi)] if lo <= hi else [(lo, seq_len), (1, hi)]
+        pairs.extend([(b, a) for a, b in reversed(plus_pts)] if strand == "-" else plus_pts)
+    return pairs
+
+
+def write_tbl(tbl_path, features, chrom, seq_len, prefix, genetic_code):
+    """Write an NCBI 5-column feature table (.tbl) for table2asn, from the same
+    ``features`` dict write_gff consumes. Mirrors EMMA's .tbl shape (gene ->
+    mRNA/CDS or gene -> tRNA/rRNA blocks) so process_files.py's normalisation
+    (MT- stripping, protein_id removal, transl_except insertion) applies
+    unchanged regardless of which annotator produced the table.
+    """
+    ordered = sorted(features.items(), key=lambda kv: min(e["start"] for e in kv[1]))
+    with open(tbl_path, "w") as out:
+        out.write(f">Feature {prefix}\n")
+        for emma_name, exons in ordered:
+            product = PRODUCT.get(emma_name, emma_name)
+            ftype = exons[0]["ftype"]
+            intervals = _tbl_intervals(exons, seq_len)
+
+            def write_block(key, qual_lines):
+                (s0, e0), rest = intervals[0], intervals[1:]
+                out.write(f"{s0}\t{e0}\t{key}\n")
+                for s, e in rest:
+                    out.write(f"{s}\t{e}\n")
+                for q in qual_lines:
+                    out.write(f"\t\t\t{q[0]}\t{q[1]}\n")
+
+            write_block("gene", [("gene", f"MT-{emma_name}")])
+            if ftype == "CDS":
+                write_block("mRNA", [("gene", f"MT-{emma_name}")])
+                write_block("CDS", [("product", product), ("transl_table", genetic_code)])
+            else:
+                prod = trna_product(emma_name, exons[0].get("anticodon")) if ftype == "tRNA" else product
+                write_block(ftype, [("product", prod)])
 
 
 def gene_nt_seq(genome, chrom, start, end, strand):
@@ -344,6 +430,9 @@ def main():
 
     write_gff(args.outdir / f"{args.prefix}.gff", features, chrom, seq_len,
               args.species, is_circular=not args.linear)
+
+    write_tbl(args.outdir / f"{args.prefix}.tbl", features, chrom, seq_len,
+              args.prefix, args.code)
 
     for emma_name, exons in features.items():
         # Concatenate exons in MITOS transcript (part) order so an intron-split

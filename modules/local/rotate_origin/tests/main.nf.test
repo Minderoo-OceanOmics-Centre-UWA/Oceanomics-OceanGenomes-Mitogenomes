@@ -1,0 +1,60 @@
+nextflow_process {
+
+    name "Test Process ROTATE_ORIGIN"
+    script "../main.nf"
+    process "ROTATE_ORIGIN"
+
+    tag "modules"
+    tag "modules_local"
+    tag "rotate_origin"
+
+    // cox1_ref is per-sample (not a broadcast value channel) so each phylum group
+    // can be rotated against its own curated cox1 anchor panel -- this pins that
+    // 3-element tuple input, one process call per phylum's panel.
+
+    test("mollusca sample rotates against the mollusca cox1 panel") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_mollusca' ],
+                    file("${projectDir}/modules/local/select_coral_reference/tests/data/query.fa", checkIfExists: true),
+                    file("${projectDir}/assets/cox1_mollusca.faa", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.fasta[0][1] ==~ ".*/rotated/query.fa" },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub' ],
+                    file("${projectDir}/modules/local/select_coral_reference/tests/data/query.fa", checkIfExists: true),
+                    file("${projectDir}/assets/cox1_arthropoda.faa", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(process.out).match() }
+            )
+        }
+    }
+}

@@ -378,37 +378,32 @@ def query_species_info(cursor, sample_id):
         FROM (
             SELECT sp.class, sp.family, sp.ordr, sp.species AS ref_name, 1 AS priority, 1.0 AS sim
             FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.species) = lower(s.nominal_name)
+            WHERE lower(sp.species) = lower(s.nominal_name)
 
             UNION ALL
 
             SELECT sp.class, sp.family, sp.ordr, sp.genus AS ref_name, 2 AS priority, 1.0 AS sim
             FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.genus) = lower(s.nominal_genus)
+            WHERE lower(sp.genus) = lower(s.nominal_genus)
 
             UNION ALL
 
             SELECT sp.class, sp.family, sp.ordr, sp.family AS ref_name, 3 AS priority, 1.0 AS sim
             FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.family) = lower(s.nominal_name)
+            WHERE lower(sp.family) = lower(s.nominal_name)
 
             UNION ALL
 
             SELECT sp.class, sp.family, sp.ordr, sp.ordr AS ref_name, 4 AS priority, 1.0 AS sim
             FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.ordr) = lower(s.nominal_name)
+            WHERE lower(sp.ordr) = lower(s.nominal_name)
 
             UNION ALL
 
             SELECT sp.class, sp.family, sp.ordr, sp.species AS ref_name, 5 AS priority,
                    similarity(sp.species, s.nominal_name) AS sim
             FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.genus) = lower(s.nominal_genus)
+            WHERE lower(sp.genus) = lower(s.nominal_genus)
               AND sp.species %% s.nominal_name
 
             UNION ALL
@@ -416,8 +411,7 @@ def query_species_info(cursor, sample_id):
             SELECT sp.class, sp.family, sp.ordr, sp.family AS ref_name, 6 AS priority,
                    similarity(sp.family, s.nominal_name) AS sim
             FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND sp.family %% s.nominal_name
+            WHERE sp.family %% s.nominal_name
               AND similarity(sp.family, s.nominal_name) >= 0.65
 
             UNION ALL
@@ -425,8 +419,7 @@ def query_species_info(cursor, sample_id):
             SELECT sp.class, sp.family, sp.ordr, sp.ordr AS ref_name, 7 AS priority,
                    similarity(sp.ordr, s.nominal_name) AS sim
             FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND sp.ordr %% s.nominal_name
+            WHERE sp.ordr %% s.nominal_name
               AND similarity(sp.ordr, s.nominal_name) >= 0.65
         ) ranked
         ORDER BY priority, sim DESC

@@ -34,20 +34,24 @@ PROT_GENES = [
     "ND4L", "ND5", "ND6"
 ]
 
-# Taxonomic classes whose mitogenomes follow the cnidarian pattern: 13 PCGs +
-# 2 rRNAs but only ~2 mt tRNAs (trnM/trnW) — the rest are nuclear-encoded and
-# imported. The vertebrate 22-tRNA expectation would wrongly fail these, so for
-# them completeness is judged on the conserved protein-coding + rRNA core only
-# and gene order is not evaluated.
-CNIDARIA_CLASSES = {
+# Taxonomic classes with legitimately reduced/atypical mt tRNA complements:
+# Cnidaria follows the well-known pattern of 13 PCGs + 2 rRNAs but only ~2 mt
+# tRNAs (trnM/trnW), the rest nuclear-encoded and imported. Porifera groups
+# with it here too -- sponge mt tRNA counts are highly variable across
+# lineages (2-27 genes), including documented tRNA-Phe loss in some clades --
+# so the same relaxed expectation applies. The vertebrate 22-tRNA expectation
+# would wrongly fail both groups, so for them completeness is judged on the
+# conserved protein-coding + rRNA core only and gene order is not evaluated.
+REDUCED_TRNA_CLASSES = {
     "anthozoa", "hydrozoa", "scyphozoa", "cubozoa",
     "staurozoa", "myxozoa", "polypodiozoa", "cnidaria",
+    "demospongiae", "calcarea", "hexactinellida", "homoscleromorpha", "porifera",
 }
 CNIDARIAN_CORE = PROT_GENES + ["RNR1", "RNR2"]
 
 
-def is_cnidarian(class_name):
-    return (class_name or "").strip().lower() in CNIDARIA_CLASSES
+def has_reduced_trna_expectation(class_name):
+    return (class_name or "").strip().lower() in REDUCED_TRNA_CLASSES
 
 def parse_gff_attributes(attr_str):
     return dict(
@@ -121,10 +125,11 @@ def process_gff(gff_path, annotation_name, class_name=""):
     gene_entries.sort(key=lambda x: x[1])  # sort by start
     found_by_coord = [g[0] for g in gene_entries]
 
-    if is_cnidarian(class_name):
+    if has_reduced_trna_expectation(class_name):
         # Judge completeness on the conserved protein-coding + rRNA core only;
-        # cnidarians legitimately lack most tRNAs, and their gene order is not
-        # the vertebrate order, so order is reported as NA rather than failed.
+        # cnidarians and sponges legitimately lack most tRNAs, and their gene
+        # order is not the vertebrate order, so order is reported as NA rather
+        # than failed.
         missing = [g for g in CNIDARIAN_CORE if g not in found_by_coord]
         extra = [g for g in found_by_coord if g not in REF_GENES]
         order_correct = "NA"

@@ -176,21 +176,29 @@ workflow MITOGENOME_ANNOTATION {
         ch_annot_branched.vert // tuple val(meta), path(fasta)
     )
 
-    // Re-origin invert (coral) assemblies to the cox1 start before MITOS2 so the
-    // anthozoan nad5 group I intron (and cox3) no longer straddle GetOrganelle's
-    // linearisation point. This mirrors EMMA's `--rotate MT-TF` for vertebrates;
-    // corals lack tRNA-Phe, so cox1 is the anchor. The original (un-rotated)
+    // Re-origin invert assemblies to the cox1 start before MITOS2 so intron-split
+    // genes (e.g. the hexacoral nad5 group I intron) no longer straddle
+    // GetOrganelle's linearisation point. This mirrors EMMA's `--rotate MT-TF`
+    // for vertebrates; several invert groups lack tRNA-Phe (Cnidaria always;
+    // Porifera in some lineages), so cox1 is the anchor instead. Each sample is
+    // rotated against its own phylum-appropriate curated cox1 panel -- see
+    // InvertTaxonGroups.cox1PanelGroup() in lib/. The original (un-rotated)
     // assembly is published separately by the assembly stage and left untouched.
-    ch_cox1_ref = Channel.fromPath("${projectDir}/assets/cox1_anthozoa.faa", checkIfExists: true).first()
+    ch_cox1_panel_paths = [
+        reduced_trna  : file("${projectDir}/assets/cox1_anthozoa.faa", checkIfExists: true),
+        mollusca      : file("${projectDir}/assets/cox1_mollusca.faa", checkIfExists: true),
+        arthropoda    : file("${projectDir}/assets/cox1_arthropoda.faa", checkIfExists: true),
+        echinodermata : file("${projectDir}/assets/cox1_echinodermata.faa", checkIfExists: true),
+    ]
 
     ROTATE_ORIGIN (
         ch_annot_branched.invert.map { meta, fasta ->
             if (!mitos_refdb) {
                 error "Sample ${meta.id} is marked invertebrates=true, but --mitos_refdb was not provided"
             }
-            [meta, fasta]
-        },
-        ch_cox1_ref
+            def group = InvertTaxonGroups.cox1PanelGroup(meta.class)
+            [meta, fasta, ch_cox1_panel_paths[group]]
+        }
     )
 
     MITOS2 (
@@ -201,14 +209,34 @@ workflow MITOGENOME_ANNOTATION {
     //
     // Anthozoan annotation QC gate + reference-based fixer.
     // MITOS2 annotates coral PCGs + 12S correctly but routinely drops the
-    // divergent 16S and one exon of the intron-split nad5. The gate flags each
-    // invert annotation as FIX (deficient) or PASS, so only broken corals are
-    // re-annotated; correctly annotated batch-mates pass through MITOS2 untouched.
+    // divergent 16S and one exon of the intron-split nad5 (a Hexacorallia-wide
+    // group I intron trait). The gate flags each Cnidarian annotation as FIX
+    // (deficient) or PASS, so only broken corals are re-annotated; correctly
+    // annotated batch-mates pass through MITOS2 untouched.
     //
-    ANNOTATION_QC_GATE ( MITOS2.out.gff_proteins )
+    // This gate is Cnidaria-only: it encodes a failure mode discovered from real
+    // coral MITOS2 output, and guessing an equivalent for other invert phyla
+    // (including Porifera, despite sharing genetic code/rotation handling with
+    // Cnidaria -- see InvertTaxonGroups in lib/) would be exactly that, a guess.
+    // Other invert phyla's MITOS2 output merges straight through below
+    // (ch_mitos_*_passthrough); a phylum-specific fix gets designed later from
+    // real evidence once this batch has run.
+    //
+    ANNOTATION_QC_GATE (
+        MITOS2.out.gff_proteins.filter { meta, _gff, _proteins -> InvertTaxonGroups.isCoralFixEligible(meta.class) }
+    )
 
     ch_gate = ANNOTATION_QC_GATE.out.decision
         .map { meta, dfile -> [meta, dfile.text.split('\t')[0].trim()] }   // [meta, FIX|PASS]
+
+    // Non-Cnidarian invert phyla never enter the gate above, so joining any
+    // MITOS2 output channel against ch_gate below only ever matches Cnidaria
+    // samples (join() is an inner join on meta) -- these are their untouched
+    // MITOS2 outputs, merged directly into the final annotation channels.
+    ch_mitos_co1_passthrough     = MITOS2.out.co1_sequences.filter { meta, _f -> !InvertTaxonGroups.isCoralFixEligible(meta.class) }
+    ch_mitos_s12_passthrough     = MITOS2.out.s12_sequences.filter { meta, _f -> !InvertTaxonGroups.isCoralFixEligible(meta.class) }
+    ch_mitos_s16_passthrough     = MITOS2.out.s16_sequences.filter { meta, _f -> !InvertTaxonGroups.isCoralFixEligible(meta.class) }
+    ch_mitos_results_passthrough = MITOS2.out.results.filter { meta, _f -> !InvertTaxonGroups.isCoralFixEligible(meta.class) }
 
     // PASS corals: keep MITOS2 output unchanged.
     ch_mitos_co1_pass     = MITOS2.out.co1_sequences.join(ch_gate).filter { it[-1] == 'PASS' }.map { meta, f, _d -> [meta, f] }
@@ -254,11 +282,12 @@ workflow MITOGENOME_ANNOTATION {
 
     CORAL_ANNOTATION_FIX ( ch_coral_fix_input )
 
-    // Merge annotators: verts (EMMA) + PASS corals (MITOS2) + FIX corals (fixer).
-    ch_annot_co1     = EMMA.out.co1_sequences.mix(ch_mitos_co1_pass, CORAL_ANNOTATION_FIX.out.co1_sequences)
-    ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, CORAL_ANNOTATION_FIX.out.s12_sequences)
-    ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, CORAL_ANNOTATION_FIX.out.s16_sequences)
-    ch_annot_results = EMMA.out.results.mix(ch_mitos_results_pass, CORAL_ANNOTATION_FIX.out.results)
+    // Merge annotators: verts (EMMA) + PASS corals (MITOS2) + FIX corals (fixer)
+    // + untouched non-Cnidarian invert phyla (MITOS2, no gate applied).
+    ch_annot_co1     = EMMA.out.co1_sequences.mix(ch_mitos_co1_pass, CORAL_ANNOTATION_FIX.out.co1_sequences, ch_mitos_co1_passthrough)
+    ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, CORAL_ANNOTATION_FIX.out.s12_sequences, ch_mitos_s12_passthrough)
+    ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, CORAL_ANNOTATION_FIX.out.s16_sequences, ch_mitos_s16_passthrough)
+    ch_annot_results = EMMA.out.results.mix(ch_mitos_results_pass, CORAL_ANNOTATION_FIX.out.results, ch_mitos_results_passthrough)
 
     // Per-sample region count, emitted once per annotated sample (including the
     // 0-region case). Downstream this both sizes the result groups and identifies

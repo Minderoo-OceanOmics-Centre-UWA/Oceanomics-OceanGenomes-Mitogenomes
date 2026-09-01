@@ -1,0 +1,63 @@
+{
+    "mollusca sample rotates against the mollusca cox1 panel": {
+        "content": [
+            [
+                "versions_rotate.yml:md5,f2a82cff087b8c4ef6b49d21dea8ea8c"
+            ]
+        ],
+        "timestamp": "2026-08-24T14:25:17.856542582",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "stub": {
+        "content": [
+            {
+                "0": [
+                    [
+                        {
+                            "id": "test_stub"
+                        },
+                        "query.fa:md5,8b015f57348a79ab9cec9bec6353e84d"
+                    ]
+                ],
+                "1": [
+                    [
+                        {
+                            "id": "test_stub"
+                        },
+                        "06_rotate.tool_params_mqcrow.html:md5,496addf8fbbcf3687036d67995e088c8"
+                    ]
+                ],
+                "2": [
+                    "versions_rotate.yml:md5,6ad737c7fafbb0496fe9e05ddb423b23"
+                ],
+                "fasta": [
+                    [
+                        {
+                            "id": "test_stub"
+                        },
+                        "query.fa:md5,8b015f57348a79ab9cec9bec6353e84d"
+                    ]
+                ],
+                "tool_params": [
+                    [
+                        {
+                            "id": "test_stub"
+                        },
+                        "06_rotate.tool_params_mqcrow.html:md5,496addf8fbbcf3687036d67995e088c8"
+                    ]
+                ],
+                "versions": [
+                    "versions_rotate.yml:md5,6ad737c7fafbb0496fe9e05ddb423b23"
+                ]
+            }
+        ],
+        "timestamp": "2026-08-24T14:25:23.981658622",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

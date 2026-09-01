@@ -1,0 +1,6 @@
+sample,sequencing_type,single_end,original_id,date,assembly_prefix,nominal_species_id,reference_species_id,class,family,order,invertebrates,fastq_1,fastq_2
+OGMOLLUSC,hifi,true,OGMOLLUSC,250101,OGMOLLUSC.hifi.250101,Haliotis rubra,Haliotis rubra,Gastropoda,Haliotidae,Lepetellida,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
+OGCRUST,hifi,true,OGCRUST,250101,OGCRUST.hifi.250101,Penaeus monodon,Penaeus monodon,Malacostraca,Penaeidae,Decapoda,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
+OGPYCNO,hifi,true,OGPYCNO,250101,OGPYCNO.hifi.250101,Nymphon gracile,Nymphon gracile,Pycnogonida,Nymphonidae,Pantopoda,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
+OGECHINO,hifi,true,OGECHINO,250101,OGECHINO.hifi.250101,Asterias amurensis,Asterias amurensis,Asteroidea,Asteriidae,Forcipulatida,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
+OGSPONGE,hifi,true,OGSPONGE,250101,OGSPONGE.hifi.250101,Demospongiae sp.,Demospongiae sp.,Demospongiae,Unknownidae,Unknownida,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
