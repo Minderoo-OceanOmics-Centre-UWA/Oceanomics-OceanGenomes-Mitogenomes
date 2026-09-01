@@ -19,13 +19,18 @@ include { samplesheetToList         } from 'plugin/nf-schema'
 //     the Coelenterate/Mold code (4) -- see InvertTaxonGroups (lib/) for why these
 //     two groups are handled together,
 //   * echinoderms and flatworms use the Echinoderm/Flatworm code (9),
-//   * any other invertebrate (Mollusca, Arthropoda, Annelida, Nematoda, etc.)
-//     falls back to the standard Invertebrate Mitochondrial code (5),
-//   * vertebrates (and anything unresolved) fall back to defaultCode (vertebrate, 2).
+//   * the invertebrate classes confirmed to use the standard Invertebrate code
+//     (5) are listed explicitly in InvertTaxonGroups.CODE5_CLASSES,
+//   * vertebrates (and anything unresolved but NOT flagged invertebrate) fall
+//     back to defaultCode (vertebrate, 2).
 //
-// The per-sample `genetic_code` samplesheet column wins over this map, so a
-// lineage whose code differs from its group default (e.g. a validated bivalve)
-// can be set explicitly without editing the map.
+// There is deliberately no catch-all code-5 default for invertebrates. An
+// `invertebrates=true` sample whose class is in none of the three groups raises
+// instead: not every invertebrate is code 5 (Bivalvia among others), and a wrong
+// code mistranslates the whole annotation and fails table2asn terminally, long
+// after the point where it could be diagnosed cheaply. Resolve the class before
+// the run -- add it to InvertTaxonGroups once its code is confirmed, or set the
+// per-sample `genetic_code` samplesheet column, which wins over this map.
 def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
     if (explicitCode != null && explicitCode.toString().trim() != '') {
         def parsed = explicitCode.toString().trim()
@@ -41,8 +46,13 @@ def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
     if (c in InvertTaxonGroups.ECHINODERM_FLATWORM_CLASSES) {
         return 9
     }
-    if (isInvert) {
+    if (InvertTaxonGroups.isCode5(taxClass)) {
         return 5
+    }
+    if (isInvert) {
+        error "Sample ${sampleId}: class '${taxClass ?: 'unknown'}' has no known " +
+              "mitochondrial genetic code -- add it to InvertTaxonGroups or set " +
+              "the genetic_code column"
     }
     return defaultCode
 }

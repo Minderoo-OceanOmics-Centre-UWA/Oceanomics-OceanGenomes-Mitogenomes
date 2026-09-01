@@ -51,6 +51,19 @@ class InvertTaxonGroups {
         'cephalocarida', 'remipedia', 'maxillopoda', 'pycnogonida', 'arthropoda',
     ] as Set
 
+    // Invertebrate classes whose mitochondrial genetic code has actually been
+    // checked to be the standard Invertebrate code (5). This is an allow-list, not
+    // a default: an invertebrate class that is not in here (and not in one of the
+    // code-4 or code-9 groups above) aborts the run in mitoGeneticCode() rather
+    // than being guessed at. Not every invertebrate is code 5 -- Bivalvia is
+    // deliberately absent, for one -- and a wrong code mistranslates every CDS in
+    // the annotation and fails table2asn terminally, far from the cause. Add a
+    // class here only once its code is confirmed, or set the per-sample
+    // `genetic_code` samplesheet column, which overrides this map.
+    static final Set<String> CODE5_CLASSES = [
+        'gastropoda', 'malacostraca', 'pycnogonida',
+    ] as Set
+
     static final Set<String> REDUCED_TRNA_CLASSES = CNIDARIA_CLASSES + PORIFERA_CLASSES
 
     static final Set<String> CORAL_FIX_ELIGIBLE_CLASSES = CNIDARIA_CLASSES
@@ -61,6 +74,10 @@ class InvertTaxonGroups {
 
     static boolean isReducedTrna(taxClass) {
         norm(taxClass) in REDUCED_TRNA_CLASSES
+    }
+
+    static boolean isCode5(taxClass) {
+        norm(taxClass) in CODE5_CLASSES
     }
 
     static boolean isCoralFixEligible(taxClass) {

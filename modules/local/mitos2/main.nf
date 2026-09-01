@@ -31,13 +31,14 @@ process MITOS2 {
     script:
         def prefix   = task.ext.prefix ?: meta.mt_assembly_prefix
         // MITOS2 annotates invertebrates across several phyla (see
-        // InvertTaxonGroups in lib/); meta.genetic_code is set upstream by
-        // mitoGeneticCode() from the sample's taxonomic class, and should always
-        // be present. Fall back to the standard Invertebrate code (5), the
-        // correct default for the majority (non-Cnidarian/Porifera) of
-        // invertebrate classes, only if meta.genetic_code is unset (e.g.
-        // qc-only runs). ext.code still overrides.
-        def gcode    = task.ext.code ?: (meta.genetic_code ?: 5)
+        // InvertTaxonGroups in lib/). meta.genetic_code is resolved once in
+        // prepare_samplesheet -- which aborts rather than guessing a code for an
+        // unrecognised invertebrate class -- and asserted before annotation in
+        // mitogenome_annotation_lca, so it is always set for a pipeline run.
+        // There is deliberately no fallback code here: silently annotating with
+        // the wrong table is the failure mode the upstream abort exists to
+        // prevent. task.ext.code still overrides (e.g. qc-only entrypoints).
+        def gcode    = task.ext.code ?: meta.genetic_code
         def refver   = params.mitos_refseq_ver
         def species  = meta.species ?: ''
         // The pinned BioContainer's `mitos` package self-reports version 0.0.0, so

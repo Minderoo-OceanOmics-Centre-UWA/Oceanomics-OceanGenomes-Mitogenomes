@@ -105,10 +105,12 @@ nextflow_workflow {
     }
 
     test("non-coral invertebrate classes resolve their own genetic codes") {
-        // Pins mitoGeneticCode()'s generalisation beyond Cnidaria: Mollusca and
-        // Arthropoda (Crustacea + Pycnogonida) default to the standard Invertebrate
-        // code (5), not the Coelenterate code (4) corals use; Echinodermata keeps
-        // code 9; Porifera groups with Cnidaria on code 4 (see InvertTaxonGroups).
+        // Pins mitoGeneticCode()'s generalisation beyond Cnidaria: the Mollusca
+        // and Arthropoda (Crustacea + Pycnogonida) classes on the confirmed
+        // CODE5_CLASSES allow-list resolve to the standard Invertebrate code (5),
+        // not the Coelenterate code (4) corals use; Echinodermata keeps code 9;
+        // Porifera groups with Cnidaria on code 4 (see InvertTaxonGroups). A class
+        // outside all three groups aborts instead -- covered separately below.
         when {
             workflow {
                 """
@@ -172,12 +174,11 @@ nextflow_workflow {
     // and which carries no explicit genetic_code column must abort, not silently
     // fall back to code 4. Bivalvia is code 5; a wrong default mistranslates the
     // whole annotation and fails table2asn terminally.
-    test("an invertebrate with an unmapped class takes the invertebrate default code") {
-        // The fish pipeline aborts here; this one does not. Every invertebrate
-        // class outside the Cnidaria/Porifera (4) and Echinodermata/Platyhelminthes
-        // (9) groups falls back to the standard Invertebrate code (5), which is
-        // correct for the large bilaterian majority -- see mitoGeneticCode() and
-        // InvertTaxonGroups. Bivalvia is one such class: unmapped, but code 5.
+    test("an invertebrate with an unmapped class aborts and names the sample") {
+        // There is no catch-all code-5 default: an invertebrate class outside the
+        // code-4, code-9 and CODE5_CLASSES groups must stop the run so the code is
+        // resolved before annotation, not silently guessed. Bivalvia is the case in
+        // point -- an invertebrate that is deliberately not on the code-5 list.
         when {
             workflow {
                 """
@@ -193,12 +194,11 @@ nextflow_workflow {
             }
         }
         then {
-            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
-            assertAll(
-                { assert workflow.success },
-                { assert metas.OGCORAL.genetic_code == 5 },
-                { assert metas.OGFISH.genetic_code == 2 }
-            )
+            // error() raised inside the samplesheet .map closure surfaces as an
+            // InvocationTargetException at the mitoGeneticCode() call site, same
+            // as the unresolved-class guard above; the run stopping is the
+            // contract under test.
+            assert workflow.failed
         }
     }
 

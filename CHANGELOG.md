@@ -9,8 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Invertebrate annotation now generalises beyond Cnidaria to Mollusca, Echinodermata,
   Arthropoda (Crustacea, Pycnogonida) and Porifera, instead of running every invertebrate
-  through coral-tuned machinery. `mitoGeneticCode()` gains a bilaterian invertebrate default
-  (NCBI code 5, previously 4) and a Porifera Coelenterate-code (4) entry alongside Cnidaria;
+  through coral-tuned machinery. `mitoGeneticCode()` gains an explicit allow-list of the
+  invertebrate classes confirmed to use the standard Invertebrate code (NCBI 5, previously
+  everything invertebrate took the Coelenterate code 4) and a Porifera Coelenterate-code (4)
+  entry alongside Cnidaria; there is no catch-all code-5 default -- an invertebrate class in
+  none of the code-4, code-9 or code-5 groups aborts the run so its code is resolved before
+  annotation rather than guessed, since not every invertebrate is code 5 (Bivalvia among
+  others) and a wrong table mistranslates every CDS and fails table2asn terminally. The
+  per-sample `genetic_code` samplesheet column overrides the map;
   `ROTATE_ORIGIN` re-origins each sample against its own phylum-appropriate curated cox1 panel
   (`assets/cox1_{mollusca,arthropoda,echinodermata}.faa`, new) instead of the coral-only
   `cox1_anthozoa.faa` for every invertebrate; `REFERENCE_RELEVANCE`'s 88.0 identity floor is now
