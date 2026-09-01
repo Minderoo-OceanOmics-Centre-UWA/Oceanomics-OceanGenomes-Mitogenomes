@@ -31,6 +31,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mirroring the existing `--min-nd5-aa`. The truncated CO1 above did trip the gate's no-stop check,
   but only by luck of where the exon happened to end; the length now says so directly.
 
+- Post-EMMA gene rescue for `ND4L` and `ATP8`: `modules/local/emma_gene_rescue_gate` +
+  `modules/local/emma_gene_rescue`, driven by `bin/emma_rescue_gate.py` and
+  `bin/rescue_emma_pcg.py`.
+
+  EMMA's `rationalise_matches!` discards a short CDS when its computed circular overlap with a
+  longer neighbour exceeds half the shorter feature's length, which routinely loses ND4L (against
+  ND4) and ATP8 (against ATP6). The gene is in the assembly and EMMA even reports the match; only
+  the annotation is short. Those bundles then fail `annotation_stats.py` (`passed=no`) and are held
+  out of QC/ENA for a defect the assembly does not have.
+
+  The gate reads the EMMA GFF and emits `FIX\t<targets>` only when the sole missing REF genes are
+  ND4L and/or ATP8, both flanks of each are present, and every other REF gene is present and in
+  order; anything else is `PASS\t-` and flows through untouched. The rescue then rebuilds each
+  target from the flanking-gene coordinates EMMA already produced: define the intergenic window
+  between the REF-order neighbours, tblastn a reference protein set into it to fix the reading
+  frame, refine to a clean ORF (including EMMA's polyadenylation convention where the stop is
+  completed by the poly-A tail), and write matching gene/mRNA/CDS lines into the `.gff`, the `.tbl`
+  and the per-gene `cds/` and `proteins/` FASTAs. Every edit is guarded on BLAST identity and
+  coverage, ORF cleanliness, and length against the matched reference; a target that fails any
+  guard is left alone. Only the annotation bundle is swapped, so co1/12S/16S, BLAST and the LCA are
+  untouched, and a rescue that recovers nothing re-emits EMMA's original bundle and the sample is
+  held exactly as before.
+
+  The reference set is `assets/rescue_pcg_refs.faa` with `assets/rescue_pcg_refs.manifest.tsv`,
+  built by `bin/build_rescue_pcg_refs.py` from RefSeq mitochondrion CDS translations for
+  Actinopterygii and Chondrichthyes plus a small tetrapod outgroup. The committed copy is the
+  artifact the pipeline ships; the script is a stdlib-only refresher, not a runtime dependency.
+
+- Post-EMMA tRNA rescue: `modules/local/trna_rescue_gate`, `modules/local/trna_scan` and
+  `modules/local/trna_rescue`, driven by `bin/trna_rescue_gate.py` and `bin/rescue_trna.py`.
+
+  EMMA's covariance model periodically misses a tRNA that is physically present on an otherwise
+  complete, correctly ordered vertebrate mitogenome. The gate routes an assembly to the rescue only
+  when every missing REF gene is a tRNA and the whole 13-PCG + 2-rRNA core is present and ordered,
+  so each target's insertion gap is well defined. tRNAscan-SE 2.0 (vertebrate-mitochondrial model)
+  is then run as a second, independent finder against the EMMA genome FASTA; the scan and the
+  splicer are separate processes because tRNAscan's Perl container has no Python.
+
+  A hit is spliced back only if it clears every guard: isotype *and* anticodon match the specific
+  missing gene (which is what separates the two Leu and the two Ser isotypes), Infernal score above
+  `--min-score`, length in range and intronless, midpoint inside the genomic gap between the
+  target's nearest present neighbours (an origin-spanning gap is skipped), no more than
+  `--max-overlap` bp of overlap with an existing feature, and exactly one surviving hit. Accepted
+  hits are written as gene + tRNA lines into the `.gff` and `.tbl` the way EMMA writes its own.
+  Failures are recorded per target in a status file and the script always exits 0.
+
+- `annotation_trna_tolerance` (default 2): a vertebrate mitogenome that carries the whole conserved
+  core (13 PCGs + both rRNAs) in the correct order but is short at most this many tRNAs now clears
+  the QC/ENA gate instead of being held. That shortfall is an EMMA tRNA-model limitation rather than
+  an assembly defect, and after the rescue above it is what is left over. `missing_genes` still
+  lists every absent gene; the tolerated ones are additionally named in a new `trna_advisory` column
+  (`sql/021_mitogenome_data_trna_advisory.sql`, plus the same field through
+  `annotation_stats.py`, `evaluate_qc_conditions.py` and the push scripts) so a pass driven by the
+  allowance stays queryable and auditable. `0` restores the old requirement of a complete 37-gene
+  annotation.
+
+- `bin/annotation_qc_gate.py` now runs a code-generic per-PCG ORF check for every invertebrate
+  lineage: each of the 13 protein-coding genes is read from the spliced `annotation/cds/` FASTA
+  MITOS wrote and checked for a valid start codon, a terminal stop, and internal stops against the
+  sample's own translation table. This is exactly what table2asn enforces
+  (`SEQ_FEAT.StartCodon`, `SEQ_FEAT.NoStop`, internal stop) and the check the gate previously
+  lacked: a mis-placed boundary such as a MITOS ND1 off by three codons went straight through to
+  table2asn and failed terminally there. The core-presence, ND5 and CO1 heuristics remain
+  Anthozoa-specific and still run only for cnidarian (code 4) samples. The gate now takes
+  `--cds` and a required `--genetic-code`.
+
+- `bin/orf_utils.py`: one source of truth for the mitochondrial start/stop codon sets, covering
+  every NCBI table the pipeline can route (2, 4, 5, 9, 13, 14, 21, 24, 33) with the per-table
+  reasoning recorded. `bin/process_files.py` previously carried partial tables enumerating only
+  code 2 and now reads them from here. Pure stdlib, so it imports in the gate's psycopg2 container.
+
+- `bin/mito_gene_order.py`: the vertebrate `REF_GENES` order plus the tRNA / rRNA / PCG partitions
+  and the tRNA anticodon and `/product` tables. `REF_GENES` had been copy-pasted into
+  `annotation_stats.py` and the rescue scripts, each with a "keep this in sync" comment that had
+  already drifted (three of them said "change both" or "change all three" while there were four
+  copies). The gates and the QC step have to agree byte-for-byte on what "present and in order"
+  means, so the list now lives in one place.
+
+- A run-level `held_samples.tsv` (`modules/local/compile_held_samples`), one row per sample that
+  did not reach submission-ready, with the cause. Two sources feed it: pre-QC holds, from a new
+  machine-readable `held_reason` written by `evaluate_qc_conditions.py`
+  (`species_not_in_blast`, `annotation_failed`, `assembly_anomaly:<type>`, `not_circular`), and
+  table2asn quarantines with their blocking codes. Both sets were previously console-only
+  `.view()` calls, so a run could report success with part of the batch quietly missing. The file
+  is always emitted, header-only when nothing was held, so its presence is a reliable end-of-run
+  signal rather than something that appears only on failure.
+
+- `sql/020_ena_validation_attempts_og_num.sql` adds the generated `og_num` column to
+  `ena_validation_attempts` as column 2, matching `sample`, `draft_genomes`, `lca`,
+  `lca_raw_results`, `sequencing` and `mitogenome_data` (migration 018). PostgreSQL cannot insert a
+  column at a position, so this is a table rebuild like 014 and 018. Migration 019 exists because an
+  earlier rebuild silently reset a column for every row and nothing caught it until the corruption
+  was found independently; this one verifies the copy row-for-row with a bidirectional `EXCEPT`
+  diff over every carried column before the old table is dropped, so a mismatch raises inside the
+  transaction and nothing is renamed.
+
+- nf-test coverage for the new modules (`emma_gene_rescue`, `emma_gene_rescue_gate`, `trna_scan`,
+  `trna_rescue`, `trna_rescue_gate`, `compile_held_samples`, `annotation_qc_gate`) and unit tests
+  for `orf_utils`, `mitos_to_emma`, `coral_fix_bed`, `annotation_qc_gate`, `annotation_stats`,
+  `evaluate_qc_conditions`, `species_validation`, and both rescue scripts and their gates.
+
 ### `Fixed`
 
 - `MITOGENOME_COVERAGE`, `OATK`, `LCA` and `SPECIES_VALIDATION` now retry a walltime kill instead
@@ -185,6 +286,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run accessions. **This pipeline never writes or reads it** — validation must not depend on
   submission state — so the writer is the downstream submitter; `docs/ena_submission_handoff.md`
   carries the contract and the idempotent-upsert pattern.
+
+- The mitochondrial translation table is now resolved once and asserted, instead of being defaulted
+  to 2 or 4 at each point of use.
+
+  `mitoGeneticCode()` in `subworkflows/local/prepare_samplesheet` gained the sample id (so its
+  errors name the sample), accepts an explicit per-sample `genetic_code` samplesheet column that
+  wins over the class map, and now raises for an `invertebrates=true` sample whose class it does not
+  know rather than silently returning the vertebrate default. As more invertebrate lineages are
+  added (bivalves are code 5, for instance) a wrong default would mistranslate an entire annotation
+  and fail table2asn terminally. `MITOGENOME_ANNOTATION` then asserts, before the EMMA/MITOS2
+  branch, that every sample carries an integer `meta.genetic_code` in the supported set, mirroring
+  the existing `--mitos_refdb` / `--nt_blast_db` asserts.
+
+  With the value guaranteed upstream, the `meta.genetic_code ?: 2` and `?: 4` fallbacks scattered
+  through `mitos2`, `annotation_qc_gate`, `coral_annotation_fix`, `translate_genes`,
+  `gen_files_table2asn` and `format_files` are gone; each now reads `task.ext.code ?:
+  meta.genetic_code`, so a missing code fails loudly at the assert instead of quietly annotating
+  under one table and validating under another.
+
+- `bin/mitos_to_emma.py` now carries the tRNA anticodon through to the `/product` string, so a
+  MITOS2 `trnW(tca)` becomes `tRNA-Trp(UCA)` exactly as EMMA writes it. `map_gene_name()` returns
+  the anticodon alongside the name, type and fragment label, and the product is built from the
+  shared table in `bin/mito_gene_order.py` so the two annotators cannot emit different strings for
+  the same feature. An unrecognised suffix or anticodon falls back to a bare gene-name product; a
+  cosmetic field should never fail the run.
 
 ### `Changed`
 
