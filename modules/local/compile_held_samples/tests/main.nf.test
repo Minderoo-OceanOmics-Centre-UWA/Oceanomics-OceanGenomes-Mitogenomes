@@ -1,0 +1,63 @@
+nextflow_process {
+
+    name "Test Process COMPILE_HELD_SAMPLES"
+    script "../main.nf"
+    process "COMPILE_HELD_SAMPLES"
+
+    tag "modules"
+    tag "modules_local"
+    tag "compile_held_samples"
+
+    test("merges pre-QC and table2asn fragments into one sorted table") {
+        when {
+            process {
+                """
+                def a = file("\${workDir}/OG2350.ilmn.1.getorg.held.tsv")
+                a.text = "OG2350\\tOG2350.ilmn.1.getorg\\tTABLE2ASN\\tFAIL_TABLE2ASN: SEQ_FEAT.StartCodon,SEQ_FEAT.NoStop\\n"
+                def b = file("\${workDir}/OG2375.ilmn.1.getorg.held.tsv")
+                b.text = "OG2375\\tOG2375.ilmn.1.getorg\\tPRE_QC\\tproceed_qc=false: not_circular\\n"
+                input[0] = [ a, b ]
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.held[0]).readLines()[0] == "sample\tassembly_prefix\tstage\treason" },
+                { assert path(process.out.held[0]).readLines().size() == 3 },
+                { assert path(process.out.held[0]).text.contains("FAIL_TABLE2ASN: SEQ_FEAT.StartCodon,SEQ_FEAT.NoStop") },
+                { assert path(process.out.held[0]).text.contains("proceed_qc=false: not_circular") },
+            )
+        }
+    }
+
+    test("no held samples still emits a header-only file") {
+        when {
+            process {
+                """
+                input[0] = []
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.held[0]).readLines() == ["sample\tassembly_prefix\tstage\treason"] },
+            )
+        }
+    }
+
+    test("stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = []
+                """
+            }
+        }
+        then {
+            assert process.success
+        }
+    }
+}

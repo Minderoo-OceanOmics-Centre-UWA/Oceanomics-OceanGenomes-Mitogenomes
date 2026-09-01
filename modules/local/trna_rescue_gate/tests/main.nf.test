@@ -1,0 +1,53 @@
+nextflow_process {
+
+    name "Test Process TRNA_RESCUE_GATE"
+    script "../main.nf"
+    process "TRNA_RESCUE_GATE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "trna_rescue_gate"
+
+    // Fixture: a synthetic EMMA bundle whose GFF lists the full 37-gene
+    // vertebrate set in coordinate order with ONLY tRNA-Pro (TP) missing.
+    test("flags a tRNA-only drop as FIX") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', mt_assembly_prefix:'test', genetic_code:2 ],
+                    file("${projectDir}/modules/local/trna_rescue_gate/tests/data/trna_missing/annotation", checkIfExists: true).listFiles().toList()
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.decision[0][1]).text.trim() == "FIX\tTP" },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'test_stub', genetic_code:2 ],
+                    file("${projectDir}/modules/local/trna_rescue_gate/tests/data/trna_missing/annotation", checkIfExists: true).listFiles().toList()
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.decision[0][1]).text.trim() == "PASS\t-" },
+                { assert snapshot(process.out).match() }
+            )
+        }
+    }
+}

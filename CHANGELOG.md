@@ -22,6 +22,207 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through untouched. New `InvertTaxonGroups` (`lib/`) centralises the class groupings both the
   samplesheet and annotation subworkflow read.
 
+- An intron-split `cox1` is now rebuilt as `cox1_0`/`cox1_1` in `bin/coral_fix_bed.py`, the
+  same reference-transfer treatment `nad5` already got.
+
+  Most scleractinians carry the group I intron only in `nad5`, but some carry a second one in
+  `cox1`, holding a LAGLIDADG homing endonuclease ORF (MITOS calls that ORF `lagli`, correctly).
+  MITOS then annotates only one of cox1's two exons, and nothing downstream noticed: OG2361
+  published an 873 nt `CO1` and a 291 aa `MT-CO1` (barely half a cox1), and the LCA was run on
+  that fragment. It resolved to Scleractinia anyway, which is the dangerous part: half a CO1 still
+  BLASTs to plausible neighbours, so the barcode looked fine.
+
+  The reference's cox1 is normally single-exon, which is exactly what makes it a usable probe: it
+  BLASTs onto an intron-split assembly as two subject blocks. `group_exons()` collapses HSPs that
+  share a diagonal (so an exon running off the end of the contig and continuing past position 1
+  stays one block) and treats a broken diagonal as the intron. The 5' end keeps the transferred
+  start codon, the 3' end is walked in frame to the first stop, and the result must be a clean ORF
+  before it replaces MITOS's row. On OG2361 this rebuilds cox1 as 17218-17928 + 730-1590, 1572 nt /
+  523 aa, 99.0% identical to the *Favites abdita* NC_035879 COX1 over its full length, with the
+  splice junction at the canonical anthozoan site (`...FWFFGH` | `PEVYIL...`). Across the 36
+  batch-20 corals it is the only sample whose output changes.
+
+- `bin/annotation_qc_gate.py` gained a `--min-co1-aa` (default 450) truncation check for cnidarians,
+  mirroring the existing `--min-nd5-aa`. The truncated CO1 above did trip the gate's no-stop check,
+  but only by luck of where the exon happened to end; the length now says so directly.
+
+- Post-EMMA gene rescue for `ND4L` and `ATP8`: `modules/local/emma_gene_rescue_gate` +
+  `modules/local/emma_gene_rescue`, driven by `bin/emma_rescue_gate.py` and
+  `bin/rescue_emma_pcg.py`.
+
+  EMMA's `rationalise_matches!` discards a short CDS when its computed circular overlap with a
+  longer neighbour exceeds half the shorter feature's length, which routinely loses ND4L (against
+  ND4) and ATP8 (against ATP6). The gene is in the assembly and EMMA even reports the match; only
+  the annotation is short. Those bundles then fail `annotation_stats.py` (`passed=no`) and are held
+  out of QC/ENA for a defect the assembly does not have.
+
+  The gate reads the EMMA GFF and emits `FIX\t<targets>` only when the sole missing REF genes are
+  ND4L and/or ATP8, both flanks of each are present, and every other REF gene is present and in
+  order; anything else is `PASS\t-` and flows through untouched. The rescue then rebuilds each
+  target from the flanking-gene coordinates EMMA already produced: define the intergenic window
+  between the REF-order neighbours, tblastn a reference protein set into it to fix the reading
+  frame, refine to a clean ORF (including EMMA's polyadenylation convention where the stop is
+  completed by the poly-A tail), and write matching gene/mRNA/CDS lines into the `.gff`, the `.tbl`
+  and the per-gene `cds/` and `proteins/` FASTAs. Every edit is guarded on BLAST identity and
+  coverage, ORF cleanliness, and length against the matched reference; a target that fails any
+  guard is left alone. Only the annotation bundle is swapped, so co1/12S/16S, BLAST and the LCA are
+  untouched, and a rescue that recovers nothing re-emits EMMA's original bundle and the sample is
+  held exactly as before.
+
+  The reference set is `assets/rescue_pcg_refs.faa` with `assets/rescue_pcg_refs.manifest.tsv`,
+  built by `bin/build_rescue_pcg_refs.py` from RefSeq mitochondrion CDS translations for
+  Actinopterygii and Chondrichthyes plus a small tetrapod outgroup. The committed copy is the
+  artifact the pipeline ships; the script is a stdlib-only refresher, not a runtime dependency.
+
+- Post-EMMA tRNA rescue: `modules/local/trna_rescue_gate`, `modules/local/trna_scan` and
+  `modules/local/trna_rescue`, driven by `bin/trna_rescue_gate.py` and `bin/rescue_trna.py`.
+
+  EMMA's covariance model periodically misses a tRNA that is physically present on an otherwise
+  complete, correctly ordered vertebrate mitogenome. The gate routes an assembly to the rescue only
+  when every missing REF gene is a tRNA and the whole 13-PCG + 2-rRNA core is present and ordered,
+  so each target's insertion gap is well defined. tRNAscan-SE 2.0 (vertebrate-mitochondrial model)
+  is then run as a second, independent finder against the EMMA genome FASTA; the scan and the
+  splicer are separate processes because tRNAscan's Perl container has no Python.
+
+  A hit is spliced back only if it clears every guard: isotype *and* anticodon match the specific
+  missing gene (which is what separates the two Leu and the two Ser isotypes), Infernal score above
+  `--min-score`, length in range and intronless, midpoint inside the genomic gap between the
+  target's nearest present neighbours (an origin-spanning gap is skipped), no more than
+  `--max-overlap` bp of overlap with an existing feature, and exactly one surviving hit. Accepted
+  hits are written as gene + tRNA lines into the `.gff` and `.tbl` the way EMMA writes its own.
+  Failures are recorded per target in a status file and the script always exits 0.
+
+- `annotation_trna_tolerance` (default 2): a vertebrate mitogenome that carries the whole conserved
+  core (13 PCGs + both rRNAs) in the correct order but is short at most this many tRNAs now clears
+  the QC/ENA gate instead of being held. That shortfall is an EMMA tRNA-model limitation rather than
+  an assembly defect, and after the rescue above it is what is left over. `missing_genes` still
+  lists every absent gene; the tolerated ones are additionally named in a new `trna_advisory` column
+  (`sql/021_mitogenome_data_trna_advisory.sql`, plus the same field through
+  `annotation_stats.py`, `evaluate_qc_conditions.py` and the push scripts) so a pass driven by the
+  allowance stays queryable and auditable. `0` restores the old requirement of a complete 37-gene
+  annotation.
+
+- `bin/annotation_qc_gate.py` now runs a code-generic per-PCG ORF check for every invertebrate
+  lineage: each of the 13 protein-coding genes is read from the spliced `annotation/cds/` FASTA
+  MITOS wrote and checked for a valid start codon, a terminal stop, and internal stops against the
+  sample's own translation table. This is exactly what table2asn enforces
+  (`SEQ_FEAT.StartCodon`, `SEQ_FEAT.NoStop`, internal stop) and the check the gate previously
+  lacked: a mis-placed boundary such as a MITOS ND1 off by three codons went straight through to
+  table2asn and failed terminally there. The core-presence, ND5 and CO1 heuristics remain
+  Anthozoa-specific and still run only for cnidarian (code 4) samples. The gate now takes
+  `--cds` and a required `--genetic-code`.
+
+- `bin/orf_utils.py`: one source of truth for the mitochondrial start/stop codon sets, covering
+  every NCBI table the pipeline can route (2, 4, 5, 9, 13, 14, 21, 24, 33) with the per-table
+  reasoning recorded. `bin/process_files.py` previously carried partial tables enumerating only
+  code 2 and now reads them from here. Pure stdlib, so it imports in the gate's psycopg2 container.
+
+- `bin/mito_gene_order.py`: the vertebrate `REF_GENES` order plus the tRNA / rRNA / PCG partitions
+  and the tRNA anticodon and `/product` tables. `REF_GENES` had been copy-pasted into
+  `annotation_stats.py` and the rescue scripts, each with a "keep this in sync" comment that had
+  already drifted (three of them said "change both" or "change all three" while there were four
+  copies). The gates and the QC step have to agree byte-for-byte on what "present and in order"
+  means, so the list now lives in one place.
+
+- A run-level `held_samples.tsv` (`modules/local/compile_held_samples`), one row per sample that
+  did not reach submission-ready, with the cause. Two sources feed it: pre-QC holds, from a new
+  machine-readable `held_reason` written by `evaluate_qc_conditions.py`
+  (`species_not_in_blast`, `annotation_failed`, `assembly_anomaly:<type>`, `not_circular`), and
+  table2asn quarantines with their blocking codes. Both sets were previously console-only
+  `.view()` calls, so a run could report success with part of the batch quietly missing. The file
+  is always emitted, header-only when nothing was held, so its presence is a reliable end-of-run
+  signal rather than something that appears only on failure.
+
+- `sql/020_ena_validation_attempts_og_num.sql` adds the generated `og_num` column to
+  `ena_validation_attempts` as column 2, matching `sample`, `draft_genomes`, `lca`,
+  `lca_raw_results`, `sequencing` and `mitogenome_data` (migration 018). PostgreSQL cannot insert a
+  column at a position, so this is a table rebuild like 014 and 018. Migration 019 exists because an
+  earlier rebuild silently reset a column for every row and nothing caught it until the corruption
+  was found independently; this one verifies the copy row-for-row with a bidirectional `EXCEPT`
+  diff over every carried column before the old table is dropped, so a mismatch raises inside the
+  transaction and nothing is renamed.
+
+- nf-test coverage for the new modules (`emma_gene_rescue`, `emma_gene_rescue_gate`, `trna_scan`,
+  `trna_rescue`, `trna_rescue_gate`, `compile_held_samples`, `annotation_qc_gate`) and unit tests
+  for `orf_utils`, `mitos_to_emma`, `coral_fix_bed`, `annotation_qc_gate`, `annotation_stats`,
+  `evaluate_qc_conditions`, `species_validation`, and both rescue scripts and their gates.
+
+### `Fixed`
+
+- `MITOGENOME_COVERAGE`, `OATK`, `LCA` and `SPECIES_VALIDATION` now retry a walltime kill instead
+  of silently dropping the sample.
+
+  All four carried a narrowed `errorStrategy` treating only `exitStatus == 137` as transient, so a
+  Slurm timeout (140/143) fell straight through to `'ignore'`. This is the same defect fixed for
+  `GETORGANELLE_RESEED`, where it cost OG28.ilmn.231024 its reseed assembly in batch-02; the
+  narrow overrides are removed rather than widened, so all four inherit the global default
+  (`maxRetries = 2`, transient `(130..145) + 104 + 247`, `'ignore'` on exhaustion) and there is one
+  copy of the policy to maintain. Both original intents survive: `137` is still covered because it
+  sits inside `130..145`, and depth is still never a reason to fail a sample because the inherited
+  default also ends in `'ignore'`, not `'terminate'`.
+
+  This was live risk, not theory. Batch-19 had three coverage tasks at 51-64% with more than five
+  hours of work left against a 3h20m remaining walltime; under the old strategy each would have
+  been ignored on timeout and published an empty depth placeholder.
+
+- `MITOGENOME_COVERAGE` concurrency is now bounded by `params.mitogenome_depth_max_forks`
+  (default 4).
+
+  Each task streams an entire WGS library (~150 GB gzipped, ~2 billion reads) past a 33 kb doubled
+  index through `minimap2 -t N | awk | python`, so a batch is limited by filesystem read bandwidth
+  and by that single-threaded awk, not by cores. Nothing bounded submission, so batch-19 launched
+  13 within four minutes and every one of them degraded roughly 15x, from 476k to 22k reads/s, with
+  minimap2's CPU multiplier falling from 2.4x to 0.70x. The same samples, on the same nodes, with a
+  byte-identical command, had held 290-430k reads/s to completion at 6 concurrent: OG2288 took
+  1h46m then and had not finished after 4h40m under contention.
+
+- `bin/build_source_modifiers.py` no longer invents a hemisphere for a latitude the sample
+  table records without one.
+
+  The sample table stores latitudes as unsigned magnitudes: a Ningaloo sample at 22.03 S is
+  `latitude_collection = 22.03`. `parse_coordinate()` defaulted an unsigned value to the
+  hemisphere implied by its sign, so every one of them came out N. The result is well formed,
+  so `valid_lat_lon()` could not catch it; table2asn accepted the shape and then rejected the
+  value as `SEQ_DESCR.LatLonValue` ("Latitude should be set to S") because the coordinate
+  contradicts the country. In batch-19 that quarantined 15 Western Australian assemblies,
+  OG2279 through OG2294, the entire 260114 ilmn plate. The two parse paths also disagreed
+  about the default: `fallback_parse_latlon()` assumed S and E, which would have been right
+  here, but `smart_split_latlon()` splits a bare `"22.03 113.891"` pair successfully so the
+  fallback never ran.
+
+  The hemisphere is now only ever read, never inferred from a sign that is not there.
+  `parse_coordinate()` takes the axis (so a longitude written `23.43 S` is rejected rather
+  than emitted as a second latitude) and returns `(magnitude, hemisphere-or-None)`, where
+  None means the value states no hemisphere, which is a different thing from an unparsable
+  one. A new `format_lat_lon()` resolves that None against `COUNTRY_HEMISPHERE` in
+  `bin/geo_loc_name_utils.py`, keyed on the *resolved* geo_loc_name so the alias table stays
+  the single place country spellings are corrected. Where the country cannot settle it, the
+  modifier is omitted and the reason named: the country straddles that axis (Indonesia,
+  Brazil, Ghana, Kiribati), or is not a mapped country at all. A stated hemisphere the
+  country contradicts is likewise dropped rather than corrected, since which of the two is
+  wrong cannot be told from here. That turns a hard `FAIL_TABLE2ASN` into an omitted
+  optional qualifier, so one bad row can no longer quarantine an otherwise clean assembly.
+
+  Country resolution consequently moved above the coordinate block in `main()`, and the old
+  post-hoc `unknown`/`valid_lat_lon` blanking passes are subsumed by `format_lat_lon`.
+
+  This makes the pipeline resilient to an unsigned latitude; it does not make the stored
+  value right. Preserving the sign in the spreadsheet ingest remains the durable fix.
+
+- `bin/rotate_to_cox1.py` no longer re-origins inside cox1.
+
+  The script's premise was that cox1 is "a conserved, single-exon gene corals always carry" and "is
+  not the wrapping feature". For a coral with an intron-split cox1 both halves of that are false. It
+  anchored on the best-scoring tblastn HSP, which is usually the 3' exon, then back-extrapolated
+  `3*(qstart-1)` to reach the N-terminus, landing in the middle of the intron. On OG2361 that put
+  position 1 at offset 568, cutting cox1 across the origin: precisely the failure the rotation exists
+  to prevent, moved from nad5 to cox1.
+
+  The anchor is now the lowest-`qstart` HSP of the best-scoring query (cox1's true 5' exon), and a
+  new `MAX_EXTRAPOLATE_AA` refuses to rotate at all when even that HSP starts too far into the
+  protein to locate the 5' end. OG2361 now re-origins at 17768, cox1's actual start, leaving the
+  gene linear at 19-729 + 1808-2668. It is the only batch-20 sample whose rotation changes.
+
 - The run now aborts when a sample's taxonomic `class` is unresolved, and `class`/`family`/`order`
   resolve from the NCBI taxdump when the `species` table has no match for the sample's nominal
   name.
@@ -101,7 +302,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   submission state — so the writer is the downstream submitter; `docs/ena_submission_handoff.md`
   carries the contract and the idempotent-upsert pattern.
 
+- The mitochondrial translation table is now resolved once and asserted, instead of being defaulted
+  to 2 or 4 at each point of use.
+
+  `mitoGeneticCode()` in `subworkflows/local/prepare_samplesheet` gained the sample id (so its
+  errors name the sample), accepts an explicit per-sample `genetic_code` samplesheet column that
+  wins over the class map, and now raises for an `invertebrates=true` sample whose class it does not
+  know rather than silently returning the vertebrate default. As more invertebrate lineages are
+  added (bivalves are code 5, for instance) a wrong default would mistranslate an entire annotation
+  and fail table2asn terminally. `MITOGENOME_ANNOTATION` then asserts, before the EMMA/MITOS2
+  branch, that every sample carries an integer `meta.genetic_code` in the supported set, mirroring
+  the existing `--mitos_refdb` / `--nt_blast_db` asserts.
+
+  With the value guaranteed upstream, the `meta.genetic_code ?: 2` and `?: 4` fallbacks scattered
+  through `mitos2`, `annotation_qc_gate`, `coral_annotation_fix`, `translate_genes`,
+  `gen_files_table2asn` and `format_files` are gone; each now reads `task.ext.code ?:
+  meta.genetic_code`, so a missing code fails loudly at the assert instead of quietly annotating
+  under one table and validating under another.
+
+- `bin/mitos_to_emma.py` now carries the tRNA anticodon through to the `/product` string, so a
+  MITOS2 `trnW(tca)` becomes `tRNA-Trp(UCA)` exactly as EMMA writes it. `map_gene_name()` returns
+  the anticodon alongside the name, type and fragment label, and the product is built from the
+  shared table in `bin/mito_gene_order.py` so the two annotators cannot emit different strings for
+  the same feature. An unrecognised suffix or anticodon falls back to a bare gene-name product; a
+  cosmetic field should never fail the run.
+
 ### `Changed`
+
+- `MITOGENOME_COVERAGE` is sized from measurement: `cpus` 12 -> 4 and `memory` 16 GB -> 4 GB per
+  attempt. The Aug-25 batch-19 trace for OG2288 records `%cpu=2228` (2.2 cores) and
+  `peak_rss=484604` (473 MB), and threads past the single-threaded awk consumer cannot be used.
+  Memory is the directive that actually shrinks the allocation, since Slurm drives the granted core
+  count up to satisfy the memory request.
+
+  Neither change affects `-resume`. Nextflow's task hash covers session id, process name, script
+  source, container fingerprint, conda env, module, arch, bin dirs, inputs and attempt number;
+  resource directives and retry policy are not hashed. The `memory_hints.json` preamble in
+  `conf/base.config` said otherwise and has been corrected: the reason a resumed retry misses its
+  cached success is the attempt salt, not the resolved memory. The workaround it documents is still
+  necessary and unchanged.
 
 - `apply_ena_migrations.py` now applies each migration exactly once, recording it in a
   `public.schema_migrations` ledger (filename, sha256, applied_at) and skipping anything already

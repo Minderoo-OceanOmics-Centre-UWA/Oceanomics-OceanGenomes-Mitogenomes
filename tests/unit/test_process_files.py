@@ -1,12 +1,17 @@
 """Unit tests for filename-derived metadata in process_files.py."""
 
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# bin/ scripts import their siblings (orf_utils, mito_gene_order, ...) the way
+# Nextflow stages them: flat on PATH. Mirror that for the file-path loads below.
+sys.path.insert(0, str(ROOT / "bin"))
 SPEC = importlib.util.spec_from_file_location(
     "process_files", ROOT / "bin" / "process_files.py"
 )
@@ -63,9 +68,11 @@ class ProcessTblFileTests(unittest.TestCase):
 
 
 class ProcessGffFileTests(unittest.TestCase):
+    # mitos_to_emma.py historically wrote this directive space-separated (GFF3
+    # spec), which the tab-only rewrite in process_gff_file used to skip.
     GFF = (
         "##gff-version 3\n"
-        "##sequence-region\tOG1.hifi.260101.v323mitohifi\t1\t100\n"
+        "##sequence-region OG1.hifi.260101.v323mitohifi 1 100\n"
         "# retain this comment\n"
         "\n"
         "OG1.hifi.260101.v323mitohifi\tEmma\tregion\t1\t100\t.\t+\t0\tIs_circular=true\n"

@@ -31,6 +31,9 @@ MIGRATIONS = [
     "016_mitogenome_data_og_num_generated.sql",
     "017_lca_content_addressed_rows.sql",
     "018_mitogenome_data_og_num_first.sql",
+    "019_ena_validation_attempts_recompute_submission_ready.sql",
+    "020_ena_validation_attempts_og_num.sql",
+    "021_mitogenome_data_trna_advisory.sql",
 ]
 
 
@@ -88,6 +91,29 @@ def audit(cursor) -> dict[str, object]:
     og_num_generated = cursor.fetchone()[0]
     cursor.execute(
         """
+        SELECT EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE attrelid = to_regclass('public.ena_validation_attempts')
+              AND attname = 'og_num'
+              AND attgenerated = 's'
+              AND attnum = 2
+        )
+        """
+    )
+    ena_validation_og_num_generated = cursor.fetchone()[0]
+    cursor.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM pg_attribute
+            WHERE attrelid = to_regclass('public.mitogenome_data')
+              AND attname = 'trna_advisory'
+              AND NOT attisdropped
+        )
+        """
+    )
+    mitogenome_trna_advisory_present = cursor.fetchone()[0]
+    cursor.execute(
+        """
         SELECT
             (SELECT count(*) FROM information_schema.columns
               WHERE table_schema = 'public'
@@ -136,6 +162,17 @@ def audit(cursor) -> dict[str, object]:
         # be: a rebuild that moves it is the same accident that lost the
         # generation expression the first time, so the audit checks both.
         "og_num_generated": og_num_generated,
+        # Migration 020 adds og_num to ena_validation_attempts as a stored
+        # generated column at column 2 (right after id), the same convention
+        # as the other OG-keyed tables. Nothing writes it, so if the
+        # generation expression or position is missing, that migration did
+        # not actually apply cleanly.
+        "ena_validation_og_num_generated": ena_validation_og_num_generated,
+        # Migration 021 adds mitogenome_data.trna_advisory, which
+        # push_emma_annotation_results.py names in its INSERT / ON CONFLICT /
+        # RETURNING lists. Without the column every annotation push fails, so
+        # the audit checks it the same way it checks 020.
+        "mitogenome_trna_advisory_present": mitogenome_trna_advisory_present,
         # Migration 017 records the content-addressing rework of lca and
         # lca_raw_results. The push scripts name lca_content_unique and
         # lca_raw_results_content_unique as ON CONFLICT targets, so without

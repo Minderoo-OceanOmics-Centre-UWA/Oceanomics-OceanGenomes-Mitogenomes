@@ -1,6 +1,7 @@
-// Repair a deficient anthozoan MITOS2 annotation by transferring the 16S rRNA
-// and the intron-split nad5 from a close coral reference (GenBank) at the BED
-// level, then re-running the existing EMMA adapter (mitos_to_emma.py) so the
+// Repair a deficient anthozoan MITOS2 annotation by transferring the 16S rRNA,
+// the intron-split nad5 and (where cox1 is intron-split too) the two cox1 exons
+// from a close coral reference (GenBank) at the BED level, then re-running the
+// existing EMMA adapter (mitos_to_emma.py) so the
 // gff / cds/ / proteins/ standardisation, splice-join, translation and trnM
 // re-origin are all reused unchanged.
 //
@@ -9,7 +10,8 @@
 // MITOS2 BioContainer, which already provides blastn + biopython.
 //
 // Fail-safe: coral_fix_bed.py guards every edit with BLAST coverage/identity and
-// a nad5 ORF check, and writes the (possibly unchanged) BED plus a status line;
+// a clean-ORF check on each rebuilt join, and writes the (possibly unchanged)
+// BED plus a status line;
 // it always exits 0. So a poor or distant reference reproduces the original
 // MITOS2 output rather than breaking the run.
 process CORAL_ANNOTATION_FIX {
@@ -31,7 +33,7 @@ process CORAL_ANNOTATION_FIX {
     tuple val(meta), path("annotation/cds/*RNR2*.fa"), emit: s16_sequences, optional: true
     tuple val(meta), path("annotation/*"), emit: results
     tuple val(meta), path("annotation/mitos_fix/result.fixed.bed"), emit: bed
-    tuple val(meta), path("annotation/*.gff"), path("annotation/proteins"), emit: gff_proteins
+    tuple val(meta), path("annotation/*.gff"), path("annotation/proteins"), path("annotation/cds"), emit: gff_proteins
     // Fix artefacts published under annotation/mitos_fix/ (declared explicitly so
     // publishDir copies them out of the work dir, not just left as work-dir copies).
     tuple val(meta), path("annotation/mitos_fix/*.coral_fix.status.txt"), emit: status
@@ -44,7 +46,7 @@ process CORAL_ANNOTATION_FIX {
 
     script:
         def prefix   = task.ext.prefix ?: meta.mt_assembly_prefix
-        def gcode    = task.ext.code ?: (meta.genetic_code ?: 4)
+        def gcode    = task.ext.code ?: meta.genetic_code
         def species  = meta.species ?: ''
         def base_args = (task.ext.args ?: '').toString().trim()
         def mitos_tag = '2110'
@@ -91,7 +93,7 @@ process CORAL_ANNOTATION_FIX {
         ref_used=\$(basename ${reference_gb})
         fix_status=\$(cut -f1 ${prefix}.coral_fix.status.txt)
         cat <<-END_TOOL_PARAMS > 08_coral_fix.tool_params_mqcrow.html
-        <tr><td>Coral Annotation Fix</td><td><samp>${effective_args}</samp></td><td>Repairs the MITOS2 anthozoan annotation for ${meta.id} (status \${fix_status}) by BLAST-transferring 16S + nad5 from reference \${ref_used}, then re-running the EMMA adapter.</td></tr>
+        <tr><td>Coral Annotation Fix</td><td><samp>${effective_args}</samp></td><td>Repairs the MITOS2 anthozoan annotation for ${meta.id} (status \${fix_status}) by BLAST-transferring 16S + nad5 (+ cox1 when intron-split) from reference \${ref_used}, then re-running the EMMA adapter.</td></tr>
         END_TOOL_PARAMS
 
         cat <<-END_VERSIONS > versions.yml

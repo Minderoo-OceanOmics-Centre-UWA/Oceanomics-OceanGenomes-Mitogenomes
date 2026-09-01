@@ -613,6 +613,7 @@ def main():
         'family',
         'order',
         'invertebrates',
+        'genetic_code',
         'fastq_1',
         'fastq_2'
     ]
@@ -724,6 +725,9 @@ def main():
                     tax_family,
                     tax_order,
                     invertebrates,
+                    # Explicit genetic_code is not stored in the sample table;
+                    # leave blank so prepare_samplesheet derives it from class.
+                    '',
                     r1,
                     r2
                 ])

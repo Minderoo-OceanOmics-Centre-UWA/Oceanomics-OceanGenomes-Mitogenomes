@@ -1,0 +1,49 @@
+{
+    "flags an ND4L-only drop as FIX": {
+        "content": [
+            [
+                "versions.yml:md5,d2ac24a3184cff62b3a626b9d31aa3f7"
+            ]
+        ],
+        "timestamp": "2026-08-26T13:58:41.010889098",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "stub": {
+        "content": [
+            {
+                "0": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.emma_rescue_qc.txt:md5,470c73b3f530cf64eb34439c7bfd5811"
+                    ]
+                ],
+                "1": [
+                    "versions.yml:md5,c8e6a466856c5138e230568a7fe64e5c"
+                ],
+                "decision": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.emma_rescue_qc.txt:md5,470c73b3f530cf64eb34439c7bfd5811"
+                    ]
+                ],
+                "versions": [
+                    "versions.yml:md5,c8e6a466856c5138e230568a7fe64e5c"
+                ]
+            }
+        ],
+        "timestamp": "2026-08-26T13:58:48.541051375",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

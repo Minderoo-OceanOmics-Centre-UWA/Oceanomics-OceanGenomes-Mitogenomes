@@ -21,9 +21,19 @@ order with nothing crossing the origin. This mirrors EMMA's `--rotate MT-TF` for
 vertebrates (corals lack tRNA-Phe, so cox1 is the anchor instead).
 
 cox1 is located with tblastn against a small panel of coral cox1 proteins. The
-rotation only needs to land near cox1's 5' end -- cox1 is single-exon and is not
-the wrapping feature, so re-origining there is enough to lift the nad5 intron and
-cox3 off position 1; a few bp of imprecision is harmless.
+rotation only needs to land near cox1's 5' end, and a few bp of imprecision is
+harmless.
+
+cox1 is usually single-exon, but not always: some scleractinians carry a second
+group I intron in cox1 (holding a LAGLIDADG homing endonuclease ORF), so cox1
+comes back as two tblastn HSPs on the same diagonal, split by ~1 kb of intron.
+Anchoring on the best-scoring HSP is wrong there -- the 3' exon usually scores
+higher, and back-extrapolating 3*(qstart-1) from it lands the origin inside the
+intron, cutting cox1 in half across position 1. That is the very failure this
+rotation exists to prevent, just moved from nad5 to cox1. So the anchor is taken
+from the HSP with the lowest qstart (cox1's true 5' exon), and the rotation is
+declined altogether when even that HSP starts too far into the protein for the
+back-extrapolation to locate the 5' end.
 
 Fail-safe: if no confident cox1 hit is found, or the input is not a single
 contig, the assembly is written through UNROTATED (exit 0) so MITOS2 still runs;
@@ -46,16 +56,28 @@ from Bio.SeqRecord import SeqRecord
 MIN_ALN_AA = 120
 MIN_PIDENT = 50.0
 
+# How far into the cox1 protein the anchor HSP may start before back-extrapolating
+# to the N-terminus stops being meaningful. A real 5' exon alignment begins within
+# the first few residues; anything past this is a 3'-exon-only hit.
+MAX_EXTRAPOLATE_AA = 30
+
 
 def log(msg):
     print(f"[rotate_to_cox1] {msg}", flush=True)
 
 
 def best_cox1_hit(cox1_ref, genome_fa):
-    """tblastn the cox1 protein panel against the genome; return the best HSP.
+    """tblastn the cox1 protein panel against the genome; pick the anchor HSP.
 
-    Returns a dict {sstart, send, qstart, sframe, bitscore, length, pident} in
-    genome (subject) nucleotide coordinates, or None if nothing passes the floor.
+    Returns (hit, locus, n_exons) where `hit` is a dict
+    {sstart, send, qstart, sframe, bitscore, length, pident} in genome (subject)
+    nucleotide coordinates, `locus` is the (lo, hi) subject span covered by all
+    the anchor query's HSPs, and `n_exons` is how many HSPs that query
+    contributed. Returns (None, None, 0) if nothing passes the floor.
+
+    The anchor is the lowest-qstart HSP of the best-scoring *query*, not the
+    best-scoring HSP overall: on an intron-split cox1 the 3' exon commonly wins
+    on bitscore, and anchoring there puts the origin inside the intron.
     """
     cmd = [
         "tblastn",
@@ -68,9 +90,9 @@ def best_cox1_hit(cox1_ref, genome_fa):
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         log(f"WARNING: tblastn failed (rc={proc.returncode}): {proc.stderr.strip()}")
-        return None
+        return None, None, 0
 
-    best = None
+    by_query = {}
     for line in proc.stdout.splitlines():
         f = line.split("\t")
         if len(f) < 10:
@@ -83,9 +105,23 @@ def best_cox1_hit(cox1_ref, genome_fa):
         }
         if hit["length"] < MIN_ALN_AA or hit["pident"] < MIN_PIDENT:
             continue
-        if best is None or hit["bitscore"] > best["bitscore"]:
-            best = hit
-    return best
+        by_query.setdefault(f[0], []).append(hit)
+    if not by_query:
+        return None, None, 0
+
+    # Pick the query with the most total signal, then keep only its HSPs that
+    # agree on strand with its strongest one -- a stray opposite-strand HSP is
+    # noise, not an exon.
+    qid = max(by_query, key=lambda q: sum(h["bitscore"] for h in by_query[q]))
+    hsps = by_query[qid]
+    lead = max(hsps, key=lambda h: h["bitscore"])
+    plus = lead["sframe"] > 0
+    hsps = [h for h in hsps if (h["sframe"] > 0) == plus]
+
+    anchor = min(hsps, key=lambda h: h["qstart"])
+    lo = min(min(h["sstart"], h["send"]) for h in hsps)
+    hi = max(max(h["sstart"], h["send"]) for h in hsps)
+    return anchor, (lo, hi), len(hsps)
 
 
 def cox1_five_prime(hit, seq_len):
@@ -151,14 +187,31 @@ def main():
 
     record = records[0]
     seq_len = len(record.seq)
-    hit = best_cox1_hit(args.cox1_ref, args.genome)
+    hit, locus, n_exons = best_cox1_hit(args.cox1_ref, args.genome)
     if hit is None:
         log("no confident cox1 hit -- writing through UNROTATED (MITOS + "
             "origin-spanning fallback will handle any wrap).")
         write_records([record], args.out)
         return
+    if n_exons > 1:
+        log(f"cox1 looks intron-split ({n_exons} HSPs, subject {locus[0]}-{locus[1]}); "
+            f"anchoring on the 5'-most exon (cox1 residue {hit['qstart']}).")
+
+    # Never cut cox1 in half. start_pos is the anchor HSP's start walked back by
+    # 3*(qstart-1) to reach the protein's N-terminus, so it is only trustworthy
+    # while that walk is short. A long walk means cox1's real 5' end was never
+    # aligned, and the extrapolation is then just as likely to land mid-gene (or
+    # in the neighbouring gene) as on the start codon -- which is exactly how an
+    # intron-split cox1 used to get re-origined into two pieces.
+    if hit["qstart"] - 1 > MAX_EXTRAPOLATE_AA:
+        log(f"anchor HSP starts at cox1 residue {hit['qstart']}, too far into the "
+            f"protein to locate the 5' end (limit {MAX_EXTRAPOLATE_AA}) -- writing "
+            "through UNROTATED rather than risking a rotation inside cox1.")
+        write_records([record], args.out)
+        return
 
     start_pos, plus = cox1_five_prime(hit, seq_len)
+
     log(f"cox1 located: strand={'+' if plus else '-'} 5'pos={start_pos} "
         f"(bitscore={hit['bitscore']:.0f}, {hit['length']}aa, {hit['pident']:.1f}% id); "
         f"re-origining {record.id} ({seq_len} bp).")

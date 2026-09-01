@@ -19,6 +19,11 @@ def main():
     parser.add_argument('--output-circular', default='circular.txt',
                         help='Output file for the resolved circular verdict (true/false). Consumed '
                              'downstream to set the table2asn topology/completeness modifiers.')
+    parser.add_argument('--output-reason', default='held_reason.txt',
+                        help='Output file for the machine-readable cause when proceed_qc '
+                             'is false (empty when the sample proceeds). Compiled into the '
+                             'run-level held_samples.tsv so a run cannot report success '
+                             'with part of the batch quietly missing.')
     parser.add_argument('--output-versions', default='versions.yml', help='Output file for versions')
 
     args = parser.parse_args()
@@ -55,12 +60,16 @@ def main():
     
     # Check annotation CSV for passed = "yes"
     annotation_passed = False
+    trna_advisory = ""
     try:
         with open(args.annotation_csv, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 if 'passed' in row and row['passed'].lower() == "yes":
                     annotation_passed = True
+                    adv = (row.get('trna_advisory') or '').strip()
+                    if adv and adv.lower() != "no":
+                        trna_advisory = adv
                     break
     except Exception as e:
         print(f"Error reading annotation CSV: {e}", file=sys.stderr)
@@ -118,6 +127,19 @@ def main():
     if blast_found and annotation_passed and not assembly_anomaly and not circular_known_false:
         proceed_qc = "true"
 
+    # Machine-readable cause(s) when the sample is held before QC. Empty when it
+    # proceeds. Compiled into the run-level held_samples.tsv.
+    held_reasons = []
+    if not blast_found:
+        held_reasons.append("species_not_in_blast")
+    if not annotation_passed:
+        held_reasons.append("annotation_failed")
+    if assembly_anomaly:
+        held_reasons.append(f"assembly_anomaly:{anomaly_type}")
+    if circular_known_false:
+        held_reasons.append("not_circular")
+    held_reason = "" if proceed_qc == "true" else ";".join(held_reasons)
+
     # Write results to files for Nextflow
     with open(args.output_species, 'w') as f:
         f.write(species_name)
@@ -125,11 +147,15 @@ def main():
     with open(args.output_proceed, 'w') as f:
         f.write(proceed_qc)
 
+    with open(args.output_reason, 'w') as f:
+        f.write(held_reason)
+
     with open(args.output_circular, 'w') as f:
         f.write(circular_out)
 
     print(f"Blast condition met: {blast_found}")
-    print(f"Annotation condition met: {annotation_passed}")
+    print(f"Annotation condition met: {annotation_passed}"
+          + (f" (passed with tolerated missing tRNAs: {trna_advisory})" if trna_advisory else ""))
     print(f"Assembly anomaly: {assembly_anomaly} ({anomaly_type})")
     print(f"Circular verdict: {circular_out} (meta={meta_circ}, file={circ_from_file}, known_non_circular={circular_known_false})")
     print(f"Species name: {species_name}")

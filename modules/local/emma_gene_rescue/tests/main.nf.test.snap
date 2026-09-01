@@ -1,0 +1,26 @@
+{
+    "stub": {
+        "content": [
+            [
+                "versions.yml:md5,f1c54748743e661875b136a7377e25d2"
+            ]
+        ],
+        "timestamp": "2026-08-26T13:58:33.638736299",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "splices the recovered ND4L into the bundle": {
+        "content": [
+            [
+                "versions.yml:md5,c5f16007a748f9699bd0e39cb4ecd94b"
+            ]
+        ],
+        "timestamp": "2026-08-26T13:58:26.164010454",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

@@ -1,0 +1,51 @@
+{
+    "flags a tRNA-only drop as FIX": {
+        "content": [
+            [
+                "versions.yml:md5,f97956bf6e6218e126ca0325a08658b5"
+            ]
+        ],
+        "timestamp": "2026-08-27T16:09:25.591324004",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "stub": {
+        "content": [
+            {
+                "0": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub",
+                            "genetic_code": 2
+                        },
+                        "test_stub.trna_rescue_qc.txt:md5,470c73b3f530cf64eb34439c7bfd5811"
+                    ]
+                ],
+                "1": [
+                    "versions.yml:md5,df454e8c227b55bdec6ae0352a6a483d"
+                ],
+                "decision": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub",
+                            "genetic_code": 2
+                        },
+                        "test_stub.trna_rescue_qc.txt:md5,470c73b3f530cf64eb34439c7bfd5811"
+                    ]
+                ],
+                "versions": [
+                    "versions.yml:md5,df454e8c227b55bdec6ae0352a6a483d"
+                ]
+            }
+        ],
+        "timestamp": "2026-08-27T16:09:33.24256512",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

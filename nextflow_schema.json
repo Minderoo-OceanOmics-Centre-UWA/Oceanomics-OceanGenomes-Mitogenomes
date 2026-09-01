@@ -369,6 +369,12 @@
                     "default": 0,
                     "description": "0 uses every read. A value in (0,1) keeps a uniform random fraction (stable hash of the read name, so mates stay together) and scales the depth back up. Saves mapping time but not decompression."
                 },
+                "mitogenome_depth_max_forks": {
+                    "type": "integer",
+                    "default": 4,
+                    "minimum": 1,
+                    "description": "Maximum MITOGENOME_COVERAGE tasks running concurrently. Each streams an entire read library past the assembly, so this is bounded by filesystem read bandwidth rather than by cores; running more at once makes every one of them slower."
+                },
                 "mitogenome_summary_min_mean_coverage": {
                     "type": "number",
                     "default": 20,
@@ -398,6 +404,13 @@
                     "type": "integer",
                     "default": 13,
                     "description": "Expected mitochondrial protein-coding gene (CDS) count. The summary flags missing_protein_coding_genes when the annotation-derived CDS count falls below this, catching collapses that tRNAs mask in the total gene count."
+                },
+                "annotation_trna_tolerance": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 0,
+                    "maximum": 5,
+                    "description": "Maximum number of tRNAs a vertebrate mitogenome annotation may be missing and still pass the QC/ENA gate, provided all 13 protein-coding genes and both rRNAs are present and gene order is correct. Tolerated tRNAs are recorded in the trna_advisory column; missing_genes stays truthful. Set to 0 to require a complete 37-gene annotation."
                 },
                 "mitogenome_oatk_length_ratio_threshold": {
                     "type": "number",

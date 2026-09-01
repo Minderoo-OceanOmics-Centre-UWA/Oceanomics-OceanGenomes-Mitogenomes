@@ -76,28 +76,11 @@ PRODUCT = {
     "RNR2": "16S ribosomal RNA",
 }
 
-# EMMA-style tRNA gene suffix (as produced by map_gene_name, e.g. "TW", "TS1",
-# "TL2") -> 3-letter amino acid, for tRNA /product strings ("tRNA-Trp(UCA)").
-TRNA_AA = {
-    "A": "Ala", "R": "Arg", "N": "Asn", "D": "Asp", "C": "Cys",
-    "Q": "Gln", "E": "Glu", "G": "Gly", "H": "His", "I": "Ile",
-    "L1": "Leu", "L2": "Leu", "K": "Lys", "M": "Met", "F": "Phe",
-    "P": "Pro", "S1": "Ser", "S2": "Ser", "T": "Thr", "W": "Trp",
-    "Y": "Tyr", "V": "Val",
-}
-
-
-def trna_product(emma_name, anticodon):
-    """Return an EMMA-style tRNA /product string, e.g. 'tRNA-Trp(UCA)'.
-
-    Falls back to a bare gene-name product if the suffix or anticodon isn't
-    recognised -- a cosmetic field should never fail the run.
-    """
-    suffix = emma_name[1:] if emma_name.startswith("T") else emma_name
-    aa = TRNA_AA.get(suffix)
-    if aa and anticodon:
-        return f"tRNA-{aa}({anticodon})"
-    return f"tRNA-{emma_name}"
+# EMMA-style tRNA /product strings ("tRNA-Trp(UCA)"), shared with rescue_trna.py
+# via bin/mito_gene_order.py so both annotators emit byte-identical products.
+# trna_product() falls back to a bare gene-name product if the suffix or anticodon
+# isn't recognised -- a cosmetic field should never fail the run.
+from mito_gene_order import trna_product
 
 
 def map_gene_name(raw):
@@ -199,7 +182,7 @@ def write_gff(gff_path, features, chrom, seq_len, species, is_circular):
     ordered = sorted(features.items(), key=lambda kv: min(e["start"] for e in kv[1]))
     with open(gff_path, "w") as out:
         out.write("##gff-version 3\n")
-        out.write(f"##sequence-region {chrom} 1 {seq_len}\n")
+        out.write(f"##sequence-region\t{chrom}\t1\t{seq_len}\n")
         if species:
             out.write(f"##organism {species}\n")
         # Landmark region feature, matching EMMA's GFF. The Is_circular attribute

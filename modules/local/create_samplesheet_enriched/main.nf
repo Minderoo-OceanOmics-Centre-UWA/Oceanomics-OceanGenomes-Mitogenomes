@@ -38,7 +38,7 @@ process CREATE_SAMPLESHEET_ENRICHED {
     // Header-only rather than empty: the sheet is parsed by samplesheetToList
     // downstream, which needs a header row to parse at all.
     """
-    printf 'sample,sequencing_type,single_end,original_id,completion_date,date,assembly_prefix,nominal_species_id,reference_species_id,class,family,order,invertebrates,fastq_1,fastq_2\\n' > ${output_name}
+    printf 'sample,sequencing_type,single_end,original_id,completion_date,date,assembly_prefix,nominal_species_id,reference_species_id,class,family,order,invertebrates,genetic_code,fastq_1,fastq_2\\n' > ${output_name}
     printf 'sample\\tnominal_species_id\\tclass\\tfamily\\torder\\treference_species_id\\tsource\\n' > taxonomy_resolution.tsv
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

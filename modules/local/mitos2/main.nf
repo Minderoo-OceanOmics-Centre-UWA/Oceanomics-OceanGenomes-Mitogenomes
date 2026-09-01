@@ -24,7 +24,7 @@ process MITOS2 {
     // Raw MITOS BED plus the EMMA GFF + proteins dir, consumed by the anthozoan
     // QC gate and the coral fixer (which patches the BED and re-runs mitos_to_emma).
     tuple val(meta), path("annotation/mitos_raw/result.bed"), emit: bed
-    tuple val(meta), path("annotation/*.gff"), path("annotation/proteins"), emit: gff_proteins
+    tuple val(meta), path("annotation/*.gff"), path("annotation/proteins"), path("annotation/cds"), emit: gff_proteins
     tuple val(meta), path("07_mitos.tool_params_mqcrow.html"), emit: tool_params
     path "versions_mitos.yml", emit: versions
 

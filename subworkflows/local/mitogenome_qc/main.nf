@@ -193,6 +193,19 @@ workflow MITOGENOME_QC {
     // Quarantined metas: no ENA_FLATFILE, package or Webin runs for these.
     ch_ena_quarantined = ch_table2asn_branched.fail.map { meta, _gbf, _status_file -> meta }
 
+    // Headerless per-sample fragments for the run-level held_samples.tsv: the
+    // table2asn quarantine set, with the blocking validator codes (status.tsv
+    // column 9). table2asn FAIL is terminal -- no feedback loop -- so surfacing
+    // it here is the only record outside the ENA validation summary.
+    ch_held_fragments = ch_table2asn_branched.fail
+        .collectFile { meta, _gbf, status_file ->
+            def lines = status_file.readLines()
+            def cols = lines.size() > 1 ? lines[1].split('\t', -1) : []
+            def blocking = (cols.size() > 8 && cols[8]?.trim()) ? cols[8].trim() : 'unknown'
+            [ "${meta.mt_assembly_prefix}.held.tsv",
+              "${meta.id}\t${meta.mt_assembly_prefix}\tTABLE2ASN\tFAIL_TABLE2ASN: ${blocking}\n" ]
+        }
+
     ENA_FLATFILE(ch_table2asn_pass)
     ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.status.collect { it[1] })
@@ -370,6 +383,7 @@ workflow MITOGENOME_QC {
     ena_validation_records = ENA_VALIDATION_RESULT.out.record
     ena_validation_summary = ENA_VALIDATION_SUMMARY.out.multiqc
     ena_run_summary         = ENA_VALIDATION_SUMMARY.out.run_summary
+    held_fragments          = ch_held_fragments            // channel: path(<prefix>.held.tsv) — one row per table2asn quarantine
     ena_candidate_packages  = BUILD_ENA_CANDIDATE_PACKAGE.out.package_dir
     ena_candidate_metadata  = BUILD_ENA_CANDIDATE_PACKAGE.out.metadata
 }

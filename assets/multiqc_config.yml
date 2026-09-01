@@ -26,7 +26,7 @@ disable_version_detection: true
 custom_data:
   qc_summary:
     section_name: "QC Summary"
-    description: "Per-sample QC summary (sample, species, proceed_qc, annotation_passed, missing_genes)."
+    description: "Per-sample QC summary (sample, species, proceed_qc, annotation_passed, missing_genes, trna_advisory)."
     plot_type: table
     data_format: tsv
     filename_glob: "*.qc_summary.tsv"
@@ -41,6 +41,9 @@ custom_data:
         title: "Annotation Passed"
       missing_genes:
         title: "Missing Genes"
+      trna_advisory:
+        title: "tRNA advisory"
+        description: "tRNAs missing from an otherwise complete, correctly ordered mitogenome that were waived (within annotation_trna_tolerance) so the sample could pass. 'no' means nothing waived."
 
   mitogenome_assembly_summary:
     section_name: "Mitogenome assembly summary"

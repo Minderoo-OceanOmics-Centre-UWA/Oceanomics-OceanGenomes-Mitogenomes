@@ -1,0 +1,51 @@
+{
+    "scans a bundle FASTA and emits a table": {
+        "content": [
+            [
+                "versions.yml:md5,6df9ac593e0e4b96bc36ff5caf4cff50"
+            ]
+        ],
+        "timestamp": "2026-08-27T16:11:35.142355908",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "stub": {
+        "content": [
+            {
+                "0": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub",
+                            "genetic_code": 2
+                        },
+                        "test_stub.trnascan.tsv:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "1": [
+                    "versions.yml:md5,226ad1ae728b9230d67a11112de4e947"
+                ],
+                "tsv": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub",
+                            "genetic_code": 2
+                        },
+                        "test_stub.trnascan.tsv:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "versions": [
+                    "versions.yml:md5,226ad1ae728b9230d67a11112de4e947"
+                ]
+            }
+        ],
+        "timestamp": "2026-08-27T16:11:41.847609572",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

@@ -168,6 +168,71 @@ nextflow_workflow {
         }
     }
 
+    // F1: an invertebrate whose (resolved) class is not in mitoGeneticCode()'s map
+    // and which carries no explicit genetic_code column must abort, not silently
+    // fall back to code 4. Bivalvia is code 5; a wrong default mistranslates the
+    // whole annotation and fails table2asn terminally.
+    test("an invertebrate with an unmapped class takes the invertebrate default code") {
+        // The fish pipeline aborts here; this one does not. Every invertebrate
+        // class outside the Cnidaria/Porifera (4) and Echinodermata/Platyhelminthes
+        // (9) groups falls back to the standard Invertebrate code (5), which is
+        // correct for the large bilaterian majority -- see mitoGeneticCode() and
+        // InvertTaxonGroups. Bivalvia is one such class: unmapped, but code 5.
+        when {
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/with_taxonomy.csv", checkIfExists: true)
+                def sheet = file("unmapped_invert.csv")
+                sheet.text = template.text
+                    .replace('__PROJECT_DIR__', "\${projectDir}")
+                    .replace(',Anthozoa,Acroporidae,Scleractinia,true,', ',Bivalvia,Veneridae,Venerida,true,')
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
+            assertAll(
+                { assert workflow.success },
+                { assert metas.OGCORAL.genetic_code == 5 },
+                { assert metas.OGFISH.genetic_code == 2 }
+            )
+        }
+    }
+
+    test("an explicit genetic_code column overrides the class-derived code") {
+        // The per-sample column is the escape hatch for a lineage whose code
+        // differs from its group default, so it must win over the class map even
+        // when the class is mapped (Anthozoa would otherwise resolve to 4).
+        when {
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/with_taxonomy.csv", checkIfExists: true)
+                def sheet = file("explicit_code.csv")
+                def lines = template.text.replace('__PROJECT_DIR__', "\${projectDir}").trim().split('\\n')
+                def rows = [ lines[0] + ',genetic_code' ]
+                lines.drop(1).each { line ->
+                    rows << line + (line.startsWith('OGCORAL,') ? ',13' : ',')
+                }
+                sheet.text = rows.join('\\n') + '\\n'
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
+            assertAll(
+                { assert workflow.success },
+                { assert metas.OGCORAL.genetic_code == 13 },
+                { assert metas.OGFISH.genetic_code == 2 }
+            )
+        }
+    }
+
     test("--allow_unknown_taxonomy downgrades the abort to a warning") {
         when {
             params {

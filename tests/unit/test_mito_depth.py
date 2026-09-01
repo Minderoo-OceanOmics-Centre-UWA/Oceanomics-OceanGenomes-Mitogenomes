@@ -20,6 +20,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# bin/ scripts import their siblings (orf_utils, mito_gene_order, ...) the way
+# Nextflow stages them: flat on PATH. Mirror that for the file-path loads below.
+sys.path.insert(0, str(ROOT / "bin"))
 SCRIPT = ROOT / "bin" / "mito_depth.py"
 
 

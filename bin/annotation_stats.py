@@ -15,17 +15,12 @@ import csv
 import sys
 import argparse
 from pathlib import Path
-from Bio import SeqIO
 
 
-# Reference gene order (tRNA, rRNA, CDS) — the standard vertebrate set.
-REF_GENES = [
-    "TF", "RNR1", "TV", "RNR2", "TL2", "ND1", "TI", "TQ",
-    "TM", "ND2", "TW", "TA", "TN", "TC", "TY", "CO1", "TS2",
-    "TD", "CO2", "TK", "ATP8", "ATP6", "CO3", "TG", "ND3",
-    "TR", "ND4L", "ND4", "TH", "TS1", "TL1", "ND5", "ND6",
-    "TE", "CYTB", "TT", "TP"
-]
+# Reference gene order (tRNA, rRNA, CDS) — the standard vertebrate set. Shared
+# with the rescue gates via bin/mito_gene_order.py so the gates and this QC step
+# cannot drift on what "present and in order" means.
+from mito_gene_order import REF_GENES, TRNA_GENES as TRNA_NAMES
 
 # Protein-coding genes to pull from .faa/.fa files
 PROT_GENES = [
@@ -48,6 +43,15 @@ REDUCED_TRNA_CLASSES = {
     "demospongiae", "calcarea", "hexactinellida", "homoscleromorpha", "porifera",
 }
 CNIDARIAN_CORE = PROT_GENES + ["RNR1", "RNR2"]
+
+# The 22 vertebrate mt tRNAs (the T* entries of REF_GENES) and the conserved
+# protein-coding + rRNA core. A vertebrate mitogenome that carries the whole core
+# in the right order but is short a small number of tRNAs is an annotation
+# limitation (EMMA's tRNA model misses divergent copies), not an assembly defect,
+# so it is allowed to pass with the shortfall recorded in trna_advisory. See
+# --trna-tolerance and the matching TRNA_TOLERANCE in mitogenome_assembly_summary.py.
+VERT_CORE = set(PROT_GENES) | {"RNR1", "RNR2"}            # 13 PCG + 2 rRNA
+DEFAULT_TRNA_TOLERANCE = 2
 
 
 def has_reduced_trna_expectation(class_name):
@@ -73,7 +77,7 @@ def get_annotation_name(gff_path):
     """Extracts annotation name from the GFF file basename (no extension)."""
     return Path(gff_path).stem
 
-def process_gff(gff_path, annotation_name, class_name=""):
+def process_gff(gff_path, annotation_name, class_name="", trna_tolerance=DEFAULT_TRNA_TOLERANCE):
     parts = annotation_name.split(".")
     if len(parts) != 5:
         print(f"⚠️ Warning: Unexpected annotation_name format: {annotation_name}")
@@ -125,6 +129,7 @@ def process_gff(gff_path, annotation_name, class_name=""):
     gene_entries.sort(key=lambda x: x[1])  # sort by start
     found_by_coord = [g[0] for g in gene_entries]
 
+    trna_advisory = []
     if has_reduced_trna_expectation(class_name):
         # Judge completeness on the conserved protein-coding + rRNA core only;
         # cnidarians and sponges legitimately lack most tRNAs, and their gene
@@ -142,6 +147,18 @@ def process_gff(gff_path, annotation_name, class_name=""):
         order_correct = "yes" if order_ok else "no"
         passed = len(missing) == 0 and order_ok
 
+        # Tolerate a small tRNA-only shortfall on an otherwise complete, correctly
+        # ordered mitogenome. All 13 PCGs + both rRNAs must be present, gene order
+        # correct, and every missing gene a tRNA, with at most trna_tolerance of
+        # them. missing_genes still lists them; trna_advisory records which were
+        # waived so the pass stays auditable and downstream can flag it.
+        if (not passed and order_ok and missing
+                and all(g in TRNA_NAMES for g in missing)
+                and VERT_CORE.issubset(found_by_coord)
+                and len(missing) <= trna_tolerance):
+            trna_advisory = list(missing)  # already in REF order
+            passed = True
+
     gff_summary = {
         "og_id": og_id,
         "tech": tech,
@@ -149,6 +166,7 @@ def process_gff(gff_path, annotation_name, class_name=""):
         "code": code,
         "annotation": annotation,
         "missing_genes": ";".join(missing) if missing else "no",
+        "trna_advisory": ";".join(trna_advisory) if trna_advisory else "no",
         "extra_genes": ";".join(extra) if extra else "no",
         "order_correct": order_correct,
         "passed": "yes" if passed else "no",
@@ -161,6 +179,7 @@ def process_gff(gff_path, annotation_name, class_name=""):
     return gff_summary
 
 def process_protein_lengths(prot_dir, annotation_name):
+    from Bio import SeqIO  # local: keeps process_gff importable without Biopython
     missing = []
     prot_lengths = {f"{gene}_trans": "" for gene in PROT_GENES}
     for gene in PROT_GENES:
@@ -179,12 +198,12 @@ def process_protein_lengths(prot_dir, annotation_name):
         print(f"✅ All translated genes present in {annotation_name}")
     return prot_lengths
 
-def main(gff_path, prot_dir, class_name=""):
+def main(gff_path, prot_dir, class_name="", trna_tolerance=DEFAULT_TRNA_TOLERANCE):
     if not os.path.isfile(gff_path):
         sys.exit(f"❌ GFF file not found: {gff_path}")
 
     annotation_name = get_annotation_name(gff_path)
-    gff_summary = process_gff(gff_path, annotation_name, class_name)
+    gff_summary = process_gff(gff_path, annotation_name, class_name, trna_tolerance)
     prot_lengths = process_protein_lengths(prot_dir, annotation_name)
 
     combined = {**gff_summary, **prot_lengths}
@@ -208,6 +227,13 @@ if __name__ == "__main__":
                     help="taxonomic class (e.g. Anthozoa); selects the completeness "
                          "profile. Cnidarian classes are judged on the PCG+rRNA core "
                          "only. Defaults to the vertebrate 22-tRNA profile.")
+    ap.add_argument("--trna-tolerance", dest="trna_tolerance", type=int,
+                    default=DEFAULT_TRNA_TOLERANCE,
+                    help="max tRNAs a non-cnidarian mitogenome may be missing and "
+                         "still pass, provided all 13 PCGs + 2 rRNAs are present and "
+                         "gene order is correct. Tolerated tRNAs are recorded in the "
+                         "trna_advisory column; missing_genes stays truthful. "
+                         "0 requires a complete 37-gene annotation. Default %(default)s.")
     args = ap.parse_args()
 
-    main(args.gff, Path(args.proteins), args.class_name)
+    main(args.gff, Path(args.proteins), args.class_name, args.trna_tolerance)

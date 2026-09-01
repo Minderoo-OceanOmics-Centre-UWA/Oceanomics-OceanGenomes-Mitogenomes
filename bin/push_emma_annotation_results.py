@@ -81,7 +81,7 @@ if __name__ == "__main__":
         # the assembly upload, so we don't gate on row existence — we gate on
         # whether these cells are already (partially) filled.
         annotation_columns = [
-            "annotation", "extra_genes", "missing_genes", "order_correct", "passed", "length_emma", "seqlength_12s",
+            "annotation", "extra_genes", "missing_genes", "trna_advisory", "order_correct", "passed", "length_emma", "seqlength_12s",
             "seqlength_16s", "seqlength_co1", "cds_no", "trna_no", "rrna_no", "rrna12s",
             "rrna16s", "atp6", "atp8", "cox1", "cox2", "cox3", "cytb", "nad1", "nad2", "nad3", "nad4", "nad4l",
             "nad5", "nad6", "trna_phe", "trna_val", "trna_leuuag", "trna_leuuaa", "trna_ile", "trna_met",
@@ -105,7 +105,7 @@ if __name__ == "__main__":
             -- og_num is a generated column maintained by the DB (SUBSTRING(og_id FROM 3)).
             -- It is intentionally absent from this column list: naming it here would error.
             INSERT INTO mitogenome_data (
-                og_id, tech, seq_date, code, annotation, extra_genes, missing_genes, order_correct, passed, length_emma, seqlength_12s,
+                og_id, tech, seq_date, code, annotation, extra_genes, missing_genes, trna_advisory, order_correct, passed, length_emma, seqlength_12s,
                 seqlength_16s, seqlength_co1, cds_no, trna_no, rrna_no, rrna12s,
                 rrna16s, atp6, atp8, cox1, cox2, cox3, cytb, nad1, nad2, nad3, nad4, nad4l, 
                 nad5, nad6, trna_phe, trna_val, trna_leuuag, trna_leuuaa, trna_ile, trna_met, 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
                 nad2_trans, nad3_trans, nad4_trans, nad4l_trans, nad5_trans, nad6_trans
             )
             VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s, %(extra_genes)s, %(missing_genes)s, %(order_correct)s, %(passed)s, %(length_emma)s, %(seqlength_12s)s,
+                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s, %(extra_genes)s, %(missing_genes)s, %(trna_advisory)s, %(order_correct)s, %(passed)s, %(length_emma)s, %(seqlength_12s)s,
                 %(seqlength_16s)s, %(seqlength_co1)s, %(cds_no)s, %(trna_no)s, %(rrna_no)s, %(rrna12s)s,
                 %(rrna16s)s, %(atp6)s, %(atp8)s, %(cox1)s, %(cox2)s, %(cox3)s, %(cytb)s, %(nad1)s, %(nad2)s, %(nad3)s, %(nad4)s, %(nad4l)s,
                 %(nad5)s, %(nad6)s, %(trna_phe)s, %(trna_val)s, %(trna_leuuag)s, %(trna_leuuaa)s, %(trna_ile)s, %(trna_met)s,
@@ -129,6 +129,7 @@ if __name__ == "__main__":
                 annotation = EXCLUDED.annotation,
                 extra_genes = EXCLUDED.extra_genes,
                 missing_genes = EXCLUDED.missing_genes,
+                trna_advisory = EXCLUDED.trna_advisory,
                 order_correct = EXCLUDED.order_correct,
                 passed = EXCLUDED.passed,
                 length_emma = EXCLUDED.length_emma,
@@ -188,7 +189,7 @@ if __name__ == "__main__":
                 nad4l_trans = EXCLUDED.nad4l_trans,
                 nad5_trans = EXCLUDED.nad5_trans,
                 nad6_trans = EXCLUDED.nad6_trans
-            RETURNING annotation, extra_genes, missing_genes, order_correct, passed, length_emma, seqlength_12s,
+            RETURNING annotation, extra_genes, missing_genes, trna_advisory, order_correct, passed, length_emma, seqlength_12s,
                 seqlength_16s, seqlength_co1, cds_no, trna_no, rrna_no, rrna12s,
                 rrna16s, atp6, atp8, cox1, cox2, cox3, cytb, nad1, nad2, nad3, nad4, nad4l, 
                 nad5, nad6, trna_phe, trna_val, trna_leuuag, trna_leuuaa, trna_ile, trna_met, 
@@ -206,6 +207,7 @@ if __name__ == "__main__":
                 "annotation": row_dict["annotation"],
                 "extra_genes": row_dict["extra_genes"],
                 "missing_genes": row_dict["missing_genes"],
+                "trna_advisory": row_dict.get("trna_advisory"),
                 "order_correct": row_dict["order_correct"],
                 "passed": row_dict["passed"],
                 "length_emma": row_dict.get("total_length"),

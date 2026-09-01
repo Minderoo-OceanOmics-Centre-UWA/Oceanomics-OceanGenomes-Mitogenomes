@@ -110,6 +110,15 @@
                 ],
                 "meta": ["invertebrates"],
                 "description": "Whether the sample is an invertebrate (true/false)"
+            },
+            "genetic_code": {
+                "anyOf": [
+                    { "type": "integer" },
+                    { "type": "string", "maxLength": 0 },
+                    { "type": "string", "pattern": "^[0-9]+$" }
+                ],
+                "meta": ["genetic_code"],
+                "description": "Optional explicit NCBI mitochondrial translation table (e.g. 2, 4, 5, 9). When set it overrides the class-derived code resolved in prepare_samplesheet."
             }
         },
         "required": ["sample", "fastq_1", "sequencing_type"]

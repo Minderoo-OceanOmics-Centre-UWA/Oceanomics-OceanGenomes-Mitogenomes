@@ -1,0 +1,54 @@
+nextflow_process {
+
+    name "Test Process EMMA_GENE_RESCUE_GATE"
+    script "../main.nf"
+    process "EMMA_GENE_RESCUE_GATE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "emma_gene_rescue_gate"
+
+    // Fixture: a synthetic EMMA bundle whose GFF lists the full 37-gene
+    // vertebrate set in coordinate order with ONLY ND4L missing (built from
+    // public RefSeq NC_011710.1 CDS; see tests/../mk_fixture in git history).
+    test("flags an ND4L-only drop as FIX") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', mt_assembly_prefix:'test' ],
+                    file("${projectDir}/modules/local/emma_gene_rescue_gate/tests/data/nd4l_missing/annotation", checkIfExists: true).listFiles().toList()
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.decision[0][1]).text.trim() == "FIX\tND4L" },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'test_stub' ],
+                    file("${projectDir}/modules/local/emma_gene_rescue_gate/tests/data/nd4l_missing/annotation", checkIfExists: true).listFiles().toList()
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.decision[0][1]).text.trim() == "PASS\t-" },
+                { assert snapshot(process.out).match() }
+            )
+        }
+    }
+}

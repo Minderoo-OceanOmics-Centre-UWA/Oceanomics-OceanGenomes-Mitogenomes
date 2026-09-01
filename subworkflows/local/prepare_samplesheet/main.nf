@@ -22,7 +22,18 @@ include { samplesheetToList         } from 'plugin/nf-schema'
 //   * any other invertebrate (Mollusca, Arthropoda, Annelida, Nematoda, etc.)
 //     falls back to the standard Invertebrate Mitochondrial code (5),
 //   * vertebrates (and anything unresolved) fall back to defaultCode (vertebrate, 2).
-def mitoGeneticCode(taxClass, isInvert, defaultCode) {
+//
+// The per-sample `genetic_code` samplesheet column wins over this map, so a
+// lineage whose code differs from its group default (e.g. a validated bivalve)
+// can be set explicitly without editing the map.
+def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
+    if (explicitCode != null && explicitCode.toString().trim() != '') {
+        def parsed = explicitCode.toString().trim()
+        if (!parsed.isInteger()) {
+            error "Sample ${sampleId}: genetic_code '${parsed}' is not an integer"
+        }
+        return parsed as int
+    }
     if (InvertTaxonGroups.isReducedTrna(taxClass)) {
         return 4
     }
@@ -254,7 +265,8 @@ workflow PREPARE_SAMPLESHEET {
                     // resolved taxonomic class so MITOS2 / QC translation use the
                     // correct code (e.g. Cnidaria -> 4) instead of a one-size
                     // global table. --translation_table sets the vertebrate/default.
-                    def mt_genetic_code = mitoGeneticCode(meta.class, meta.invertebrates, (params.translation_table ?: 2) as int)
+                    def mt_genetic_code = mitoGeneticCode(meta.id, meta.class, meta_invertebrates,
+                                                          meta.genetic_code, (params.translation_table ?: 2) as int)
                     meta = meta + [ genetic_code: mt_genetic_code ]
 
                     // Group by sample id + sequencing type + date so that single-end

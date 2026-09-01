@@ -8,6 +8,11 @@
 include { DOWNLOAD_BLAST_DB      } from '../../../modules/local/download_blast_db'
 include { DOWNLOAD_TAXONKIT_DB   } from '../../../modules/local/download_taxonkit_db'
 include { EMMA                   } from '../../../modules/local/EMMA'
+include { EMMA_GENE_RESCUE_GATE  } from '../../../modules/local/emma_gene_rescue_gate'
+include { EMMA_GENE_RESCUE       } from '../../../modules/local/emma_gene_rescue'
+include { TRNA_RESCUE_GATE       } from '../../../modules/local/trna_rescue_gate'
+include { TRNA_SCAN              } from '../../../modules/local/trna_scan'
+include { TRNA_RESCUE            } from '../../../modules/local/trna_rescue'
 include { ROTATE_ORIGIN          } from '../../../modules/local/rotate_origin'
 include { MITOS2                 } from '../../../modules/local/mitos2'
 include { ANNOTATION_QC_GATE     } from '../../../modules/local/annotation_qc_gate'
@@ -161,10 +166,26 @@ workflow MITOGENOME_ANNOTATION {
     // of this subworkflow is annotator-agnostic.
     //
 
-    ch_annot_branched = fasta_with_mt_assembly_prefix.branch { meta, _fasta ->
-        invert: meta.invertebrates
-        vert:   true
-    }
+    // Hard assertion before the EMMA/MITOS2 branch: every sample must carry an
+    // integer meta.genetic_code in the supported set. prepare_samplesheet resolves
+    // it once (from taxonomic class or the explicit genetic_code column); this is
+    // the fail-fast that stops an unset/garbage code reaching annotation, where
+    // MITOS2 would translate under one table and table2asn validate under another.
+    // Mirrors the --mitos_refdb / --nt_blast_db asserts later in this subworkflow.
+    def SUPPORTED_GENETIC_CODES = [2, 4, 5, 9, 13, 14, 21, 24, 33] as Set
+    ch_annot_branched = fasta_with_mt_assembly_prefix
+        .map { meta, fasta ->
+            def gc = meta.genetic_code
+            if (!(gc instanceof Integer) || !SUPPORTED_GENETIC_CODES.contains(gc)) {
+                error "Sample ${meta.id}: genetic_code '${gc}' is not a supported " +
+                      "mitochondrial translation table (${SUPPORTED_GENETIC_CODES.sort().join(', ')})"
+            }
+            [meta, fasta]
+        }
+        .branch { meta, _fasta ->
+            invert: meta.invertebrates
+            vert:   true
+        }
 
     // MITOS2 needs its RefSeq reference data dir; fail clearly if an invert
     // sample is present but --mitos_refdb was not provided.
@@ -175,6 +196,132 @@ workflow MITOGENOME_ANNOTATION {
     EMMA (
         ch_annot_branched.vert // tuple val(meta), path(fasta)
     )
+
+    //
+    // MODULE: EMMA gene rescue (ND4L / ATP8).
+    // EMMA's rationalise_matches! overlap filter drops these short PCGs against
+    // their longer neighbour (ND4, ATP6) even though the gene is in the assembly.
+    // The gate flags an EMMA bundle as FIX (only ND4L/ATP8 missing, flanks present
+    // and the rest in order) or PASS; only FIX bundles are re-annotated, and only
+    // the annotation `results` bundle is swapped. co1/12S/16S -> BLAST/LCA and the
+    // sample's onward flow are untouched: a rescue that cannot recover the gene
+    // re-emits EMMA's original bundle and the sample is held at the QC gate as now.
+    //
+    // Every join below uses `remainder: true`. The rescue processes run with
+    // errorStrategy 'ignore' so a crashed rescue cannot kill the run -- but an
+    // ignored task emits nothing, and a plain join would then drop that sample
+    // out of the pipeline entirely: no annotation bundle, no hold row, no error.
+    // With the remainder joins, a missing gate decision reads as PASS and a
+    // missing rescue output falls back to the input bundle, so the worst a failed
+    // rescue can do is leave the annotation exactly as EMMA produced it.
+    //
+    EMMA_GENE_RESCUE_GATE ( EMMA.out.results )
+
+    ch_emma_gate = EMMA_GENE_RESCUE_GATE.out.decision
+        .map { meta, dfile ->
+            def parts = dfile.text.trim().split('\t')
+            [ meta, parts[0].trim(), parts.size() > 1 ? parts[1].trim() : '-' ]  // [meta, FIX|PASS, targets]
+        }
+
+    // join(remainder: true) pads an UNMATCHED row with a single trailing null, not
+    // one null per right-hand element, so the row length varies -- index into it
+    // rather than destructuring, or the closure fails on the very rows this is
+    // here to keep.
+    ch_emma_branched = EMMA.out.results.join(ch_emma_gate, remainder: true)
+        .filter { row -> row[1] != null }                    // drop decision-only rows
+        .map { row ->                                        // no decision -> PASS
+            [ row[0], row[1],
+              row.size() > 2 && row[2] ? row[2] : 'PASS',
+              row.size() > 3 && row[3] ? row[3] : '-' ]
+        }
+        .branch { _meta, _bundle, decision, _targets ->
+            fix:  decision == 'FIX'
+            pass: true
+        }
+    ch_emma_pass = ch_emma_branched.pass.map { meta, bundle, _d, _t      -> [meta, bundle] }
+    ch_emma_fix  = ch_emma_branched.fix.map  { meta, bundle, _d, targets -> [meta, bundle, targets] }
+
+    ch_rescue_ref = Channel.fromPath("${projectDir}/assets/rescue_pcg_refs.faa", checkIfExists: true).first()
+
+    EMMA_GENE_RESCUE (
+        ch_emma_fix.combine(ch_rescue_ref).map { meta, bundle, targets, ref -> [meta, bundle, targets, ref] }
+    )
+
+    // EMMA bundle after the ND4L/ATP8 rescue: PASS bundles unchanged, FIX patched,
+    // and a FIX whose rescue task failed falls back to its original bundle.
+    ch_emma_results = ch_emma_pass.mix(
+        ch_emma_fix.map { meta, bundle, _t -> [meta, bundle] }
+            .join(EMMA_GENE_RESCUE.out.results, remainder: true)
+            .filter { row -> row[1] != null }
+            .map { row -> [ row[0], row.size() > 2 && row[2] ? row[2] : row[1] ] }
+    )
+
+    //
+    // MODULE: tRNA rescue.
+    // EMMA's covariance model sometimes misses a tRNA that is in the assembly on
+    // an otherwise complete, correctly ordered mitogenome. The gate flags a
+    // bundle as FIX (only tRNAs missing, whole PCG+rRNA core present and ordered)
+    // or PASS; only FIX bundles are re-annotated, and only the annotation
+    // `results` bundle is swapped. co1/12S/16S -> BLAST/LCA are untouched. A
+    // rescue that cannot confidently place the tRNA re-emits the original bundle
+    // and the sample is held at the QC gate as now (unless the residual shortfall
+    // is within annotation_trna_tolerance).
+    //
+    // The rescue is vertebrate-code only (tRNAscan-SE's -M vert model, and the
+    // canonical REF gene order the gate checks). That is expressed as an explicit
+    // branch here rather than `ext.when` on the processes: a process skipped by
+    // ext.when emits nothing, which -- exactly like an ignored failure -- would
+    // silently drop every non-code-2 sample at the join below. Branching keeps
+    // them visible and passes them straight through.
+    //
+    ch_trna_eligible = ch_emma_results.branch { meta, _bundle ->
+        code2: meta.genetic_code == 2
+        other: true
+    }
+
+    TRNA_RESCUE_GATE ( ch_trna_eligible.code2 )
+
+    ch_trna_gate = TRNA_RESCUE_GATE.out.decision
+        .map { meta, dfile ->
+            def parts = dfile.text.trim().split('\t')
+            [ meta, parts[0].trim(), parts.size() > 1 ? parts[1].trim() : '-' ]  // [meta, FIX|PASS, targets]
+        }
+
+    ch_trna_branched = ch_trna_eligible.code2.join(ch_trna_gate, remainder: true)
+        .filter { row -> row[1] != null }
+        .map { row ->
+            [ row[0], row[1],
+              row.size() > 2 && row[2] ? row[2] : 'PASS',
+              row.size() > 3 && row[3] ? row[3] : '-' ]
+        }
+        .branch { _meta, _bundle, decision, _targets ->
+            fix:  decision == 'FIX'
+            pass: true
+        }
+    ch_trna_pass = ch_trna_branched.pass.map { meta, bundle, _d, _t      -> [meta, bundle] }
+    ch_trna_fix  = ch_trna_branched.fix.map  { meta, bundle, _d, targets -> [meta, bundle, targets] }
+
+    // tRNAscan-SE runs in its own (Perl) container; TRNA_RESCUE parses + splices
+    // its output in the stdlib psycopg2 container. A sample whose scan failed has
+    // no tsv, so it never reaches TRNA_RESCUE and keeps its bundle below.
+    TRNA_SCAN ( ch_trna_fix.map { meta, bundle, _targets -> [meta, bundle] } )
+
+    TRNA_RESCUE (
+        ch_trna_fix.join(TRNA_SCAN.out.tsv)
+            .map { meta, bundle, targets, scan -> [meta, bundle, scan, targets] }
+    )
+
+    // Vertebrate annotation bundle used from here on: non-code-2 and PASS bundles
+    // unchanged, FIX patched, and any FIX whose scan or rescue failed falls back
+    // to the bundle it went in with.
+    ch_emma_results_trna = ch_trna_eligible.other
+        .mix(ch_trna_pass)
+        .mix(
+            ch_trna_fix.map { meta, bundle, _t -> [meta, bundle] }
+                .join(TRNA_RESCUE.out.results, remainder: true)
+                .filter { row -> row[1] != null }
+                .map { row -> [ row[0], row.size() > 2 && row[2] ? row[2] : row[1] ] }
+        )
 
     // Re-origin invert assemblies to the cox1 start before MITOS2 so intron-split
     // genes (e.g. the hexacoral nad5 group I intron) no longer straddle
@@ -282,20 +429,27 @@ workflow MITOGENOME_ANNOTATION {
 
     CORAL_ANNOTATION_FIX ( ch_coral_fix_input )
 
-    // Merge annotators: verts (EMMA) + PASS corals (MITOS2) + FIX corals (fixer)
-    // + untouched non-Cnidarian invert phyla (MITOS2, no gate applied).
+    // Merge annotators: verts (EMMA, ND4L/ATP8- then tRNA-rescued) + PASS corals
+    // (MITOS2) + FIX corals (fixer) + untouched non-Cnidarian invert phyla
+    // (MITOS2, no gate applied). co1/12S/16S come straight from EMMA for every
+    // vertebrate sample -- neither rescue touches those, so BLAST/LCA is
+    // unaffected by the rescue outcomes.
     ch_annot_co1     = EMMA.out.co1_sequences.mix(ch_mitos_co1_pass, CORAL_ANNOTATION_FIX.out.co1_sequences, ch_mitos_co1_passthrough)
     ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, CORAL_ANNOTATION_FIX.out.s12_sequences, ch_mitos_s12_passthrough)
     ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, CORAL_ANNOTATION_FIX.out.s16_sequences, ch_mitos_s16_passthrough)
-    ch_annot_results = EMMA.out.results.mix(ch_mitos_results_pass, CORAL_ANNOTATION_FIX.out.results, ch_mitos_results_passthrough)
+    ch_annot_results = ch_emma_results_trna.mix(ch_mitos_results_pass, CORAL_ANNOTATION_FIX.out.results, ch_mitos_results_passthrough)
 
     // Per-sample region count, emitted once per annotated sample (including the
     // 0-region case). Downstream this both sizes the result groups and identifies
     // the samples that will never reach BLAST/LCA at all.
     ch_annot_region_counts = ch_annot_results
         .map { meta, files -> [ meta, countAnnotatedRegions(files) ] }
-    ch_annot_params  = EMMA.out.tool_params.mix(ROTATE_ORIGIN.out.tool_params, MITOS2.out.tool_params, CORAL_ANNOTATION_FIX.out.tool_params)
-    ch_annot_versions = EMMA.out.versions.mix(ROTATE_ORIGIN.out.versions, MITOS2.out.versions,
+    ch_annot_params  = EMMA.out.tool_params.mix(EMMA_GENE_RESCUE.out.tool_params, TRNA_RESCUE.out.tool_params,
+                                                ROTATE_ORIGIN.out.tool_params,
+                                                MITOS2.out.tool_params, CORAL_ANNOTATION_FIX.out.tool_params)
+    ch_annot_versions = EMMA.out.versions.mix(EMMA_GENE_RESCUE_GATE.out.versions, EMMA_GENE_RESCUE.out.versions,
+                                              TRNA_RESCUE_GATE.out.versions, TRNA_SCAN.out.versions, TRNA_RESCUE.out.versions,
+                                              ROTATE_ORIGIN.out.versions, MITOS2.out.versions,
                                               ANNOTATION_QC_GATE.out.versions, CORAL_ANNOTATION_FIX.out.versions,
                                               SELECT_CORAL_REFERENCE.out.versions)
 

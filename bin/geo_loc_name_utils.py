@@ -164,6 +164,173 @@ BIOSAMPLE_GEO_LOC = {
 }
 
 
+# Hemispheres implied by an INSDC geo_loc_name, as (latitude, longitude).
+#
+# The sample table records latitudes as unsigned magnitudes -- a Ningaloo sample
+# at 22.03 S is stored as "22.03 113.891" -- so the hemisphere has to come from
+# somewhere else. It comes from here. table2asn checks the coordinate against the
+# country and raises SEQ_DESCR.LatLonValue when they disagree, which is exactly
+# the check being anticipated.
+#
+# A None means the territory genuinely falls on both sides of the equator or of
+# the prime/anti meridian, so no single answer is correct and the caller must
+# omit the coordinate rather than pick one. A country absent from this table is
+# treated the same way. That is deliberately the safe direction: an omitted
+# lat_lon is recoverable, a confidently wrong one submitted to a public archive
+# is not. Add entries as new collection localities appear.
+#
+# Bounds were taken from each territory's full extent including outlying islands,
+# which is why several countries that read as unambiguous are None: New Zealand's
+# Kermadec and Chatham Islands sit west of 180, Fiji and Kiribati and Russia and
+# the Aleutians straddle the antimeridian, and the United Kingdom, France, Spain,
+# Algeria, Mali, Burkina Faso and Ghana straddle the prime meridian.
+COUNTRY_HEMISPHERE = {
+    # Australia and the eastern Indian Ocean
+    'Australia': ('S', 'E'), 'Ashmore and Cartier Islands': ('S', 'E'),
+    'Christmas Island': ('S', 'E'), 'Cocos Islands': ('S', 'E'),
+    'Coral Sea Islands': ('S', 'E'), 'Norfolk Island': ('S', 'E'),
+    'Timor-Leste': ('S', 'E'), 'Indonesia': (None, 'E'), 'Borneo': (None, 'E'),
+    'Malaysia': ('N', 'E'), 'Brunei': ('N', 'E'), 'Singapore': ('N', 'E'),
+    'Papua New Guinea': ('S', 'E'), 'Solomon Islands': ('S', 'E'),
+    'Vanuatu': ('S', 'E'), 'New Caledonia': ('S', 'E'),
+    'New Zealand': ('S', None), 'Fiji': ('S', None),
+
+    # Pacific
+    'Nauru': ('S', 'E'), 'Tuvalu': ('S', 'E'), 'Marshall Islands': ('N', 'E'),
+    'Micronesia, Federated States of': ('N', 'E'), 'Palau': ('N', 'E'),
+    'Guam': ('N', 'E'), 'Northern Mariana Islands': ('N', 'E'),
+    'Wake Island': ('N', 'E'), 'Kiribati': (None, None),
+    'Tonga': ('S', 'W'), 'Samoa': ('S', 'W'), 'American Samoa': ('S', 'W'),
+    'Niue': ('S', 'W'), 'Tokelau': ('S', 'W'), 'Cook Islands': ('S', 'W'),
+    'Wallis and Futuna': ('S', 'W'), 'French Polynesia': ('S', 'W'),
+    'Pitcairn Islands': ('S', 'W'), 'Jarvis Island': ('S', 'W'),
+    'Midway Islands': ('N', 'W'), 'Johnston Atoll': ('N', 'W'),
+    'Palmyra Atoll': ('N', 'W'), 'Kingman Reef': ('N', 'W'),
+    'Howland Island': ('N', 'W'), 'Baker Island': ('N', 'W'),
+    'Clipperton Island': ('N', 'W'), 'Line Islands': (None, 'W'),
+    'Spratly Islands': ('N', 'E'), 'Paracel Islands': ('N', 'E'),
+
+    # Asia
+    'Japan': ('N', 'E'), 'China': ('N', 'E'), 'Taiwan': ('N', 'E'),
+    'Hong Kong': ('N', 'E'), 'Macau': ('N', 'E'), 'South Korea': ('N', 'E'),
+    'North Korea': ('N', 'E'), 'Mongolia': ('N', 'E'), 'Philippines': ('N', 'E'),
+    'Viet Nam': ('N', 'E'), 'Laos': ('N', 'E'), 'Cambodia': ('N', 'E'),
+    'Thailand': ('N', 'E'), 'Myanmar': ('N', 'E'), 'Bangladesh': ('N', 'E'),
+    'Bhutan': ('N', 'E'), 'Nepal': ('N', 'E'), 'India': ('N', 'E'),
+    'Sri Lanka': ('N', 'E'), 'Maldives': (None, 'E'), 'Pakistan': ('N', 'E'),
+    'Afghanistan': ('N', 'E'), 'Kazakhstan': ('N', 'E'), 'Uzbekistan': ('N', 'E'),
+    'Turkmenistan': ('N', 'E'), 'Tajikistan': ('N', 'E'), 'Kyrgyzstan': ('N', 'E'),
+    'Russia': ('N', None),
+
+    # Middle East
+    'Iran': ('N', 'E'), 'Iraq': ('N', 'E'), 'Kuwait': ('N', 'E'),
+    'Saudi Arabia': ('N', 'E'), 'Bahrain': ('N', 'E'), 'Qatar': ('N', 'E'),
+    'United Arab Emirates': ('N', 'E'), 'Oman': ('N', 'E'), 'Yemen': ('N', 'E'),
+    'Jordan': ('N', 'E'), 'Israel': ('N', 'E'), 'Lebanon': ('N', 'E'),
+    'Syria': ('N', 'E'), 'Turkey': ('N', 'E'), 'Cyprus': ('N', 'E'),
+    'Gaza Strip': ('N', 'E'), 'West Bank': ('N', 'E'),
+    'State of Palestine': ('N', 'E'), 'Georgia': ('N', 'E'),
+    'Armenia': ('N', 'E'), 'Azerbaijan': ('N', 'E'),
+
+    # Europe
+    'Iceland': ('N', 'W'), 'Ireland': ('N', 'W'), 'United Kingdom': ('N', None),
+    'Isle of Man': ('N', 'W'), 'Jersey': ('N', 'W'), 'Guernsey': ('N', 'W'),
+    'Faroe Islands': ('N', 'W'), 'Greenland': ('N', 'W'), 'Jan Mayen': ('N', 'W'),
+    'Svalbard': ('N', 'E'), 'Norway': ('N', 'E'), 'Sweden': ('N', 'E'),
+    'Finland': ('N', 'E'), 'Denmark': ('N', 'E'), 'Estonia': ('N', 'E'),
+    'Latvia': ('N', 'E'), 'Lithuania': ('N', 'E'), 'Belarus': ('N', 'E'),
+    'Ukraine': ('N', 'E'), 'Moldova': ('N', 'E'), 'Poland': ('N', 'E'),
+    'Germany': ('N', 'E'), 'Netherlands': ('N', 'E'), 'Belgium': ('N', 'E'),
+    'Luxembourg': ('N', 'E'), 'France': ('N', None), 'Monaco': ('N', 'E'),
+    'Andorra': ('N', 'E'), 'Spain': ('N', None), 'Gibraltar': ('N', 'W'),
+    'Portugal': ('N', 'W'), 'Italy': ('N', 'E'), 'San Marino': ('N', 'E'),
+    'Malta': ('N', 'E'), 'Switzerland': ('N', 'E'), 'Liechtenstein': ('N', 'E'),
+    'Austria': ('N', 'E'), 'Czech Republic': ('N', 'E'), 'Czechia': ('N', 'E'),
+    'Slovakia': ('N', 'E'), 'Hungary': ('N', 'E'), 'Slovenia': ('N', 'E'),
+    'Croatia': ('N', 'E'), 'Bosnia and Herzegovina': ('N', 'E'),
+    'Serbia': ('N', 'E'), 'Kosovo': ('N', 'E'), 'Montenegro': ('N', 'E'),
+    'North Macedonia': ('N', 'E'), 'Albania': ('N', 'E'), 'Greece': ('N', 'E'),
+    'Bulgaria': ('N', 'E'), 'Romania': ('N', 'E'),
+
+    # Africa
+    'Morocco': ('N', 'W'), 'Western Sahara': ('N', 'W'), 'Algeria': ('N', None),
+    'Tunisia': ('N', 'E'), 'Libya': ('N', 'E'), 'Egypt': ('N', 'E'),
+    'Sudan': ('N', 'E'), 'South Sudan': ('N', 'E'), 'Eritrea': ('N', 'E'),
+    'Djibouti': ('N', 'E'), 'Ethiopia': ('N', 'E'), 'Somalia': (None, 'E'),
+    'Kenya': (None, 'E'), 'Uganda': (None, 'E'), 'Rwanda': ('S', 'E'),
+    'Burundi': ('S', 'E'), 'Tanzania': ('S', 'E'), 'Malawi': ('S', 'E'),
+    'Zambia': ('S', 'E'), 'Zimbabwe': ('S', 'E'), 'Mozambique': ('S', 'E'),
+    'Botswana': ('S', 'E'), 'Namibia': ('S', 'E'), 'South Africa': ('S', 'E'),
+    'Lesotho': ('S', 'E'), 'Eswatini': ('S', 'E'), 'Angola': ('S', 'E'),
+    'Democratic Republic of the Congo': (None, 'E'),
+    'Republic of the Congo': (None, 'E'), 'Gabon': (None, 'E'),
+    'Equatorial Guinea': (None, 'E'), 'Sao Tome and Principe': (None, 'E'),
+    'Cameroon': ('N', 'E'), 'Central African Republic': ('N', 'E'),
+    'Chad': ('N', 'E'), 'Niger': ('N', 'E'), 'Nigeria': ('N', 'E'),
+    'Benin': ('N', 'E'), 'Togo': ('N', 'E'), 'Ghana': ('N', None),
+    'Burkina Faso': ('N', None), 'Mali': ('N', None),
+    "Cote d'Ivoire": ('N', 'W'), 'Liberia': ('N', 'W'),
+    'Sierra Leone': ('N', 'W'), 'Guinea': ('N', 'W'),
+    'Guinea-Bissau': ('N', 'W'), 'Senegal': ('N', 'W'), 'Gambia': ('N', 'W'),
+    'Mauritania': ('N', 'W'), 'Cape Verde': ('N', 'W'),
+    'Saint Helena': ('S', 'W'), 'Madagascar': ('S', 'E'), 'Comoros': ('S', 'E'),
+    'Mayotte': ('S', 'E'), 'Mauritius': ('S', 'E'), 'Reunion': ('S', 'E'),
+    'Seychelles': ('S', 'E'), 'Europa Island': ('S', 'E'),
+    'Bassas da India': ('S', 'E'), 'Juan de Nova Island': ('S', 'E'),
+    'Tromelin Island': ('S', 'E'), 'Glorioso Islands': ('S', 'E'),
+
+    # Americas
+    'Canada': ('N', 'W'), 'USA': ('N', None), 'Mexico': ('N', 'W'),
+    'Guatemala': ('N', 'W'), 'Belize': ('N', 'W'), 'Honduras': ('N', 'W'),
+    'El Salvador': ('N', 'W'), 'Nicaragua': ('N', 'W'), 'Costa Rica': ('N', 'W'),
+    'Panama': ('N', 'W'), 'Cuba': ('N', 'W'), 'Jamaica': ('N', 'W'),
+    'Haiti': ('N', 'W'), 'Dominican Republic': ('N', 'W'),
+    'Puerto Rico': ('N', 'W'), 'Bahamas': ('N', 'W'), 'Bermuda': ('N', 'W'),
+    'Cayman Islands': ('N', 'W'), 'Turks and Caicos Islands': ('N', 'W'),
+    'British Virgin Islands': ('N', 'W'), 'Virgin Islands': ('N', 'W'),
+    'Anguilla': ('N', 'W'), 'Antigua and Barbuda': ('N', 'W'),
+    'Saint Kitts and Nevis': ('N', 'W'), 'Montserrat': ('N', 'W'),
+    'Guadeloupe': ('N', 'W'), 'Dominica': ('N', 'W'), 'Martinique': ('N', 'W'),
+    'Saint Lucia': ('N', 'W'), 'Saint Vincent and the Grenadines': ('N', 'W'),
+    'Grenada': ('N', 'W'), 'Barbados': ('N', 'W'),
+    'Trinidad and Tobago': ('N', 'W'), 'Aruba': ('N', 'W'), 'Curacao': ('N', 'W'),
+    'Sint Maarten': ('N', 'W'), 'Saint Martin': ('N', 'W'),
+    'Saint Barthelemy': ('N', 'W'), 'Saint Pierre and Miquelon': ('N', 'W'),
+    'Navassa Island': ('N', 'W'), 'Colombia': (None, 'W'),
+    'Venezuela': ('N', 'W'), 'Guyana': ('N', 'W'), 'Suriname': ('N', 'W'),
+    'French Guiana': ('N', 'W'), 'Ecuador': (None, 'W'), 'Brazil': (None, 'W'),
+    'Peru': ('S', 'W'), 'Bolivia': ('S', 'W'), 'Paraguay': ('S', 'W'),
+    'Uruguay': ('S', 'W'), 'Argentina': ('S', 'W'), 'Chile': ('S', 'W'),
+    'Falkland Islands (Islas Malvinas)': ('S', 'W'),
+    'South Georgia and the South Sandwich Islands': ('S', 'W'),
+
+    # Polar and marine
+    'Antarctica': ('S', None), 'Bouvet Island': ('S', 'E'),
+    'Heard Island and McDonald Islands': ('S', 'E'),
+    'Kerguelen Archipelago': ('S', 'E'),
+    'French Southern and Antarctic Lands': ('S', 'E'),
+    'Arctic Ocean': ('N', None), 'Southern Ocean': ('S', None),
+    'Ross Sea': ('S', None), 'Atlantic Ocean': (None, None),
+    'Pacific Ocean': (None, None), 'Indian Ocean': (None, None),
+    'North Sea': ('N', 'E'), 'Baltic Sea': ('N', 'E'),
+    'Mediterranean Sea': ('N', None), 'Tasman Sea': ('S', 'E'),
+}
+
+
+def hemispheres_for_geo_loc_name(value):
+    """Return the (latitude, longitude) hemispheres a geo_loc_name implies.
+
+    `value` is a resolved geo_loc_name, "<country>[: <locality>]"; only the
+    leading country token is consulted. Either element is None when the country
+    straddles that axis, or is not in COUNTRY_HEMISPHERE at all -- including
+    every INSDC missing-value term, which names no place. A caller with a
+    coordinate that states no hemisphere of its own must omit it in that case
+    rather than guess.
+    """
+    country = str(value or "").partition(":")[0].strip()
+    return COUNTRY_HEMISPHERE.get(country, (None, None))
+
+
 def _rejoin(country, remainder):
     """Reattach the locality suffix, if any, to a replaced country token."""
     return f"{country}: {remainder}" if remainder else country

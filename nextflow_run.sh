@@ -58,6 +58,7 @@ nextflow -log $OUT_DIR/nextflow.log \
     --force_db_overwrite false \
     --translation_table "2" \
     --ena_webin_validate true \
+    --ena_study "PRJEB110568" \
     --ena_validation_attempt "initial"
     
     # --getorganelle_fromreads_args "-R 20 -w 75 -k 21,45,65,85,105 --max-extending-len inf --max-n-words 1000000000 --continue" ## Include this line if you want to customise the getorganelle fromreads args.
