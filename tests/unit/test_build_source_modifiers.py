@@ -110,5 +110,116 @@ class ValidCollectionDateTests(unittest.TestCase):
         self.assertFalse(MODULE.valid_collection_date("21-Xxx-1952"))
 
 
+class FormatLatLonTests(unittest.TestCase):
+    """The hemisphere is read, never invented.
+
+    The sample table stores latitudes as unsigned magnitudes, so defaulting an
+    unsigned value to the northern hemisphere placed fifteen Western Australian
+    assemblies north of the equator. table2asn accepted the shape and rejected
+    the value as SEQ_DESCR.LatLonValue, quarantining every one of them.
+    """
+
+    AU_NINGALOO = "Australia: Western Australia, Ningaloo"
+
+    def test_unsigned_latitude_takes_its_hemisphere_from_the_country(self):
+        # The exact batch-19 regression: OG2279, held as FAIL_TABLE2ASN.
+        self.assertEqual(
+            MODULE.format_lat_lon("22.03 113.891", self.AU_NINGALOO),
+            ("22.03000 S 113.89100 E", "ok"),
+        )
+
+    def test_signed_latitude_wins_over_the_country(self):
+        self.assertEqual(
+            MODULE.format_lat_lon("-22.03 113.891", self.AU_NINGALOO),
+            ("22.03000 S 113.89100 E", "ok"),
+        )
+
+    def test_stated_hemisphere_is_passed_through(self):
+        self.assertEqual(
+            MODULE.format_lat_lon("18.14943 S 122.29572 E", "Australia"),
+            ("18.14943 S 122.29572 E", "ok"),
+        )
+
+    def test_northern_hemisphere_country_is_not_flipped(self):
+        # The one locality in the table that is genuinely north of the equator.
+        self.assertEqual(
+            MODULE.format_lat_lon("29.5 34.9", "Israel: Elat, Gulf of Aquaba"),
+            ("29.50000 N 34.90000 E", "ok"),
+        )
+
+    def test_dms_without_letters_uses_the_country(self):
+        value, status = MODULE.format_lat_lon("22° 1.8 113° 53.5", self.AU_NINGALOO)
+        self.assertEqual(status, "ok")
+        self.assertTrue(value.startswith("22.03000 S 113.89"), value)
+
+    def test_equator_straddling_country_cannot_place_a_bare_magnitude(self):
+        self.assertEqual(
+            MODULE.format_lat_lon("2.5 118.4", "Indonesia"), ("", "no_hemisphere")
+        )
+
+    def test_unmapped_country_cannot_place_a_bare_magnitude(self):
+        self.assertEqual(
+            MODULE.format_lat_lon("22.03 113.891", "Atlantis"), ("", "no_hemisphere")
+        )
+
+    def test_missing_value_country_cannot_place_a_bare_magnitude(self):
+        self.assertEqual(
+            MODULE.format_lat_lon("22.03 113.891", "not provided"),
+            ("", "no_hemisphere"),
+        )
+
+    def test_stated_hemisphere_contradicting_the_country_is_dropped(self):
+        # Exactly what table2asn raises SEQ_DESCR.LatLonValue for. Which of the
+        # two is wrong cannot be told from here, so neither is corrected.
+        self.assertEqual(
+            MODULE.format_lat_lon("22.03 N 113.891 E", self.AU_NINGALOO),
+            ("", "conflict"),
+        )
+
+    def test_two_latitudes_are_dropped(self):
+        self.assertEqual(
+            MODULE.format_lat_lon("25.51 N 23.43 S", "Australia"), ("", "unparsable")
+        )
+
+    def test_out_of_range_magnitude_is_dropped(self):
+        self.assertEqual(
+            MODULE.format_lat_lon("95.0 10.0", "Australia"), ("", "unparsable")
+        )
+
+    def test_absent_and_unknown_are_silent(self):
+        for raw in (None, "", "   ", "unknown", "Unknown"):
+            self.assertEqual(
+                MODULE.format_lat_lon(raw, "Australia"), ("", "absent"), raw
+            )
+
+    def test_every_drop_status_has_an_operator_message(self):
+        # A status with no entry in LATLON_DROP_REASONS would drop the coordinate
+        # silently, which is the failure mode this whole path exists to avoid.
+        for status in ("unparsable", "no_hemisphere", "conflict"):
+            self.assertIn(status, MODULE.LATLON_DROP_REASONS)
+        self.assertNotIn("absent", MODULE.LATLON_DROP_REASONS)
+        self.assertNotIn("ok", MODULE.LATLON_DROP_REASONS)
+
+
+class ParseCoordinateTests(unittest.TestCase):
+    def test_bare_magnitude_reports_no_hemisphere(self):
+        self.assertEqual(MODULE.parse_coordinate("22.03", "lat"), (22.03, None))
+
+    def test_sign_is_a_recorded_hemisphere(self):
+        self.assertEqual(MODULE.parse_coordinate("-22.03", "lat"), (22.03, "S"))
+        self.assertEqual(MODULE.parse_coordinate("-113.891", "lon"), (113.891, "W"))
+
+    def test_letter_is_read_and_magnitude_made_positive(self):
+        self.assertEqual(MODULE.parse_coordinate("22.03 S", "lat"), (22.03, "S"))
+
+    def test_letter_from_the_wrong_axis_is_rejected(self):
+        # A longitude labelled S is not a longitude, and no fix is safe to guess.
+        self.assertIsNone(MODULE.parse_coordinate("23.43 S", "lon"))
+        self.assertIsNone(MODULE.parse_coordinate("23.43 E", "lat"))
+
+    def test_non_numeric_is_rejected(self):
+        self.assertIsNone(MODULE.parse_coordinate("not a coordinate", "lat"))
+
+
 if __name__ == "__main__":
     unittest.main()

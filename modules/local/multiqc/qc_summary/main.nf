@@ -23,26 +23,31 @@ process QC_SUMMARY {
     # Extract columns from annotation CSV if present
     ann_passed=NA
     missing=NA
+    trna_adv=NA
     if [ -s "${annotation_stats_csv}" ]; then
       # Find column indices
       pass_col=\$(awk -F"," 'NR==1{for(i=1;i<=NF;i++){if(\$i=="passed"){print i; exit}}}' ${annotation_stats_csv})
       miss_col=\$(awk -F"," 'NR==1{for(i=1;i<=NF;i++){if(\$i=="missing_genes"||\$i=="num_missing"){print i; exit}}}' ${annotation_stats_csv})
+      adv_col=\$(awk -F"," 'NR==1{for(i=1;i<=NF;i++){if(\$i=="trna_advisory"){print i; exit}}}' ${annotation_stats_csv})
       if [ -n "\${pass_col}" ]; then
         ann_passed=\$(awk -F"," -v c=\${pass_col} 'NR==2{print \$c}' ${annotation_stats_csv})
       fi
       if [ -n "\${miss_col}" ]; then
         missing=\$(awk -F"," -v c=\${miss_col} 'NR==2{print \$c}' ${annotation_stats_csv})
       fi
+      if [ -n "\${adv_col}" ]; then
+        trna_adv=\$(awk -F"," -v c=\${adv_col} 'NR==2{print \$c}' ${annotation_stats_csv})
+      fi
     fi
     out=${meta.mt_assembly_prefix}.qc_summary.tsv
     {
-      echo -e "sample\\tassembly\\tspecies\\tproceed_qc\\tannotation_passed\\tmissing_genes"
-      echo -e "${meta.id}\\t${meta.mt_assembly_prefix}\\t\${species}\\t\${proceed}\\t\${ann_passed}\\t\${missing}"
+      echo -e "sample\\tassembly\\tspecies\\tproceed_qc\\tannotation_passed\\tmissing_genes\\ttrna_advisory"
+      echo -e "${meta.id}\\t${meta.mt_assembly_prefix}\\t\${species}\\t\${proceed}\\t\${ann_passed}\\t\${missing}\\t\${trna_adv}"
     } > \${out}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        qc_summary: "1.2.0"
+        qc_summary: "1.3.0"
     END_VERSIONS
     """
 
@@ -50,8 +55,8 @@ process QC_SUMMARY {
     """
     out=${meta.mt_assembly_prefix}.qc_summary.tsv
     {
-      echo -e "sample\\tassembly\\tspecies\\tproceed_qc\\tannotation_passed\\tmissing_genes"
-      echo -e "${meta.id}\\t${meta.mt_assembly_prefix}\\ttest_species\\ttrue\\tyes\\t0"
+      echo -e "sample\\tassembly\\tspecies\\tproceed_qc\\tannotation_passed\\tmissing_genes\\ttrna_advisory"
+      echo -e "${meta.id}\\t${meta.mt_assembly_prefix}\\ttest_species\\ttrue\\tyes\\t0\\tno"
     } > \${out}
 
     cat <<-END_VERSIONS > versions.yml

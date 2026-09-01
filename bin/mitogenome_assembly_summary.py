@@ -49,6 +49,7 @@ class Thresholds:
     max_length: int | None = None
     expected_gene_count: int | None = None
     expected_pcg_count: int | None = None
+    trna_tolerance: int = 2
 
 
 @dataclass
@@ -1035,6 +1036,10 @@ ADVISORY_WHEN_COMPLETE = {
 }
 # Number of tRNAs a complete-core assembly may be missing (annotation limitation,
 # not an assembly defect) while all 13 PCGs + 2 rRNAs are still present.
+# Default only. The effective value comes from --trna-tolerance (wired to
+# params.annotation_trna_tolerance), the SAME knob annotation_stats.py uses for
+# its pass/hold decision -- a hardcoded constant here would silently disagree
+# with the gate the moment that param is changed.
 TRNA_TOLERANCE = 2
 # A fragmented / non-circular assembly whose mean coverage is below this fraction
 # of the minimum coverage threshold is treated as sequencing-depth limited rather
@@ -1071,7 +1076,7 @@ def is_complete_core(row: dict[str, str], thresholds: Thresholds) -> bool:
     if thresholds.max_length is not None and (length is None or length > thresholds.max_length):
         return False
     if thresholds.expected_gene_count is not None and num_genes is not None:
-        if num_genes < thresholds.expected_gene_count - TRNA_TOLERANCE:
+        if num_genes < thresholds.expected_gene_count - thresholds.trna_tolerance:
             return False
     return True
 
@@ -1091,7 +1096,7 @@ def blocking_reasons(row: dict[str, str], reasons: list[str], thresholds: Thresh
         thresholds.expected_pcg_count is not None and num_cds is not None
         and num_cds >= thresholds.expected_pcg_count
         and thresholds.expected_gene_count is not None and num_genes is not None
-        and 0 < (thresholds.expected_gene_count - num_genes) <= TRNA_TOLERANCE
+        and 0 < (thresholds.expected_gene_count - num_genes) <= thresholds.trna_tolerance
     )
     advisory = set(ADVISORY_WHEN_COMPLETE)
     if trna_only_shortfall:
@@ -1417,6 +1422,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-length", type=int, default=None)
     parser.add_argument("--max-length", type=int, default=None)
     parser.add_argument("--expected-gene-count", type=int, default=None)
+    parser.add_argument("--trna-tolerance", dest="trna_tolerance", type=int,
+                        default=TRNA_TOLERANCE,
+                        help="tRNA-only shortfall tolerated on an otherwise complete "
+                             "assembly before missing_genes becomes a blocking reason. "
+                             "Must match annotation_stats.py --trna-tolerance (both are "
+                             "wired to params.annotation_trna_tolerance).")
     parser.add_argument("--expected-pcg-count", type=int, default=None,
                         help="Flag missing_protein_coding_genes when the CDS count is "
                              "below this (e.g. 13 for a vertebrate mitogenome).")
@@ -1432,6 +1443,7 @@ def main() -> None:
         max_length=args.max_length,
         expected_gene_count=args.expected_gene_count,
         expected_pcg_count=args.expected_pcg_count,
+        trna_tolerance=args.trna_tolerance,
     )
     rows = build_summary(args.input, thresholds)
     write_rows(rows, args.output)

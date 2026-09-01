@@ -319,21 +319,31 @@ workflow UPLOAD_RESULTS {
 
     // Filter for samples that dont meet the conditions
     ch_not_qc_ready = EVALUATE_QC_CONDITIONS.out.evaluation
-        .map { meta, species_file, proceed_file, circular_file ->
+        .join(EVALUATE_QC_CONDITIONS.out.reason, by: 0)
+        .map { meta, species_file, proceed_file, circular_file, reason_file ->
             def species_name = species_file.text.trim()
             def proceed_qc = proceed_file.text.trim()
             def circular = circular_file.text.trim()
-            return [ meta, species_name, proceed_qc, circular ]
+            def held_reason = reason_file.text.trim()
+            return [ meta, species_name, proceed_qc, circular, held_reason ]
         }
-        .filter { meta, species_name, proceed_qc, circular ->
+        .filter { meta, species_name, proceed_qc, circular, held_reason ->
             proceed_qc == "false"
         }
-        .view { meta, species_name, proceed_qc, circular ->
-            "Sample ${meta.id} will NOT proceed to QC - conditions not met"
+        .view { meta, species_name, proceed_qc, circular, held_reason ->
+            "Sample ${meta.id} will NOT proceed to QC - ${held_reason ?: 'conditions not met'}"
         }
 
-    
-    
+    // Headerless per-sample fragments for the run-level held_samples.tsv. These
+    // samples are filtered out before MITOGENOME_QC, so this subworkflow is the
+    // only place their hold is recorded.
+    ch_held_fragments = ch_not_qc_ready
+        .collectFile { meta, _species, _proceed, _circular, held_reason ->
+            [ "${meta.mt_assembly_prefix}.held.tsv",
+              "${meta.id}\t${meta.mt_assembly_prefix}\tPRE_QC\tproceed_qc=false: ${held_reason ?: 'conditions not met'}\n" ]
+        }
+
+
     //
     // Build a per-sample QC summary TSV for MultiQC
     qc_summary_input = EVALUATE_QC_CONDITIONS.out.evaluation
@@ -390,6 +400,7 @@ workflow UPLOAD_RESULTS {
 
     emit:
     qc_ready    = ch_qc_ready                   // channel: [ val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false) ]
+    held_fragments = ch_held_fragments         // channel: path(<prefix>.held.tsv) — one row per pre-QC hold
     assembly_summary_files = PUSH_MTDNA_ANNOTATION_RESULTS.out.stats.map { meta, stats -> stats }
     upload_status_files = ch_upload_status_files
     multiqc_files = ch_multiqc_files            // channel: [ path(multiqc_files) ]

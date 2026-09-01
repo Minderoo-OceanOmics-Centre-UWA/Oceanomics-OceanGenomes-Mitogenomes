@@ -1,0 +1,65 @@
+nextflow_process {
+
+    name "Test Process EMMA_GENE_RESCUE"
+    script "../main.nf"
+    process "EMMA_GENE_RESCUE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "emma_gene_rescue"
+
+    // Fixture: a synthetic EMMA bundle (public RefSeq NC_011710.1 CDS) with a
+    // real teleost ND4L sitting in the intergenic gap between MT-TR and MT-ND4,
+    // but no ND4L feature in the GFF/TBL.
+    test("splices the recovered ND4L into the bundle") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', mt_assembly_prefix:'synthfish.test.1.emma102', genetic_code: 2 ],
+                    file("${projectDir}/modules/local/emma_gene_rescue/tests/data/nd4l_missing/annotation", checkIfExists: true).listFiles().toList(),
+                    'ND4L',
+                    file("${projectDir}/assets/rescue_pcg_refs.faa", checkIfExists: true)
+                ])
+                """
+            }
+        }
+        then {
+            def gff = process.out.results[0][1].find { it.endsWith('.gff') }
+            def tbl = process.out.results[0][1].find { it.endsWith('.tbl') }
+            def proteins = process.out.results[0][1].find { it.endsWith('/proteins') }
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.startsWith("RESCUED\tND4L") },
+                { assert path(gff).text.contains("Emma\tCDS\t") },
+                { assert path(gff).text.contains("Name=MT-ND4L;Product=NADH dehydrogenase subunit 4L") },
+                { assert path(tbl).text.contains("gene\tMT-ND4L") },
+                { assert new File(proteins, "MT-ND4L.synthfish.test.1.emma102.fa").exists() },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'synthfish.test.1.emma102' ],
+                    file("${projectDir}/modules/local/emma_gene_rescue/tests/data/nd4l_missing/annotation", checkIfExists: true).listFiles().toList(),
+                    'ND4L',
+                    file("${projectDir}/assets/rescue_pcg_refs.faa", checkIfExists: true)
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.startsWith("SKIP") },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+}

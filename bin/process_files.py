@@ -4,6 +4,12 @@ import re
 import argparse
 from pathlib import Path
 
+# One source of truth for the per-code mitochondrial start/stop codon sets. bin/
+# is bind-mounted onto PATH by Nextflow, so this sibling import resolves via
+# sys.path[0] (same pattern as build_source_modifiers.py -> geo_loc_name_utils).
+from orf_utils import start_codons as _orf_start_codons
+from orf_utils import stop_codons as _orf_stop_codons
+
 def parse_args():
     p = argparse.ArgumentParser(description="Process mitogenome files for GenBank submission.")
     p.add_argument("--og-id", required=True, help="OG_ID / isolate")
@@ -128,30 +134,18 @@ def process_fasta_file(input_file, output_file, species, assembly, og_id, geneti
                 f_out.write(line)
     log(f"✅ Processed FASTA: {output_file}")
 
-# Stop codons by NCBI mitochondrial translation table. Used to confirm that an
-# incomplete terminal codon really is a truncated stop before we assert aa:TERM.
-# Only the vertebrate code (2) reads AGA/AGG as stops; the coelenterate (4),
-# invertebrate (5) and echinoderm/flatworm (9) codes use TAA/TAG only (AGA/AGG
-# there are Arg or Ser). TGA is Trp, not a stop, in every mitochondrial code.
-_MITO_STOPS_BY_CODE = {
-    2: ("TAA", "TAG", "AGA", "AGG"),
-}
-_DEFAULT_MITO_STOPS = ("TAA", "TAG")
+# Start / stop codons by NCBI mitochondrial translation table. Used to confirm
+# that an incomplete terminal codon really is a truncated stop before we assert
+# aa:TERM, and that a CDS initiates on a documented start (else SEQ_FEAT.
+# StartCodon). Fully enumerated for every table the pipeline can route (2, 4, 5,
+# 9, 13, 14, ...) in bin/orf_utils.py -- one source of truth shared with the
+# annotation QC gate and the coral fixer.
 
 def mito_stop_codons(genetic_code: int):
-    return _MITO_STOPS_BY_CODE.get(int(genetic_code), _DEFAULT_MITO_STOPS)
-
-# Initiation codons each mitochondrial code accepts without comment. A CDS
-# starting on anything else is what raises SEQ_FEAT.StartCodon, so these are the
-# codons for which no transl_except is needed. The vertebrate code (2) is the
-# strictest and the only one this pipeline routinely uses.
-_MITO_STARTS_BY_CODE = {
-    2: ("ATT", "ATC", "ATA", "ATG", "GTG"),
-}
-_DEFAULT_MITO_STARTS = ("ATG", "GTG")
+    return _orf_stop_codons(genetic_code)
 
 def mito_start_codons(genetic_code: int):
-    return _MITO_STARTS_BY_CODE.get(int(genetic_code), _DEFAULT_MITO_STARTS)
+    return _orf_start_codons(genetic_code)
 
 # Union of the initiation codons across every mitochondrial translation table,
 # read out of the EMBOSS EGC.* data files (tables 2, 3, 4, 5, 9, 13, 14, 21;
@@ -447,11 +441,13 @@ def process_gff_file(input_file, output_file, assembly):
 
     for line in original_lines:
         if line.startswith('##sequence-region'):
-            cols = line.rstrip('\r\n').split('\t')
+            # EMMA writes this directive tab-separated, mitos_to_emma.py writes it
+            # space-separated (GFF3 spec). Split on any whitespace so the seqid is
+            # rewritten either way, then re-emit tab-separated to match EMMA.
+            cols = line.split()
             if len(cols) >= 2:
                 cols[1] = assembly
-            line = '\t'.join(cols) + '\n'
-            new_lines.append(line)
+            new_lines.append('\t'.join(cols) + '\n')
             continue
 
         if line.startswith('#') or not line.strip():

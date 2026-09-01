@@ -12,8 +12,8 @@ process ANNOTATION_QC_GATE {
         'tylerpeirce/psycopg2:0.1' }"
 
     input:
-    // The GFF + proteins/ dir MITOS2 produced (MITOS2.out.gff_proteins).
-    tuple val(meta), path(gff), path(proteins)
+    // The GFF + proteins/ + cds/ dirs MITOS2 produced (MITOS2.out.gff_proteins).
+    tuple val(meta), path(gff), path(proteins), path(cds)
 
     output:
     tuple val(meta), path("${meta.mt_assembly_prefix}.coral_qc.txt"), emit: decision
@@ -24,10 +24,13 @@ process ANNOTATION_QC_GATE {
 
     script:
     def args = task.ext.args ?: ''
+    def gcode = task.ext.code ?: meta.genetic_code
     """
     annotation_qc_gate.py \\
         --gff ${gff} \\
         --proteins ${proteins} \\
+        --cds ${cds} \\
+        --genetic-code ${gcode} \\
         --out ${meta.mt_assembly_prefix}.coral_qc.txt \\
         ${args}
 

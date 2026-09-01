@@ -30,7 +30,7 @@ process FORMAT_FILES {
     script:
     def args = task.ext.args ?: ''
     def species = species_name ?: 'Unknown species'
-    def genetic_code = meta.genetic_code ?: 2
+    def genetic_code = task.ext.code ?: meta.genetic_code
     def effective_args = [args, "--og-id ${meta.id}", "--species '${species}'", "--input-dir .", "--outdir processed", "--genetic-code ${genetic_code}"].findAll { it?.trim() }.join(' ')
 
     """

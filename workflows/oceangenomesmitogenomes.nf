@@ -19,6 +19,7 @@ include { COLLAPSE_CONCATEMER       } from '../modules/local/collapse_concatemer
 include { MIRROR_MTDNA_TO_COLLAPSED } from '../modules/local/mirror_mtdna_to_collapsed'
 include { UPLOAD_RESULTS; UPLOAD_ENA_RESULTS } from '../subworkflows/local/upload_results_mito'
 include { MITOGENOME_QC             } from '../subworkflows/local/mitogenome_qc'
+include { COMPILE_HELD_SAMPLES      } from '../modules/local/compile_held_samples'
 include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
 include { MITOGENOME_COVERAGE      } from '../modules/local/mitogenome_coverage/main'
 include { MITOGENOME_ASSEMBLY_SUMMARY } from '../modules/local/multiqc/mitogenome_assembly_summary'
@@ -976,6 +977,15 @@ workflow OCEANGENOMESMITOGENOMES {
             sql_config
         )
         ch_assembly_summary_files = ch_assembly_summary_files.mix(UPLOAD_RESULTS.out.assembly_summary_files)
+
+        // One run-level held_samples.tsv: pre-QC holds (UPLOAD_RESULTS) + table2asn
+        // quarantine (MITOGENOME_QC). Always emitted, header-only when nothing held.
+        COMPILE_HELD_SAMPLES (
+            UPLOAD_RESULTS.out.held_fragments
+                .mix(MITOGENOME_QC.out.held_fragments)
+                .collect()
+                .ifEmpty([])
+        )
     } else if (!params.skip_upload_results && !params.sql_config) {
         log.warn "Skipping upload/QC because --sql_config not provided"
     }
@@ -1033,6 +1043,9 @@ workflow OCEANGENOMESMITOGENOMES {
     }
     if (!params.skip_upload_results && params.sql_config) {
         ch_versions = ch_versions.mix(UPLOAD_ENA_RESULTS.out.versions)
+    }
+    if (!params.skip_upload_results && params.sql_config) {
+        ch_versions = ch_versions.mix(COMPILE_HELD_SAMPLES.out.versions)
     }
 
 

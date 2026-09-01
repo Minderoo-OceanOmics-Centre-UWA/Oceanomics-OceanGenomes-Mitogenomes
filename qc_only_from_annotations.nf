@@ -69,7 +69,12 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
                 code              : parts[3],
                 annotation        : parts[4],
                 annotation_prefix : annotation_prefix,
-                mt_assembly_prefix: mt_assembly_prefix
+                mt_assembly_prefix: mt_assembly_prefix,
+                // This entrypoint has no samplesheet, so it cannot resolve the
+                // per-sample mitochondrial code from taxonomic class the way
+                // prepare_samplesheet does. Assume the run-level --translation_table
+                // (default 2); pass --translation_table 4 for a coral-only QC run.
+                genetic_code      : (params.translation_table ?: 2) as int
             ]
             [ annotation_prefix, meta, file ]
         }

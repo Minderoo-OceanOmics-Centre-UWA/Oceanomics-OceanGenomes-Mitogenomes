@@ -15,9 +15,9 @@ process TRANSLATE_GENES {
     path "versions.yml"                                                , emit: versions
 
     script:
-    // Prefer the per-sample mitochondrial code derived from taxonomic class
-    // (e.g. Cnidaria -> 4); fall back to the global --translation_table.
-    def gcode = meta.genetic_code ?: params.translation_table ?: 2
+    // Per-sample mitochondrial code, resolved once in prepare_samplesheet and
+    // asserted before annotation. task.ext.code still overrides.
+    def gcode = task.ext.code ?: meta.genetic_code
     def effective_args = "--input ${genes_dir} --outdir . --table ${gcode}"
     """
     translate_genes.py \\
@@ -36,7 +36,7 @@ process TRANSLATE_GENES {
     """
 
     stub:
-    def gcode = meta.genetic_code ?: params.translation_table ?: 2
+    def gcode = task.ext.code ?: meta.genetic_code ?: params.translation_table ?: 2
     def effective_args = "--input ${genes_dir} --outdir . --table ${gcode}"
     """
     mkdir -p proteins

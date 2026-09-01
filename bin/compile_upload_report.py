@@ -141,6 +141,8 @@ def classify_status(step, text):
     if step == "species_validation":
         if "❌ Database error" in body:
             return "failed"
+        if "has no nominal_species_id" in body:
+            return "no_nominal_species"
         if "✅ Success: lca_validation overwritten (--force)" in body:
             return "validated_forced"
         if "✅ Success: lca_validation upserted" in body:

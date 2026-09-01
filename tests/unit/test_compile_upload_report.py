@@ -1,10 +1,15 @@
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# bin/ scripts import their siblings (orf_utils, mito_gene_order, ...) the way
+# Nextflow stages them: flat on PATH. Mirror that for the file-path loads below.
+sys.path.insert(0, str(ROOT / "bin"))
 SPEC = importlib.util.spec_from_file_location(
     "compile_upload_report", ROOT / "bin" / "compile_upload_report.py"
 )
@@ -33,6 +38,23 @@ class EnaUploadReportTests(unittest.TestCase):
                 "(overwrote the previous attempt)\nUPLOAD_EXIT=0\n",
             ),
             "success_updated",
+        )
+
+    def test_species_validation_no_nominal_species_is_not_reported_as_validated(self):
+        # species_validation.py still prints the upsert's own "upserted" success
+        # line even when there's no nominal species (validated_species_name is
+        # just NULL), so the "no nominal species" marker must take precedence.
+        self.assertEqual(
+            MODULE.classify_status(
+                "species_validation",
+                "[WARN] OG ID 'OG470' nominal species not found in database — "
+                "species match columns will be recorded as N/A.\n"
+                "[INFO] OG ID 'OG470' has no nominal_species_id — recording "
+                "lca_validation row with no species match.\n"
+                "✅ Success: lca_validation upserted for OG470.ilmn.230607.getorg1770.emma102 "
+                "-> validated_species_name='None', validator='nf-core'\n",
+            ),
+            "no_nominal_species",
         )
 
     def test_assembly_prefix_parsing_and_summary_column(self):

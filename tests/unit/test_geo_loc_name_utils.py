@@ -6,11 +6,16 @@ thing standing between a recorded typo and a rejected submission.
 """
 
 import importlib.util
+import sys
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# bin/ scripts import their siblings (orf_utils, mito_gene_order, ...) the way
+# Nextflow stages them: flat on PATH. Mirror that for the file-path loads below.
+sys.path.insert(0, str(ROOT / "bin"))
 SPEC = importlib.util.spec_from_file_location(
     "geo_loc_name_utils", ROOT / "bin" / "geo_loc_name_utils.py"
 )
@@ -216,6 +221,58 @@ class GuardTests(unittest.TestCase):
             resolved, status = resolve(value)
             self.assertNotEqual(status, "unmapped")
             self.assertIn(resolved.partition(":")[0].strip(), CV)
+
+
+class HemisphereTests(unittest.TestCase):
+    """COUNTRY_HEMISPHERE places a coordinate the sample table stores unsigned."""
+
+    def setUp(self):
+        self.hemispheres = geo_loc_name_utils.hemispheres_for_geo_loc_name
+
+    def test_every_key_is_a_controlled_value(self):
+        # A typo here would silently never match, which reads as "unmappable
+        # country" and quietly drops coordinates instead of failing loudly.
+        for country in geo_loc_name_utils.COUNTRY_HEMISPHERE:
+            self.assertIn(country, CV, country)
+
+    def test_every_value_is_a_hemisphere_pair(self):
+        for country, pair in geo_loc_name_utils.COUNTRY_HEMISPHERE.items():
+            lat, lon = pair
+            self.assertIn(lat, ("N", "S", None), country)
+            self.assertIn(lon, ("E", "W", None), country)
+
+    def test_locality_suffix_is_ignored(self):
+        self.assertEqual(
+            self.hemispheres("Australia: Western Australia, Ningaloo"), ("S", "E")
+        )
+
+    def test_straddling_territory_is_undecided(self):
+        # Both axes are unresolvable for Kiribati; Indonesia and Brazil straddle
+        # only the equator, Ghana and the United Kingdom only the meridian.
+        self.assertEqual(self.hemispheres("Kiribati"), (None, None))
+        self.assertEqual(self.hemispheres("Indonesia"), (None, "E"))
+        self.assertEqual(self.hemispheres("Brazil"), (None, "W"))
+        self.assertEqual(self.hemispheres("Ghana"), ("N", None))
+        self.assertEqual(self.hemispheres("United Kingdom"), ("N", None))
+
+    def test_pacific_countries_east_of_the_antimeridian_are_west(self):
+        # Tonga and Samoa sit at ~174 W despite reading as "far east Pacific".
+        self.assertEqual(self.hemispheres("Tonga"), ("S", "W"))
+        self.assertEqual(self.hemispheres("Samoa"), ("S", "W"))
+
+    def test_unmapped_and_missing_values_are_undecided(self):
+        for value in (None, "", "Atlantis", "not provided", "not collected",
+                      "missing", "not applicable"):
+            self.assertEqual(self.hemispheres(value), (None, None), value)
+
+    def test_resolved_aliases_are_placeable(self):
+        # The whole point of resolving the country first: the alias table is the
+        # single place spellings are corrected, and the hemisphere lookup keys
+        # off its output rather than carrying a second spelling-tolerance layer.
+        for raw in ("Austalia: WA, Perth", "Kingdom of Tonga: Tonga Trench",
+                    "JAPAN: Okinawa"):
+            resolved, _status = geo_loc_name_utils.resolve_geo_loc_name(raw)
+            self.assertNotEqual(self.hemispheres(resolved), (None, None), raw)
 
 
 class UnmappedWarningTests(unittest.TestCase):

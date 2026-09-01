@@ -1,0 +1,26 @@
+{
+    "empty scan -> SKIP, bundle unchanged": {
+        "content": [
+            [
+                "versions.yml:md5,acfa491d47461f07753a6e352cbcefd7"
+            ]
+        ],
+        "timestamp": "2026-08-27T16:11:15.903187378",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "stub": {
+        "content": [
+            [
+                "versions.yml:md5,4b3f37f43cdce96dfc04bc202a700ff2"
+            ]
+        ],
+        "timestamp": "2026-08-27T16:11:24.338931769",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

@@ -17,12 +17,22 @@ include { samplesheetToList         } from 'plugin/nf-schema'
 // code mistranslates CDS in MITOS2 annotation and QC protein translation:
 //   * Cnidaria (corals, anemones, jellyfish, hydroids) use the Coelenterate code (4),
 //   * echinoderms and flatworms use the Echinoderm/Flatworm code (9),
-//   * any other invertebrate falls back to the Coelenterate code (4): in practice
-//     the only invertebrates routed through this pipeline are cnidarians, so an
-//     unrecognised invertebrate class is far more likely to be one of those than
-//     a code-5 invertebrate. (Add an explicit class above if that ever changes.)
-//   * vertebrates (and anything unresolved) fall back to defaultCode (vertebrate, 2).
-def mitoGeneticCode(taxClass, isInvert, defaultCode) {
+//   * vertebrates (and anything unresolved but NOT flagged invertebrate) fall
+//     back to defaultCode (vertebrate, 2).
+//
+// An `invertebrates=true` sample whose class is not in the known map raises
+// rather than silently defaulting: as more invertebrate lineages are validated
+// (e.g. bivalves are code 5) a wrong default would mistranslate the whole
+// annotation and fail table2asn terminally. Add the class here, or set the
+// per-sample `genetic_code` samplesheet column, which wins over this map.
+def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
+    if (explicitCode != null && explicitCode.toString().trim() != '') {
+        def parsed = explicitCode.toString().trim()
+        if (!parsed.isInteger()) {
+            error "Sample ${sampleId}: genetic_code '${parsed}' is not an integer"
+        }
+        return parsed as int
+    }
     def c = (taxClass ?: '').toString().trim().toLowerCase()
     if (c in ['anthozoa', 'hydrozoa', 'scyphozoa', 'cubozoa', 'staurozoa', 'myxozoa', 'polypodiozoa']) {
         return 4
@@ -32,7 +42,9 @@ def mitoGeneticCode(taxClass, isInvert, defaultCode) {
         return 9
     }
     if (isInvert) {
-        return 4
+        error "Sample ${sampleId}: class '${taxClass ?: 'unknown'}' has no known " +
+              "mitochondrial genetic code -- add it to mitoGeneticCode() or set " +
+              "the genetic_code column"
     }
     return defaultCode
 }
@@ -255,7 +267,8 @@ workflow PREPARE_SAMPLESHEET {
                     // resolved taxonomic class so MITOS2 / QC translation use the
                     // correct code (e.g. Cnidaria -> 4) instead of a one-size
                     // global table. --translation_table sets the vertebrate/default.
-                    def mt_genetic_code = mitoGeneticCode(meta.class, meta.invertebrates, (params.translation_table ?: 2) as int)
+                    def mt_genetic_code = mitoGeneticCode(meta.id, meta.class, meta_invertebrates,
+                                                          meta.genetic_code, (params.translation_table ?: 2) as int)
                     meta = meta + [ genetic_code: mt_genetic_code ]
 
                     // Group by sample id + sequencing type + date so that single-end

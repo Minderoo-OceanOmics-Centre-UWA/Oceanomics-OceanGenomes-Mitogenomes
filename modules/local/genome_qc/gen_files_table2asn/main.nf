@@ -24,7 +24,7 @@ process GEN_FILES_TABLE2ASN {
     script:
     def sample_out = "${meta.full_seqid ?: meta.mt_assembly_prefix}.sqn"
     def topology_mod = (circular?.toString()?.trim() == 'true') ? '[topology=circular] [completeness=complete]' : '[topology=linear]'
-    def mgcode = meta.genetic_code ?: 2
+    def mgcode = task.ext.code ?: meta.genetic_code
     def effective_args = "-indir . -euk -J -t ${sample_sbt} -i ${sample_fa} -f ${sample_tbl} -w ${sample_cmt} -src-file ${sample_src} -o ${sample_out} -M n -j '[mgcode=${mgcode}] [location=mitochondrion] ${topology_mod}' -V vb -Z -W"
 
     """
@@ -62,7 +62,7 @@ process GEN_FILES_TABLE2ASN {
     stub:
     def sample_out = "${meta.full_seqid ?: meta.mt_assembly_prefix ?: (meta.id ?: 'stub')}.sqn"
     def topology_mod = (circular?.toString()?.trim() == 'true') ? '[topology=circular] [completeness=complete]' : '[topology=linear]'
-    def mgcode = meta.genetic_code ?: 2
+    def mgcode = task.ext.code ?: meta.genetic_code
     def effective_args = "-indir . -euk -J -t ${sample_sbt} -i ${sample_fa} -f ${sample_tbl} -w ${sample_cmt} -src-file ${sample_src} -o ${sample_out} -M n -j '[mgcode=${mgcode}] [location=mitochondrion] ${topology_mod}' -V vb -Z -W"
     """
     prefix=${meta.full_seqid ?: meta.mt_assembly_prefix ?: (meta.id ?: "stub")}

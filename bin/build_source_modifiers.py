@@ -21,7 +21,11 @@ from pathlib import Path
 import pandas as pd
 import psycopg2
 
-from geo_loc_name_utils import resolve_geo_loc_name, unmapped_warning
+from geo_loc_name_utils import (
+    hemispheres_for_geo_loc_name,
+    resolve_geo_loc_name,
+    unmapped_warning,
+)
 
 # -------------------------------
 # Load DB credentials from .cfg
@@ -79,19 +83,43 @@ def _norm_quotes(s: str) -> str:
             .replace("O", "°")
             .strip())
 
-def parse_coordinate(coord_str):
-    """
-    Accepts DMS like 33° 52' 31.2" S or decimal with/without sign and optional NSEW.
-    Returns 'DD.ddddd X' or 'DD.ddddd' if direction cannot be inferred.
+# A hemisphere is information, and where the sample table does not record one it
+# must not be invented. Latitudes arrive as unsigned magnitudes -- a Ningaloo
+# sample at 22.03 S is stored as "22.03 113.891" -- and defaulting an unsigned
+# value to the northern hemisphere put fifteen Western Australian assemblies on
+# the wrong side of the equator. table2asn accepts the shape and then rejects the
+# value as SEQ_DESCR.LatLonValue because the coordinate contradicts the country,
+# which quarantines the whole assembly. So the hemisphere is only ever *read*
+# here; where the value carries none it is derived from the resolved
+# geo_loc_name, and where the country cannot settle it the modifier is omitted.
+# See format_lat_lon below.
+AXIS_HEMISPHERES = {"lat": ("N", "S"), "lon": ("E", "W")}
+
+def parse_coordinate(coord_str, axis):
+    """Parse one coordinate into (magnitude, hemisphere-or-None).
+
+    `axis` is "lat" or "lon" and fixes which hemisphere letters are legal, so a
+    longitude written "23.43 S" is rejected here rather than emitted as a second
+    latitude. Accepts DMS like 33° 52' 31.2" S and decimal with or without a sign
+    and with or without an NSEW letter.
+
+    Returns None when the text is not a coordinate for this axis at all. Returns
+    a None hemisphere when the value simply does not state one, which is a
+    different thing and is resolved against the country by the caller.
     """
     if coord_str is None:
         return None
+    positive, negative = AXIS_HEMISPHERES[axis]
     coord_str = _norm_quotes(coord_str)
-    direction = ""
+    hemisphere = None
 
     mdir = re.search(r"([NSEW])", coord_str, flags=re.IGNORECASE)
     if mdir:
-        direction = mdir.group(1).upper()
+        hemisphere = mdir.group(1).upper()
+        if hemisphere not in (positive, negative):
+            # A latitude labelled E, or a longitude labelled S. No correction is
+            # safe to guess, so this is not a coordinate.
+            return None
         coord_str = re.sub(r"[NSEW]", "", coord_str, flags=re.IGNORECASE).strip()
 
     mdms = re.match(r"(\d+(?:\.\d+)?)\s*[°:\s]\s*(\d+(?:\.\d+)?)\s*['\s]?\s*(\d+(?:\.\d+)?)?", coord_str)
@@ -105,20 +133,19 @@ def parse_coordinate(coord_str):
             dec = float(coord_str)
         except ValueError:
             return None
-        if not direction:
-            if -90 <= dec <= 90:
-                direction = "S" if dec < 0 else "N"
-            else:
-                direction = "W" if dec < 0 else "E"
+        if hemisphere is None and coord_str.strip().startswith(("-", "+")):
+            # An explicit sign IS a recorded hemisphere. Only a bare magnitude is
+            # silent, and only a bare magnitude falls through to the country.
+            hemisphere = negative if dec < 0 else positive
 
-    dec = abs(dec)
-    return f"{dec:.5f} {direction}" if direction else f"{dec:.5f}"
+    return abs(dec), hemisphere
 
-def smart_split_latlon(value):
+def split_lat_lon(value):
+    """Split a raw sample-table coordinate into its latitude and longitude text."""
     if value is None:
         return None, None
     value = _norm_quotes(value)
-    if value.lower() == "unknown":
+    if value == "" or value.lower() == "unknown":
         return None, None
 
     lat_match = re.search(r'([NS]?\s*[\d°\'"\.\-\s]+[NS])', value, re.IGNORECASE)
@@ -126,41 +153,16 @@ def smart_split_latlon(value):
     if lat_match and lon_match:
         return lat_match.group(1).strip(), lon_match.group(1).strip()
 
+    # A DMS pair carrying no hemisphere letters ("12° 34.5 113° 20.1"), which the
+    # whitespace split below would tear in half.
+    dms_parts = re.findall(r"\d+°\s*\d+(?:\.\d+)?", value)
+    if len(dms_parts) >= 2:
+        return dms_parts[0], dms_parts[1]
+
     parts = value.split()
     if len(parts) >= 2:
         return parts[0], parts[1]
     return None, None
-
-def fallback_parse_latlon(value):
-    if value is None:
-        return "unknown"
-    value = _norm_quotes(value)
-    if value.lower() == "unknown":
-        return "unknown"
-
-    parts = re.findall(r"\d+°\s*\d+(?:\.\d+)?", value)
-    if len(parts) >= 2:
-        lat_dec = parse_coordinate(parts[0] + " S")
-        lon_dec = parse_coordinate(parts[1] + " E")
-        if lat_dec and lon_dec:
-            return f"{lat_dec} {lon_dec}"
-
-    split = value.split()
-    if len(split) >= 2:
-        lat_dec = parse_coordinate(split[0] + " S")
-        lon_dec = parse_coordinate(split[1] + " E")
-        if lat_dec and lon_dec:
-            return f"{lat_dec} {lon_dec}"
-
-    return "unknown"
-
-def convert_full_latlon(raw_value):
-    lat_raw, lon_raw = smart_split_latlon(raw_value)
-    lat_dec = parse_coordinate(lat_raw) if lat_raw else None
-    lon_dec = parse_coordinate(lon_raw) if lon_raw else None
-    if lat_dec and lon_dec:
-        return f"{lat_dec} {lon_dec}"
-    return fallback_parse_latlon(raw_value)
 
 # ---------------------------
 # Source-modifier validation
@@ -179,6 +181,62 @@ def valid_lat_lon(value):
         return False
     lat, _lat_hem, lon, _lon_hem = match.groups()
     return float(lat) <= 90.0 and float(lon) <= 180.0
+
+def format_lat_lon(raw_value, geo_loc_name):
+    """Render a raw sample-table coordinate as an INSDC lat_lon.
+
+    Returns (value, status). `value` is "" whenever nothing submittable can be
+    built, because an empty cell in the .src omits the modifier, and omission is
+    the only correct way to say "no value" here: the literal "unknown" is
+    rejected as SEQ_DESCR.LatLonFormat, and a guessed hemisphere is rejected as
+    SEQ_DESCR.LatLonValue. `status` is one of:
+
+        'ok'            -- a complete, well-formed coordinate
+        'absent'        -- nothing recorded; the common case, reported silently
+        'unparsable'    -- text that is not a coordinate, or one out of range
+        'no_hemisphere' -- a bare magnitude the geo_loc_name cannot place,
+                           because the country straddles that axis or is not a
+                           mapped country at all
+        'conflict'      -- a stated hemisphere the geo_loc_name contradicts,
+                           which is precisely what table2asn rejects
+    """
+    lat_raw, lon_raw = split_lat_lon(raw_value)
+    if lat_raw is None and lon_raw is None:
+        return "", "absent"
+
+    lat = parse_coordinate(lat_raw, "lat")
+    lon = parse_coordinate(lon_raw, "lon")
+    if lat is None or lon is None:
+        return "", "unparsable"
+    lat_dec, lat_hem = lat
+    lon_dec, lon_hem = lon
+
+    country_lat_hem, country_lon_hem = hemispheres_for_geo_loc_name(geo_loc_name)
+
+    # A recorded hemisphere the country disagrees with is a bad record, not a
+    # value to correct: which of the two is wrong cannot be told from here.
+    for stated, implied in ((lat_hem, country_lat_hem), (lon_hem, country_lon_hem)):
+        if stated and implied and stated != implied:
+            return "", "conflict"
+
+    lat_hem = lat_hem or country_lat_hem
+    lon_hem = lon_hem or country_lon_hem
+    if not lat_hem or not lon_hem:
+        return "", "no_hemisphere"
+
+    formatted = f"{lat_dec:.5f} {lat_hem} {lon_dec:.5f} {lon_hem}"
+    return (formatted, "ok") if valid_lat_lon(formatted) else ("", "unparsable")
+
+# Operator-facing reason for each format_lat_lon status that drops a coordinate.
+# 'absent' is deliberately not here: most samples record no coordinate at all and
+# warning on every one of them would bury the rows that are actually broken.
+LATLON_DROP_REASONS = {
+    "unparsable": "is not a usable INSDC coordinate",
+    "no_hemisphere": ("records no hemisphere, and the geo_loc_name does not imply "
+                      "one (add the country to COUNTRY_HEMISPHERE in "
+                      "bin/geo_loc_name_utils.py, or sign the latitude at source)"),
+    "conflict": "states a hemisphere that its geo_loc_name contradicts",
+}
 
 # INSDC collection_date, in the three forms both gates accept: DD-Mmm-YYYY,
 # Mmm-YYYY and YYYY. Anything else is SEQ_DESCR.BadCollectionDate at table2asn,
@@ -308,10 +366,36 @@ def main():
     df.to_csv(out_csv, index=False)
     print(f"📁 Metadata written to: {out_csv}")
 
+    # geo_loc_name (the 'country' modifier) must start with a value from the INSDC
+    # controlled list, and it is one of only two mandatory fields in ENA checklist
+    # ERC000011. The sample table is rebuilt from a spreadsheet, so typos and
+    # long-form names ("Kingdom of Tonga", "Austalia") are translated here rather
+    # than corrected upstream, where the next refresh would undo the fix.
+    # Where the row records no country, a BioSample this project already registered
+    # for the same og_id may state one; failing that the INSDC 'not provided' term
+    # is written, because geo_loc_name is mandatory and omitting it fails sample
+    # registration outright.
+    #
+    # Resolved before the coordinate below, and not after it as it once was,
+    # because a latitude the sample table records without a hemisphere can only
+    # be placed against the country -- and only against the canonical spelling of
+    # it, so that the alias table is the single place country names are corrected.
+    _resolved = [
+        resolve_geo_loc_name(_country, _og_id)
+        for _country, _og_id in zip(df["country"], df["isolate"])
+    ]
+    df["country"] = [value for value, _status in _resolved]
+    df["_geo_loc_status"] = [status for _value, status in _resolved]
+
     # Lat/Lon cleanup + write cleaned
-    df["formatted_lat_lon"] = df["lat_lon"].apply(convert_full_latlon)
+    _formatted = [
+        format_lat_lon(_raw, _country)
+        for _raw, _country in zip(df["lat_lon"], df["country"])
+    ]
+    df["formatted_lat_lon"] = [value for value, _status in _formatted]
+    df["_lat_lon_status"] = [status for _value, status in _formatted]
     cleaned_csv = f"{args.og_id}.bankit_metadata_latlon_cleaned.csv"
-    df.to_csv(cleaned_csv, index=False)
+    df.drop(columns=["_geo_loc_status", "_lat_lon_status"]).to_csv(cleaned_csv, index=False)
     print(f"✅ Updated metadata with cleaned lat/lon values: {cleaned_csv}")
 
     # Expand SeqIDs and write .src files into the working directory
@@ -338,23 +422,18 @@ def main():
             print(f"⚠️  No SeqID matched assembly-id '{_aid}'; writing all "
                   f"{len(df_exp)} source file(s) unfiltered.", flush=True)
 
-    # Leave lat_lon empty when we have no usable coordinate. NCBI's validator
-    # rejects the literal "unknown" (SEQ_DESCR.LatLonFormat); an empty cell in the
-    # .src simply omits the modifier, which is the correct way to signal "no value".
-    df_exp["formatted_lat_lon"] = df_exp["lat_lon"].apply(convert_full_latlon)
-    df_exp["formatted_lat_lon"] = df_exp["formatted_lat_lon"].fillna("")
-    _unknown = df_exp["formatted_lat_lon"].str.strip().str.lower().eq("unknown")
-    df_exp.loc[_unknown, "formatted_lat_lon"] = ""
-
-    # A coordinate that survived parsing but is not a well-formed INSDC lat_lon
-    # (e.g. "25.51000 N 23.43000 S", two latitudes and no longitude) must not be
-    # emitted: table2asn flags it and EMBOSS then demotes it to a note, so the
-    # bad value reaches ENA disguised as free text. Drop it and say so loudly.
-    _bad_latlon = df_exp["formatted_lat_lon"].ne("") & ~df_exp["formatted_lat_lon"].apply(valid_lat_lon)
-    for _seqid, _value in zip(df_exp.loc[_bad_latlon, "SeqID"], df_exp.loc[_bad_latlon, "formatted_lat_lon"]):
-        print(f"⚠️  {_seqid}: lat_lon '{_value}' is not a valid INSDC coordinate; "
-              f"omitting the modifier. Fix the source record.", flush=True)
-    df_exp.loc[_bad_latlon, "formatted_lat_lon"] = ""
+    # A coordinate that cannot be turned into a submittable INSDC lat_lon is
+    # dropped rather than guessed at, and the reason is named so the source record
+    # can be fixed. Emitting a bad one is worse than emitting none: table2asn
+    # flags it and EMBOSS then demotes it to a note, so the wrong value reaches
+    # ENA disguised as free text. Warned per SeqID here, after the assembly filter
+    # above, so the message names the assembly actually being submitted.
+    for _seqid, _raw, _status in zip(
+        df_exp["SeqID"], df_exp["lat_lon"], df_exp["_lat_lon_status"]
+    ):
+        if _status in LATLON_DROP_REASONS:
+            print(f"⚠️  {_seqid}: lat_lon '{_raw}' {LATLON_DROP_REASONS[_status]}; "
+                  f"omitting the modifier. Fix the source record.", flush=True)
 
     # Same treatment for a date that is present but not submittable -- a future
     # date, or anything that is not one of the three INSDC forms. Unlike
@@ -370,25 +449,15 @@ def main():
               f"date; omitting the modifier. Fix the source record.", flush=True)
     df_exp.loc[_bad_date, "Collection_date"] = ""
 
-    # geo_loc_name (the 'country' modifier) must start with a value from the INSDC
-    # controlled list, and it is one of only two mandatory fields in ENA checklist
-    # ERC000011. The sample table is rebuilt from a spreadsheet, so typos and
-    # long-form names ("Kingdom of Tonga", "Austalia") are translated here rather
-    # than corrected upstream, where the next refresh would undo the fix.
-    # Where the row records no country, a BioSample this project already registered
-    # for the same og_id may state one; failing that the INSDC 'not provided' term
-    # is written, because geo_loc_name is mandatory and omitting it fails sample
-    # registration outright.
-    _resolved = [
-        resolve_geo_loc_name(_country, _og_id)
-        for _country, _og_id in zip(df_exp["country"], df_exp["isolate"])
-    ]
-    df_exp["country"] = [value for value, _status in _resolved]
-    # An unmapped value is left untouched on purpose: table2asn then raises
+    # An unmapped country is left untouched on purpose: table2asn then raises
     # SEQ_DESCR.BadGeoLocNameCode and the validation gate quarantines this one
     # assembly, which is safer than substituting a placeholder and silently
-    # replacing the recorded locality.
-    for _seqid, (_value, _status) in zip(df_exp["SeqID"], _resolved):
+    # replacing the recorded locality. Resolution itself happened before the
+    # coordinate block above; only the reporting waits until here, so each message
+    # names the assembly being submitted rather than the aggregated row.
+    for _seqid, _value, _status in zip(
+        df_exp["SeqID"], df_exp["country"], df_exp["_geo_loc_status"]
+    ):
         if _status == "unmapped":
             print(unmapped_warning(_seqid, _value), flush=True)
         elif _status == "derived":

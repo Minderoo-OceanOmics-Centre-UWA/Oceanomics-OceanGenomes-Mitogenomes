@@ -24,16 +24,16 @@ process MITOS2 {
     // Raw MITOS BED plus the EMMA GFF + proteins dir, consumed by the anthozoan
     // QC gate and the coral fixer (which patches the BED and re-runs mitos_to_emma).
     tuple val(meta), path("annotation/mitos_raw/result.bed"), emit: bed
-    tuple val(meta), path("annotation/*.gff"), path("annotation/proteins"), emit: gff_proteins
+    tuple val(meta), path("annotation/*.gff"), path("annotation/proteins"), path("annotation/cds"), emit: gff_proteins
     tuple val(meta), path("07_mitos.tool_params_mqcrow.html"), emit: tool_params
     path "versions_mitos.yml", emit: versions
 
     script:
         def prefix   = task.ext.prefix ?: meta.mt_assembly_prefix
-        // MITOS2 only annotates invertebrates, which for this pipeline are
-        // cnidarians; fall back to the Coelenterate code (4), not invertebrate (5),
-        // when meta.genetic_code is unset (e.g. qc-only runs). ext.code still overrides.
-        def gcode    = task.ext.code ?: (meta.genetic_code ?: 4)
+        // meta.genetic_code is resolved once in prepare_samplesheet and asserted
+        // before annotation in mitogenome_annotation_lca, so it is always set for
+        // a pipeline run. task.ext.code still overrides (e.g. qc-only entrypoints).
+        def gcode    = task.ext.code ?: meta.genetic_code
         def refver   = params.mitos_refseq_ver
         def species  = meta.species ?: ''
         // The pinned BioContainer's `mitos` package self-reports version 0.0.0, so

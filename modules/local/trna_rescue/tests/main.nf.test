@@ -1,0 +1,62 @@
+nextflow_process {
+
+    name "Test Process TRNA_RESCUE"
+    script "../main.nf"
+    process "TRNA_RESCUE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "trna_rescue"
+
+    // Fixture: a 36/37 EMMA bundle (tRNA-Pro missing) paired with an EMPTY
+    // tRNAscan-SE table, so every target must SKIP with the bundle re-emitted
+    // untouched. The RESCUED path needs a real scan table with a matching hit in
+    // the gap; build that fixture on Setonix with `nf-test test --update-snapshot`.
+    test("empty scan -> SKIP, bundle unchanged") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', mt_assembly_prefix:'test', genetic_code:2 ],
+                    file("${projectDir}/modules/local/trna_rescue/tests/data/trna_missing/annotation", checkIfExists: true).listFiles().toList(),
+                    file("${projectDir}/modules/local/trna_rescue/tests/data/empty.trnascan.tsv", checkIfExists: true),
+                    'TP'
+                ])
+                """
+            }
+        }
+        then {
+            def gff_in  = path("${projectDir}/modules/local/trna_rescue/tests/data/trna_missing/annotation/synth.trna.1.emma102.gff").text
+            def gff_out = path(process.out.results[0][1].find { it.endsWith('.gff') }).text
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.startsWith("SKIP\tTP") },
+                { assert gff_out == gff_in },   // no splice
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'test_stub', genetic_code:2 ],
+                    file("${projectDir}/modules/local/trna_rescue/tests/data/trna_missing/annotation", checkIfExists: true).listFiles().toList(),
+                    file("${projectDir}/modules/local/trna_rescue/tests/data/empty.trnascan.tsv", checkIfExists: true),
+                    'TP'
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.trim().startsWith("SKIP") },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+}

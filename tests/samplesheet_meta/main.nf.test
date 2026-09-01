@@ -137,6 +137,34 @@ nextflow_workflow {
         }
     }
 
+    // F1: an invertebrate whose (resolved) class is not in mitoGeneticCode()'s map
+    // and which carries no explicit genetic_code column must abort, not silently
+    // fall back to code 4. Bivalvia is code 5; a wrong default mistranslates the
+    // whole annotation and fails table2asn terminally.
+    test("an invertebrate with an unmapped class and no genetic_code column aborts") {
+        when {
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/with_taxonomy.csv", checkIfExists: true)
+                def sheet = file("unmapped_invert.csv")
+                sheet.text = template.text
+                    .replace('__PROJECT_DIR__', "\${projectDir}")
+                    .replace(',Anthozoa,Acroporidae,Scleractinia,true,', ',Bivalvia,Veneridae,Venerida,true,')
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            // error() raised inside the samplesheet .map closure surfaces as an
+            // InvocationTargetException at the mitoGeneticCode() call site, same
+            // as the unresolved-class guard above; the run stopping is the
+            // contract under test.
+            assert workflow.failed
+        }
+    }
+
     test("--allow_unknown_taxonomy downgrades the abort to a warning") {
         when {
             params {

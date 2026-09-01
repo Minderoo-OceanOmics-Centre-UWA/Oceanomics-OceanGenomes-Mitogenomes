@@ -1,0 +1,70 @@
+nextflow_process {
+
+    name "Test Process ANNOTATION_QC_GATE"
+    script "../main.nf"
+    process "ANNOTATION_QC_GATE"
+
+    tag "modules"
+    tag "modules_local"
+    tag "annotation_qc_gate"
+
+    // Fixtures: synthetic MITOS2 EMMA-contract annotations (gff + proteins/ +
+    // cds/) for a cnidarian (genetic_code 4). coral_nd1_broken carries the real
+    // OG2350 ND1 CDS (starts on AAA, no terminal stop) that the old gate waved
+    // through to a terminal table2asn failure; coral_clean is the same bundle
+    // with a well-formed ND1.
+
+    def bundle = { name -> """
+        def dir = file("\${projectDir}/modules/local/annotation_qc_gate/tests/data/${name}/annotation")
+        input[0] = Channel.of([
+            [ id:'test', mt_assembly_prefix:'synthcoral.test.1.mitos2110', genetic_code: 4 ],
+            file("\${dir}/synthcoral.test.1.mitos2110.gff", checkIfExists: true),
+            file("\${dir}/proteins", checkIfExists: true),
+            file("\${dir}/cds", checkIfExists: true)
+        ])
+    """ }
+
+    test("routes a broken ND1 boundary to FIX") {
+        when {
+            process {
+                bundle("coral_nd1_broken")
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.decision[0][1]).text.trim().startsWith("FIX") },
+                { assert path(process.out.decision[0][1]).text.contains("ND1_no_start") },
+            )
+        }
+    }
+
+    test("passes a clean coral annotation") {
+        when {
+            process {
+                bundle("coral_clean")
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.decision[0][1]).text.trim().startsWith("PASS") },
+            )
+        }
+    }
+
+    test("stub") {
+        options "-stub"
+        when {
+            process {
+                bundle("coral_clean")
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.decision[0][1]).text.trim().startsWith("FIX") },
+            )
+        }
+    }
+}

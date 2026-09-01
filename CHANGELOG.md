@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `Added`
 
+- An intron-split `cox1` is now rebuilt as `cox1_0`/`cox1_1` in `bin/coral_fix_bed.py`, the
+  same reference-transfer treatment `nad5` already got.
+
+  Most scleractinians carry the group I intron only in `nad5`, but some carry a second one in
+  `cox1`, holding a LAGLIDADG homing endonuclease ORF (MITOS calls that ORF `lagli`, correctly).
+  MITOS then annotates only one of cox1's two exons, and nothing downstream noticed: OG2361
+  published an 873 nt `CO1` and a 291 aa `MT-CO1` (barely half a cox1), and the LCA was run on
+  that fragment. It resolved to Scleractinia anyway, which is the dangerous part: half a CO1 still
+  BLASTs to plausible neighbours, so the barcode looked fine.
+
+  The reference's cox1 is normally single-exon, which is exactly what makes it a usable probe: it
+  BLASTs onto an intron-split assembly as two subject blocks. `group_exons()` collapses HSPs that
+  share a diagonal (so an exon running off the end of the contig and continuing past position 1
+  stays one block) and treats a broken diagonal as the intron. The 5' end keeps the transferred
+  start codon, the 3' end is walked in frame to the first stop, and the result must be a clean ORF
+  before it replaces MITOS's row. On OG2361 this rebuilds cox1 as 17218-17928 + 730-1590, 1572 nt /
+  523 aa, 99.0% identical to the *Favites abdita* NC_035879 COX1 over its full length, with the
+  splice junction at the canonical anthozoan site (`...FWFFGH` | `PEVYIL...`). Across the 36
+  batch-20 corals it is the only sample whose output changes.
+
+- `bin/annotation_qc_gate.py` gained a `--min-co1-aa` (default 450) truncation check for cnidarians,
+  mirroring the existing `--min-nd5-aa`. The truncated CO1 above did trip the gate's no-stop check,
+  but only by luck of where the exon happened to end; the length now says so directly.
+
+### `Fixed`
+
+- `MITOGENOME_COVERAGE`, `OATK`, `LCA` and `SPECIES_VALIDATION` now retry a walltime kill instead
+  of silently dropping the sample.
+
+  All four carried a narrowed `errorStrategy` treating only `exitStatus == 137` as transient, so a
+  Slurm timeout (140/143) fell straight through to `'ignore'`. This is the same defect fixed for
+  `GETORGANELLE_RESEED`, where it cost OG28.ilmn.231024 its reseed assembly in batch-02; the
+  narrow overrides are removed rather than widened, so all four inherit the global default
+  (`maxRetries = 2`, transient `(130..145) + 104 + 247`, `'ignore'` on exhaustion) and there is one
+  copy of the policy to maintain. Both original intents survive: `137` is still covered because it
+  sits inside `130..145`, and depth is still never a reason to fail a sample because the inherited
+  default also ends in `'ignore'`, not `'terminate'`.
+
+  This was live risk, not theory. Batch-19 had three coverage tasks at 51-64% with more than five
+  hours of work left against a 3h20m remaining walltime; under the old strategy each would have
+  been ignored on timeout and published an empty depth placeholder.
+
+- `MITOGENOME_COVERAGE` concurrency is now bounded by `params.mitogenome_depth_max_forks`
+  (default 4).
+
+  Each task streams an entire WGS library (~150 GB gzipped, ~2 billion reads) past a 33 kb doubled
+  index through `minimap2 -t N | awk | python`, so a batch is limited by filesystem read bandwidth
+  and by that single-threaded awk, not by cores. Nothing bounded submission, so batch-19 launched
+  13 within four minutes and every one of them degraded roughly 15x, from 476k to 22k reads/s, with
+  minimap2's CPU multiplier falling from 2.4x to 0.70x. The same samples, on the same nodes, with a
+  byte-identical command, had held 290-430k reads/s to completion at 6 concurrent: OG2288 took
+  1h46m then and had not finished after 4h40m under contention.
+
+- `bin/build_source_modifiers.py` no longer invents a hemisphere for a latitude the sample
+  table records without one.
+
+  The sample table stores latitudes as unsigned magnitudes: a Ningaloo sample at 22.03 S is
+  `latitude_collection = 22.03`. `parse_coordinate()` defaulted an unsigned value to the
+  hemisphere implied by its sign, so every one of them came out N. The result is well formed,
+  so `valid_lat_lon()` could not catch it; table2asn accepted the shape and then rejected the
+  value as `SEQ_DESCR.LatLonValue` ("Latitude should be set to S") because the coordinate
+  contradicts the country. In batch-19 that quarantined 15 Western Australian assemblies,
+  OG2279 through OG2294, the entire 260114 ilmn plate. The two parse paths also disagreed
+  about the default: `fallback_parse_latlon()` assumed S and E, which would have been right
+  here, but `smart_split_latlon()` splits a bare `"22.03 113.891"` pair successfully so the
+  fallback never ran.
+
+  The hemisphere is now only ever read, never inferred from a sign that is not there.
+  `parse_coordinate()` takes the axis (so a longitude written `23.43 S` is rejected rather
+  than emitted as a second latitude) and returns `(magnitude, hemisphere-or-None)`, where
+  None means the value states no hemisphere, which is a different thing from an unparsable
+  one. A new `format_lat_lon()` resolves that None against `COUNTRY_HEMISPHERE` in
+  `bin/geo_loc_name_utils.py`, keyed on the *resolved* geo_loc_name so the alias table stays
+  the single place country spellings are corrected. Where the country cannot settle it, the
+  modifier is omitted and the reason named: the country straddles that axis (Indonesia,
+  Brazil, Ghana, Kiribati), or is not a mapped country at all. A stated hemisphere the
+  country contradicts is likewise dropped rather than corrected, since which of the two is
+  wrong cannot be told from here. That turns a hard `FAIL_TABLE2ASN` into an omitted
+  optional qualifier, so one bad row can no longer quarantine an otherwise clean assembly.
+
+  Country resolution consequently moved above the coordinate block in `main()`, and the old
+  post-hoc `unknown`/`valid_lat_lon` blanking passes are subsumed by `format_lat_lon`.
+
+  This makes the pipeline resilient to an unsigned latitude; it does not make the stored
+  value right. Preserving the sign in the spreadsheet ingest remains the durable fix.
+
+- `bin/rotate_to_cox1.py` no longer re-origins inside cox1.
+
+  The script's premise was that cox1 is "a conserved, single-exon gene corals always carry" and "is
+  not the wrapping feature". For a coral with an intron-split cox1 both halves of that are false. It
+  anchored on the best-scoring tblastn HSP, which is usually the 3' exon, then back-extrapolated
+  `3*(qstart-1)` to reach the N-terminus, landing in the middle of the intron. On OG2361 that put
+  position 1 at offset 568, cutting cox1 across the origin: precisely the failure the rotation exists
+  to prevent, moved from nad5 to cox1.
+
+  The anchor is now the lowest-`qstart` HSP of the best-scoring query (cox1's true 5' exon), and a
+  new `MAX_EXTRAPOLATE_AA` refuses to rotate at all when even that HSP starts too far into the
+  protein to locate the 5' end. OG2361 now re-origins at 17768, cox1's actual start, leaving the
+  gene linear at 19-729 + 1808-2668. It is the only batch-20 sample whose rotation changes.
+
 - The run now aborts when a sample's taxonomic `class` is unresolved, and `class`/`family`/`order`
   resolve from the NCBI taxdump when the `species` table has no match for the sample's nominal
   name.
@@ -87,6 +187,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries the contract and the idempotent-upsert pattern.
 
 ### `Changed`
+
+- `MITOGENOME_COVERAGE` is sized from measurement: `cpus` 12 -> 4 and `memory` 16 GB -> 4 GB per
+  attempt. The Aug-25 batch-19 trace for OG2288 records `%cpu=2228` (2.2 cores) and
+  `peak_rss=484604` (473 MB), and threads past the single-threaded awk consumer cannot be used.
+  Memory is the directive that actually shrinks the allocation, since Slurm drives the granted core
+  count up to satisfy the memory request.
+
+  Neither change affects `-resume`. Nextflow's task hash covers session id, process name, script
+  source, container fingerprint, conda env, module, arch, bin dirs, inputs and attempt number;
+  resource directives and retry policy are not hashed. The `memory_hints.json` preamble in
+  `conf/base.config` said otherwise and has been corrected: the reason a resumed retry misses its
+  cached success is the attempt salt, not the resolved memory. The workaround it documents is still
+  necessary and unchanged.
 
 - `apply_ena_migrations.py` now applies each migration exactly once, recording it in a
   `public.schema_migrations` ledger (filename, sha256, applied_at) and skipping anything already
