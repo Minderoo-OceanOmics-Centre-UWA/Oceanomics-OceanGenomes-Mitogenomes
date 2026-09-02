@@ -10,6 +10,7 @@ process CREATE_SAMPLESHEET_ENRICHED {
     val output_name
     path sql_config
     path taxdump
+    path genetic_codes
 
     output:
     path "${output_name}"             , emit: samplesheet
@@ -25,6 +26,7 @@ process CREATE_SAMPLESHEET_ENRICHED {
         --output "${output_name}" \
         --sql-config "${sql_config}" \
         ${taxdump_arg} \
+        --genetic-codes ${genetic_codes} \
         --input-files ${input_files}
 
     cat <<-END_VERSIONS > versions.yml

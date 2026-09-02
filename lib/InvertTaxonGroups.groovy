@@ -18,7 +18,16 @@
  *     a few sponge families, via lineage-specific horizontal transfer -- a
  *     different gene and a different mechanism). Porifera therefore stays out
  *     of this group even though it is in REDUCED_TRNA above.
+ *
+ * Mitochondrial genetic codes are deliberately NOT one of these sets. They live
+ * in assets/mito_genetic_codes.json, loaded here by loadGeneticCodes(), because
+ * bin/create_samplesheet.py needs the same mapping and a second copy in Python
+ * would drift. They also do not line up with the sets above -- the code-4 group
+ * includes Ctenophora, which is neither reduced-tRNA nor coral-fix eligible, and
+ * the flatworm classes split across codes 9, 14 and 21 -- so deriving one from
+ * the other would corrupt panel selection and coral-fix routing.
  */
+import groovy.json.JsonSlurper
 class InvertTaxonGroups {
 
     static final Set<String> CNIDARIA_CLASSES = [
@@ -27,11 +36,6 @@ class InvertTaxonGroups {
 
     static final Set<String> PORIFERA_CLASSES = [
         'demospongiae', 'calcarea', 'hexactinellida', 'homoscleromorpha', 'porifera',
-    ] as Set
-
-    static final Set<String> ECHINODERM_FLATWORM_CLASSES = [
-        'asteroidea', 'ophiuroidea', 'echinoidea', 'holothuroidea', 'crinoidea',
-        'rhabditophora', 'trematoda', 'cestoda', 'monogenea', 'turbellaria',
     ] as Set
 
     // Echinoderm-only subset of the above, used for cox1 rotation-panel selection
@@ -51,19 +55,6 @@ class InvertTaxonGroups {
         'cephalocarida', 'remipedia', 'maxillopoda', 'pycnogonida', 'arthropoda',
     ] as Set
 
-    // Invertebrate classes whose mitochondrial genetic code has actually been
-    // checked to be the standard Invertebrate code (5). This is an allow-list, not
-    // a default: an invertebrate class that is not in here (and not in one of the
-    // code-4 or code-9 groups above) aborts the run in mitoGeneticCode() rather
-    // than being guessed at. Not every invertebrate is code 5 -- Bivalvia is
-    // deliberately absent, for one -- and a wrong code mistranslates every CDS in
-    // the annotation and fails table2asn terminally, far from the cause. Add a
-    // class here only once its code is confirmed, or set the per-sample
-    // `genetic_code` samplesheet column, which overrides this map.
-    static final Set<String> CODE5_CLASSES = [
-        'gastropoda', 'malacostraca', 'pycnogonida',
-    ] as Set
-
     static final Set<String> REDUCED_TRNA_CLASSES = CNIDARIA_CLASSES + PORIFERA_CLASSES
 
     static final Set<String> CORAL_FIX_ELIGIBLE_CLASSES = CNIDARIA_CLASSES
@@ -72,12 +63,69 @@ class InvertTaxonGroups {
         (taxClass ?: '').toString().trim().toLowerCase()
     }
 
-    static boolean isReducedTrna(taxClass) {
-        norm(taxClass) in REDUCED_TRNA_CLASSES
+    // ---- Mitochondrial genetic codes (assets/mito_genetic_codes.json) ----
+
+    private static Map<String, Integer> geneticCodes = null
+    private static Map<String, String> ambiguousCodes = null
+
+    /**
+     * Parse assets/mito_genetic_codes.json once per session. Idempotent, so the
+     * per-sample closure in prepare_samplesheet can call it without a guard.
+     * A class listed twice with different codes, or listed both as a code and as
+     * ambiguous, is a contradiction in the asset and stops the run here rather
+     * than resolving to whichever entry happened to be parsed last.
+     */
+    static synchronized void loadGeneticCodes(codesFile) {
+        if (geneticCodes != null) return
+        def handle = codesFile instanceof File ? codesFile : new File(codesFile.toString())
+        def payload = new JsonSlurper().parse(handle)
+
+        def resolved = [:]
+        payload.codes.each { entry ->
+            def code = entry.code as int
+            entry.classes.each { taxClass ->
+                def key = norm(taxClass)
+                if (resolved.containsKey(key) && resolved[key] != code) {
+                    throw new IllegalStateException(
+                        "${handle}: class '${key}' is mapped to both genetic code " +
+                        "${resolved[key]} and ${code}")
+                }
+                resolved[key] = code
+            }
+        }
+
+        def ambiguous = [:]
+        (payload.ambiguous ?: [:]).each { taxClass, reason ->
+            ambiguous[norm(taxClass)] = reason.toString()
+        }
+
+        def clash = resolved.keySet().intersect(ambiguous.keySet())
+        if (clash) {
+            throw new IllegalStateException(
+                "${handle}: class(es) ${clash.sort().join(', ')} are listed both " +
+                "with a genetic code and as ambiguous")
+        }
+
+        geneticCodes = resolved
+        ambiguousCodes = ambiguous
     }
 
-    static boolean isCode5(taxClass) {
-        norm(taxClass) in CODE5_CLASSES
+    /** Resolved mitochondrial genetic code for a class, or null if unmapped. */
+    static Integer geneticCode(taxClass) {
+        geneticCodes?.get(norm(taxClass))
+    }
+
+    /**
+     * Why a class is deliberately left unmapped, or null if it is not one of the
+     * documented ambiguous cases. Used to explain the abort rather than just
+     * reporting the class as unknown.
+     */
+    static String ambiguousReason(taxClass) {
+        ambiguousCodes?.get(norm(taxClass))
+    }
+
+    static boolean isReducedTrna(taxClass) {
+        norm(taxClass) in REDUCED_TRNA_CLASSES
     }
 
     static boolean isCoralFixEligible(taxClass) {

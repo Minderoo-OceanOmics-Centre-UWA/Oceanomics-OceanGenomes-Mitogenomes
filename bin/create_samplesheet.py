@@ -3,6 +3,7 @@
 import argparse
 import csv
 import glob
+import json
 import os
 import re
 import sys
@@ -39,8 +40,12 @@ INVERT_CLASSES = frozenset({
     'Ascidiacea', 'Thaliacea', 'Appendicularia', 'Tunicata',
     # Bryozoa
     'Gymnolaemata', 'Stenolaemata', 'Phylactolaemata', 'Bryozoa',
-    # Brachiopoda
-    'Lingulata', 'Craniata', 'Rhynchonellata', 'Brachiopoda',
+    # Brachiopoda. NB 'Craniata' is deliberately absent: it is a brachiopod class
+    # AND the vertebrate clade name, so listing it would mark a fish whose class
+    # resolved to Craniata as an invertebrate and route it to the invertebrate
+    # BLAST DB and MITOS2. Craniate brachiopods must set the class to
+    # Rhynchonellata/Lingulata or the phylum, or the genetic_code column.
+    'Lingulata', 'Rhynchonellata', 'Brachiopoda',
     # Ctenophora
     'Tentaculata', 'Nuda', 'Ctenophora',
     # Hemichordata
@@ -514,7 +519,7 @@ def resolve_species_info(cursor, sample_id, resolver=None):
 
 
 RESOLUTION_COLUMNS = ('sample', 'nominal_species_id', 'class', 'family', 'order',
-                      'reference_species_id', 'source')
+                      'reference_species_id', 'source', 'invertebrates', 'genetic_code')
 
 
 def write_resolution_report(path, rows):
@@ -553,6 +558,79 @@ def report_unresolved(rows):
           "columns by hand and re-run with --input.\n", file=sys.stderr)
 
 
+def load_genetic_codes(path):
+    """Parse assets/mito_genetic_codes.json into (class -> code, class -> reason).
+
+    Shared with lib/InvertTaxonGroups.groovy, which prepare_samplesheet uses to
+    resolve the same codes: one asset rather than a Python copy and a Groovy copy
+    that drift. The contradiction checks mirror loadGeneticCodes() there, so a
+    malformed asset fails the same way whichever side reads it first.
+    """
+    if not path:
+        return {}, {}
+    with open(path) as handle:
+        payload = json.load(handle)
+
+    resolved = {}
+    for entry in payload.get('codes', []):
+        code = int(entry['code'])
+        for tax_class in entry.get('classes', []):
+            key = tax_class.strip().lower()
+            if key in resolved and resolved[key] != code:
+                raise ValueError(f"{path}: class '{key}' is mapped to both genetic "
+                                 f"code {resolved[key]} and {code}")
+            resolved[key] = code
+
+    ambiguous = {k.strip().lower(): str(v) for k, v in payload.get('ambiguous', {}).items()}
+    clash = sorted(set(resolved) & set(ambiguous))
+    if clash:
+        raise ValueError(f"{path}: class(es) {', '.join(clash)} are listed both with "
+                         f"a genetic code and as ambiguous")
+    return resolved, ambiguous
+
+
+def resolve_genetic_code(tax_class, genetic_codes):
+    """The samplesheet's genetic_code value for a class, or '' if unresolved.
+
+    Blank means "let prepare_samplesheet decide": for a vertebrate that is the
+    --translation_table default, and for an invertebrate it is the abort that
+    stops a wrong translation table reaching annotation. Either way the row is
+    still written, so an unresolved sample can be fixed by hand in the CSV.
+    """
+    return str(genetic_codes.get((tax_class or '').strip().lower(), ''))
+
+
+def report_unresolved_genetic_code(rows, ambiguous):
+    """Print the invertebrate samples whose genetic code never resolved.
+
+    Mirrors report_unresolved() above: the run is aborted on these by
+    prepare_samplesheet, and the sheet is still written so the rows can be fixed
+    before launching rather than after a failed run.
+    """
+    unresolved = []
+    seen = set()
+    for row in rows:
+        if row['sample'] in seen:
+            continue
+        if row.get('invertebrates') != 'true' or row.get('genetic_code'):
+            continue
+        seen.add(row['sample'])
+        unresolved.append(row)
+    if not unresolved:
+        return
+    print(f"\nWARNING: mitochondrial genetic code could not be resolved for "
+          f"{len(unresolved)} invertebrate sample(s):", file=sys.stderr)
+    for row in unresolved:
+        tax_class = row.get('class') or 'unknown'
+        reason = ambiguous.get(tax_class.strip().lower())
+        detail = f" -- {reason}" if reason else ""
+        print(f"  {row['sample']}\tclass='{tax_class}'{detail}", file=sys.stderr)
+    print("The run will abort on these. Fill in the genetic_code column for each "
+          "row and re-run with --input, or add the class to "
+          "assets/mito_genetic_codes.json once its code is confirmed.\n",
+          file=sys.stderr)
+
+
 def is_invertebrate(tax_class):
     return 'true' if tax_class in INVERT_CLASSES else 'false'
 
@@ -565,6 +643,9 @@ def parse_args():
     parser.add_argument("--taxdump-dir", required=False, default=None,
                         help="Optional NCBI taxdump directory (nodes.dmp/names.dmp). Used to "
                              "resolve class/family/order when the species table has no match.")
+    parser.add_argument("--genetic-codes", required=False, default=None,
+                        help="Path to assets/mito_genetic_codes.json. Used to fill the "
+                             "samplesheet's genetic_code column from the resolved class.")
     parser.add_argument("--resolution-report", required=False, default=None,
                         help="Where to write the per-sample taxonomy provenance table "
                              "(default: taxonomy_resolution.tsv next to --output).")
@@ -638,6 +719,12 @@ def main():
         except Exception as exc:
             print(f"Error connecting to database: {exc}", file=sys.stderr)
 
+    genetic_codes, ambiguous_codes = load_genetic_codes(args.genetic_codes)
+    if not genetic_codes:
+        print("Warning: no --genetic-codes map given; the genetic_code column will be "
+              "left blank and every invertebrate row will abort in prepare_samplesheet",
+              file=sys.stderr)
+
     resolver = None
     if args.taxdump_dir:
         candidate = TaxdumpLineage(args.taxdump_dir)
@@ -691,6 +778,7 @@ def main():
              reference_species_id, tax_source) = resolve_species_info(
                 cursor, cleaned_id, resolver)
             invertebrates = is_invertebrate(tax_class)
+            genetic_code = resolve_genetic_code(tax_class, genetic_codes)
             resolution_rows.append({
                 'sample': cleaned_id,
                 'nominal_species_id': nominal_species_id,
@@ -699,6 +787,8 @@ def main():
                 'order': tax_order,
                 'reference_species_id': reference_species_id,
                 'source': tax_source,
+                'invertebrates': invertebrates,
+                'genetic_code': genetic_code,
             })
 
             def write_row(r1, r2, single_end,
@@ -725,9 +815,13 @@ def main():
                     tax_family,
                     tax_order,
                     invertebrates,
-                    # Explicit genetic_code is not stored in the sample table;
-                    # leave blank so prepare_samplesheet derives it from class.
-                    '',
+                    # Resolved from the class via assets/mito_genetic_codes.json,
+                    # the same map prepare_samplesheet uses, so the sheet shows
+                    # which table each sample will be annotated under and can be
+                    # corrected before the run. Blank means unresolved: the
+                    # vertebrate default for a vertebrate, an abort for an
+                    # invertebrate (reported by report_unresolved_genetic_code).
+                    genetic_code,
                     r1,
                     r2
                 ])
@@ -776,6 +870,7 @@ def main():
 
     write_resolution_report(args.resolution_report, resolution_rows)
     report_unresolved(resolution_rows)
+    report_unresolved_genetic_code(resolution_rows, ambiguous_codes)
 
     return 0
 

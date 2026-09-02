@@ -28,6 +28,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through untouched. New `InvertTaxonGroups` (`lib/`) centralises the class groupings both the
   samplesheet and annotation subworkflow read.
 
+- The generated samplesheet now carries a resolved `genetic_code` per row, and the class ->
+  code map lives in one place.
+
+  `bin/create_samplesheet.py` emitted the `genetic_code` column but always wrote it blank,
+  leaving `mitoGeneticCode()` to derive the code from the class. That was harmless while
+  `mitoGeneticCode()` had a catch-all code-5 default for invertebrates; once it aborted on an
+  unmapped class instead, a blank column meant the run died at samplesheet parse for any class
+  the map did not know. It knew 25 of the 76 classes `INVERT_CLASSES` marks as invertebrate:
+  Bivalvia, Cephalopoda, Polychaeta, Ascidiacea and 47 others would have stopped the run.
+
+  New `assets/mito_genetic_codes.json` is the single source of truth, read by both
+  `bin/create_samplesheet.py` and `lib/InvertTaxonGroups.groovy` -- the same fix
+  `bin/mito_gene_order.py` applied to `REF_GENES` after four copies drifted. Every entry
+  records its `basis` and whether the code is NCBI-documented (`ncbi`) or the conventional
+  choice for the group (`convention`), and an `ambiguous` block documents the classes that are
+  deliberately left to abort: Pterobranchia and Hemichordata (Rhabdopleuridae is code 24,
+  Cephalodiscidae 33, unresolvable at class rank), Trematoda/Cestoda/Monogenea/Platyhelminthes
+  (NCBI table 21 is trematode-specific and 14 is the alternative flatworm code, so table 9's
+  stated Rhabditophora scope does not cover them -- these were previously mapped to 9) and
+  Placozoa. Ctenophora joins Cnidaria on code 4, which is NCBI table 4's stated metazoan scope
+  verbatim; tunicates take the Ascidian code 13.
+
+  The generator resolves each row against that map and writes the code, so the sheet shows
+  which table a sample will be annotated under and can be corrected before launching.
+  Unresolved invertebrate rows are still written, and are now named on stderr at generation
+  time (`report_unresolved_genetic_code()`, mirroring the existing `report_unresolved()`),
+  with the ambiguity reason where there is one, instead of surfacing as an abort mid-run.
+  `taxonomy_resolution.tsv` records the code alongside the taxonomy provenance.
+
+- `Craniata` is no longer treated as an invertebrate class. It is a brachiopod class, but it is
+  also the vertebrate clade name, so a fish whose class resolved to `Craniata` was marked
+  `invertebrates=true` and routed to the invertebrate BLAST DB and MITOS2. Craniate brachiopods
+  use `Rhynchonellata`/`Lingulata`/`Brachiopoda`, or the `genetic_code` column.
+
+- `MITOS2`'s stub block no longer falls back to genetic code 5 when `meta.genetic_code` is
+  unset, matching the script block. Both now rely on the upstream abort and the
+  `SUPPORTED_GENETIC_CODES` assertion rather than guessing a table.
+
 - An intron-split `cox1` is now rebuilt as `cox1_0`/`cox1_1` in `bin/coral_fix_bed.py`, the
   same reference-transfer treatment `nad5` already got.
 

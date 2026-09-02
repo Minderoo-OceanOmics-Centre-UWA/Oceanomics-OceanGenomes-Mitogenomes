@@ -1,0 +1,104 @@
+{
+  "_comment": [
+    "Taxonomic class -> NCBI mitochondrial genetic code (translation table).",
+    "",
+    "Single source of truth, read by BOTH lib/InvertTaxonGroups.groovy (which",
+    "prepare_samplesheet uses to resolve meta.genetic_code) and",
+    "bin/create_samplesheet.py (which writes the resolved code into the",
+    "samplesheet's genetic_code column). It exists because those two are a Groovy",
+    "set and a Python set that would otherwise drift -- the same failure that had",
+    "four copies of REF_GENES disagreeing before bin/mito_gene_order.py.",
+    "",
+    "Class names are lowercase; both readers normalise before lookup.",
+    "",
+    "A class that is NOT here and NOT in 'ambiguous' aborts the run rather than",
+    "taking a default. A wrong translation table mistranslates every CDS in the",
+    "annotation and surfaces as a terminal table2asn failure far from its cause,",
+    "so an unconfirmed class is worth stopping for. Add a class here once its code",
+    "is confirmed, or set the per-sample genetic_code samplesheet column, which",
+    "overrides this file.",
+    "",
+    "'confidence' records how the code was established:",
+    "  ncbi       - the group is named explicitly on NCBI's genetic code table,",
+    "               https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi",
+    "  convention - the code is the standard one used for the group in published",
+    "               mitogenomes, but NCBI's table does not name the group. Review",
+    "               these before trusting them on a new lineage; moving one into",
+    "               'ambiguous' is the safe direction."
+  ],
+
+  "codes": [
+    {
+      "code": 4,
+      "confidence": "ncbi",
+      "basis": "NCBI table 4 (Mold, Protozoan, and Coelenterate Mitochondrial Code) gives its metazoan scope verbatim as 'Coelenterata (Ctenophora and Cnidaria)'.",
+      "classes": [
+        "anthozoa", "hydrozoa", "scyphozoa", "cubozoa", "staurozoa", "myxozoa",
+        "polypodiozoa", "cnidaria",
+        "tentaculata", "nuda", "ctenophora"
+      ]
+    },
+    {
+      "code": 4,
+      "confidence": "convention",
+      "basis": "Porifera is not named on NCBI's table 4 page, but NCBI's taxonomy assigns sponges mitochondrial code 4 and sponge mitogenomes are annotated under it. Sponges also share the reduced/atypical tRNA complement that puts them with Cnidaria in InvertTaxonGroups.REDUCED_TRNA_CLASSES.",
+      "classes": [
+        "demospongiae", "calcarea", "hexactinellida", "homoscleromorpha", "porifera"
+      ]
+    },
+    {
+      "code": 5,
+      "confidence": "ncbi",
+      "basis": "NCBI table 5 (Invertebrate Mitochondrial Code) names Mollusca (Bivalvia; Polyplacophora), Arthropoda (Crustacea, Insecta) and Nematoda (Ascaris, Caenorhabditis). Annelida is the standard code-5 lophotrochozoan alongside them.",
+      "classes": [
+        "bivalvia", "gastropoda", "cephalopoda", "polyplacophora", "scaphopoda",
+        "monoplacophora", "caudofoveata", "solenogastres", "mollusca",
+        "malacostraca", "hexanauplia", "branchiopoda", "ostracoda",
+        "cephalocarida", "remipedia", "maxillopoda", "pycnogonida", "arthropoda",
+        "chromadorea", "enoplea", "secernentea", "nematoda",
+        "polychaeta", "clitellata", "annelida"
+      ]
+    },
+    {
+      "code": 5,
+      "confidence": "convention",
+      "basis": "Minor invertebrate phyla not named on NCBI's table page. Published mitogenomes for each use the standard Invertebrate code, but none of these has been checked against a sample in this pipeline. Enteropneusta is listed here and NOT with the rest of Hemichordata: its sister class Pterobranchia is genuinely ambiguous (see below).",
+      "classes": [
+        "gymnolaemata", "stenolaemata", "phylactolaemata", "bryozoa",
+        "lingulata", "rhynchonellata", "brachiopoda",
+        "nemertea", "sipuncula", "echiura", "onychophora", "tardigrada",
+        "rotifera",
+        "sagittoidea", "chaetognatha",
+        "enteropneusta"
+      ]
+    },
+    {
+      "code": 9,
+      "confidence": "ncbi",
+      "basis": "NCBI table 9 (Echinoderm and Flatworm) names 'Asterozoa (starfishes); Echinozoa (sea urchins); Rhabditophora among the Platyhelminthes'. Ophiuroidea is Asterozoa and Holothuroidea is Echinozoa. Crinoidea is neither, but published crinoid mitogenomes use the same code. Turbellaria is the old free-living-flatworm grouping, effectively Rhabditophora.",
+      "classes": [
+        "asteroidea", "ophiuroidea", "echinoidea", "holothuroidea", "crinoidea",
+        "echinodermata",
+        "rhabditophora", "turbellaria"
+      ]
+    },
+    {
+      "code": 13,
+      "confidence": "ncbi",
+      "basis": "NCBI table 13 (Ascidian Mitochondrial Code) scope is 'Urochordata (tunicates)', evidenced from Pyura stolonifera, Halocynthia roretzi and Ciona savignyi. Tunicates sit inside Chordata but do not use the vertebrate code.",
+      "classes": [
+        "ascidiacea", "thaliacea", "appendicularia", "tunicata"
+      ]
+    }
+  ],
+
+  "ambiguous": {
+    "pterobranchia": "Contains both Rhabdopleuridae (NCBI table 24) and Cephalodiscidae (table 33). The code cannot be resolved at class rank -- set the per-sample genetic_code column from the family.",
+    "hemichordata": "Phylum rank spans Enteropneusta (code 5) and Pterobranchia (24 or 33). Resolve the sample to a class, or set the genetic_code column.",
+    "trematoda": "NCBI has table 21 (Trematode Mitochondrial Code) specifically for Trematoda, and table 14 (Alternative Flatworm) for others. Table 9 covers only Rhabditophora among the flatworms, so 9 is not safe here.",
+    "cestoda": "Neodermatan flatworm outside table 9's stated Rhabditophora scope; reported under both table 9 and table 14 in the literature.",
+    "monogenea": "As cestoda -- outside table 9's stated scope, with table 14 reported for some lineages.",
+    "platyhelminthes": "Phylum rank spans Rhabditophora (code 9) and the neodermatans above (9, 14 or 21). Resolve the sample to a class.",
+    "placozoa": "Plausibly code 4 alongside the other basal metazoans, but not documented on NCBI's table page and never yet seen in a run."
+  }
+}

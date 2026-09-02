@@ -4,3 +4,5 @@ OGCRUST,hifi,true,OGCRUST,250101,OGCRUST.hifi.250101,Penaeus monodon,Penaeus mon
 OGPYCNO,hifi,true,OGPYCNO,250101,OGPYCNO.hifi.250101,Nymphon gracile,Nymphon gracile,Pycnogonida,Nymphonidae,Pantopoda,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
 OGECHINO,hifi,true,OGECHINO,250101,OGECHINO.hifi.250101,Asterias amurensis,Asterias amurensis,Asteroidea,Asteriidae,Forcipulatida,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
 OGSPONGE,hifi,true,OGSPONGE,250101,OGSPONGE.hifi.250101,Demospongiae sp.,Demospongiae sp.,Demospongiae,Unknownidae,Unknownida,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
+OGCTENO,hifi,true,OGCTENO,250101,OGCTENO.hifi.250101,Mnemiopsis leidyi,Mnemiopsis leidyi,Tentaculata,Bolinopsidae,Lobata,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,
+OGTUNIC,hifi,true,OGTUNIC,250101,OGTUNIC.hifi.250101,Ciona intestinalis,Ciona intestinalis,Ascidiacea,Cionidae,Phlebobranchia,true,__PROJECT_DIR__/tests/test_data/read_preparation/OGSOLO.hifi.250101.fastq.gz,

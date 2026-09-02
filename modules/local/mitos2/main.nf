@@ -107,7 +107,7 @@ process MITOS2 {
 
     stub:
         def prefix = task.ext.prefix ?: meta.mt_assembly_prefix
-        def gcode  = task.ext.code ?: (meta.genetic_code ?: 5)
+        def gcode  = task.ext.code ?: meta.genetic_code
         def base_args = (task.ext.args ?: '').toString().trim()
         def topology_arg = (meta.circular == false) ? '--linear' : ''
         def effective_args = "runmitos -i ${fasta} -c ${gcode} -r ${params.mitos_refseq_ver} -R <refdb> ${topology_arg} --noplots --best ${base_args}".replaceAll(/ +/, ' ').trim()

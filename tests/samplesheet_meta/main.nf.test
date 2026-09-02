@@ -105,12 +105,14 @@ nextflow_workflow {
     }
 
     test("non-coral invertebrate classes resolve their own genetic codes") {
-        // Pins mitoGeneticCode()'s generalisation beyond Cnidaria: the Mollusca
-        // and Arthropoda (Crustacea + Pycnogonida) classes on the confirmed
-        // CODE5_CLASSES allow-list resolve to the standard Invertebrate code (5),
-        // not the Coelenterate code (4) corals use; Echinodermata keeps code 9;
-        // Porifera groups with Cnidaria on code 4 (see InvertTaxonGroups). A class
-        // outside all three groups aborts instead -- covered separately below.
+        // Pins mitoGeneticCode()'s generalisation beyond Cnidaria, reading
+        // assets/mito_genetic_codes.json: Mollusca and Arthropoda (Crustacea +
+        // Pycnogonida) resolve to the standard Invertebrate code (5), not the
+        // Coelenterate code (4) corals use; Echinodermata keeps 9; Porifera groups
+        // with Cnidaria on 4, as does Ctenophora (NCBI's table 4 scope is
+        // "Coelenterata (Ctenophora and Cnidaria)"); tunicates are 13 despite
+        // sitting inside Chordata. A class the asset does not map aborts instead
+        // -- covered separately below.
         when {
             workflow {
                 """
@@ -132,6 +134,8 @@ nextflow_workflow {
                 { assert metas.OGPYCNO.genetic_code == 5 },
                 { assert metas.OGECHINO.genetic_code == 9 },
                 { assert metas.OGSPONGE.genetic_code == 4 },
+                { assert metas.OGCTENO.genetic_code == 4 },
+                { assert metas.OGTUNIC.genetic_code == 13 },
                 { assert metas.values().every { it.invertebrates == true } }
             )
         }
@@ -175,10 +179,11 @@ nextflow_workflow {
     // fall back to code 4. Bivalvia is code 5; a wrong default mistranslates the
     // whole annotation and fails table2asn terminally.
     test("an invertebrate with an unmapped class aborts and names the sample") {
-        // There is no catch-all code-5 default: an invertebrate class outside the
-        // code-4, code-9 and CODE5_CLASSES groups must stop the run so the code is
-        // resolved before annotation, not silently guessed. Bivalvia is the case in
-        // point -- an invertebrate that is deliberately not on the code-5 list.
+        // There is no catch-all code-5 default: an invertebrate class that
+        // assets/mito_genetic_codes.json does not map must stop the run so the code
+        // is resolved before annotation, not silently guessed. Pterobranchia is the
+        // case in point -- the class spans Rhabdopleuridae (code 24) and
+        // Cephalodiscidae (33), so it cannot be resolved at class rank at all.
         when {
             workflow {
                 """
@@ -186,7 +191,7 @@ nextflow_workflow {
                 def sheet = file("unmapped_invert.csv")
                 sheet.text = template.text
                     .replace('__PROJECT_DIR__', "\${projectDir}")
-                    .replace(',Anthozoa,Acroporidae,Scleractinia,true,', ',Bivalvia,Veneridae,Venerida,true,')
+                    .replace(',Anthozoa,Acroporidae,Scleractinia,true,', ',Pterobranchia,Rhabdopleuridae,Rhabdopleurida,true,')
                 input[0] = sheet.toString()
                 input[1] = null
                 input[2] = 'samplesheet'

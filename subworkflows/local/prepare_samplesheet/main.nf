@@ -14,23 +14,21 @@ include { samplesheetToList         } from 'plugin/nf-schema'
 
 // Resolve the NCBI mitochondrial genetic code (translation table) for a sample
 // from its taxonomic class. Mitochondrial codes differ by lineage, and the wrong
-// code mistranslates CDS in MITOS2 annotation and QC protein translation:
-//   * Cnidaria (corals, anemones, jellyfish, hydroids) and Porifera (sponges) use
-//     the Coelenterate/Mold code (4) -- see InvertTaxonGroups (lib/) for why these
-//     two groups are handled together,
-//   * echinoderms and flatworms use the Echinoderm/Flatworm code (9),
-//   * the invertebrate classes confirmed to use the standard Invertebrate code
-//     (5) are listed explicitly in InvertTaxonGroups.CODE5_CLASSES,
-//   * vertebrates (and anything unresolved but NOT flagged invertebrate) fall
-//     back to defaultCode (vertebrate, 2).
+// code mistranslates CDS in MITOS2 annotation and QC protein translation --
+// Cnidaria/Ctenophora/Porifera are code 4, echinoderms and most flatworms 9,
+// tunicates 13, and the bilaterian invertebrate bulk 5.
 //
-// There is deliberately no catch-all code-5 default for invertebrates. An
-// `invertebrates=true` sample whose class is in none of the three groups raises
-// instead: not every invertebrate is code 5 (Bivalvia among others), and a wrong
-// code mistranslates the whole annotation and fails table2asn terminally, long
-// after the point where it could be diagnosed cheaply. Resolve the class before
-// the run -- add it to InvertTaxonGroups once its code is confirmed, or set the
-// per-sample `genetic_code` samplesheet column, which wins over this map.
+// The class -> code map lives in assets/mito_genetic_codes.json, not here, so
+// bin/create_samplesheet.py can resolve the same codes when it writes the
+// samplesheet's genetic_code column. See InvertTaxonGroups.loadGeneticCodes().
+//
+// Precedence: the per-sample `genetic_code` column wins over everything, then
+// the map, then defaultCode for vertebrates. There is deliberately no catch-all
+// invertebrate default: not every invertebrate is code 5, and a wrong table
+// mistranslates the whole annotation and fails table2asn terminally, long after
+// the point where it could be diagnosed cheaply. An `invertebrates=true` sample
+// whose class is unmapped raises instead, so the code is resolved before the run
+// -- add the class to the JSON once its code is confirmed, or set the column.
 def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
     if (explicitCode != null && explicitCode.toString().trim() != '') {
         def parsed = explicitCode.toString().trim()
@@ -39,20 +37,18 @@ def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
         }
         return parsed as int
     }
-    if (InvertTaxonGroups.isReducedTrna(taxClass)) {
-        return 4
-    }
-    def c = (taxClass ?: '').toString().trim().toLowerCase()
-    if (c in InvertTaxonGroups.ECHINODERM_FLATWORM_CLASSES) {
-        return 9
-    }
-    if (InvertTaxonGroups.isCode5(taxClass)) {
-        return 5
+    def mapped = InvertTaxonGroups.geneticCode(taxClass)
+    if (mapped != null) {
+        return mapped
     }
     if (isInvert) {
-        error "Sample ${sampleId}: class '${taxClass ?: 'unknown'}' has no known " +
-              "mitochondrial genetic code -- add it to InvertTaxonGroups or set " +
-              "the genetic_code column"
+        // A documented ambiguous class (e.g. Pterobranchia, which spans codes 24
+        // and 33) gets the reason rather than a bare "no known code", so the fix
+        // is obvious from the error alone.
+        def reason = InvertTaxonGroups.ambiguousReason(taxClass)
+        error "Sample ${sampleId}: class '${taxClass ?: 'unknown'}' has no confirmed " +
+              "mitochondrial genetic code -- " + (reason ?: "add it to " +
+              "assets/mito_genetic_codes.json") + " or set the genetic_code column"
     }
     return defaultCode
 }
@@ -144,6 +140,12 @@ workflow PREPARE_SAMPLESHEET {
     
     main:
 
+    // Parse the class -> genetic code map once, before the per-sample closure
+    // below calls mitoGeneticCode(). checkIfExists so a missing or malformed
+    // asset fails here, not as a null code on every invertebrate row.
+    ch_genetic_codes = file("${projectDir}/assets/mito_genetic_codes.json", checkIfExists: true)
+    InvertTaxonGroups.loadGeneticCodes(ch_genetic_codes)
+
    // Handle different input types
     if (input && input_dir) {
         error "Please specify either --input (samplesheet) OR --input_dir (directory), not both"
@@ -175,7 +177,8 @@ workflow PREPARE_SAMPLESHEET {
             input_files_ch,
             "samplesheet.csv",
             params.sql_config,
-            taxdump_ch
+            taxdump_ch,
+            ch_genetic_codes
         )
 
         samplesheet_ch = CREATE_SAMPLESHEET_ENRICHED.out.samplesheet
