@@ -474,7 +474,7 @@ def query_species_info(cursor, sample_id):
 
 def resolve_species_info(cursor, sample_id, resolver=None):
     """
-    (nominal_species_id, class, family, order, reference_species_id, source).
+    (nominal_species_id, class, family, order, reference_species_id, source, lineage).
 
     The OceanOmics species table is authoritative and tried first. It only holds
     curated taxa, though, and a miss there is not benign: 'unknown' class makes
@@ -494,7 +494,7 @@ def resolve_species_info(cursor, sample_id, resolver=None):
     missing = (not db_had_class) or (not tax_family) or (not tax_order)
     if not missing:
         return (nominal_species_id, tax_class, tax_family, tax_order,
-                reference_species_id, 'db')
+                reference_species_id, 'db', {})
 
     lineage = {}
     if resolver is not None and nominal_species_id and nominal_species_id != "unknown":
@@ -505,8 +505,13 @@ def resolve_species_info(cursor, sample_id, resolver=None):
                   f"('{nominal_species_id}'): {exc}", file=sys.stderr)
 
     if lineage:
-        if not db_had_class and lineage.get('class'):
-            tax_class = lineage['class']
+        if not db_had_class and (lineage.get('class') or lineage.get('phylum')):
+            # A sample identified no further than its phylum ('Porifera') has no
+            # class to resolve, but the phylum still selects the genetic code and
+            # the annotation route, and INVERT_CLASSES / mito_genetic_codes.json
+            # carry the phylum names for exactly this case. Better than 'unknown',
+            # which reads as vertebrate everywhere downstream.
+            tax_class = lineage.get('class') or lineage['phylum']
         tax_family = tax_family or lineage.get('family', '')
         tax_order = tax_order or lineage.get('order', '')
         # An NCBI scientific name is a better findMitoReference query than the raw
@@ -519,11 +524,15 @@ def resolve_species_info(cursor, sample_id, resolver=None):
         source = 'db+taxdump'
     elif db_had_class:
         source = 'db'
+    elif lineage and not lineage.get('class') and lineage.get('phylum'):
+        # Flagged distinctly so the resolution report shows which samples are
+        # only identified to phylum, rather than burying it under 'taxdump'.
+        source = 'taxdump-phylum'
     else:
         source = 'taxdump'
 
     return (nominal_species_id, tax_class, tax_family, tax_order,
-            reference_species_id, source)
+            reference_species_id, source, lineage)
 
 
 RESOLUTION_COLUMNS = ('sample', 'nominal_species_id', 'class', 'family', 'order',
@@ -639,8 +648,24 @@ def report_unresolved_genetic_code(rows, ambiguous):
           file=sys.stderr)
 
 
-def is_invertebrate(tax_class):
-    return 'true' if tax_class in INVERT_CLASSES else 'false'
+def is_invertebrate(tax_class, lineage=None):
+    """'true' / 'false', preferring NCBI ancestry over the INVERT_CLASSES list.
+
+    The list is a hand-maintained allow-list, and anything missing from it reads
+    as a vertebrate: the wrong genetic code, EMMA instead of MITOS2, and the
+    curated fish BLAST database, with nothing raised to notice. That is not a
+    hypothetical -- barnacles resolve to class Thecostraca, which was absent, and
+    a taxdump sweep put 41 of NCBI's 92 invertebrate classes outside the list.
+
+    So when the taxdump resolved the sample, ancestry decides: an animal that is
+    not a vertebrate is an invertebrate, whatever its class is called and whether
+    or not anyone has added that class here. INVERT_CLASSES remains the fallback
+    for a class that came from the species table with no taxdump lineage behind
+    it.
+    """
+    if lineage and lineage.get('is_animal') is not None:
+        return 'true' if (lineage['is_animal'] and not lineage['is_vertebrate']) else 'false'
+    return 'true' if tax_class in INVERT_CLASSES else 'false' 
 
 
 def parse_args():
@@ -783,9 +808,9 @@ def main():
                 assembly_prefix = f"{cleaned_id}.{sequencing_type}.{date}"
 
             (nominal_species_id, tax_class, tax_family, tax_order,
-             reference_species_id, tax_source) = resolve_species_info(
+             reference_species_id, tax_source, tax_lineage) = resolve_species_info(
                 cursor, cleaned_id, resolver)
-            invertebrates = is_invertebrate(tax_class)
+            invertebrates = is_invertebrate(tax_class, tax_lineage)
             genetic_code = resolve_genetic_code(tax_class, genetic_codes)
             resolution_rows.append({
                 'sample': cleaned_id,

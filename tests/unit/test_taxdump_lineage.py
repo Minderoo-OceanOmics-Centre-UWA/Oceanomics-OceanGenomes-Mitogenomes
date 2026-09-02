@@ -44,24 +44,36 @@ def load_create_samplesheet():
 cs = load_create_samplesheet()
 
 
-# A miniature taxdump: Anthozoa > Scleractinia > Acroporidae > Acropora >
-# Acropora tenuis, plus a cross-kingdom homonym at genus rank ('Morus').
+# A miniature taxdump: Metazoa > Cnidaria > Anthozoa > Scleractinia >
+# Acroporidae > Acropora > Acropora tenuis, a vertebrate branch under
+# Vertebrata, a plant branch outside Metazoa, and two homonyms -- 'Morus'
+# (gannet vs mulberry, one animal candidate) and 'Vertebrata' itself (the clade
+# vs a plant genus), which is why the ancestry anchors are picked by lineage
+# rather than by taking the first match.
 NODES = [
     (1, 1, "no rank"),
-    (2, 1, "class"),
+    (100, 1, "kingdom"),      # Metazoa
+    (101, 100, "clade"),      # Vertebrata
+    (30, 100, "phylum"),      # Cnidaria
+    (2, 30, "class"),         # Anthozoa
     (3, 2, "order"),
     (4, 3, "family"),
     (5, 4, "genus"),
     (6, 5, "species"),
     (7, 5, "species"),
-    (10, 1, "class"),
-    (11, 10, "genus"),
-    (20, 1, "class"),
-    (21, 20, "genus"),
+    (40, 100, "phylum"),      # Porifera -- a phylum with no class below it here
+    (10, 101, "class"),       # Aves
+    (11, 10, "genus"),        # Morus, the gannet
+    (20, 1, "class"),         # Magnoliopsida, outside Metazoa
+    (21, 20, "genus"),        # Morus, the mulberry
+    (22, 20, "genus"),        # Vertebrata, the red alga
 ]
 
 NAMES = [
     (1, "root", "scientific name"),
+    (100, "Metazoa", "scientific name"),
+    (101, "Vertebrata", "scientific name"),
+    (30, "Cnidaria", "scientific name"),
     (2, "Anthozoa", "scientific name"),
     (3, "Scleractinia", "scientific name"),
     (4, "Acroporidae", "scientific name"),
@@ -69,10 +81,12 @@ NAMES = [
     (6, "Acropora tenuis", "scientific name"),
     (6, "Madrepora tenuis", "synonym"),
     (7, "Acropora sp.", "scientific name"),
+    (40, "Porifera", "scientific name"),
     (10, "Aves", "scientific name"),
     (11, "Morus", "scientific name"),
     (20, "Magnoliopsida", "scientific name"),
     (21, "Morus", "scientific name"),
+    (22, "Vertebrata", "scientific name"),
 ]
 
 
@@ -126,9 +140,32 @@ class TaxdumpLineageTests(unittest.TestCase):
         self.assertEqual(lineage["class"], "Anthozoa")
         self.assertEqual(lineage["family"], "Acroporidae")
 
-    def test_cross_kingdom_homonym_resolves_to_nothing(self):
-        # 'Morus' is both a gannet and a mulberry. No lineage beats the wrong one.
-        self.assertEqual(self.resolver.lineage_for_name("Morus"), {})
+    def test_cross_kingdom_homonym_resolves_to_the_animal(self):
+        # 'Morus' is both a gannet and a mulberry. This pipeline sequences animals
+        # and never plants, so the animal candidate is the answer -- dropping the
+        # name outright cost real samples their lineage (the sponge genus
+        # Acanthella and the barnacle genus Calantica are both plant homonyms).
+        lineage = self.resolver.lineage_for_name("Morus")
+        self.assertEqual(lineage["class"], "Aves")
+        self.assertTrue(lineage["is_animal"])
+        self.assertTrue(lineage["is_vertebrate"])
+
+    def test_the_vertebrata_anchor_is_the_animal_one(self):
+        # 'Vertebrata' is itself a homonym (a red algal genus), so an anchor taken
+        # by first match would classify every vertebrate as an invertebrate.
+        self.assertTrue(self.resolver.lineage_for_name("Acropora tenuis")["is_animal"])
+        self.assertFalse(self.resolver.lineage_for_name("Acropora tenuis")["is_vertebrate"])
+        self.assertTrue(self.resolver.lineage_for_name("Morus")["is_vertebrate"])
+
+    def test_a_phylum_only_name_still_resolves(self):
+        # 'Porifera' pins no class, but the phylum is enough to choose the genetic
+        # code and the annotation route, and is what the operator has when the
+        # sponge has not been identified further.
+        lineage = self.resolver.lineage_for_name("Porifera")
+        self.assertEqual(lineage["phylum"], "Porifera")
+        self.assertNotIn("class", lineage)
+        self.assertTrue(lineage["is_animal"])
+        self.assertFalse(lineage["is_vertebrate"])
 
     def test_absent_name_resolves_to_nothing(self):
         self.assertEqual(self.resolver.lineage_for_name("Nothing here"), {})
@@ -212,6 +249,32 @@ class ResolveSpeciesInfoTests(unittest.TestCase):
         # is_invertebrate() cannot say so, which is why the run must abort.
         self.assertEqual(cs.is_invertebrate("unknown"), "false")
         self.assertEqual(cs.is_invertebrate("Anthozoa"), "true")
+
+    def test_ancestry_beats_the_class_allow_list(self):
+        # A class nobody has added to INVERT_CLASSES is still an invertebrate when
+        # the taxdump says it is an animal outside Vertebrata. Without this, a
+        # missing class silently takes the vertebrate path -- how barnacles
+        # (Thecostraca) were being annotated as fish.
+        self.assertNotIn("Nothingoidea", cs.INVERT_CLASSES)
+        self.assertEqual(
+            cs.is_invertebrate("Nothingoidea",
+                               {"is_animal": True, "is_vertebrate": False}),
+            "true")
+        self.assertEqual(
+            cs.is_invertebrate("Anthozoa",
+                               {"is_animal": True, "is_vertebrate": True}),
+            "false")
+
+    def test_the_class_list_is_still_the_fallback_without_a_lineage(self):
+        # A class straight from the species table has no taxdump lineage behind it.
+        self.assertEqual(cs.is_invertebrate("Anthozoa", {}), "true")
+        self.assertEqual(cs.is_invertebrate("Actinopteri", None), "false")
+
+    def test_a_phylum_only_sample_gets_the_phylum_as_its_class(self):
+        result = self.resolve(("Porifera", "unknown", "", "", ""), self.resolver)
+        self.assertEqual(result[1], "Porifera")
+        self.assertEqual(result[5], "taxdump-phylum")
+        self.assertEqual(cs.is_invertebrate(result[1], result[6]), "true")
 
 
 if __name__ == "__main__":

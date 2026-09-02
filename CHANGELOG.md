@@ -57,6 +57,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the ambiguity reason where there is one, instead of surfacing as an abort mid-run.
   `taxonomy_resolution.tsv` records the code alongside the taxonomy provenance.
 
+- Invertebrate status is now decided by NCBI ancestry, not by a hand-maintained class list.
+
+  `INVERT_CLASSES` is an allow-list, and anything missing from it read as a vertebrate:
+  genetic code 2, EMMA instead of MITOS2 and the curated fish BLAST database, with nothing
+  raised to notice. Checking the first invertebrate run against the taxdump found stalked
+  barnacles going through as fish -- they resolve to class `Thecostraca`, which was absent --
+  and a sweep of every class-rank node under Metazoa but outside Vertebrata put **41 of NCBI's
+  92 invertebrate classes** outside the list, Insecta, Arachnida, Copepoda and Merostomata
+  among them. `Maxillopoda` and `Hexanauplia`, which were in the list, are retired names the
+  taxdump no longer carries at all.
+
+  `TaxdumpLineage` now reports `is_animal` / `is_vertebrate` from the lineage walk, and
+  `is_invertebrate()` uses them whenever the taxdump resolved the sample, falling back to
+  `INVERT_CLASSES` only for a class that came from the species table with no lineage behind it.
+  A class nobody has added can no longer misroute a sample. The ancestry anchors are picked by
+  lineage rather than by first match, because `Vertebrata` is itself a homonym (a red algal
+  genus) and taking the wrong one would classify every vertebrate as an invertebrate.
+
+- A cross-kingdom homonym now resolves to the animal rather than to nothing. Dropping the name
+  outright was too blunt for a pipeline that sequences animals and never plants: it cost the
+  sponge genus `Acanthella` and the barnacle genus `Calantica` their whole lineage, both being
+  homonyms of flowering-plant genera. When exactly one candidate is an animal it is the answer;
+  two animal candidates (the phylum `Ctenophora` and the crane-fly genus `Ctenophora`) stay
+  genuinely ambiguous and still resolve to nothing.
+
+- A sample identified no further than its phylum now resolves. `phylum` joins `INDEXED_RANKS`
+  and `WANTED_RANKS`, and a lineage with no class rank falls back to the phylum name as the
+  sample's `class`. A sponge recorded only as `Porifera` pins no class, but the phylum still
+  selects the genetic code (4), the reduced-tRNA expectation and the cox1 rotation panel --
+  `INVERT_CLASSES` and `mito_genetic_codes.json` already carry the phylum names for exactly
+  this case. These rows are marked `taxdump-phylum` in `taxonomy_resolution.tsv` rather than
+  being hidden under `taxdump`.
+
+- Barnacles are no longer annotated as vertebrates: `Thecostraca` and `Copepoda` (plus
+  `Ichthyostraca` and `Mystacocarida`) join the crustacean classes, all on code 5.
+
 - `Craniata` is no longer treated as an invertebrate class. It is a brachiopod class, but it is
   also the vertebrate clade name, so a fish whose class resolved to `Craniata` was marked
   `invertebrates=true` and routed to the invertebrate BLAST DB and MITOS2. Craniate brachiopods

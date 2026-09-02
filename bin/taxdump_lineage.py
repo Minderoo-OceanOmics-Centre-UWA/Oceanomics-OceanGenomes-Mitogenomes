@@ -22,11 +22,19 @@ import sys
 
 # Ranks worth indexing by name. A nominal_species_id is usually a binomial, but
 # the species table's own fallbacks mean it can legitimately be a genus, family
-# or order name, and each of those still pins down a class.
-INDEXED_RANKS = frozenset({'species', 'genus', 'family', 'order', 'class'})
+# or order name, and each of those still pins down a class. Phylum is indexed
+# too, one rank coarser than useful: it does NOT pin down a class, but for a
+# sample identified no further than 'Porifera' the phylum is still enough to pick
+# the genetic code and the annotation route, and it is what the operator has.
+INDEXED_RANKS = frozenset({'species', 'genus', 'family', 'order', 'class', 'phylum'})
 
 # Ranks read back out of a lineage walk.
-WANTED_RANKS = ('class', 'order', 'family', 'genus', 'species')
+WANTED_RANKS = ('phylum', 'class', 'order', 'family', 'genus', 'species')
+
+# Nodes used to tell an invertebrate from a vertebrate by ancestry rather than by
+# a hand-maintained class list. Looked up by name during parsing because neither
+# rank ('kingdom', 'clade') is in INDEXED_RANKS.
+ANCESTRY_ANCHORS = ('Metazoa', 'Vertebrata')
 
 # Open-nomenclature qualifiers. NCBI holds species-rank placeholder nodes such
 # as 'Exocoetus sp.', one per submitter's unidentified organism. Matching one
@@ -49,7 +57,9 @@ class TaxdumpLineage:
         self._rank = {}            # taxid -> rank
         self._name = {}            # taxid -> scientific name (indexed ranks only)
         self._name_to_taxid = {}   # lowercased scientific name -> taxid
+        self._name_to_taxids = {}  # lowercased scientific name -> all taxids
         self._ambiguous = set()    # names shared by more than one taxon
+        self._anchors = {}         # 'Metazoa' / 'Vertebrata' -> taxid
 
     # -- loading ---------------------------------------------------------
 
@@ -104,20 +114,94 @@ class TaxdumpLineage:
                     taxid = int(parts[0].strip())
                 except ValueError:
                     continue
+                name = parts[1].strip()
+                # Anchors first: their ranks ('kingdom', 'clade') are outside
+                # INDEXED_RANKS, so the filter below would drop them.
+                if name in ANCESTRY_ANCHORS:
+                    self._anchors.setdefault(name, []).append(taxid)
                 if rank.get(taxid) not in INDEXED_RANKS:
                     continue
-                name = parts[1].strip()
                 self._name[taxid] = name
                 key = name.lower()
+                self._name_to_taxids.setdefault(key, []).append(taxid)
                 existing = self._name_to_taxid.get(key)
                 if existing is not None and existing != taxid:
                     # Cross-kingdom homonyms are real (Morus the bird vs Morus
-                    # the mulberry). No lineage is better than the wrong one.
+                    # the mulberry). Recorded here, then narrowed to the animal
+                    # candidate in _resolve_taxid() -- see the note there.
                     self._ambiguous.add(key)
                 else:
                     self._name_to_taxid[key] = taxid
 
     # -- lookups ---------------------------------------------------------
+
+    # -- ancestry --------------------------------------------------------
+
+    def _anchor(self, name):
+        """Resolve an ANCESTRY_ANCHORS name to its animal-kingdom taxid.
+
+        'Vertebrata' is itself a homonym (the red algal genus Vertebrata), so the
+        anchor is the candidate that sits under Metazoa. Metazoa is picked by
+        rank instead, there being no Metazoa outside the animals.
+        """
+        cached = getattr(self, '_anchor_cache', None)
+        if cached is None:
+            cached = self._anchor_cache = {}
+        if name in cached:
+            return cached[name]
+        candidates = self._anchors.get(name, [])
+        chosen = None
+        if name == 'Metazoa':
+            for taxid in candidates:
+                if self._rank.get(taxid) == 'kingdom':
+                    chosen = taxid
+                    break
+        else:
+            metazoa = self._anchor('Metazoa')
+            for taxid in candidates:
+                if metazoa is not None and self.has_ancestor(taxid, metazoa):
+                    chosen = taxid
+                    break
+        if chosen is None and len(candidates) == 1:
+            chosen = candidates[0]
+        cached[name] = chosen
+        return chosen
+
+    def has_ancestor(self, taxid, ancestor):
+        """True when `ancestor` is `taxid` or one of its parents."""
+        if taxid is None or ancestor is None:
+            return False
+        current = taxid
+        seen = set()
+        while current and current != 1 and current not in seen:
+            if current == ancestor:
+                return True
+            seen.add(current)
+            current = self._parent.get(current)
+        return False
+
+    def is_animal(self, taxid):
+        return self.has_ancestor(taxid, self._anchor('Metazoa'))
+
+    def is_vertebrate(self, taxid):
+        return self.has_ancestor(taxid, self._anchor('Vertebrata'))
+
+    def _resolve_taxid(self, key):
+        """Taxid for a lowercased name, narrowing homonyms to the animal one.
+
+        A cross-kingdom homonym used to be dropped outright, on the grounds that
+        no lineage beats the wrong one. That is too blunt here: this pipeline
+        sequences animals and never plants, so 'Acanthella' is the sponge genus
+        and 'Calantica' the barnacle, and refusing both cost two samples their
+        whole lineage. When exactly one candidate is an animal it is the answer.
+        Two animal candidates (the phylum Ctenophora and the crane-fly genus
+        Ctenophora) are still genuinely ambiguous and still resolve to nothing.
+        """
+        taxid = self._name_to_taxid.get(key)
+        if key not in self._ambiguous:
+            return taxid
+        animals = [t for t in self._name_to_taxids.get(key, []) if self.is_animal(t)]
+        return animals[0] if len(animals) == 1 else None
 
     def lineage_for_taxid(self, taxid):
         """Walk to the root collecting the wanted ranks. {} if the taxid is unknown."""
@@ -147,10 +231,7 @@ class TaxdumpLineage:
         """
         self.load()
         for candidate in self._candidates(name):
-            key = candidate.lower()
-            if key in self._ambiguous:
-                continue
-            taxid = self._name_to_taxid.get(key)
+            taxid = self._resolve_taxid(candidate.lower())
             if taxid is None:
                 continue
             lineage = self.lineage_for_taxid(taxid)
@@ -158,6 +239,12 @@ class TaxdumpLineage:
                 continue
             lineage['matched_name'] = self._name.get(taxid, candidate)
             lineage['matched_rank'] = self._rank.get(taxid, '')
+            # Ancestry, not a class list, is what decides invertebrate status:
+            # a class missing from a hand-maintained set reads as 'vertebrate'
+            # and silently annotates the sample with the wrong code, annotator
+            # and BLAST database. See is_invertebrate() in create_samplesheet.py.
+            lineage['is_animal'] = self.is_animal(taxid)
+            lineage['is_vertebrate'] = self.is_vertebrate(taxid)
             return lineage
         return {}
 
