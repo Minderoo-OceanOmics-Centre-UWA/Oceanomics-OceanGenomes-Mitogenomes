@@ -477,15 +477,19 @@ def resolve_species_info(cursor, sample_id, resolver=None):
     (nominal_species_id, class, family, order, reference_species_id, source, lineage).
 
     The OceanOmics species table is authoritative and tried first. It only holds
-    curated taxa, though, and a miss there is not benign: 'unknown' class makes
-    is_invertebrate() return 'false', which silently picks the vertebrate genetic
-    code, EMMA over MITOS2 and the curated (fish) BLAST DB. So anything the table
-    leaves blank is filled in from the NCBI taxdump when one is available.
+    curated taxa, though, and a miss there is not benign: an 'unknown' class is
+    what is_invertebrate() reads as 'false', so it would select the vertebrate
+    genetic code, EMMA over MITOS2 and the curated (fish) BLAST DB. It does not
+    reach any of that -- validateTaxonomy() in
+    subworkflows/local/prepare_samplesheet aborts the run first, naming every
+    unresolved sample, unless --allow_unknown_taxonomy is set -- but the cost is
+    still a stopped run. So anything the table leaves blank is filled in from the
+    NCBI taxdump when one is available.
 
-    `source` is 'db', 'db+taxdump', 'taxdump' or 'unresolved', and is reported for
-    the run rather than written to the samplesheet -- see the meta-shape warning in
-    subworkflows/local/prepare_samplesheet: a new optional column changes every
-    meta map and silently breaks joins on resume.
+    `source` is 'db', 'db+taxdump', 'taxdump', 'taxdump-phylum' or 'unresolved',
+    and is reported for the run rather than written to the samplesheet -- see the
+    meta-shape warning in subworkflows/local/prepare_samplesheet: a new optional
+    column changes every meta map and silently breaks joins on resume.
     """
     (nominal_species_id, tax_class, tax_family, tax_order,
      reference_species_id) = query_species_info(cursor, sample_id)
@@ -507,10 +511,16 @@ def resolve_species_info(cursor, sample_id, resolver=None):
     if lineage:
         if not db_had_class and (lineage.get('class') or lineage.get('phylum')):
             # A sample identified no further than its phylum ('Porifera') has no
-            # class to resolve, but the phylum still selects the genetic code and
-            # the annotation route, and INVERT_CLASSES / mito_genetic_codes.json
-            # carry the phylum names for exactly this case. Better than 'unknown',
-            # which reads as vertebrate everywhere downstream.
+            # class to resolve. The phylum is still enough to select the genetic
+            # code, the reduced-tRNA expectation and the cox1 rotation panel --
+            # INVERT_CLASSES and mito_genetic_codes.json carry the phylum names
+            # for exactly this case -- so use it rather than leaving 'unknown',
+            # which validateTaxonomy() (in subworkflows/local/prepare_samplesheet)
+            # aborts the run on. That abort is the safe outcome, not a wrong
+            # annotation; what the fallback buys is not having to stop the run to
+            # identify a sponge to class. It is still coarser than the rest of the
+            # sheet, so report_phylum_only() names these samples, and the row is
+            # marked 'taxdump-phylum' in taxonomy_resolution.tsv.
             tax_class = lineage.get('class') or lineage['phylum']
         tax_family = tax_family or lineage.get('family', '')
         tax_order = tax_order or lineage.get('order', '')
