@@ -53,8 +53,10 @@
       "classes": [
         "bivalvia", "gastropoda", "cephalopoda", "polyplacophora", "scaphopoda",
         "monoplacophora", "caudofoveata", "solenogastres", "mollusca",
-        "malacostraca", "hexanauplia", "branchiopoda", "ostracoda",
-        "cephalocarida", "remipedia", "maxillopoda", "pycnogonida", "arthropoda",
+        "malacostraca", "thecostraca", "copepoda", "ichthyostraca",
+        "mystacocarida", "branchiopoda", "ostracoda", "cephalocarida",
+        "remipedia", "pycnogonida", "arthropoda",
+        "hexanauplia", "maxillopoda",
         "chromadorea", "enoplea", "secernentea", "nematoda",
         "polychaeta", "clitellata", "annelida"
       ]
@@ -65,7 +67,7 @@
       "basis": "Minor invertebrate phyla not named on NCBI's table page. Published mitogenomes for each use the standard Invertebrate code, but none of these has been checked against a sample in this pipeline. Enteropneusta is listed here and NOT with the rest of Hemichordata: its sister class Pterobranchia is genuinely ambiguous (see below).",
       "classes": [
         "gymnolaemata", "stenolaemata", "phylactolaemata", "bryozoa",
-        "lingulata", "rhynchonellata", "brachiopoda",
+        "lingulata", "craniata", "rhynchonellata", "brachiopoda",
         "nemertea", "sipuncula", "echiura", "onychophora", "tardigrada",
         "rotifera",
         "sagittoidea", "chaetognatha",

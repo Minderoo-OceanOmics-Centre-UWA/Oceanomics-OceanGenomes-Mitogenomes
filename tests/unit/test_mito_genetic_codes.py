@@ -97,10 +97,24 @@ class InvertClassCoverageTests(unittest.TestCase):
         uncovered = sorted(self.invert_classes - set(self.codes) - set(self.ambiguous))
         self.assertEqual(uncovered, [], f"classes with no code and no reason: {uncovered}")
 
-    def test_craniata_is_not_an_invert_class(self):
-        # Craniata is a brachiopod class AND the vertebrate clade name; listing it
-        # marks a fish as an invertebrate.
-        self.assertNotIn("craniata", self.invert_classes)
+    def test_craniata_is_the_brachiopod_class(self):
+        # Craniata is a homonym: NCBI has it as both the brachiopod class (115366)
+        # and the vertebrate subphylum (89593). taxdump_lineage indexes only
+        # species/genus/family/order/class, so the subphylum is unreachable and a
+        # resolved class of 'Craniata' can only mean the brachiopod. It must stay
+        # an invertebrate class -- dropping it makes craniid brachiopods silently
+        # vertebrate, the worse of the two failures.
+        self.assertIn("craniata", self.invert_classes)
+        self.assertEqual(self.codes.get("craniata"), 5)
+
+    def test_current_crustacean_classes_are_covered(self):
+        # Barnacles resolve to Thecostraca and copepods to Copepoda; Maxillopoda
+        # and Hexanauplia are retired names the taxdump no longer carries. A
+        # missing class here does not abort -- it reads as invertebrates=false and
+        # the sample is annotated as a vertebrate.
+        for tax_class in ["thecostraca", "copepoda", "malacostraca", "ostracoda"]:
+            self.assertIn(tax_class, self.invert_classes, tax_class)
+            self.assertEqual(self.codes.get(tax_class), 5, tax_class)
 
     def test_known_codes(self):
         for tax_class, expected in [

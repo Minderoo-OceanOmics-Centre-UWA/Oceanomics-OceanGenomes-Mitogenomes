@@ -28,9 +28,16 @@ INVERT_CLASSES = frozenset({
     'Monoplacophora', 'Caudofoveata', 'Solenogastres', 'Mollusca',
     # Annelida
     'Polychaeta', 'Clitellata', 'Annelida',
-    # Arthropoda (crustaceans + chelicerates)
-    'Malacostraca', 'Hexanauplia', 'Branchiopoda', 'Ostracoda',
-    'Cephalocarida', 'Remipedia', 'Maxillopoda', 'Pycnogonida',
+    # Arthropoda (crustaceans + chelicerates). 'Thecostraca' (barnacles) and
+    # 'Copepoda' are the current NCBI classes; 'Maxillopoda' and 'Hexanauplia'
+    # are retired names the taxdump no longer carries, kept only so a legacy
+    # species-table row still reads as invertebrate. A barnacle resolves to
+    # Thecostraca, and while that was missing from this set it took the
+    # is_invertebrate() == 'false' path: vertebrate genetic code, the fish BLAST
+    # DB and EMMA, with no error to notice.
+    'Malacostraca', 'Thecostraca', 'Copepoda', 'Ichthyostraca', 'Mystacocarida',
+    'Branchiopoda', 'Ostracoda', 'Cephalocarida', 'Remipedia', 'Pycnogonida',
+    'Hexanauplia', 'Maxillopoda',
     # Echinodermata
     'Echinoidea', 'Asteroidea', 'Ophiuroidea', 'Holothuroidea', 'Crinoidea',
     'Echinodermata',
@@ -40,12 +47,13 @@ INVERT_CLASSES = frozenset({
     'Ascidiacea', 'Thaliacea', 'Appendicularia', 'Tunicata',
     # Bryozoa
     'Gymnolaemata', 'Stenolaemata', 'Phylactolaemata', 'Bryozoa',
-    # Brachiopoda. NB 'Craniata' is deliberately absent: it is a brachiopod class
-    # AND the vertebrate clade name, so listing it would mark a fish whose class
-    # resolved to Craniata as an invertebrate and route it to the invertebrate
-    # BLAST DB and MITOS2. Craniate brachiopods must set the class to
-    # Rhynchonellata/Lingulata or the phylum, or the genetic_code column.
-    'Lingulata', 'Rhynchonellata', 'Brachiopoda',
+    # Brachiopoda. 'Craniata' is a homonym -- NCBI has it as both the brachiopod
+    # class (taxid 115366) and the vertebrate subphylum (89593) -- but only the
+    # class-rank node is indexed by taxdump_lineage (INDEXED_RANKS has no
+    # subphylum), so a resolved class of 'Craniata' can only ever mean the
+    # brachiopod. Keep it: dropping it makes craniid brachiopods silently
+    # vertebrate, which is the worse failure of the two.
+    'Lingulata', 'Craniata', 'Rhynchonellata', 'Brachiopoda',
     # Ctenophora
     'Tentaculata', 'Nuda', 'Ctenophora',
     # Hemichordata
