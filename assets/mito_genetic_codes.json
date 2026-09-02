@@ -43,7 +43,8 @@
       "confidence": "convention",
       "basis": "Porifera is not named on NCBI's table 4 page, but NCBI's taxonomy assigns sponges mitochondrial code 4 and sponge mitogenomes are annotated under it. Sponges also share the reduced/atypical tRNA complement that puts them with Cnidaria in InvertTaxonGroups.REDUCED_TRNA_CLASSES.",
       "classes": [
-        "demospongiae", "calcarea", "hexactinellida", "homoscleromorpha", "porifera"
+        "demospongiae", "calcarea", "hexactinellida", "homoscleromorpha", "porifera",
+        "placozoa"
       ]
     },
     {
@@ -71,7 +72,8 @@
         "nemertea", "sipuncula", "echiura", "onychophora", "tardigrada",
         "rotifera",
         "sagittoidea", "chaetognatha",
-        "enteropneusta"
+        "enteropneusta",
+        "appendicularia", "tunicata"
       ]
     },
     {
@@ -81,26 +83,22 @@
       "classes": [
         "asteroidea", "ophiuroidea", "echinoidea", "holothuroidea", "crinoidea",
         "echinodermata",
-        "rhabditophora", "turbellaria"
+        "rhabditophora", "turbellaria",
+        "trematoda", "cestoda", "monogenea", "platyhelminthes"
       ]
     },
     {
       "code": 13,
       "confidence": "ncbi",
-      "basis": "NCBI table 13 (Ascidian Mitochondrial Code) scope is 'Urochordata (tunicates)', evidenced from Pyura stolonifera, Halocynthia roretzi and Ciona savignyi. Tunicates sit inside Chordata but do not use the vertebrate code.",
+      "basis": "NCBI table 13 (Ascidian Mitochondrial Code) is scoped 'Urochordata (tunicates)' on the prose page, but NCBI's taxonomy applies it only to Ascidiacea and Thaliacea -- nodes.dmp gives class Appendicularia (larvaceans, e.g. Oikopleura) and the Tunicata subphylum node code 5, so those are listed with the code-5 group instead. Tunicates sit inside Chordata but do not use the vertebrate code.",
       "classes": [
-        "ascidiacea", "thaliacea", "appendicularia", "tunicata"
+        "ascidiacea", "thaliacea"
       ]
     }
   ],
 
   "ambiguous": {
-    "pterobranchia": "Contains both Rhabdopleuridae (NCBI table 24) and Cephalodiscidae (table 33). The code cannot be resolved at class rank -- set the per-sample genetic_code column from the family.",
-    "hemichordata": "Phylum rank spans Enteropneusta (code 5) and Pterobranchia (24 or 33). Resolve the sample to a class, or set the genetic_code column.",
-    "trematoda": "NCBI has table 21 (Trematode Mitochondrial Code) specifically for Trematoda, and table 14 (Alternative Flatworm) for others. Table 9 covers only Rhabditophora among the flatworms, so 9 is not safe here.",
-    "cestoda": "Neodermatan flatworm outside table 9's stated Rhabditophora scope; reported under both table 9 and table 14 in the literature.",
-    "monogenea": "As cestoda -- outside table 9's stated scope, with table 14 reported for some lineages.",
-    "platyhelminthes": "Phylum rank spans Rhabditophora (code 9) and the neodermatans above (9, 14 or 21). Resolve the sample to a class.",
-    "placozoa": "Plausibly code 4 alongside the other basal metazoans, but not documented on NCBI's table page and never yet seen in a run."
+    "pterobranchia": "The code varies below class rank: nodes.dmp gives Rhabdopleuridae 5 but Cephalodiscidae 33, so the class alone does not determine it. A sample the taxdump resolves gets its own taxon's code and never reaches this map; this entry only guards a class-only row from the species table. Set the genetic_code column from the family.",
+    "hemichordata": "Phylum rank spans Enteropneusta (5) and Pterobranchia (5 or 33). Resolve the sample to a class, or set the genetic_code column."
   }
 }

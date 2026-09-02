@@ -606,14 +606,24 @@ def load_genetic_codes(path):
     return resolved, ambiguous
 
 
-def resolve_genetic_code(tax_class, genetic_codes):
-    """The samplesheet's genetic_code value for a class, or '' if unresolved.
+def resolve_genetic_code(tax_class, genetic_codes, lineage=None):
+    """The samplesheet's genetic_code value, or '' if unresolved.
+
+    NCBI's own per-taxon assignment (nodes.dmp field 8, surfaced by
+    TaxdumpLineage as `mito_genetic_code`) wins when the taxdump resolved the
+    sample. It is what ENA and table2asn validate the submission against, and it
+    is finer-grained than any class-keyed table can be: Cephalodiscidae is code
+    33 while its parent class Pterobranchia is 5, so a map keyed on class cannot
+    hold both. assets/mito_genetic_codes.json is the fallback for a class that
+    came from the species table with no taxdump lineage behind it.
 
     Blank means "let prepare_samplesheet decide": for a vertebrate that is the
     --translation_table default, and for an invertebrate it is the abort that
     stops a wrong translation table reaching annotation. Either way the row is
     still written, so an unresolved sample can be fixed by hand in the CSV.
     """
+    if lineage and lineage.get('mito_genetic_code'):
+        return str(lineage['mito_genetic_code'])
     return str(genetic_codes.get((tax_class or '').strip().lower(), ''))
 
 
@@ -646,6 +656,36 @@ def report_unresolved_genetic_code(rows, ambiguous):
           "row and re-run with --input, or add the class to "
           "assets/mito_genetic_codes.json once its code is confirmed.\n",
           file=sys.stderr)
+
+
+def report_phylum_only(rows):
+    """Print the samples whose `class` is really their phylum.
+
+    resolve_species_info() falls back to the phylum when a name pins no class
+    ('Porifera'), because a phylum still selects the genetic code, the annotation
+    route and the cox1 panel, and is better than 'unknown' -- which reads as
+    vertebrate everywhere downstream. It is still coarser than the rest of the
+    sheet, and silently putting a phylum in a column called `class` would be a
+    trap for anyone reading the samplesheet later, so say so.
+    """
+    flagged = []
+    seen = set()
+    for row in rows:
+        if row.get('source') != 'taxdump-phylum' or row['sample'] in seen:
+            continue
+        seen.add(row['sample'])
+        flagged.append(row)
+    if not flagged:
+        return
+    print(f"\nNOTE: {len(flagged)} sample(s) are identified only to phylum, so the "
+          f"`class` column holds a phylum name:", file=sys.stderr)
+    for row in flagged:
+        print(f"  {row['sample']}\tnominal_species_id='{row['nominal_species_id']}'"
+              f"\tclass='{row['class']}'\tgenetic_code={row.get('genetic_code') or '-'}",
+              file=sys.stderr)
+    print("This is enough for the genetic code and the annotation route. Identify the "
+          "sample to a class (or edit the class column) if you want family/order-level "
+          "reference selection as well.\n", file=sys.stderr)
 
 
 def is_invertebrate(tax_class, lineage=None):
@@ -811,7 +851,7 @@ def main():
              reference_species_id, tax_source, tax_lineage) = resolve_species_info(
                 cursor, cleaned_id, resolver)
             invertebrates = is_invertebrate(tax_class, tax_lineage)
-            genetic_code = resolve_genetic_code(tax_class, genetic_codes)
+            genetic_code = resolve_genetic_code(tax_class, genetic_codes, tax_lineage)
             resolution_rows.append({
                 'sample': cleaned_id,
                 'nominal_species_id': nominal_species_id,
@@ -904,6 +944,7 @@ def main():
     write_resolution_report(args.resolution_report, resolution_rows)
     report_unresolved(resolution_rows)
     report_unresolved_genetic_code(resolution_rows, ambiguous_codes)
+    report_phylum_only(resolution_rows)
 
     return 0
 

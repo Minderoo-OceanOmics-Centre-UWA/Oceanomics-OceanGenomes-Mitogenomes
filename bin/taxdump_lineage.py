@@ -55,6 +55,7 @@ class TaxdumpLineage:
         self._loaded = False
         self._parent = {}          # taxid -> parent taxid
         self._rank = {}            # taxid -> rank
+        self._mito_code = {}       # taxid -> NCBI mitochondrial genetic code
         self._name = {}            # taxid -> scientific name (indexed ranks only)
         self._name_to_taxid = {}   # lowercased scientific name -> taxid
         self._name_to_taxids = {}  # lowercased scientific name -> all taxids
@@ -86,9 +87,13 @@ class TaxdumpLineage:
         # and the naive str->str form costs well over a gigabyte.
         parent = self._parent
         rank = self._rank
+        mito = self._mito_code
         with open(nodes_file, 'r') as handle:
             for line in handle:
-                parts = line.split('\t|\t', 3)
+                # Field 8 is the taxon's mitochondrial genetic code -- NCBI's own
+                # assignment, and what ENA and table2asn validate a submission
+                # against. Split far enough to reach it.
+                parts = line.split('\t|\t', 9)
                 if len(parts) < 3:
                     continue
                 try:
@@ -97,6 +102,13 @@ class TaxdumpLineage:
                 except ValueError:
                     continue
                 rank[taxid] = sys.intern(parts[2].strip())
+                if len(parts) > 8:
+                    try:
+                        code = int(parts[8].strip())
+                    except ValueError:
+                        continue
+                    if code:            # 0 = unset (the root and a few stubs)
+                        mito[taxid] = code
 
     def _parse_names(self, names_file):
         # nodes.dmp is parsed first, so ranks are known here and only the ranks
@@ -245,6 +257,11 @@ class TaxdumpLineage:
             # and BLAST database. See is_invertebrate() in create_samplesheet.py.
             lineage['is_animal'] = self.is_animal(taxid)
             lineage['is_vertebrate'] = self.is_vertebrate(taxid)
+            # NCBI's own mitochondrial code for this exact taxon. More precise
+            # than any class-level map can be: Cephalodiscidae is code 33 while
+            # its parent class Pterobranchia is 5, so the two cannot both be
+            # expressed by a table keyed on class.
+            lineage['mito_genetic_code'] = self._mito_code.get(taxid)
             return lineage
         return {}
 

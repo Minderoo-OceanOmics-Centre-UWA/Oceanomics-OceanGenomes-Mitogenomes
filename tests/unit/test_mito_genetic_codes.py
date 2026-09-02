@@ -121,14 +121,47 @@ class InvertClassCoverageTests(unittest.TestCase):
             ("anthozoa", 4), ("porifera", 4), ("ctenophora", 4),
             ("bivalvia", 5), ("gastropoda", 5), ("polychaeta", 5), ("nematoda", 5),
             ("asteroidea", 9), ("rhabditophora", 9),
-            ("ascidiacea", 13), ("tunicata", 13),
+            ("ascidiacea", 13), ("thaliacea", 13),
+            ("appendicularia", 5), ("tunicata", 5),
+            ("trematoda", 9), ("platyhelminthes", 9), ("placozoa", 4),
         ]:
             self.assertEqual(self.codes.get(tax_class), expected, tax_class)
 
     def test_classes_spanning_several_codes_stay_unmapped(self):
-        for tax_class in ["pterobranchia", "hemichordata", "trematoda", "platyhelminthes"]:
+        # Only the pterobranchs genuinely vary below class rank: nodes.dmp gives
+        # Rhabdopleuridae 5 and Cephalodiscidae 33. NCBI is unambiguous on the
+        # flatworms and Placozoa, so those are mapped rather than left to abort.
+        for tax_class in ["pterobranchia", "hemichordata"]:
             self.assertNotIn(tax_class, self.codes)
             self.assertIn(tax_class, self.ambiguous)
+
+    def test_the_map_agrees_with_ncbis_own_per_taxon_assignment(self):
+        """Every mapped class must match nodes.dmp field 8 where NCBI names it.
+
+        The map is only the fallback for a class with no taxdump lineage behind
+        it, so it must not contradict the per-taxon codes the resolver returns
+        for everything else. This test is what caught Appendicularia and Tunicata
+        being listed as code 13 when NCBI assigns both 5.
+        """
+        taxdump = Path("/scratch/pawsey1348/tpeirce/taxonkit_dbs")
+        if not (taxdump / "nodes.dmp").is_file():
+            self.skipTest("no taxdump available")
+        sys.path.insert(0, str(ROOT / "bin"))
+        try:
+            from taxdump_lineage import TaxdumpLineage
+        finally:
+            sys.path.remove(str(ROOT / "bin"))
+        resolver = TaxdumpLineage(str(taxdump))
+        resolver.load()
+        mismatches = []
+        for tax_class, code in self.codes.items():
+            taxid = resolver._resolve_taxid(tax_class)
+            if taxid is None:
+                continue                      # retired or ambiguous name
+            ncbi = resolver._mito_code.get(taxid)
+            if ncbi is not None and ncbi != code:
+                mismatches.append((tax_class, code, ncbi))
+        self.assertEqual(mismatches, [], f"map disagrees with NCBI: {mismatches}")
 
 
 class LoaderContradictionTests(unittest.TestCase):

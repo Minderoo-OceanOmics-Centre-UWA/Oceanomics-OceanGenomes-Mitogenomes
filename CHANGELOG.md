@@ -57,6 +57,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the ambiguity reason where there is one, instead of surfacing as an abort mid-run.
   `taxonomy_resolution.tsv` records the code alongside the taxonomy provenance.
 
+- The genetic code now comes from NCBI's own per-taxon assignment, not from a class map.
+
+  `nodes.dmp` field 8 holds the mitochondrial genetic code NCBI assigns each taxon, and it is
+  what ENA and table2asn validate a submission against. `TaxdumpLineage` now parses it and
+  `resolve_genetic_code()` prefers it whenever the taxdump resolved the sample, with
+  `assets/mito_genetic_codes.json` demoted to the fallback for a class that came from the
+  species table with no lineage behind it.
+
+  Per-taxon beats per-class because the code varies *below* class rank: `Cephalodiscidae` is
+  code 33 while its parent class `Pterobranchia` is 5, so no table keyed on class can hold
+  both. A `Cephalodiscus` sample now gets 33 and a `Rhabdopleura` 5, from the same class.
+
+  Checking the hand-written map against that field found two errors in it: `Appendicularia`
+  (larvaceans, e.g. `Oikopleura`) and the `Tunicata` subphylum node are **code 5, not 13**.
+  NCBI's prose page scopes table 13 as "Urochordata (tunicates)", but its taxonomy applies 13
+  only to Ascidiacea and Thaliacea. The remaining 70 entries agree with NCBI exactly, and a
+  new test asserts that agreement so the map cannot drift from it again.
+
+  With per-taxon codes available, the `ambiguous` block shrinks to the pterobranchs, the only
+  group whose code genuinely varies below class. `Trematoda`, `Cestoda`, `Monogenea`,
+  `Platyhelminthes` (all 9) and `Placozoa` (4) are mapped rather than left to abort -- NCBI is
+  unambiguous on them, and the earlier caution was based on the prose page's table 14/21
+  scoping rather than on what NCBI assigns.
+
+- Samples identified only to phylum are now called out at samplesheet-generation time.
+  `report_phylum_only()` names them on stderr with the phylum, alongside the existing
+  unresolved-taxonomy and unresolved-code reports, so a phylum sitting in a column called
+  `class` is stated rather than left to be discovered by whoever reads the sheet next.
+
 - Invertebrate status is now decided by NCBI ancestry, not by a hand-maintained class list.
 
   `INVERT_CLASSES` is an allow-list, and anything missing from it read as a vertebrate:
