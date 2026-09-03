@@ -3,9 +3,28 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## v2.0.0 - [2026-09-03]
 
-### `Added`
+Second major release, and the first to carry the ENA submission path. Everything ENA-related is new since
+v1.1.0, which shipped neither the params nor the tables: packaging, flatfile generation, Webin validation and
+the whole `sql/` migration chain. The release also hardens post-assembly routing and the assembly summary,
+makes the migration chain replayable end to end, and adds the annotation rescue and QC-gate work that closed
+out the cycle.
+
+Nothing here breaks a released version. The `Deprecated` section records parts of the ENA layer that were
+built and then handed to a separate downstream pipeline within this same cycle, so no release ever carried the
+params or tables it retires.
+
+**Operator note.** The `sql/` migrations are applied to the live database as they land rather than at release
+boundaries, so a database already carrying earlier migrations is affected regardless of when this tag lands.
+
+The entries are grouped in two blocks. The first covers work that landed after the v2.0.0 changelog entry was
+first drafted on 2026-08-18; the second is that original entry, kept intact. Both are part of this one release
+-- the 2026-08-18 tag was never published.
+
+### Work that landed after 2026-08-18
+
+#### `Added`
 
 - An intron-split `cox1` is now rebuilt as `cox1_0`/`cox1_1` in `bin/coral_fix_bed.py`, the
   same reference-transfer treatment `nad5` already got.
@@ -146,7 +165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/qc_only_upload/main.nf.test`.
 
 
-### `Fixed`
+#### `Fixed`
 
 - `MITOGENOME_COVERAGE`, `OATK`, `LCA` and `SPECIES_VALIDATION` now retry a walltime kill instead
   of silently dropping the sample.
@@ -325,8 +344,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared table in `bin/mito_gene_order.py` so the two annotators cannot emit different strings for
   the same feature. An unrecognised suffix or anticodon falls back to a bare gene-name product; a
   cosmetic field should never fail the run.
+- A walltime kill on `GETORGANELLE_RESEED` is retried again. Its `withName` block in
+  `conf/base.config` overrode the global error strategy and narrowed "transient" to exit 137
+  (OOM) alone, so exit 140 -- what Slurm returns when a task exceeds its time allocation --
+  fell straight through to `ignore` on attempt 1, with `maxRetries = 2` never spent.
+  `GETORGANELLE_RESEED` was the only process carrying that override; `GETORGANELLE_FROMREADS`
+  next to it has always inherited the global policy, which counts 130..145 as transient.
 
-### `Changed`
+  It cost a real assembly: in `batch-02`, `OG28.ilmn.231024` timed out at 16 h and was ignored,
+  leaving `mitogenomes/OG28/OG28.ilmn.231024.getorg1770reseed/mtdna/` holding nothing but
+  `reference_seed/` -- no FASTA, no GFA, and therefore no downstream annotation for that library.
+  The override is deleted rather than widened, so the two GetOrganelle processes now resolve to
+  one retry policy and 137 stays covered because it sits inside 130..145. Note the second attempt
+  gains only 8 hours (`Math.min(24, 16 * task.attempt).h`, capped by `max_time = 24.h`): samples
+  that exceed 16 h are usually not converging rather than running slightly long, so expect the
+  retry to buy a verdict rather than an assembly.
+
+- `WEBIN_VALIDATE` bounds each `webin-cli` call with `timeout` and retries transient failures
+  in-script, controlled by `--webin_validate_timeout_seconds` (default 900) and
+  `--webin_validate_max_attempts` (default 3). The call was previously unbounded, so a hung
+  ENA request could only end when Slurm killed the whole task: `OG16` in `batch-02` spent its
+  entire 4 h allocation inside a call that normally returns in about 5 seconds, and the
+  automatic task retry then passed in 4.
+
+  Only timeouts and infrastructure failures are retried, with a 30 s/60 s backoff; a
+  `FAIL_WEBIN` verdict is deterministic and breaks out immediately rather than re-running a
+  rejected flatfile. `webin_output` is cleared between attempts, since the classifier greps it
+  and a report left by an earlier attempt would misclassify a later one. The process still
+  ends `exit 0` and the `.webin_status.tsv` schema is unchanged -- a failing task would drop
+  the non-optional `manifest`/`status`/`log`/`reports` emits and erase the sample from the ENA
+  collation instead of recording it as failed -- so the only new value is the `webin_timeout`
+  reason, and the attempt count goes to the log.
+
+  The biocontainer ships **busybox** `timeout`, not GNU coreutils: it takes positional seconds
+  with no `--signal`/`--kill-after`, and it exits **143** on timeout rather than GNU's 124. The
+  module matches both codes so the `conda` path, which does supply GNU `timeout`, behaves the
+  same.
+- `BUILD_SOURCE_MODIFIERS`'s stub emitted files under names that did not match its `output:`
+  block (`output/bankit_metadata.csv`, `src_files/dummy.src`). The optional `src_file` emit
+  therefore produced nothing, the join into `GEN_FILES_TABLE2ASN` came out empty, and every
+  `-stub` run of `MITOGENOME_QC` was silently truncated before `table2asn` -- the workflow still
+  reported success. The stub now writes `${meta.id}.bankit_metadata*.csv` and
+  `${meta.mt_assembly_prefix}.stub.src`, matching the declared outputs.
+
+#### `Changed`
 
 - `MITOGENOME_COVERAGE` is sized from measurement: `cpus` 12 -> 4 and `memory` 16 GB -> 4 GB per
   attempt. The Aug-25 batch-19 trace for OG2288 records `%cpu=2228` (2.2 cores) and
@@ -460,62 +521,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assemblies are validated. The `assembly_prefix`-dependent statements in `001`, `002`, `011` and `012` are now
   guarded on that column still existing, so `bin/apply_ena_migrations.py` can keep replaying the whole chain.
 
-### `Fixed`
+### Work from the first half of the cycle (internally tagged 2026-08-18)
 
-- A walltime kill on `GETORGANELLE_RESEED` is retried again. Its `withName` block in
-  `conf/base.config` overrode the global error strategy and narrowed "transient" to exit 137
-  (OOM) alone, so exit 140 -- what Slurm returns when a task exceeds its time allocation --
-  fell straight through to `ignore` on attempt 1, with `maxRetries = 2` never spent.
-  `GETORGANELLE_RESEED` was the only process carrying that override; `GETORGANELLE_FROMREADS`
-  next to it has always inherited the global policy, which counts 130..145 as transient.
-
-  It cost a real assembly: in `batch-02`, `OG28.ilmn.231024` timed out at 16 h and was ignored,
-  leaving `mitogenomes/OG28/OG28.ilmn.231024.getorg1770reseed/mtdna/` holding nothing but
-  `reference_seed/` -- no FASTA, no GFA, and therefore no downstream annotation for that library.
-  The override is deleted rather than widened, so the two GetOrganelle processes now resolve to
-  one retry policy and 137 stays covered because it sits inside 130..145. Note the second attempt
-  gains only 8 hours (`Math.min(24, 16 * task.attempt).h`, capped by `max_time = 24.h`): samples
-  that exceed 16 h are usually not converging rather than running slightly long, so expect the
-  retry to buy a verdict rather than an assembly.
-
-- `WEBIN_VALIDATE` bounds each `webin-cli` call with `timeout` and retries transient failures
-  in-script, controlled by `--webin_validate_timeout_seconds` (default 900) and
-  `--webin_validate_max_attempts` (default 3). The call was previously unbounded, so a hung
-  ENA request could only end when Slurm killed the whole task: `OG16` in `batch-02` spent its
-  entire 4 h allocation inside a call that normally returns in about 5 seconds, and the
-  automatic task retry then passed in 4.
-
-  Only timeouts and infrastructure failures are retried, with a 30 s/60 s backoff; a
-  `FAIL_WEBIN` verdict is deterministic and breaks out immediately rather than re-running a
-  rejected flatfile. `webin_output` is cleared between attempts, since the classifier greps it
-  and a report left by an earlier attempt would misclassify a later one. The process still
-  ends `exit 0` and the `.webin_status.tsv` schema is unchanged -- a failing task would drop
-  the non-optional `manifest`/`status`/`log`/`reports` emits and erase the sample from the ENA
-  collation instead of recording it as failed -- so the only new value is the `webin_timeout`
-  reason, and the attempt count goes to the log.
-
-  The biocontainer ships **busybox** `timeout`, not GNU coreutils: it takes positional seconds
-  with no `--signal`/`--kill-after`, and it exits **143** on timeout rather than GNU's 124. The
-  module matches both codes so the `conda` path, which does supply GNU `timeout`, behaves the
-  same.
-- `BUILD_SOURCE_MODIFIERS`'s stub emitted files under names that did not match its `output:`
-  block (`output/bankit_metadata.csv`, `src_files/dummy.src`). The optional `src_file` emit
-  therefore produced nothing, the join into `GEN_FILES_TABLE2ASN` came out empty, and every
-  `-stub` run of `MITOGENOME_QC` was silently truncated before `table2asn` -- the workflow still
-  reported success. The stub now writes `${meta.id}.bankit_metadata*.csv` and
-  `${meta.mt_assembly_prefix}.stub.src`, matching the declared outputs.
-
-
-## v2.0.0 - [2026-08-18]
-
-Second major release, and the first to carry the ENA submission path. Everything ENA-related below is new since
-v1.1.0, which shipped neither the params nor the tables: packaging, flatfile generation, Webin validation and the
-whole `sql/` migration chain. This release also hardens post-assembly routing and the assembly summary, and makes
-the migration chain replayable end to end.
-
-Nothing here breaks a released version. The `Deprecated` section records parts of the ENA layer that were built and
-then handed to a separate downstream pipeline within this same cycle, so no release ever carried the params or
-tables it retires.
+This is the v2.0.0 entry as first drafted, kept intact.
 
 **Operator note.** The `sql/` migrations are applied to the live database as they land rather than at release
 boundaries, so a database already carrying `001`-`009` is affected by `010`-`012` regardless. `010` archives
@@ -523,7 +531,7 @@ boundaries, so a database already carrying `001`-`009` is affected by `010`-`012
 `ena_submission_selections` and the `ena_submission_queue` view with no archive, so dump those first if their
 contents matter.
 
-### `Added`
+#### `Added`
 
 - Uniform, cross-platform mitogenome read depth: `MITOGENOME_COVERAGE` + `bin/mito_depth.py`. `mitogenome_data.avg_coverage`
   previously held three different quantities depending on which assembler produced the row, so comparing it across
@@ -654,7 +662,7 @@ contents matter.
   priority order: the assembly stage's findMitoReference download → a fresh `MITOHIFI_FINDMITOREFERENCE` lookup →
   the bundled `assets/anthozoa_reference.gb`; the reference used is published into the sample's annotation dir.
 
-### `Fixed`
+#### `Fixed`
 
 - A CDS that initiates on an alternative start codon is now declared as such even when Emma says nothing about
   it, so `SEQ_FEAT.StartCodon`/`SEQ_INST.BadProteinStart` stop quarantining otherwise clean assemblies.
@@ -834,9 +842,9 @@ contents matter.
   `elif "incomplete" in status_text`: `"complete"` is a substring of `"incomplete"`, so a genuinely
   incomplete result would have been reported as complete.
 
-### `Dependencies`
+#### `Dependencies`
 
-### `Deprecated`
+#### `Deprecated`
 
 - Locus-tag allocation is no longer this pipeline's job. Tags are assigned and injected by a separate
   downstream submission pipeline, so every file this one emits now carries **no** `/locus_tag` on any
