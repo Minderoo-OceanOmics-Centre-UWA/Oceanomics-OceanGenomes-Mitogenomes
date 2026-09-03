@@ -1,0 +1,4 @@
+##gff-version 3
+##sequence-region	OG910.hifi.250101.v3mitohifi.emma102	1	6
+OG910.hifi.250101.v3mitohifi.emma102	Emma	region	1	6	.	+	0	Is_circular=true
+OG910.hifi.250101.v3mitohifi.emma102	Emma	gene	1	6	.	+	.	ID=gene-1;Name=MT-CO1

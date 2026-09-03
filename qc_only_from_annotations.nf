@@ -3,17 +3,25 @@ nextflow.enable.dsl = 2
 
 // Ensure modules relying on this parameter have a stable default in standalone runs.
 params.translation_table = params.translation_table ?: 2
+// Uploads are on by default, matching the main pipeline; --skip_upload_results true
+// turns this entrypoint back into the read-only QC pass it used to be.
+params.skip_upload_results = params.skip_upload_results == null ? false : params.skip_upload_results
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Standalone QC-only workflow
     - Input: precomputed annotation files (*.fa/*.fasta/*.gff/*.tbl/*.gb)
     - Species: queried from SQL via VALIDATED_SPECIES_QUERY (lca_validation.validated_species_name)
-    - Action: run MITOGENOME_QC only
+    - Action: run MITOGENOME_QC, then push that stage's own results to SQL via
+      UPLOAD_ENA_RESULTS (ena_validation_attempts + lca_validation.validator_2).
+      Only the QC stage's uploads run here -- there is no assembly, annotation or
+      LCA on this path, so nothing writes mitogenome_data, blast_filtered_lca or lca.
+      Disable the uploads with --skip_upload_results true.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
 include { MITOGENOME_QC } from './subworkflows/local/mitogenome_qc/main'
+include { UPLOAD_ENA_RESULTS } from './subworkflows/local/upload_results_mito/main'
 include { VALIDATED_SPECIES_QUERY } from './modules/local/validated_species_query/main'
 
 /*
@@ -108,6 +116,25 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
     MITOGENOME_QC(
         ch_qc_input
     )
+
+    // Push the QC stage's own results to SQL. The scope is deliberately the QC
+    // stage only: this entrypoint runs no assembly, no annotation and no LCA, so
+    // it pushes no mitogenome_data, blast_filtered_lca or lca rows. That also
+    // keeps SPECIES_VALIDATION out of this path, which matters -- under
+    // --force_db_overwrite that module overwrites lca_validation.validated_species_name
+    // and validator, and this entrypoint exists precisely for samples whose species
+    // was validated by hand and cannot be re-derived from BLAST.
+    //
+    // prior_upload_status_files is empty here for the same reason: the five
+    // pre-QC pushes never ran, so the upload report is built from the ENA
+    // validation and validator_2 pushes alone.
+    if (!params.skip_upload_results) {
+        UPLOAD_ENA_RESULTS(
+            MITOGENOME_QC.out.ena_validation_records,
+            Channel.empty(),
+            sql_config_file
+        )
+    }
 }
 
 workflow {

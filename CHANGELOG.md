@@ -131,6 +131,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `trna_rescue`, `trna_rescue_gate`, `compile_held_samples`, `annotation_qc_gate`) and unit tests
   for `orf_utils`, `mitos_to_emma`, `coral_fix_bed`, `annotation_qc_gate`, `annotation_stats`,
   `evaluate_qc_conditions`, `species_validation`, and both rescue scripts and their gates.
+- `qc_only_from_annotations.nf` now pushes the QC stage's own results to SQL through
+  `UPLOAD_ENA_RESULTS` (`ena_validation_attempts` plus `lca_validation.validator_2`), instead of
+  being entirely read-only. A sample QC'd through this entrypoint previously read as un-uploaded
+  even though its QC had run.
+
+  The scope is deliberately the QC stage alone: this entrypoint runs no assembly, no annotation
+  and no LCA, so it writes no `mitogenome_data`, `blast_filtered_lca` or `lca` rows, and
+  `prior_upload_status_files` is empty because the five pre-QC pushes never ran. Keeping
+  `SPECIES_VALIDATION` off this path is the point of the narrow scope: under
+  `--force_db_overwrite` that module overwrites `lca_validation.validated_species_name` and
+  `validator`, which is exactly the hand-validated row this entrypoint exists to serve.
+  `--skip_upload_results true` restores the old read-only behaviour. Pinned by
+  `tests/qc_only_upload/main.nf.test`.
+
 
 ### `Fixed`
 
@@ -484,6 +498,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no `--signal`/`--kill-after`, and it exits **143** on timeout rather than GNU's 124. The
   module matches both codes so the `conda` path, which does supply GNU `timeout`, behaves the
   same.
+- `BUILD_SOURCE_MODIFIERS`'s stub emitted files under names that did not match its `output:`
+  block (`output/bankit_metadata.csv`, `src_files/dummy.src`). The optional `src_file` emit
+  therefore produced nothing, the join into `GEN_FILES_TABLE2ASN` came out empty, and every
+  `-stub` run of `MITOGENOME_QC` was silently truncated before `table2asn` -- the workflow still
+  reported success. The stub now writes `${meta.id}.bankit_metadata*.csv` and
+  `${meta.mt_assembly_prefix}.stub.src`, matching the declared outputs.
+
 
 ## v2.0.0 - [2026-08-18]
 
