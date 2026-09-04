@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Nextflow stages them: flat on PATH. Mirror that for the file-path loads below.
 sys.path.insert(0, str(ROOT / "bin"))
 BIN = ROOT / "bin"
-ASSETS = ROOT / "assets"
+ASSETS = ROOT / "assets" / "placeholders"
 
 
 def load_calculate_lca():

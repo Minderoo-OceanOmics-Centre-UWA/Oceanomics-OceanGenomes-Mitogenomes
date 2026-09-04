@@ -192,8 +192,8 @@ workflow UPLOAD_RESULTS {
     // nominal-species hit, and records the sample as not validated. That is the
     // correct outcome for a sample with nothing to validate against, and it is
     // reached immediately rather than at the end of the run.
-    def empty_lca_file   = file("${projectDir}/assets/empty_lca.tsv", checkIfExists: true)
-    def empty_blast_file = file("${projectDir}/assets/empty_blast_filtered.tsv", checkIfExists: true)
+    def empty_lca_file   = file("${projectDir}/assets/placeholders/empty_lca.tsv", checkIfExists: true)
+    def empty_blast_file = file("${projectDir}/assets/placeholders/empty_blast_filtered.tsv", checkIfExists: true)
 
     ch_zero_region_blast_lca = region_counts
         .filter { _meta, n_regions -> n_regions == 0 }
@@ -274,7 +274,7 @@ workflow UPLOAD_RESULTS {
     // behind a maintenance reservation.
     //
     // The fix is upstream totality rather than a cleverer operator here: every emitted
-    // assembly carries an evidence row (assets/empty_circularity_check.tsv where no check
+    // assembly carries an evidence row (assets/placeholders/empty_circularity_check.tsv where no check
     // ran), so there is no "missing evidence" case left for a lookup fallback or a remainder
     // path to cover, and no reason to wait for the channel to close. Deliberately no
     // placeholder fallback at this point: if the contract upstream ever breaks, the sample

@@ -146,7 +146,7 @@ workflow OCEANGENOMESMITOGENOMES {
     // Stand-in for an assembly with no circularity check on disk. The assembly subworkflows
     // guarantee one evidence row per assembly they emit; the precomputed paths below have to
     // reconstruct that guarantee from whatever *_check.tsv files happen to be present.
-    def no_circularity_evidence = file("${projectDir}/assets/empty_circularity_check.tsv", checkIfExists: true)
+    def no_circularity_evidence = file("${projectDir}/assets/placeholders/empty_circularity_check.tsv", checkIfExists: true)
 
     // Map samplesheet meta by sample id + sequencing type + date for reuse with precomputed files
     ch_samplesheet_meta = getorg_input
@@ -909,7 +909,7 @@ workflow OCEANGENOMESMITOGENOMES {
     // that was actually remapped. Rows with no depth are still uploaded, just with the
     // header-only placeholder (push_mtdna_assm_results.py records them as 'not_measured').
     // See buildAssemblyUploadRows for the routing.
-    def no_depth_file = file("${projectDir}/assets/empty_mito_depth.tsv", checkIfExists: true)
+    def no_depth_file = file("${projectDir}/assets/placeholders/empty_mito_depth.tsv", checkIfExists: true)
 
     ch_mitogenome_assembly_results = buildAssemblyUploadRows(
         ch_canonical_upload_rows,

@@ -1,0 +1,79 @@
+nextflow_workflow {
+
+    name "Invertebrate seed database routing"
+    script "./main.nf"
+    workflow "INVERT_SEED_DB"
+
+    // The seed group name IS the assets/refdb/ directory name and the file
+    // prefix, so a group added to InvertTaxonGroups without its database (or a
+    // directory renamed without the mapping) only shows up at reseed time, on a
+    // sample that has already burned a failed first pass. These tests resolve
+    // every group we run and check the files are really there.
+
+    test("each invertebrate phylum resolves to its own curated seed database") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of('Anthozoa', 'Hydrozoa', 'Demospongiae', 'Gastropoda', 'Bivalvia', 'Cephalopoda', 'Malacostraca', 'Pycnogonida', 'Thecostraca', 'Asteroidea', 'Echinoidea', 'Holothuroidea', 'Tentaculata', 'Ascidiacea', 'Polychaeta')
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.resolved.every { !it.contains('NONE') } },
+                { assert workflow.out.resolved.every { it.contains('seed:yes') && it.contains('genes:yes') } },
+                { assert workflow.out.resolved.any { it.startsWith('Anthozoa anthozoa') } },
+                { assert workflow.out.resolved.any { it.startsWith('Hydrozoa anthozoa') } },
+                { assert workflow.out.resolved.any { it.startsWith('Demospongiae porifera') } },
+                { assert workflow.out.resolved.any { it.startsWith('Gastropoda mollusca') } },
+                { assert workflow.out.resolved.any { it.startsWith('Malacostraca arthropoda') } },
+                { assert workflow.out.resolved.any { it.startsWith('Pycnogonida arthropoda') } },
+                { assert workflow.out.resolved.any { it.startsWith('Asteroidea echinodermata') } },
+                { assert workflow.out.resolved.any { it.startsWith('Tentaculata ctenophora') } },
+                { assert workflow.out.resolved.any { it.startsWith('Ascidiacea tunicata') } },
+                { assert workflow.out.resolved.any { it.startsWith('Polychaeta annelida') } },
+            )
+        }
+    }
+
+    test("a class with no curated database resolves to no group rather than another phylum") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of('Nemertea', 'Tardigrada', 'Rotifera', '', 'Gastropoda')
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                // The point of the null: these must NOT silently take the coral
+                // (or any other) database the way every invertebrate used to.
+                { assert workflow.out.resolved.any { it.startsWith('Nemertea NONE') } },
+                { assert workflow.out.resolved.any { it.startsWith('Tardigrada NONE') } },
+                { assert workflow.out.resolved.any { it.startsWith('Rotifera NONE') } },
+                { assert workflow.out.resolved.any { it.startsWith('Gastropoda mollusca') } },
+            )
+        }
+    }
+
+    test("class matching ignores case and surrounding whitespace") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of('  GASTROPODA  ', ' asteroidea ', 'AnThOzOa')
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.resolved.every { !it.contains('NONE') } },
+                { assert workflow.out.resolved.any { it.contains(' mollusca ') } },
+                { assert workflow.out.resolved.any { it.contains(' echinodermata ') } },
+                { assert workflow.out.resolved.any { it.contains(' anthozoa ') } },
+            )
+        }
+    }
+}

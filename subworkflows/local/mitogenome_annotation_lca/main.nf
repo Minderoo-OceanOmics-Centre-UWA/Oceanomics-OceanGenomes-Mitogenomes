@@ -241,7 +241,7 @@ workflow MITOGENOME_ANNOTATION {
     ch_emma_pass = ch_emma_branched.pass.map { meta, bundle, _d, _t      -> [meta, bundle] }
     ch_emma_fix  = ch_emma_branched.fix.map  { meta, bundle, _d, targets -> [meta, bundle, targets] }
 
-    ch_rescue_ref = Channel.fromPath("${projectDir}/assets/rescue_pcg_refs.faa", checkIfExists: true).first()
+    ch_rescue_ref = Channel.fromPath("${projectDir}/assets/panels/rescue_pcg_refs.faa", checkIfExists: true).first()
 
     EMMA_GENE_RESCUE (
         ch_emma_fix.combine(ch_rescue_ref).map { meta, bundle, targets, ref -> [meta, bundle, targets, ref] }
@@ -332,10 +332,10 @@ workflow MITOGENOME_ANNOTATION {
     // InvertTaxonGroups.cox1PanelGroup() in lib/. The original (un-rotated)
     // assembly is published separately by the assembly stage and left untouched.
     ch_cox1_panel_paths = [
-        reduced_trna  : file("${projectDir}/assets/cox1_anthozoa.faa", checkIfExists: true),
-        mollusca      : file("${projectDir}/assets/cox1_mollusca.faa", checkIfExists: true),
-        arthropoda    : file("${projectDir}/assets/cox1_arthropoda.faa", checkIfExists: true),
-        echinodermata : file("${projectDir}/assets/cox1_echinodermata.faa", checkIfExists: true),
+        reduced_trna  : file("${projectDir}/assets/panels/cox1/anthozoa.faa", checkIfExists: true),
+        mollusca      : file("${projectDir}/assets/panels/cox1/mollusca.faa", checkIfExists: true),
+        arthropoda    : file("${projectDir}/assets/panels/cox1/arthropoda.faa", checkIfExists: true),
+        echinodermata : file("${projectDir}/assets/panels/cox1/echinodermata.faa", checkIfExists: true),
     ]
 
     ROTATE_ORIGIN (
@@ -403,7 +403,7 @@ workflow MITOGENOME_ANNOTATION {
     // wrong/coarse species label can no longer hand a wrong-family reference to
     // the fixer. The bundled curated anthozoan reference is the only fallback (used
     // just for the rare sample no DB record aligns to).
-    ch_coral_db = Channel.fromPath("${projectDir}/assets/coral_mito_refdb.gb", checkIfExists: true).first()
+    ch_coral_db = Channel.fromPath("${projectDir}/assets/refdb/anthozoa/anthozoa_mito_refdb.gb", checkIfExists: true).first()
 
     SELECT_CORAL_REFERENCE ( ch_fix_base.map { meta, genome, _bed -> [meta, genome] }, ch_coral_db )
     ch_selected_ref = SELECT_CORAL_REFERENCE.out.reference   // [meta, reference.gb]
@@ -419,7 +419,7 @@ workflow MITOGENOME_ANNOTATION {
     ch_coral_ref_unselected = SELECT_CORAL_REFERENCE.out.status
         .filter { _meta, status_file -> !coralReferenceSelected(status_file) }
         .map { meta, _status_file -> [meta, true] }
-    ch_curated_ref = Channel.fromPath("${projectDir}/assets/anthozoa_reference.gb", checkIfExists: true).first()
+    ch_curated_ref = Channel.fromPath("${projectDir}/assets/refdb/anthozoa/anthozoa_reference.gb", checkIfExists: true).first()
     ch_fix_fallback = ch_fix_base.join(ch_coral_ref_unselected, by: 0)
         .map { meta, genome, bed, _flag -> [meta, genome, bed] }
         .combine(ch_curated_ref)
@@ -499,7 +499,7 @@ workflow MITOGENOME_ANNOTATION {
     //
     // MODULE: Calculate the Lowest Common Ancestor (LCA) from the filtered BLAST results
     //
-    ch_worms = channel.fromPath("${projectDir}/assets/worms_species.txt.gz", checkIfExists: true)
+    ch_worms = channel.fromPath("${projectDir}/assets/taxonomy/worms_species.txt.gz", checkIfExists: true)
     if (!params.taxonkit_db_dir) {
         error "--taxonkit_db_dir is required for the persistent LCA taxonomy cache"
     }

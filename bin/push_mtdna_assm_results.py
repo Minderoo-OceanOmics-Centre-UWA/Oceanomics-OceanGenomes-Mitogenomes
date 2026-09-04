@@ -175,7 +175,7 @@ def parse_depth_tsv(path):
     """Read the single data row of a <prefix>.mito_depth.tsv.
 
     Returns a dict keyed by DEPTH_COLUMNS, or None when there is no usable
-    measurement -- which covers the header-only assets/empty_mito_depth.tsv
+    measurement -- which covers the header-only assets/placeholders/empty_mito_depth.tsv
     placeholder, a missing file, and a fail-open run of mito_depth.py. Callers
     treat None as "this row was never measured", never as "depth is zero".
     """

@@ -21,14 +21,14 @@ workflow ENA_RECORD_TOTALITY {
 
     main:
 
-    def stand_in = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
+    def stand_in = file("${projectDir}/assets/placeholders/NO_REFERENCE.gb", checkIfExists: true)
 
-    def notrun_flatfile_status  = file("${projectDir}/assets/ena_not_run/flatfile_status.not_run",  checkIfExists: true)
-    def notrun_flatfile_checks  = file("${projectDir}/assets/ena_not_run/flatfile_checks.not_run",  checkIfExists: true)
-    def notrun_flatfile_embl    = file("${projectDir}/assets/ena_not_run/flatfile_embl.not_run",    checkIfExists: true)
-    def notrun_package_metadata = file("${projectDir}/assets/ena_not_run/package_metadata.not_run", checkIfExists: true)
-    def notrun_webin_status     = file("${projectDir}/assets/ena_not_run/webin_status.not_run",     checkIfExists: true)
-    def notrun_webin_manifest   = file("${projectDir}/assets/ena_not_run/webin_manifest.not_run",   checkIfExists: true)
+    def notrun_flatfile_status  = file("${projectDir}/assets/placeholders/ena_not_run/flatfile_status.not_run",  checkIfExists: true)
+    def notrun_flatfile_checks  = file("${projectDir}/assets/placeholders/ena_not_run/flatfile_checks.not_run",  checkIfExists: true)
+    def notrun_flatfile_embl    = file("${projectDir}/assets/placeholders/ena_not_run/flatfile_embl.not_run",    checkIfExists: true)
+    def notrun_package_metadata = file("${projectDir}/assets/placeholders/ena_not_run/package_metadata.not_run", checkIfExists: true)
+    def notrun_webin_status     = file("${projectDir}/assets/placeholders/ena_not_run/webin_status.not_run",     checkIfExists: true)
+    def notrun_webin_manifest   = file("${projectDir}/assets/placeholders/ena_not_run/webin_manifest.not_run",   checkIfExists: true)
 
     // E = pass + conversion PASS (embl/package/webin run); F = pass + conversion FAIL;
     // Q = quarantined (never reaches ENA_FLATFILE).

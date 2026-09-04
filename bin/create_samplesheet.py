@@ -586,7 +586,7 @@ def report_unresolved(rows):
 
 
 def load_genetic_codes(path):
-    """Parse assets/mito_genetic_codes.json into (class -> code, class -> reason).
+    """Parse assets/taxonomy/mito_genetic_codes.json into (class -> code, class -> reason).
 
     Shared with lib/InvertTaxonGroups.groovy, which prepare_samplesheet uses to
     resolve the same codes: one asset rather than a Python copy and a Groovy copy
@@ -624,7 +624,7 @@ def resolve_genetic_code(tax_class, genetic_codes, lineage=None):
     sample. It is what ENA and table2asn validate the submission against, and it
     is finer-grained than any class-keyed table can be: Cephalodiscidae is code
     33 while its parent class Pterobranchia is 5, so a map keyed on class cannot
-    hold both. assets/mito_genetic_codes.json is the fallback for a class that
+    hold both. assets/taxonomy/mito_genetic_codes.json is the fallback for a class that
     came from the species table with no taxdump lineage behind it.
 
     Blank means "let prepare_samplesheet decide": for a vertebrate that is the
@@ -664,7 +664,7 @@ def report_unresolved_genetic_code(rows, ambiguous):
         print(f"  {row['sample']}\tclass='{tax_class}'{detail}", file=sys.stderr)
     print("The run will abort on these. Fill in the genetic_code column for each "
           "row and re-run with --input, or add the class to "
-          "assets/mito_genetic_codes.json once its code is confirmed.\n",
+          "assets/taxonomy/mito_genetic_codes.json once its code is confirmed.\n",
           file=sys.stderr)
 
 
@@ -727,7 +727,7 @@ def parse_args():
                         help="Optional NCBI taxdump directory (nodes.dmp/names.dmp). Used to "
                              "resolve class/family/order when the species table has no match.")
     parser.add_argument("--genetic-codes", required=False, default=None,
-                        help="Path to assets/mito_genetic_codes.json. Used to fill the "
+                        help="Path to assets/taxonomy/mito_genetic_codes.json. Used to fill the "
                              "samplesheet's genetic_code column from the resolved class.")
     parser.add_argument("--resolution-report", required=False, default=None,
                         help="Where to write the per-sample taxonomy provenance table "
@@ -898,7 +898,7 @@ def main():
                     tax_family,
                     tax_order,
                     invertebrates,
-                    # Resolved from the class via assets/mito_genetic_codes.json,
+                    # Resolved from the class via assets/taxonomy/mito_genetic_codes.json,
                     # the same map prepare_samplesheet uses, so the sheet shows
                     # which table each sample will be annotated under and can be
                     # corrected before the run. Blank means unresolved: the

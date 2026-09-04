@@ -1,0 +1,20 @@
+group	accession	organism	family	length_bp	n_cds	n_rrna	source
+tunicata	NC_009834.1	Phallusia fumigata	Ascidiidae	15535	13	2	refseq
+tunicata	NC_009833.1	Phallusia mammillata	Ascidiidae	14579	13	2	refseq
+tunicata	NC_017929.1	Ciona intestinalis B CG-2006	Cionidae	14591	13	2	refseq
+tunicata	NC_034372.1	Ciona robusta	Cionidae	14790	13	2	refseq
+tunicata	NC_004570.1	Ciona savignyi	Cionidae	14737	12	2	refseq
+tunicata	NC_012887.1	Clavelina lepadiformis	Clavelinidae	14484	12	2	refseq
+tunicata	NC_024105.1	Clavelina oblonga	Clavelinidae	14603	13	2	refseq
+tunicata	NC_026107.1	Didemnum vexillum	Didemnidae	13424	12	2	refseq
+tunicata	NC_013584.1	Aplidium conicum	Polyclinidae	15183	13	2	refseq
+tunicata	NC_053533.1	Halocynthia aurantium	Pyuridae	14979	13	2	refseq
+tunicata	NC_002177.1	Halocynthia roretzi	Pyuridae	14771	12	2	refseq
+tunicata	NC_013561.1	Herdmania momus	Pyuridae	15816	13	2	refseq
+tunicata	NC_013752.1	Microcosmus sulcatus	Pyuridae	15028	13	2	refseq
+tunicata	NC_079570.1	Pyura mirabilis	Pyuridae	15778	13	2	refseq
+tunicata	NC_024104.1	Botrylloides giganteus	Styelidae	14323	13	2	refseq
+tunicata	NC_024103.1	Botrylloides leachii	Styelidae	14408	13	2	refseq
+tunicata	NC_021467.1	Botrylloides nigrum	Styelidae	14427	13	2	refseq
+tunicata	NC_037072.1	Styela clava	Styelidae	14616	13	2	refseq
+tunicata	NC_013565.1	Styela plicata	Styelidae	14414	13	2	refseq

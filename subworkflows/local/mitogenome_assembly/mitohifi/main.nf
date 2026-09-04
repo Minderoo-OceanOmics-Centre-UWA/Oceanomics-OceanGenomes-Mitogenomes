@@ -247,7 +247,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // Stand-in for assemblies that never reached a circularity check (failed / no-contig).
     // Keeps circularity_evidence one-row-per-assembly; see the emit block for why totality
     // is a contract rather than a convenience.
-    def no_circularity_evidence = file("${projectDir}/assets/empty_circularity_check.tsv", checkIfExists: true)
+    def no_circularity_evidence = file("${projectDir}/assets/placeholders/empty_circularity_check.tsv", checkIfExists: true)
 
     //
     // Canonical read channel. The assembly prefix is embedded once, up front, and
@@ -702,7 +702,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         // is disjoint from ch_direct_oatk_reads, so the two contributors never double-key a
         // sample; together they make ch_oatk_ref_keyed TOTAL over the assembled oatk contigs
         // and the join below becomes a plain per-sample join (was a whole-run remainder wait).
-        def no_reference_gb_oatk = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
+        def no_reference_gb_oatk = file("${projectDir}/assets/placeholders/NO_REFERENCE.gb", checkIfExists: true)
         ch_oatk_ref_keyed = RELABEL_REFERENCE_GB.out.gb
             .map { m, gb -> [ [m.id, m.sequencing_type, m.date], gb ] }
             .mix( ch_direct_oatk_reads
@@ -982,7 +982,7 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // the fallback ran.
     //
     // CONTRACT: exactly one row per assembly FASTA this subworkflow emits (assembly_fasta +
-    // oatk_fasta), using assets/empty_circularity_check.tsv where no check ran. The parent
+    // oatk_fasta), using assets/placeholders/empty_circularity_check.tsv where no check ran. The parent
     // workflow and the QC gate rely on that totality to attach evidence with a plain per-key
     // join; a channel that is merely "evidence where it exists" would force them back to a
     // remainder join or a collect, which is what previously pinned every finished sample to

@@ -13,7 +13,7 @@ process SELECT_CORAL_REFERENCE {
         'quay.io/biocontainers/mitos:2.1.10--pyhdfd78af_0' }"
 
     input:
-    // assembly = the mitogenome FASTA to match; db_gb = assets/coral_mito_refdb.gb.
+    // assembly = the mitogenome FASTA to match; db_gb = assets/refdb/anthozoa/anthozoa_mito_refdb.gb.
     tuple val(meta), path(assembly)
     path db_gb
 

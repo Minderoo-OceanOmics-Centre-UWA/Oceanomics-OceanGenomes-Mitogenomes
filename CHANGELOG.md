@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `Added`
 
+- Invertebrate GetOrganelle reseeds now seed from a curated database for the sample's own
+  phylum instead of the coral one.
+
+  A failed first pass was reseeded from `coral_mito_refdb.*` for *every* invertebrate, and
+  that database is Anthozoa-only (`txid6101`). A mollusc or a sea star was therefore re-run
+  against a seed far too divergent to assemble from: a guaranteed second failure that still
+  cost the full GetOrganelle walltime. Seven new databases are built alongside it, one per
+  group we run -- porifera, mollusca, arthropoda, echinodermata, ctenophora, tunicata,
+  annelida -- and `InvertTaxonGroups.seedDbGroup()` resolves each sample's class to one of
+  them. A class no database covers now returns null and is **not** reseeded at all: it keeps
+  its first-pass assembly and is named in the log, because not reseeding is strictly better
+  than reseeding from the wrong phylum. This is deliberately the opposite of
+  `cox1PanelGroup()`'s catch-all -- a mismatched rotation panel is a safe no-op, a
+  mismatched seed is a wasted run.
+
+  `ARTHROPODA_CLASSES` gains Thecostraca, Copepoda, Ichthyostraca and Mystacocarida (the
+  classes the old Maxillopoda was split into, all of which NCBI returns), and each phylum set
+  gains its own phylum name for samples whose taxonomy only resolved to phylum rank. Without
+  them a barnacle got no seed database and the *coral* cox1 rotation panel. New
+  `tests/invert_seed_db` resolves every class we run and asserts the files are on disk, since
+  the group name is also the directory name -- the drift that hid the barnacle gap.
+
+  `bin/build_coral_reference_db.py` becomes `bin/build_invert_reference_db.py`, taking
+  `--group`/`--all` over a registry of Entrez organism expressions and per-group completeness
+  bars. The bar cannot be one number: coral references must carry what `CORAL_ANNOTATION_FIX`
+  transfers (both rRNAs, a nad5 CDS) plus the 13-PCG cnidarian set, while ctenophore
+  mitogenomes are genuinely reduced (no atp6, no tRNAs, ~10 PCGs), so the coral bar rejects
+  every valid ctenophore record. The rRNA matcher also learns the `l-rRNA`/`rnl`/`MT-RNR2`
+  spellings other phyla use, where the coral-era `16S|RRNL|LARGE` test silently dropped
+  correctly annotated records; Arthropoda subtracts Hexapoda, Arachnida and Myriapoda, which
+  are >95% of arthropod RefSeq mitogenomes, none of them anything OceanOmics sequences, and
+  enough to truncate the search at `--retmax`. The builder now aborts on such a truncation
+  rather than shipping an arbitrary slice of a group.
+
+  The anthozoa database is kept at its existing 221-record build. Rebuilding it today yields
+  278 -- a strict superset, no record lost -- but those extra records also change which
+  reference `SELECT_CORAL_REFERENCE` picks for every coral, so that refresh belongs in its
+  own change.
+
+- `assets/` is reorganised from 35 flat files into `refdb/<group>/`, `panels/`, `taxonomy/`
+  and `placeholders/`, with nf-core boilerplate left at the root. Only the files the pipeline
+  reads are tracked: the per-group `.gb` files (85 MB, read by nothing today) and the
+  `.nucl.*` BLAST databases are gitignored and rebuilt on demand. `assets/refdb/README.md`
+  records each database's taxon, completeness bar, record count and rebuild command -- the
+  provenance that previously existed only in the builder's docstring.
+
 - Invertebrate annotation now generalises beyond Cnidaria to Mollusca, Echinodermata,
   Arthropoda (Crustacea, Pycnogonida) and Porifera, instead of running every invertebrate
   through coral-tuned machinery. `mitoGeneticCode()` gains an explicit allow-list of the
@@ -18,8 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   others) and a wrong table mistranslates every CDS and fails table2asn terminally. The
   per-sample `genetic_code` samplesheet column overrides the map;
   `ROTATE_ORIGIN` re-origins each sample against its own phylum-appropriate curated cox1 panel
-  (`assets/cox1_{mollusca,arthropoda,echinodermata}.faa`, new) instead of the coral-only
-  `cox1_anthozoa.faa` for every invertebrate; `REFERENCE_RELEVANCE`'s 88.0 identity floor is now
+  (`assets/panels/cox1/{mollusca,arthropoda,echinodermata}.faa`, new) instead of the coral-only
+  `panels/cox1/anthozoa.faa` for every invertebrate; `REFERENCE_RELEVANCE`'s 88.0 identity floor is now
   Cnidaria-only, with everything else defaulting to the vertebrate 82.0 as an untuned starting
   point. `ANNOTATION_QC_GATE`/`CORAL_ANNOTATION_FIX` stay Cnidaria-only rather than guessing an
   equivalent for other phyla -- the nad5 group I intron they repair is a Hexacorallia-specific
@@ -38,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the map did not know. It knew 25 of the 76 classes `INVERT_CLASSES` marks as invertebrate:
   Bivalvia, Cephalopoda, Polychaeta, Ascidiacea and 47 others would have stopped the run.
 
-  New `assets/mito_genetic_codes.json` is the single source of truth, read by both
+  New `assets/taxonomy/mito_genetic_codes.json` is the single source of truth, read by both
   `bin/create_samplesheet.py` and `lib/InvertTaxonGroups.groovy` -- the same fix
   `bin/mito_gene_order.py` applied to `REF_GENES` after four copies drifted. Every entry
   records its `basis` and whether the code is NCBI-documented (`ncbi`) or the conventional
@@ -62,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `nodes.dmp` field 8 holds the mitochondrial genetic code NCBI assigns each taxon, and it is
   what ENA and table2asn validate a submission against. `TaxdumpLineage` now parses it and
   `resolve_genetic_code()` prefers it whenever the taxdump resolved the sample, with
-  `assets/mito_genetic_codes.json` demoted to the fallback for a class that came from the
+  `assets/taxonomy/mito_genetic_codes.json` demoted to the fallback for a class that came from the
   species table with no lineage behind it.
 
   Per-taxon beats per-class because the code varies *below* class rank: `Cephalodiscidae` is
@@ -178,7 +224,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   untouched, and a rescue that recovers nothing re-emits EMMA's original bundle and the sample is
   held exactly as before.
 
-  The reference set is `assets/rescue_pcg_refs.faa` with `assets/rescue_pcg_refs.manifest.tsv`,
+  The reference set is `assets/panels/rescue_pcg_refs.faa` with `assets/panels/rescue_pcg_refs.manifest.tsv`,
   built by `bin/build_rescue_pcg_refs.py` from RefSeq mitochondrion CDS translations for
   Actinopterygii and Chondrichthyes plus a small tetrapod outgroup. The committed copy is the
   artifact the pipeline ships; the script is a stdlib-only refresher, not a runtime dependency.
@@ -383,7 +429,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `submission_ready` is always `false` under `--ena_webin_validate false`, so the second
   validator is not recorded in runs with the format check switched off.
 
-- `assets/ena_not_run/`, the six NOT_RUN placeholder files the fixed-totality ENA record grouping
+- `assets/placeholders/ena_not_run/`, the six NOT_RUN placeholder files the fixed-totality ENA record grouping
   resolves with `checkIfExists: true`. They were referenced but never created, which aborted every
   run during workflow construction. Their contents are inert: `collate_ena_validation.py` reads
   only the real status-file suffixes and infers NOT_RUN from a stage's absence, so the placeholders
@@ -729,7 +775,7 @@ contents matter.
   summary's `manual_review_reason` (the `<prefix>.circularity_check.tsv` is read as a per-run sidecar), and the QC gate
   (`EVALUATE_QC_CONDITIONS`) blocks any sample with an anomaly from progressing to the submission-prep QC subworkflow
   (`proceed_qc = false`). Samples without a check (precomputed) get a `no anomaly` placeholder
-  (`assets/empty_circularity_check.tsv`) so they are never dropped or blocked on this condition.
+  (`assets/placeholders/empty_circularity_check.tsv`) so they are never dropped or blocked on this condition.
 - GetOrganelle circularity re-test + anomaly screen (`GETORGANELLE_CHECK` + `bin/check_getorganelle.py`). GetOrganelle
   reports a single non-circularised scaffold for assemblies it cannot formally close, but these are frequently complete
   circles linearised at a different origin (per the GetOrganelle docs). The check BLASTs the scaffold against the related
@@ -739,7 +785,7 @@ contents matter.
   same module screens length / tandem-repeat anomalies (concatemer / tandem_repeat / unresolved) like the HiFi check. The
   corrected verdict + evidence flow to the assembly summary (`circularised` override, anomaly in `manual_review_reason`) and
   the QC gate (anomaly block; circular condition via `meta.circular`). Samples with no findMitoReference get an empty
-  placeholder (`assets/NO_REFERENCE.gb`) and are recorded as `no_reference` rather than dropped.
+  placeholder (`assets/placeholders/NO_REFERENCE.gb`) and are recorded as `no_reference` rather than dropped.
 - GetOrganelle reseed now builds a custom gene (label) database from the reseed reference and passes it via `--genes`,
   improving recovery of divergent mitogenomes. New `GETORGANELLE_GENEDB` module + `bin/extract_getorganelle_genedb.py`,
   gated by `--getorganelle_genedb_min_genes` (default `10`).
@@ -755,7 +801,7 @@ contents matter.
   Correctly annotated corals pass through MITOS2 untouched. The fixer is fail-safe (BLAST coverage/identity + a nad5
   ORF check guard every edit; a poor reference reproduces the original output). Reference is resolved per sample in
   priority order: the assembly stage's findMitoReference download → a fresh `MITOHIFI_FINDMITOREFERENCE` lookup →
-  the bundled `assets/anthozoa_reference.gb`; the reference used is published into the sample's annotation dir.
+  the bundled `assets/refdb/anthozoa/anthozoa_reference.gb`; the reference used is published into the sample's annotation dir.
 
 ### `Fixed`
 

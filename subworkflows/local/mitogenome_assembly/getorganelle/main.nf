@@ -200,7 +200,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_reference_placeholders = Channel.empty()
     // The empty placeholder reference. Hoisted here (from the check-join site) so both
     // reseed branches AND the reseed-skipped else-branch can mix it in.
-    def no_reference_gb = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
+    def no_reference_gb = file("${projectDir}/assets/placeholders/NO_REFERENCE.gb", checkIfExists: true)
 
      
     //
@@ -340,11 +340,11 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             keep:   !needsReseed(fasta, log)
         }
 
-        // Split reseed candidates by taxon. INVERTEBRATES (corals) seed from the
-        // curated coral mitogenome DB -- a broad, label-free Anthozoa seed + label
-        // database, so a wrong/coarse species label can no longer pick a wrong seed.
-        // VERTEBRATES keep the per-sample findMitoReference download. The coral DB is
-        // NEVER used for vertebrates.
+        // Split reseed candidates by taxon. INVERTEBRATES seed from the curated
+        // per-phylum mitogenome DB for their class (assets/refdb/<group>/) -- a broad,
+        // label-free seed + label database, so a wrong/coarse species label can no
+        // longer pick a wrong seed. VERTEBRATES keep the per-sample findMitoReference
+        // download. The invert DBs are NEVER used for vertebrates.
         ch_reseed_branched = ch_assessed.reseed.branch { meta, _fasta, _log, _reads ->
             invert: meta.invertebrates
             vert:   true
@@ -453,18 +453,37 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
                     .filter { _meta, ref_fasta, ref_gb -> !(ref_fasta.size() > 0 && ref_gb.size() > 0) }
                     .map { meta, _ref_fasta, _ref_gb -> [ meta, no_reference_gb ] } )
 
-        // --- Invertebrate (coral) reseed path: broad coral DB seed + label db. ---
-        ch_coral_seed  = Channel.fromPath("${projectDir}/assets/coral_mito_refdb.fasta",       checkIfExists: true).first()
-        ch_coral_label = Channel.fromPath("${projectDir}/assets/coral_mito_refdb.label.fasta", checkIfExists: true).first()
-        ch_invert_seed  = ch_reseed_branched.invert
-            .map { meta, _fasta, _log, _reads -> meta }.combine(ch_coral_seed)
-            .map { meta, seed -> [meta, seed] }
-        ch_invert_genes = ch_reseed_branched.invert
-            .map { meta, _fasta, _log, _reads -> meta }.combine(ch_coral_label)
-            .map { meta, genes -> [meta, genes] }
+        // --- Invertebrate reseed path: the curated DB for the sample's phylum. ---
+        // InvertTaxonGroups.seedDbGroup() resolves the class to a group directory under
+        // assets/refdb/, or to null when no curated database covers that class. A null
+        // is NOT backfilled with some other phylum's database: every invertebrate used
+        // to be reseeded from the Anthozoa DB, so a mollusc or a sea star was re-run
+        // against a seed far too divergent to assemble from, failing a second time after
+        // burning the full GetOrganelle walltime. An unmapped class is simply not
+        // reseeded and keeps its first-pass assembly (via ch_reseed_readiness below).
+        ch_invert_group = ch_reseed_branched.invert
+            .map { meta, _fasta, _log, _reads ->
+                def group = InvertTaxonGroups.seedDbGroup(meta.class)
+                if (group) {
+                    log.info "GETORGANELLE_RESEED: ${meta.id} (class ${meta.class}) seeding from assets/refdb/${group}"
+                } else {
+                    log.warn "GETORGANELLE_RESEED: ${meta.id} has no curated seed database for class " +
+                             "'${meta.class}' -- keeping the first-pass assembly instead of reseeding " +
+                             "from another phylum. Add the class to InvertTaxonGroups.seedDbGroup() and " +
+                             "build its database with bin/build_invert_reference_db.py to reseed it."
+                }
+                [ meta, group ]
+            }
 
-        // Merge the two reseed paths. Inverts always carry both seed + genes (assets);
-        // verts carry them only when findMitoReference + GENEDB succeeded.
+        ch_invert_seeded = ch_invert_group.filter { _meta, group -> group != null }
+        ch_invert_seed  = ch_invert_seeded.map { meta, group ->
+            [ meta, file("${projectDir}/assets/refdb/${group}/${group}_mito_refdb.fasta", checkIfExists: true) ] }
+        ch_invert_genes = ch_invert_seeded.map { meta, group ->
+            [ meta, file("${projectDir}/assets/refdb/${group}/${group}_mito_refdb.label.fasta", checkIfExists: true) ] }
+
+        // Merge the two reseed paths. Inverts carry both seed + genes (assets) whenever
+        // their class resolves to a curated database; verts carry them only when
+        // findMitoReference + GENEDB succeeded.
         ch_seed  = ch_vert_seed.mix(ch_invert_seed)
         ch_genes = GETORGANELLE_GENEDB.out.genes.mix(ch_invert_genes)
 
@@ -489,13 +508,13 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         // set and disjoint across its three sources, so the fallback is a plain join + filter
         // rather than a remainder join that could not classify a not-ready sample until the run
         // closed:
-        //   * inverts always carry seed + genes (curated coral assets)          -> ready
+        //   * inverts: ready iff their class resolved to a curated seed database -> its group
         //   * vertebrates with a reference: ready iff GETORGANELLE_GENEDB built  -> its status
         //   * vertebrates with no findMitoReference at all                       -> not ready
         // (a vertebrate with a reference but a sparse gene database reports ready=no from GENEDB,
         // so it falls back here while still keeping its resolved reference upstream.)
-        ch_reseed_readiness = ch_reseed_branched.invert
-                .map { meta, _fasta, _log, _reads -> [ meta, true ] }
+        ch_reseed_readiness = ch_invert_group
+                .map { meta, group -> [ meta, group != null ] }
             .mix( GETORGANELLE_GENEDB.out.status.map { meta, s -> [ meta, genedbReady(s) ] } )
             .mix( MITOHIFI_FINDMITOREFERENCE.out.reference
                     .filter { _meta, ref_fasta, ref_gb -> !(ref_fasta.size() > 0 && ref_gb.size() > 0) }
@@ -814,7 +833,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // (unlike the MitoHiFi subworkflow, which has failed / no-contig branches to fill in).
     // The parent workflow and the QC gate rely on that totality to attach evidence with a
     // plain per-key join rather than collecting the whole channel; if a future change lets an
-    // assembly bypass the check, it must emit assets/empty_circularity_check.tsv for that
+    // assembly bypass the check, it must emit assets/placeholders/empty_circularity_check.tsv for that
     // sample or the sample will be dropped at the QC gate.
     circularity_evidence = GETORGANELLE_CHECK.out.evidence  // channel: [ meta, getorg_check.tsv ]
     // Reads keyed by the LINEAGE prefix, for MITOGENOME_COVERAGE in the parent workflow.

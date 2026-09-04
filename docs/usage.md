@@ -90,6 +90,12 @@ that matches your container/conda environment.
 | `--oatk_mito_db` | With Oatk fallback | Path to the OatkDB `<clade>_mito.fam` profile-HMM (index files staged beside it). Required when `--enable_oatk_fallback true`. |
 | `--oatk_syncmer_size`, `--oatk_syncmer_coverage` | Optional | Syncmer size (`-k`, default `1001`) and coverage (`-c`, default `30`) passed to Oatk/syncasm. |
 | `--skip_getorganelle_reseed` | Optional | Disable the automatic GetOrganelle reseed pass on failed/fragmented first passes (default `false`). |
+
+Invertebrate reseeds take their seed and gene-label database from the curated per-phylum databases in
+`assets/refdb/<group>/`, chosen from the sample's `class` (Cnidaria → anthozoa, Gastropoda → mollusca,
+Malacostraca → arthropoda, and so on). An invertebrate class no database covers is **not** reseeded from another
+phylum: it keeps its first-pass assembly, and the run log names it. See
+[`assets/refdb/README.md`](../assets/refdb/README.md) for what each database contains and how to add a group.
 | `--skip_hic_fastp` | Optional | Skip fastp trimming of raw Hi-C reads before GetOrganelle (default `false`). Override the fastp arguments with `--hic_fastp_args`. |
 | `--force_db_overwrite` | Optional | Overwrite existing `mitogenome_data` rows on SQL upload instead of the default insert-only behaviour (default `false`). |
 | `--translation_table` | Optional | Mitochondrial genetic code for vertebrate/unresolved samples (default `2`). Invertebrate codes are derived per-sample from the taxonomic `class` column (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4), so this no longer forces a single code across the whole run. |
@@ -424,7 +430,9 @@ A valid CSV must match the schema in `assets/schema_input.json`:
   `single_end`, `original_id`, `completion_date`, `date`, `assembly_prefix`,
   `nominal_species_id`, `invertebrates`, `class`, and `reference_species_id`.
 - `class` (NCBI taxonomic class, e.g. `Actinopteri`, `Anthozoa`) and `invertebrates` together determine the
-  per-sample mitochondrial genetic code used for annotation (e.g. Cnidaria → 4). In `--input_dir` mode these are
+  per-sample mitochondrial genetic code used for annotation (e.g. Cnidaria → 4), the cox1 rotation panel, and
+  which curated seed database a failed GetOrganelle first pass is reseeded from (see
+  [`assets/refdb/README.md`](../assets/refdb/README.md)). In `--input_dir` mode these are
   resolved automatically from `nominal_species_id`: first from the OceanOmics `species` table, then from the NCBI
   taxdump (`--taxonkit_db_dir`) when the table has no match. In `--input` mode supply `class` yourself.
 - **`class` is required in practice.** A missing or `unknown` class aborts the run before any assembly work, because

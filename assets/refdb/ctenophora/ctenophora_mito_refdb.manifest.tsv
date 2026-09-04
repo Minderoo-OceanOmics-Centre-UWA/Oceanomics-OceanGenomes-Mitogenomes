@@ -1,0 +1,5 @@
+group	accession	organism	family	length_bp	n_cds	n_rrna	source
+ctenophora	NC_045305.1	Beroe cucumis	Beroidae	10487	10	2	refseq
+ctenophora	NC_038065.1	Beroe forskalii	Beroidae	13338	13	2	refseq
+ctenophora	NC_016117.1	Mnemiopsis leidyi	Bolinopsidae	10326	11	2	refseq
+ctenophora	NC_045864.1	Hormiphora californensis	Pleurobrachiidae	12564	14	2	refseq

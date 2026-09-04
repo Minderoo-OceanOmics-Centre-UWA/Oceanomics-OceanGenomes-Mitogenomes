@@ -1,4 +1,4 @@
-"""assets/mito_genetic_codes.json is the one class -> genetic code map.
+"""assets/taxonomy/mito_genetic_codes.json is the one class -> genetic code map.
 
 It is read by both bin/create_samplesheet.py (which fills the samplesheet's
 genetic_code column) and lib/InvertTaxonGroups.groovy (which prepare_samplesheet
@@ -22,7 +22,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 BIN = ROOT / "bin"
-ASSET = ROOT / "assets" / "mito_genetic_codes.json"
+ASSET = ROOT / "assets" / "taxonomy" / "mito_genetic_codes.json"
 
 # The genetic codes the pipeline will actually annotate under; mirrors
 # SUPPORTED_GENETIC_CODES in subworkflows/local/mitogenome_annotation_lca.

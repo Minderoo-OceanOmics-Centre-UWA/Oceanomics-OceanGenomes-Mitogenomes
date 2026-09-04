@@ -75,7 +75,7 @@ workflow QC_GATE_STREAMING {
     ASSEMBLY_CHECK(assembly_work)
     SAMPLE_READY(sample_work)
 
-    def no_circularity_evidence = file("${projectDir}/assets/empty_circularity_check.tsv", checkIfExists: true)
+    def no_circularity_evidence = file("${projectDir}/assets/placeholders/empty_circularity_check.tsv", checkIfExists: true)
 
     // Mirrors the totality contract the assembly subworkflows now guarantee: exactly one
     // evidence row per emitted assembly, the empty-check stand-in where no check ran, keyed

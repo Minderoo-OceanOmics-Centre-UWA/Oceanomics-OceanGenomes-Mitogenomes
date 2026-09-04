@@ -27,7 +27,7 @@ process EMMA_GENE_RESCUE {
     input:
     // bundle  = EMMA.out.results for a FIX assembly
     // targets = comma-list from the gate ('ND4L', 'ATP8', 'ND4L,ATP8')
-    // ref_faa = assets/rescue_pcg_refs.faa
+    // ref_faa = assets/panels/rescue_pcg_refs.faa
     tuple val(meta), path(bundle, stageAs: 'emma_in/*'), val(targets), path(ref_faa)
 
     output:

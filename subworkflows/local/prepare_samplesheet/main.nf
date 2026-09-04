@@ -18,7 +18,7 @@ include { samplesheetToList         } from 'plugin/nf-schema'
 // Cnidaria/Ctenophora/Porifera are code 4, echinoderms and most flatworms 9,
 // tunicates 13, and the bilaterian invertebrate bulk 5.
 //
-// The class -> code map lives in assets/mito_genetic_codes.json, not here, so
+// The class -> code map lives in assets/taxonomy/mito_genetic_codes.json, not here, so
 // bin/create_samplesheet.py can resolve the same codes when it writes the
 // samplesheet's genetic_code column. See InvertTaxonGroups.loadGeneticCodes().
 //
@@ -48,7 +48,7 @@ def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
         def reason = InvertTaxonGroups.ambiguousReason(taxClass)
         error "Sample ${sampleId}: class '${taxClass ?: 'unknown'}' has no confirmed " +
               "mitochondrial genetic code -- " + (reason ?: "add it to " +
-              "assets/mito_genetic_codes.json") + " or set the genetic_code column"
+              "assets/taxonomy/mito_genetic_codes.json") + " or set the genetic_code column"
     }
     return defaultCode
 }
@@ -143,7 +143,7 @@ workflow PREPARE_SAMPLESHEET {
     // Parse the class -> genetic code map once, before the per-sample closure
     // below calls mitoGeneticCode(). checkIfExists so a missing or malformed
     // asset fails here, not as a null code on every invertebrate row.
-    ch_genetic_codes = file("${projectDir}/assets/mito_genetic_codes.json", checkIfExists: true)
+    ch_genetic_codes = file("${projectDir}/assets/taxonomy/mito_genetic_codes.json", checkIfExists: true)
     InvertTaxonGroups.loadGeneticCodes(ch_genetic_codes)
 
    // Handle different input types

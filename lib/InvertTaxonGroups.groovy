@@ -20,7 +20,7 @@
  *     of this group even though it is in REDUCED_TRNA above.
  *
  * Mitochondrial genetic codes are deliberately NOT one of these sets. They live
- * in assets/mito_genetic_codes.json, loaded here by loadGeneticCodes(), because
+ * in assets/taxonomy/mito_genetic_codes.json, loaded here by loadGeneticCodes(), because
  * bin/create_samplesheet.py needs the same mapping and a second copy in Python
  * would drift. They also do not line up with the sets above -- the code-4 group
  * includes Ctenophora, which is neither reduced-tRNA nor coral-fix eligible, and
@@ -30,8 +30,12 @@
 import groovy.json.JsonSlurper
 class InvertTaxonGroups {
 
+    // Each set also carries its own phylum name, because a sample whose taxonomy
+    // only resolved to phylum rank arrives with the phylum in meta.class -- the
+    // same convention assets/taxonomy/mito_genetic_codes.json uses.
     static final Set<String> CNIDARIA_CLASSES = [
         'anthozoa', 'hydrozoa', 'scyphozoa', 'cubozoa', 'staurozoa', 'myxozoa', 'polypodiozoa',
+        'cnidaria',
     ] as Set
 
     static final Set<String> PORIFERA_CLASSES = [
@@ -50,9 +54,25 @@ class InvertTaxonGroups {
         'monoplacophora', 'caudofoveata', 'solenogastres', 'mollusca',
     ] as Set
 
+    // Thecostraca (barnacles), Copepoda, Ichthyostraca and Mystacocarida are the
+    // classes the old Maxillopoda has been split into; NCBI returns them, and
+    // without them a barnacle got no seed database and the coral cox1 panel.
     static final Set<String> ARTHROPODA_CLASSES = [
         'malacostraca', 'hexanauplia', 'branchiopoda', 'ostracoda',
         'cephalocarida', 'remipedia', 'maxillopoda', 'pycnogonida', 'arthropoda',
+        'thecostraca', 'copepoda', 'ichthyostraca', 'mystacocarida',
+    ] as Set
+
+    static final Set<String> CTENOPHORA_CLASSES = [
+        'tentaculata', 'nuda', 'ctenophora',
+    ] as Set
+
+    static final Set<String> TUNICATA_CLASSES = [
+        'ascidiacea', 'thaliacea', 'appendicularia', 'tunicata',
+    ] as Set
+
+    static final Set<String> ANNELIDA_CLASSES = [
+        'polychaeta', 'clitellata', 'annelida', 'echiura', 'sipuncula',
     ] as Set
 
     static final Set<String> REDUCED_TRNA_CLASSES = CNIDARIA_CLASSES + PORIFERA_CLASSES
@@ -63,13 +83,13 @@ class InvertTaxonGroups {
         (taxClass ?: '').toString().trim().toLowerCase()
     }
 
-    // ---- Mitochondrial genetic codes (assets/mito_genetic_codes.json) ----
+    // ---- Mitochondrial genetic codes (assets/taxonomy/mito_genetic_codes.json) ----
 
     private static Map<String, Integer> geneticCodes = null
     private static Map<String, String> ambiguousCodes = null
 
     /**
-     * Parse assets/mito_genetic_codes.json once per session. Idempotent, so the
+     * Parse assets/taxonomy/mito_genetic_codes.json once per session. Idempotent, so the
      * per-sample closure in prepare_samplesheet can call it without a guard.
      * A class listed twice with different codes, or listed both as a code and as
      * ambiguous, is a contradiction in the asset and stops the run here rather
@@ -132,12 +152,14 @@ class InvertTaxonGroups {
         norm(taxClass) in CORAL_FIX_ELIGIBLE_CLASSES
     }
 
-    // Which curated cox1 anchor panel (assets/cox1_<group>.faa) a sample's
+    // Which curated cox1 anchor panel (assets/panels/cox1/<group>.faa) a sample's
     // ROTATE_ORIGIN re-origin step should tblastn against. 'reduced_trna'
     // (Cnidaria/Porifera) is also the fallback for any invertebrate class not in
     // one of the curated bilaterian panels -- rotate_to_cox1.py passes the
     // assembly through unrotated on a weak/no hit, so a mismatched panel is a
-    // safe no-op, never a corruption.
+    // safe no-op, never a corruption. Note this catch-all is the opposite of
+    // seedDbGroup()'s null below, and deliberately so: the cost of a wrong panel
+    // is nothing, the cost of a wrong seed is a whole wasted reseed.
     static String cox1PanelGroup(taxClass) {
         def c = norm(taxClass)
         if (c in REDUCED_TRNA_CLASSES) return 'reduced_trna'
@@ -145,5 +167,32 @@ class InvertTaxonGroups {
         if (c in ARTHROPODA_CLASSES) return 'arthropoda'
         if (c in ECHINODERMATA_CLASSES) return 'echinodermata'
         return 'reduced_trna'
+    }
+
+    // Which curated seed database (assets/refdb/<group>/) GETORGANELLE_RESEED should
+    // seed a failed invertebrate first pass from. The group name IS the directory and
+    // file prefix, and must match a key of GROUPS in bin/build_invert_reference_db.py.
+    //
+    // Returns null for a class with no curated database, and the caller must then skip
+    // the reseed and keep the first-pass assembly. There is deliberately no catch-all:
+    // until now every invertebrate was reseeded from the Anthozoa database, so a
+    // mollusc or a sea star was re-run against a seed far too divergent to assemble
+    // from -- a guaranteed second failure that still costs the full GetOrganelle
+    // walltime. Not reseeding is strictly better than reseeding from the wrong phylum.
+    //
+    // Cnidaria maps to 'anthozoa' because that is the only cnidarian database built so
+    // far; a Hydrozoa/Scyphozoa sample is seeded from anthozoans, which is within-phylum
+    // and the closest available, not cross-phylum.
+    static String seedDbGroup(taxClass) {
+        def c = norm(taxClass)
+        if (c in CNIDARIA_CLASSES) return 'anthozoa'
+        if (c in PORIFERA_CLASSES) return 'porifera'
+        if (c in MOLLUSCA_CLASSES) return 'mollusca'
+        if (c in ARTHROPODA_CLASSES) return 'arthropoda'
+        if (c in ECHINODERMATA_CLASSES) return 'echinodermata'
+        if (c in CTENOPHORA_CLASSES) return 'ctenophora'
+        if (c in TUNICATA_CLASSES) return 'tunicata'
+        if (c in ANNELIDA_CLASSES) return 'annelida'
+        return null
     }
 }
