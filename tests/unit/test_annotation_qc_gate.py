@@ -30,9 +30,14 @@ INTERNAL_STOP_CDS = "ATG" + "AAA" * 5 + "TAA" + "AAA" * 5 + "TAA"
 
 PCGS = gate.PCGS
 
+# The --min-nd5-aa / --min-co1-aa defaults in annotation_qc_gate.main(). evaluate()
+# takes them as arguments, so the tests have to supply them the way the CLI does.
+MIN_ND5_AA = 540
+MIN_CO1_AA = 450
+
 
 def write_annotation(tmp, genes=None, cds_overrides=None, nd5_aa=600,
-                     drop_from_gff=()):
+                     co1_aa=None, drop_from_gff=()):
     """Lay out a MITOS2-style annotation dir. genes defaults to the full
     cnidarian core; cds_overrides maps gene -> CDS nt string."""
     tmp = Path(tmp)
@@ -63,6 +68,10 @@ def write_annotation(tmp, genes=None, cds_overrides=None, nd5_aa=600,
     # ND5 protein length drives the cnidarian truncation heuristic.
     if "ND5" in genes:
         (prot_dir / f"MT-ND5.{PREFIX}.fa").write_text(">x\nM" + "A" * (nd5_aa - 1) + "\n")
+    # CO1 likewise, for the intron-split cox1 case. Written only when a length is
+    # asked for: absent, the gate skips the check, which is what most tests want.
+    if co1_aa is not None and "CO1" in genes:
+        (prot_dir / f"MT-CO1.{PREFIX}.fa").write_text(">x\nM" + "A" * (co1_aa - 1) + "\n")
     return gff, prot_dir, cds_dir
 
 
@@ -77,7 +86,8 @@ class GateTests(unittest.TestCase):
     def _eval(self, code=4, **kw):
         gff, prot, cds = write_annotation(self.tmp, **kw)
         return gate.evaluate(str(gff), str(prot), str(cds), code,
-                             540, is_cnidarian=(code == 4))
+                             MIN_ND5_AA, MIN_CO1_AA,
+                             is_cnidarian=(code == 4))
 
     def test_clean_annotation_passes(self):
         self.assertEqual(self._eval()[0], "PASS")
@@ -92,6 +102,16 @@ class GateTests(unittest.TestCase):
         decision, reason = self._eval(nd5_aa=400)
         self.assertEqual(decision, "FIX")
         self.assertIn("ND5_trunc", reason)
+
+    def test_short_co1_is_fix(self):
+        # One exon of an intron-split anthozoan cox1 is ~290 aa, against ~515 for
+        # the whole gene: the case that motivated the check.
+        decision, reason = self._eval(co1_aa=290)
+        self.assertEqual(decision, "FIX")
+        self.assertIn("CO1_trunc", reason)
+
+    def test_full_length_co1_passes(self):
+        self.assertEqual(self._eval(co1_aa=515)[0], "PASS")
 
     def test_nd1_non_m_start_is_fix(self):
         decision, reason = self._eval(cds_overrides={"ND1": NO_START_CDS})
