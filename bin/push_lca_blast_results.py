@@ -5,7 +5,10 @@ import pandas as pd
 import numpy as np
 import argparse
 import configparser
+import sys
 from pathlib import Path
+
+from pg_row_guard import row_savepoint
 
 def load_db_config(config_file):
     if not Path(config_file).exists():
@@ -39,12 +42,13 @@ blast_column_headers = [
 ]
 
 def process_blast(blast_file, sample, db_params):
+    """Upload one sample's filtered BLAST hits. Returns the number of failed rows."""
     print(f"📂 Reading BLAST file: {blast_file}")
     df = pd.read_csv(blast_file, sep='\t', header=None, names=blast_column_headers).replace({np.nan: None})
 
     if 'query_id' not in df.columns:
         print("❌ Missing 'query_id' in BLAST file")
-        return
+        return 1
 
     # A sample whose regions produced no filtered hits gets an empty combined file. Splitting
     # query_id on an empty frame yields a 0-column result and raises "Columns must be same
@@ -52,7 +56,7 @@ def process_blast(blast_file, sample, db_params):
     # BLAST upload. No hits is a legitimate outcome, not an error.
     if df.empty:
         print(f"ℹ️  No filtered BLAST hits for {sample} — nothing to upload")
-        return
+        return 0
 
     df[['og_id', 'tech', 'seq_date', 'code', 'annotation']] = df['query_id'].str.split('.', expand=True)
 
@@ -133,13 +137,20 @@ def process_blast(blast_file, sample, db_params):
             }
 
             try:
-                cursor.execute(upsert_query, params)
+                with row_savepoint(cursor):
+                    cursor.execute(upsert_query, params)
                 success += 1
             except Exception as e:
                 failure += 1
                 print(f"❌ BLAST row failed ({row_dict.get('query_id')}): {e}")
 
-    print(f"✅ BLAST upload complete: {success} rows succeeded, {failure} failed")
+    # Printed only after the `with` block has committed, so the tally describes
+    # rows that are actually in the table rather than rows that were attempted.
+    if failure:
+        print(f"⚠️ BLAST upload finished with errors: {success} rows succeeded, {failure} failed")
+    else:
+        print(f"✅ BLAST upload complete: {success} rows succeeded, {failure} failed")
+    return failure
 
 
 lca_column_headers = [
@@ -177,6 +188,7 @@ def prune_superseded_lca(cursor, written):
 
 
 def process_lca(lca_file, sample, db_params, force=False):
+    """Upload one sample's LCA assignments. Returns the number of failed rows."""
     print(f"📂 Reading LCA file: {lca_file}")
     # df = pd.read_csv(lca_file, sep='\t', header=True, names=lca_column_headers).replace({np.nan: None})
     # header=0 means a 0-byte file raises EmptyDataError rather than parsing to an empty
@@ -186,16 +198,16 @@ def process_lca(lca_file, sample, db_params, force=False):
         df = pd.read_csv(lca_file, sep='\t', header=0).replace({np.nan: None})
     except pd.errors.EmptyDataError:
         print(f"ℹ️  Empty LCA file for {sample} — nothing to upload")
-        return
+        return 0
 
     if 'seq_id' not in df.columns:
         print("❌ Missing 'seq_id' in LCA file")
-        return
+        return 1
 
     # Same as process_blast: a header-only combined file is "no assignments", not a failure.
     if df.empty:
         print(f"ℹ️  No LCA assignments for {sample} — nothing to upload")
-        return
+        return 0
 
     df[['og_id', 'tech', 'seq_date', 'code', 'annotation']] = df['seq_id'].str.split('.', expand=True)
     success, failure = 0, 0
@@ -323,7 +335,8 @@ def process_lca(lca_file, sample, db_params, force=False):
             }
 
             try:
-                cursor.execute(upsert_query, params)
+                with row_savepoint(cursor):
+                    cursor.execute(upsert_query, params)
                 success += 1
                 key = tuple(params[c] for c in LCA_HISTORY_KEY)
                 written.setdefault(key, set()).add(params["lca_run_date"])
@@ -339,7 +352,11 @@ def process_lca(lca_file, sample, db_params, force=False):
         elif force:
             print("⚠️ Skipping --force prune: upload had failures.")
 
-    print(f"✅ LCA upload complete: {success} rows succeeded, {failure} failed")
+    if failure:
+        print(f"⚠️ LCA upload finished with errors: {success} rows succeeded, {failure} failed")
+    else:
+        print(f"✅ LCA upload complete: {success} rows succeeded, {failure} failed")
+    return failure
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -365,9 +382,15 @@ if __name__ == "__main__":
     db_config = load_db_config(args.config_file)
 
     print("\n🔄 Starting BLAST processing...")
-    process_blast(args.blast_results, args.sample, db_config)
+    failed = process_blast(args.blast_results, args.sample, db_config)
 
     print("\n🔄 Starting LCA processing...")
-    process_lca(args.lca_results, args.sample, db_config, force=args.force)
+    failed += process_lca(args.lca_results, args.sample, db_config, force=args.force)
+
+    # Exit non-zero so Nextflow surfaces a partial upload instead of publishing a
+    # green task whose log quietly reports missing rows.
+    if failed:
+        print(f"\n❌ {failed} row(s) failed to upload for {args.sample}.")
+        sys.exit(1)
 
     print("\n🎉 All processing complete.")

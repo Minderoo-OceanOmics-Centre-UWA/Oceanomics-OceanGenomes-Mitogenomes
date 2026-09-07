@@ -34,6 +34,7 @@ MIGRATIONS = [
     "019_ena_validation_attempts_recompute_submission_ready.sql",
     "020_ena_validation_attempts_og_num.sql",
     "021_mitogenome_data_trna_advisory.sql",
+    "022_lca_widen_taxon_id_and_confidence.sql",
 ]
 
 
@@ -129,6 +130,19 @@ def audit(cursor) -> dict[str, object]:
         """
     )
     lca_content_addressing = cursor.fetchone()[0]
+    cursor.execute(
+        """
+        SELECT (
+            SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND (table_name, column_name, data_type) IN (
+                      ('blast_filtered_lca', 'taxon_id', 'text'),
+                      ('lca', 'top_confidence_score', 'double precision'),
+                      ('lca_raw_results', 'confidence_score', 'double precision'))
+        ) = 3
+        """
+    )
+    lca_columns_widened = cursor.fetchone()[0]
     measured_depth_rows = 0
     if mean_depth:
         cursor.execute(
@@ -178,6 +192,12 @@ def audit(cursor) -> dict[str, object]:
         # lca_raw_results_content_unique as ON CONFLICT targets, so without
         # these the first LCA upload of a run fails outright.
         "lca_content_addressing": lca_content_addressing,
+        # Migration 022 widens the three columns that were too narrow for real
+        # BLAST output: a ';'-joined staxids list does not fit an integer, and
+        # LCA confidence values reach ~1e-163, below the floor of real. While
+        # they are narrow every such row is rejected, and before the push
+        # scripts grew per-row savepoints one rejection cost the whole sample.
+        "lca_columns_widened": lca_columns_widened,
     }
 
 
@@ -305,6 +325,7 @@ def main() -> int:
                                     "mean_depth_column",
                                     "og_num_generated",
                                     "lca_content_addressing",
+                                    "lca_columns_widened",
                                 )
                             ):
                                 raise RuntimeError("Post-migration ENA schema audit failed")

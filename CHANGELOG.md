@@ -26,6 +26,21 @@ first drafted on 2026-08-18; the second is that original entry, kept intact. Bot
 
 #### `Added`
 
+- `bin/audit_lca_db_coverage.py` and `bin/backfill_lca_uploads.py`: find published LCA results
+  that never reached the database, and put them there without re-running the pipeline.
+
+  The audit compares the row counts in each `mitogenomes/<OG>/<assembly>/lca/` against
+  `blast_filtered_lca`, `lca` and `lca_raw_results`, reporting only assemblies whose published
+  file has data and whose table has none -- a sample with no hits above threshold writes empty
+  files and correctly has no rows. It exits non-zero when it finds a gap, so it can gate a run.
+
+  The backfill rebuilds the `lca_combined` / `blast_combined` inputs `SPECIES_VALIDATION` would
+  have produced, reusing that module's own concatenation helpers, and hands them to the same push
+  scripts the pipeline uses. It reads from `mitogenomes/`, not `species_validation/`, so it still
+  works on an archived run whose `work` and `species_validation` directories have been pruned. It
+  pushes only the tables the audit found empty and never passes `--force`, so there is no
+  superseded history to prune and re-running it once the gaps are filled finds nothing to do.
+
 - An intron-split `cox1` is now rebuilt as `cox1_0`/`cox1_1` in `bin/coral_fix_bed.py`, the
   same reference-transfer treatment `nad5` already got.
 
@@ -193,6 +208,28 @@ first drafted on 2026-08-18; the second is that original entry, kept intact. Bot
   `lib/MitoGeneticCode.groovy`, so the main pipeline and the QC-only entrypoint resolve one
   table instead of two. Only the lookup is shared: what to do with an unmapped class stays with
   each caller, because they genuinely differ. Pinned by `tests/mito_genetic_code`.
+
+- A row PostgreSQL rejects no longer costs a sample its entire LCA upload.
+
+  `bin/push_lca_blast_results.py` and `bin/push_lca_raw_results.py` wrapped each row's INSERT in
+  its own `try`/`except`, which looks like per-row isolation but is not: PostgreSQL aborts the
+  whole transaction on any error, so every later row failed with `current transaction is aborted`
+  and the commit was downgraded to a rollback. The scripts then printed a tally of "succeeded"
+  rows and exited 0, so the loss left no trace -- the Nextflow task showed COMPLETED and its
+  published `.upload.txt` ended in a tick, while the table had nothing.
+
+  Each row now runs inside a savepoint (`bin/pg_row_guard.py`), so a rejected row costs that row
+  alone and the rest of the batch commits. Both scripts exit non-zero when any row failed, and
+  the tick is reserved for an upload that landed in full; a partial upload says
+  `finished with errors`. `tests/unit/test_push_lca_row_isolation.py` reproduces PostgreSQL's
+  abort semantics against a fake cursor, so the pre-fix behaviour fails it.
+
+  This cost 87 assemblies their LCA rows across `batch-12` .. `batch-20`, in three classes: a
+  `;`-joined `staxids` against `blast_filtered_lca.taxon_id` (integer), a confidence value of
+  ~1e-163 against `lca.top_confidence_score` / `lca_raw_results.confidence_score` (`real`, floor
+  ~1.18e-38), and an insert that arrived before its `mitogenome_data` parent and tripped the
+  foreign key. Migration 022 widens the three columns; `bin/backfill_lca_uploads.py` restored the
+  rows from the published output, with no pipeline re-run.
 
 - `MITOGENOME_COVERAGE`, `OATK`, `LCA` and `SPECIES_VALIDATION` now retry a walltime kill instead
   of silently dropping the sample.
