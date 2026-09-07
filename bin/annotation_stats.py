@@ -20,7 +20,12 @@ from pathlib import Path
 # Reference gene order (tRNA, rRNA, CDS) — the standard vertebrate set. Shared
 # with the rescue gates via bin/mito_gene_order.py so the gates and this QC step
 # cannot drift on what "present and in order" means.
-from mito_gene_order import REF_GENES, TRNA_GENES as TRNA_NAMES
+from mito_gene_order import (
+    REF_GENES,
+    TRNA_GENES as TRNA_NAMES,
+    gene_entries_by_coord,
+    parse_gff_attributes,
+)
 
 # Protein-coding genes to pull from .faa/.fa files
 PROT_GENES = [
@@ -86,13 +91,6 @@ def completeness_profile(genetic_code=None, class_name=""):
     return "core" if has_reduced_trna_expectation(class_name) else "vertebrate"
 
 
-def parse_gff_attributes(attr_str):
-    return dict(
-        item.split("=", 1)
-        for item in attr_str.strip().split(";")
-        if "=" in item
-    )
-
 def extract_total_length(gff_path):
     with open(gff_path, "r") as f:
         for line in f:
@@ -115,9 +113,16 @@ def process_gff(gff_path, annotation_name, class_name="",
     else:
         og_id, tech, seq_date, code, annotation = parts
 
-    gene_entries = []  # list of (gene_name, start, end, strand)
-    seen = set()
+    # Gene entries come from the SHARED reader, which dedups a gene written as more
+    # than one `gene` line at its lowest start. This used to be an inline first-seen
+    # dedup, which on an origin-spanning gene put it at whichever half the file
+    # listed first -- so the same GFF could be judged in-order by the rescue gates
+    # (which already deduped by lowest start) and out-of-order here.
+    gene_entries = gene_entries_by_coord(gff_path)
     gene_lengths = {gene: "" for gene in REF_GENES}
+    for gene_name, start, end, _strand in gene_entries:
+        if gene_name in gene_lengths:
+            gene_lengths[gene_name] = str(abs(end - start) + 1)
     total_length = extract_total_length(gff_path)
 
     # Count features by the gene they belong to, not by feature line, so an
@@ -148,16 +153,7 @@ def process_gff(gff_path, annotation_name, class_name="",
             elif feature_type == "rrna":
                 rrna_genes.add(gene_key)
 
-            if parts[2] == "gene" and "Name" in attributes:
-                gene_name = attributes["Name"].replace("MT-", "")
-                if gene_name not in seen:
-                    seen.add(gene_name)
-                    gene_entries.append((gene_name, start, end, parts[6]))  # add strand too
-                    if gene_name in gene_lengths:
-                        gene_lengths[gene_name] = str(abs(end - start) + 1)
-
-    gene_entries.sort(key=lambda x: x[1])  # sort by start
-    found_by_coord = [g[0] for g in gene_entries]
+    found_by_coord = [entry[0] for entry in gene_entries]
 
     trna_advisory = []
     profile = completeness_profile(genetic_code, class_name)

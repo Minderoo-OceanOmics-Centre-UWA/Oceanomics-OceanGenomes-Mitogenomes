@@ -33,8 +33,9 @@ from pathlib import Path
 
 # The standard vertebrate gene order, shared with annotation_stats.py and the
 # tRNA gate via bin/mito_gene_order.py so the gates and the QC step cannot drift
-# on what "present and in order" means.
-from mito_gene_order import REF_GENES
+# on what "present and in order" means -- which covers HOW the GFF is read as
+# well as what the reference order is.
+from mito_gene_order import REF_GENES, genes_by_coord
 
 # Genes this rescue can recover, and the REF-order neighbours each one needs
 # present for the flanking-coordinate window to be well defined.
@@ -42,42 +43,6 @@ RESCUABLE = {
     "ND4L": ("TR", "ND4"),
     "ATP8": ("TK", "ATP6"),
 }
-
-
-def parse_gff_attributes(attr_str):
-    return dict(
-        item.split("=", 1)
-        for item in attr_str.strip().split(";")
-        if "=" in item
-    )
-
-
-def genes_by_coord(gff_path):
-    """Return REF gene names present in the GFF, ordered by genomic start.
-
-    A gene written as more than one `gene` line (an origin-spanning feature is
-    split into two) is kept once, at its LOWEST start. Taking the first line seen
-    instead put such a gene at whichever half the file happened to list first,
-    which could make the order check fail on an annotation that is in fact
-    correctly ordered -- and a failed order check silently suppresses the rescue.
-    """
-    starts = {}
-    with open(gff_path) as fh:
-        for line in fh:
-            if line.startswith("#"):
-                continue
-            parts = line.rstrip("\n").split("\t")
-            if len(parts) != 9 or parts[2] != "gene":
-                continue
-            attrs = parse_gff_attributes(parts[8])
-            name = attrs.get("Name")
-            if not name:
-                continue
-            gene = name.replace("MT-", "")
-            start = int(parts[3])
-            if gene not in starts or start < starts[gene]:
-                starts[gene] = start
-    return [g for g, _ in sorted(starts.items(), key=lambda kv: kv[1])]
 
 
 def decide(gff_path):
