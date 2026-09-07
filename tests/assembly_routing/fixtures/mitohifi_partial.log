@@ -1,0 +1,12 @@
+2026-08-27 21:17:20 [INFO] 8. Now we will choose the most representative contig
+2026-08-27 21:17:21 [INFO] Representative contig is atg000001l that belongs to Cluster 0.
+2026-08-27 21:17:21 [INFO] 9. Calculating final stats for final mitogenome and other potential contigs.
+    Stats will be saved on contigs_stats.tsv file.
+Traceback (most recent call last):
+  File "/opt/MitoHiFi/src/mitohifi.py", line 566, in <module>
+    main()
+  File "/opt/MitoHiFi/src/mitohifi.py", line 425, in main
+    related_mito_genes = get_genes_list(related_mito_annotation, "genbank")
+  File "/opt/MitoHiFi/src/getGenesList.py", line 22, in get_genes_list
+    genes.append(feat.qualifiers['product'][0])
+KeyError: 'product'

@@ -231,6 +231,45 @@ first drafted on 2026-08-18; the second is that original entry, kept intact. Bot
   foreign key. Migration 022 widens the three columns; `bin/backfill_lca_uploads.py` restored the
   rows from the published output, with no pipeline re-run.
 
+- A MitoHiFi run that crashed after writing its assembly no longer disappears from the pipeline.
+
+  `MITOHIFI_CHECK_CIRCULARITY` inner-joins MitoHiFi's `coverage_mapping` output, which is
+  `optional: true`. A run that died between the final FASTA and the coverage step therefore
+  produced no circularity evidence, and the `ch_circ_verdict` join then discarded the sample
+  outright: no annotation, no QC summary, no `held_samples.tsv` row, no database row. The run
+  still reported success, because the module wrapper runs under `set +e` so the task exits 0
+  whatever MitoHiFi did.
+
+  OG2133 (*Benthalbella* sp.) is the case in point. It assembled a circular 21,236 bp contig in
+  batch 18 and then vanished: of 69 samples it was the only one with no `mtdna.upload.txt`. The
+  crash was `KeyError: 'product'` in MitoHiFi's own `getGenesList.py`, parsing the reference it
+  had been given -- AP012968.1 carries a tRNA annotated `/note="tRNA-undetermined"` with no
+  `/product`, which MitoHiFi dereferences unconditionally. Any NCBI record with a
+  qualifier-less feature reproduces it.
+
+  `ch_mitohifi_fasta_branched` gains a `partial` arm for a non-empty FASTA whose run left a
+  traceback in the command log, and that arm is now a complement in every channel that
+  establishes totality (`ch_circ_verdict`, `ch_circularity_evidence`, `ch_assembly_log`,
+  the summary inputs), so the sample reaches annotation and is held visibly at QC instead of
+  being dropped. It keeps its published reference-relevance diagnostic but stays out of the
+  Oatk fallback routing, which needs circularity evidence it never produced.
+
+  A `partial` sample carries MitoHiFi's own `was_circular` rather than a blanket unknown.
+  `bin/check_circularity.py` computes `verdict = (mitohifi_circ is True) || read_span || hifiasm`,
+  a monotone OR, so the check can only ever flip `False -> True` -- across the 27 checked
+  assemblies in batch 18, `True -> True` 19 times and `False -> True` 8 times, never the
+  reverse. A `True` is therefore exactly the verdict the check would have reached and is
+  trusted; a `False` degrades to unknown and never to `false`, because that is the
+  terminal-overlap false negative the check module exists to repair and it is unresolvable
+  without the coverage mapping.
+
+- Every test in `tests/assembly_routing` was failing before it ran.
+
+  `conf/base.config` reads `params.mitogenome_depth_max_forks` at parse time, added with the
+  coverage fork-bounding, but the suite's `nextflow.config` pre-declared only `params.outdir`.
+  All five oatk-fallback tests died with `Unknown config attribute` before reaching a workflow.
+  The param is now pre-declared alongside `outdir`, with a note to keep the list in step.
+
 - `MITOGENOME_COVERAGE`, `OATK`, `LCA` and `SPECIES_VALIDATION` now retry a walltime kill instead
   of silently dropping the sample.
 

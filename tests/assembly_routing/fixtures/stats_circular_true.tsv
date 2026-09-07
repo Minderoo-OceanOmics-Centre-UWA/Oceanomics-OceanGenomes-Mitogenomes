@@ -1,0 +1,4 @@
+# Related mitogenome is 16253 bp long and has 36 genes
+contig_id	frameshifts_found	annotation_file	length(bp)	number_of_genes	was_circular
+final_mitogenome	No frameshift found	final_mitogenome.gb	21236	45	True
+atg000001l	No frameshift found	final_mitogenome.gb	21236	45	True
