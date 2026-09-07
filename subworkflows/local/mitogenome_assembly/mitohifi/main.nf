@@ -114,6 +114,69 @@ def firstRowColumn(tsv, name) {
     }
 }
 
+// Did MitoHiFi die partway through, after writing the final FASTA but before the
+// coverage mapping? The module runs under `set +e` (a genuine no-assembly sample must
+// emit an empty placeholder rather than crash the run), so the task always exits 0 and
+// a partial failure is indistinguishable from a clean one by exit status alone. The
+// Python traceback in the command log is the only signal available without changing the
+// module, which would invalidate the cache for every HiFi sample ever assembled.
+//
+// OG2133 (Benthalbella sp.) is the case in point: MitoHiFi assembled a circular 21,236 bp
+// contig, then died at step 9 with KeyError: 'product' parsing its own reference record
+// (AP012968.1 carries a tRNA with only /note="tRNA-undetermined" and no /product, which
+// MitoHiFi's getGenesList.py dereferences unconditionally). It wrote fasta/gb/stats but
+// never wrote coverage_mapping/, so MITOHIFI_CHECK_CIRCULARITY -- which inner-joins that
+// optional output -- never ran, and the sample was then dropped by the circularity-verdict
+// join with no held row, no QC summary and no DB row. It simply vanished from the run.
+//
+// Never raises: an unreadable or absent log yields false, so a missing artefact can only
+// ever leave an assembly on the normal path, never divert a good one.
+def mitohifiPartialFailure(log) {
+    try {
+        if (!log || !log.exists() || log.size() == 0) return false
+        return log.text.contains('Traceback (most recent call last)')
+    } catch (ignored) {
+        return false
+    }
+}
+
+// MitoHiFi's OWN circularity call for the final mitogenome, read from the was_circular
+// column of contigs_stats.tsv. Used only for the `partial` branch, where the sample never
+// reached MITOHIFI_CHECK_CIRCULARITY and there is no evidence TSV to parse.
+//
+// TRUE -> true, FALSE -> null (unknown), NEVER false. The asymmetry is load-bearing.
+// check_circularity.py computes `verdict = (mitohifi_circ is True) || read_span || hifiasm`,
+// a monotone OR that short-circuits on MitoHiFi's own True, so the check can only ever flip
+// False -> True. A True here therefore reconstructs exactly the verdict the check would have
+// reached, without the BAM. A False is precisely the terminal-overlap false negative the
+// check module exists to repair, and without the coverage mapping it is unresolvable --
+// recording it as `false` would write a linear topology to SQL and trip the assembly
+// summary's not_circularised review reason on a molecule that may well be closed.
+//
+// contigs_stats.tsv opens with a `# Related mitogenome is N bp long...` comment line, so
+// firstRowColumn() cannot be reused (it treats the first non-blank line as the header).
+def mitohifiStatsCircular(stats) {
+    try {
+        if (!stats || !stats.exists() || stats.size() == 0) return null
+        def rows = stats.text.readLines().findAll { it?.trim() && !it.startsWith('#') }
+        if (rows.size() < 2) return null
+        def header = rows[0].split('\t', -1)*.trim()
+        def ci = header.findIndexOf { it == 'contig_id' }
+        def wi = header.findIndexOf { it == 'was_circular' }
+        if (ci < 0 || wi < 0) return null
+        def row = rows.drop(1).find { line ->
+            def cells = line.split('\t', -1)
+            ci < cells.size() && cells[ci].trim() == 'final_mitogenome'
+        }
+        if (!row) return null
+        def cells = row.split('\t', -1)
+        if (wi >= cells.size()) return null
+        return cells[wi].trim().equalsIgnoreCase('true') ? true : null
+    } catch (ignored) {
+        return null
+    }
+}
+
 // Assembly length as a multiple of the reference length, from MITOHIFI_CHECK_CIRCULARITY.
 // A reference too distant to recruit cleanly can inflate an assembly as readily as it
 // can truncate one: OG56 came back circular with all 13 CDS at 1.281x reference length,
@@ -457,13 +520,34 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         "2"  // Fallback genetic code only: the module prefers meta.genetic_code (derived per-sample from taxonomic class in PREPARE_SAMPLESHEET). 2 = vertebrate mitochondrial.
     )
 
-    // Branch the assembled fasta on emptiness: when MitoHiFi finishes without
-    // producing a final mitogenome the wrapper emits an empty placeholder.
-    // Only run the coverage step for samples that actually assembled.
-    ch_mitohifi_fasta_branched = MITOHIFI_MITOHIFI.out.fasta.branch { meta, fasta ->
-        assembled: fasta.size() > 0
-        failed:    fasta.size() == 0
-    }
+    // Branch the assembled fasta three ways. `failed` is emptiness: when MitoHiFi
+    // finishes without producing a final mitogenome the wrapper emits an empty
+    // placeholder. `partial` is a non-empty FASTA from a run that then died before
+    // writing coverage_mapping/ (see mitohifiPartialFailure) -- it has a molecule but
+    // can never reach MITOHIFI_CHECK_CIRCULARITY, because that step inner-joins the
+    // optional coverage_mapping output. Only `assembled` runs the coverage chain.
+    //
+    // Splitting `partial` out is what stops such a sample being dropped on the floor.
+    // Before this arm existed it stayed in `assembled`, produced no circularity
+    // evidence, and was then silently discarded by the ch_circ_verdict join below --
+    // no annotation, no QC row, no held row, no DB row (OG2133 in batch 18).
+    //
+    // command_logs and stats are non-optional outputs of the same process as fasta, so
+    // joining them is total by construction: every task emits all three together, and
+    // the join releases per-sample with no channel-close barrier. Each arm re-emits the
+    // shape its consumers already expect, so `assembled` and `failed` are unchanged
+    // downstream; only `partial` carries the extra stats file it needs.
+    ch_mitohifi_fasta_branched = MITOHIFI_MITOHIFI.out.fasta
+        .join(MITOHIFI_MITOHIFI.out.command_logs, by: 0)
+        .join(MITOHIFI_MITOHIFI.out.stats, by: 0)
+        .branch { meta, fasta, log, stats ->
+            assembled: fasta.size() > 0 && !mitohifiPartialFailure(log)
+                return [meta, fasta]
+            partial:   fasta.size() > 0 &&  mitohifiPartialFailure(log)
+                return [meta, fasta, stats]
+            failed:    fasta.size() == 0
+                return [meta, fasta]
+        }
 
     ch_average_coverage_input = ch_mitohifi_fasta_branched.assembled
         .join(MITOHIFI_MITOHIFI.out.stats, by: 0)
@@ -511,7 +595,14 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         .join(MITOHIFI_MITOHIFI.out.stats, by: 0)
         .map { meta, _fasta, stats -> [meta, stats] }
 
-    ch_assembly_log = ch_assembled_stats.mix(ch_failed_assembly_log)
+    // A partially-failed run has real MitoHiFi stats but no coverage-corrected table,
+    // so it falls back to the raw contigs_stats.tsv. Without this the parent workflow's
+    // assembly_fasta <-> assembly_log join would drop the sample again, one step later
+    // than the drop this branch was added to fix.
+    ch_partial_assembly_log = ch_mitohifi_fasta_branched.partial
+        .map { meta, _fasta, stats -> [meta, stats] }
+
+    ch_assembly_log = ch_assembled_stats.mix(ch_failed_assembly_log, ch_partial_assembly_log)
 
     //
     // MODULE: OATK reference-free fallback (gated by params.enable_oatk_fallback).
@@ -596,8 +687,14 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         ch_relabelled_gb_keyed = RELABEL_REFERENCE_GB.out.gb
             .map { m, gb -> [ m.mt_assembly_run_prefix.toString(), gb ] }
 
+        // `partial` is included alongside `assembled`: it has a real molecule and a real
+        // reference, so the relevance verdict is just as meaningful for it, and it is often
+        // the artefact that explains why the run died. It stays OUT of ch_defective_oatk_reads
+        // below (that join needs circularity evidence a partial run never produced), so this
+        // only preserves the published diagnostic, it does not route anything.
         REFERENCE_RELEVANCE_ROUTING (
             ch_mitohifi_fasta_branched.assembled
+                .mix( ch_mitohifi_fasta_branched.partial.map { meta, fasta, _stats -> [ meta, fasta ] } )
                 .map { meta, fasta -> [ meta.mt_assembly_run_prefix.toString(), meta, fasta ] }
                 .join(ch_relabelled_gb_keyed, by: 0)
                 .map { _prefix, meta, fasta, gb -> [ meta, fasta, gb ] }
@@ -808,16 +905,27 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     //   SAME verdict so those joins still match.
     //
     // One verdict row per assembly this arm emits, never fewer. MITOHIFI_CHECK_CIRCULARITY
-    // runs on the `assembled` branch only, so the `failed` branch and the routed failures
-    // (ASSEMBLY_NO_RESULT) carry no evidence -- pair them here with a null verdict (unknown,
-    // not "not circular"). Both complements come from branches/channels already local at this
-    // point, so establishing totality costs no join and introduces no channel-close dependency.
+    // runs on the `assembled` branch only, so the `failed` branch, the `partial` branch and
+    // the routed failures (ASSEMBLY_NO_RESULT) carry no evidence and are paired here instead.
+    // All three complements come from branches/channels already local at this point, so
+    // establishing totality costs no join and introduces no channel-close dependency.
     // With ch_circ_verdict total over every left key below, those joins become plain per-sample
     // joins that release each finished sample immediately instead of waiting for the whole run
     // to close (the remainder-join barrier this replaces).
+    //
+    // THIS CHANNEL MUST STAY TOTAL OVER MITOHIFI_MITOHIFI.out.fasta. The joins below are inner
+    // joins, so any FASTA without a verdict row here is not delayed, it is silently discarded --
+    // that is exactly how OG2133 disappeared from batch 18. If a new way to produce a FASTA is
+    // ever added, it needs a complement here in the same commit.
+    //
+    // `partial` inherits MitoHiFi's own was_circular rather than a blanket null: the check
+    // module's verdict is a monotone OR that short-circuits on that flag, so a True here is
+    // precisely the verdict the check would have returned. A False becomes null, never false
+    // (see mitohifiStatsCircular).
     ch_circ_verdict = MITOHIFI_CHECK_CIRCULARITY.out.evidence
         .map { meta, tsv -> [ meta, parseFinalVerdictCircular(tsv) ] }
         .mix( ch_mitohifi_fasta_branched.failed.map { meta, _fasta -> [ meta, null ] } )
+        .mix( ch_mitohifi_fasta_branched.partial.map { meta, _fasta, stats -> [ meta, mitohifiStatsCircular(stats) ] } )
         .mix( ch_routed_failure_fasta.map { meta, _fasta -> [ meta, null ] } )
 
     ch_assembly_fasta = MITOHIFI_MITOHIFI.out.fasta.mix(ch_routed_failure_fasta)
@@ -834,10 +942,14 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
 
     // One evidence row per emitted assembly FASTA, never fewer. MITOHIFI_CHECK_CIRCULARITY
     // runs on the `assembled` branch only, and ch_assembly_fasta additionally carries the
-    // `failed` branch plus the routed failures, so those two are paired with the empty-check
-    // placeholder here (circular stays null -- unknown, not "not circular"). Both complements
-    // come from branches/channels that are already local at this point, so establishing
-    // totality costs no join and introduces no channel-close dependency.
+    // `failed` and `partial` branches plus the routed failures, so those three are paired with
+    // the empty-check placeholder here. All three complements come from branches/channels that
+    // are already local at this point, so establishing totality costs no join and introduces no
+    // channel-close dependency.
+    //
+    // The placeholder carries no verdict of its own, so the meta is what reports topology: null
+    // for `failed` and the routed failures, and MitoHiFi's own was_circular for `partial`, which
+    // is a real assembly whose flag we can still read even though the check never ran.
     //
     // Totality matters downstream: the parent workflow and the QC gate now attach evidence
     // with a plain per-key join instead of collecting the whole channel, which is what lets a
@@ -847,6 +959,8 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
         .map { meta, evidence -> [ meta + [ circular: parseFinalVerdictCircular(evidence) ], evidence ] }
         .mix( ch_mitohifi_fasta_branched.failed
                 .map { meta, _fasta -> [ meta + [ circular: null ], no_circularity_evidence ] } )
+        .mix( ch_mitohifi_fasta_branched.partial
+                .map { meta, _fasta, stats -> [ meta + [ circular: mitohifiStatsCircular(stats) ], no_circularity_evidence ] } )
         .mix( ch_routed_failure_fasta
                 .map { meta, _fasta -> [ meta + [ circular: null ], no_circularity_evidence ] } )
 
@@ -885,7 +999,11 @@ workflow MITOGENOME_ASSEMBLY_MITOHIFI {
     // plus the candidate-lookup outcome for samples that produced none.
     ch_summary_files = ch_summary_files.mix(REFERENCE_RANK.out.ranking.map { _meta, ranking -> ranking })
     ch_summary_files = ch_summary_files.mix(REFERENCE_CANDIDATES.out.status.map { _meta, status -> status })
+    // Corrected stats for the assembled samples, plus the raw MitoHiFi stats for a
+    // partially-failed run, which has no corrected table but is still a real assembly the
+    // summary should account for rather than omit.
     ch_summary_files = ch_summary_files.mix(ch_assembled_stats.map { meta, stats -> stats })
+    ch_summary_files = ch_summary_files.mix(ch_partial_assembly_log.map { _meta, stats -> stats })
     // The circularity-check evidence is a per-run sidecar: the assembly summary
     // strips its .circularity_check.tsv suffix to the run prefix (so it joins the
     // existing run rather than spawning a phantom) and folds its length/repeat

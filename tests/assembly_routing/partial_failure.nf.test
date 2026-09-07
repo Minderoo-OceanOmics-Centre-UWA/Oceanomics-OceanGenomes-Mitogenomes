@@ -1,0 +1,87 @@
+nextflow_workflow {
+    name "A partially-failed MitoHiFi run is detected and keeps its own circularity call"
+    script "./main.nf"
+    config "./nextflow.config"
+
+    // OG2133 (Benthalbella sp., batch 18) is the sample these two helpers exist for. MitoHiFi
+    // assembled a circular 21,236 bp contig, then died at step 9 parsing its own reference
+    // record (AP012968.1 carries a tRNA with /note but no /product). It wrote fasta/gb/stats
+    // but never wrote coverage_mapping/, so MITOHIFI_CHECK_CIRCULARITY could not run and the
+    // sample was silently dropped by the circularity-verdict join: no annotation, no QC row,
+    // no held row, no DB row. It vanished from a run that reported success.
+    test("a traceback in the command log marks the run partial, a clean log does not") {
+        when {
+            workflow "MITOHIFI_PARTIAL_FAILURE"
+            workflow {
+                """
+                def fx = { name -> file("\$baseDir/tests/assembly_routing/fixtures/\$name") }
+                input[0] = Channel.of(
+                    ['clean',   fx('mitohifi_clean.log')],
+                    ['partial', fx('mitohifi_partial.log')],
+                    // A missing or unreadable artefact must never divert a good assembly, so
+                    // both of these are false, not "assume the worst".
+                    ['empty',   fx('mitohifi_empty.log')],
+                    ['absent',  fx('does_not_exist.log')]
+                )
+                """
+            }
+        }
+        then {
+            def got = workflow.out.results
+                .collect { it instanceof String ? evaluate(it) : it }
+                .collectEntries { [(it[0]): it[1]] }
+            assertAll(
+                { assert workflow.success },
+                { assert got['partial'] == true },
+                { assert got['clean']   == false },
+                { assert got['empty']   == false },
+                { assert got['absent']  == false }
+            )
+        }
+    }
+
+    // The asymmetry here is load-bearing. check_circularity.py computes
+    //   verdict = (mitohifi_circ is True) || read_span_circ || hifiasm_circ
+    // a monotone OR that short-circuits on MitoHiFi's own flag, so the check can only ever
+    // flip False -> True. Across all 27 checked MitoHiFi assemblies in batch 18: True->True
+    // 19 times, False->True 8 times, True->False never, and it is unreachable by construction.
+    //
+    // So a True can be trusted verbatim -- it reconstructs the verdict the check would have
+    // reached without needing the BAM. A False cannot: it is exactly the terminal-overlap
+    // false negative the check module was written to repair, and with no coverage mapping it
+    // is unresolvable. Recording it as `false` would write a linear topology to SQL and trip
+    // the assembly summary's not_circularised review reason on a possibly-closed molecule.
+    test("was_circular True is trusted, False degrades to unknown and never to false") {
+        when {
+            workflow "MITOHIFI_STATS_CIRCULAR"
+            workflow {
+                """
+                def fx = { name -> file("\$baseDir/tests/assembly_routing/fixtures/\$name") }
+                input[0] = Channel.of(
+                    // OG2133's own shape, including the leading '#' comment line that would
+                    // fool a parser treating the first non-blank line as the header.
+                    ['true',           fx('stats_circular_true.tsv')],
+                    ['false',          fx('stats_circular_false.tsv')],
+                    ['no_final_row',   fx('stats_no_final_row.tsv')],
+                    ['missing_column', fx('stats_missing_column.tsv')],
+                    ['absent',         fx('does_not_exist.tsv')]
+                )
+                """
+            }
+        }
+        then {
+            def got = workflow.out.results
+                .collect { it instanceof String ? evaluate(it) : it }
+                .collectEntries { [(it[0]): it[1]] }
+            assertAll(
+                { assert workflow.success },
+                { assert got['true'] == 'true' },
+                // The regression that keeps the asymmetry honest: null, NOT 'false'.
+                { assert got['false'] == 'null' },
+                { assert got['no_final_row']   == 'null' },
+                { assert got['missing_column'] == 'null' },
+                { assert got['absent']         == 'null' }
+            )
+        }
+    }
+}

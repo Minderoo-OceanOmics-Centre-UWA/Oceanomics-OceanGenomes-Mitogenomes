@@ -1,0 +1,5 @@
+2026-08-27 21:17:20 [INFO] 8. Now we will choose the most representative contig
+2026-08-27 21:17:21 [INFO] Representative contig is atg000001l that belongs to Cluster 0.
+2026-08-27 21:17:21 [INFO] 9. Calculating final stats for final mitogenome and other potential contigs.
+2026-08-27 21:18:02 [INFO] 10. Mapping reads to the final mitogenome
+2026-08-27 21:19:44 [INFO] Done. Coverage plot saved.

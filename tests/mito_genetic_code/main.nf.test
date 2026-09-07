@@ -1,0 +1,59 @@
+nextflow_workflow {
+    name "Mitochondrial genetic code lookup by taxonomic class"
+    script "./main.nf"
+    workflow "MITO_GENETIC_CODE"
+
+    test("mapped classes resolve, and everything else returns null rather than a default") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    ['OG1', 'Anthozoa'],
+                    ['OG2', ' anthozoa '],
+                    ['OG3', 'Asteroidea'],
+                    ['OG4', 'Actinopteri'],
+                    ['OG5', 'unknown'],
+                    ['OG6', ''],
+                    ['OG7', null],
+                    ['OG8', 'Bivalvia'],
+                    ['OG9', 'Ascidiacea'],
+                    ['OG10', 'Pterobranchia']
+                )
+                """
+            }
+        }
+
+        then {
+            def code = { id -> workflow.out.resolved.find { it[0] == id }[2] }
+            assertAll(
+                { assert workflow.success },
+                // Cnidaria take the Coelenterate code, echinoderms the Echinoderm one.
+                { assert code('OG1') == 4 },
+                { assert code('OG3') == 9 },
+                // Case and surrounding whitespace must not change the answer: the class
+                // arrives from a samplesheet column in one caller and from a SQL column
+                // in the other, and they are not normalised the same way.
+                { assert code('OG2') == 4 },
+                // A vertebrate class is not "code 2" here, it is unmapped. Only the
+                // caller knows whether defaulting to --translation_table is safe, so
+                // the lookup must not decide that for it.
+                { assert code('OG4') == null },
+                // 'unknown' is the literal create_samplesheet.py writes for an
+                // unresolved taxon; it must not be looked up as if it were a class.
+                { assert code('OG5') == null },
+                { assert code('OG6') == null },
+                { assert code('OG7') == null },
+                // The rest of the invertebrate map, which the JSON asset carries and
+                // the fish repo's flat lookup did not: the bilaterian bulk and the
+                // tunicates.
+                { assert code('OG8') == 5 },
+                { assert code('OG9') == 13 },
+                // A documented ambiguous class is unmapped on purpose (Pterobranchia
+                // spans codes 24 and 33), and must not resolve to the code-5 bulk.
+                // prepare_samplesheet turns this null into an abort that quotes the
+                // reason from the asset.
+                { assert code('OG10') == null }
+            )
+        }
+    }
+}

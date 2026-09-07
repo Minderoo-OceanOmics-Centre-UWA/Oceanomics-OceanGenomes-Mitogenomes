@@ -5,6 +5,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+The invertebrate generalisation, on top of v2.0.0. Not released.
+
 ### `Added`
 
 - Invertebrate GetOrganelle reseeds now seed from a curated database for the sample's own
@@ -177,6 +179,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unset, matching the script block. Both now rely on the upstream abort and the
   `SUPPORTED_GENETIC_CODES` assertion rather than guessing a table.
 
+## v2.0.0 - [2026-09-03]
+
+Second major release, and the first to carry the ENA submission path. Everything ENA-related is new since
+v1.1.0, which shipped neither the params nor the tables: packaging, flatfile generation, Webin validation and
+the whole `sql/` migration chain. The release also hardens post-assembly routing and the assembly summary,
+makes the migration chain replayable end to end, and adds the annotation rescue and QC-gate work that closed
+out the cycle.
+
+Nothing here breaks a released version. The `Deprecated` section records parts of the ENA layer that were
+built and then handed to a separate downstream pipeline within this same cycle, so no release ever carried the
+params or tables it retires.
+
+**Operator note.** The `sql/` migrations are applied to the live database as they land rather than at release
+boundaries, so a database already carrying earlier migrations is affected regardless of when this tag lands.
+
+The entries are grouped in two blocks. The first covers work that landed after the v2.0.0 changelog entry was
+first drafted on 2026-08-18; the second is that original entry, kept intact. Both are part of this one release
+-- the 2026-08-18 tag was never published.
+
+### Work that landed after 2026-08-18
+
+#### `Added`
+
+- `bin/audit_lca_db_coverage.py` and `bin/backfill_lca_uploads.py`: find published LCA results
+  that never reached the database, and put them there without re-running the pipeline.
+
+  The audit compares the row counts in each `mitogenomes/<OG>/<assembly>/lca/` against
+  `blast_filtered_lca`, `lca` and `lca_raw_results`, reporting only assemblies whose published
+  file has data and whose table has none -- a sample with no hits above threshold writes empty
+  files and correctly has no rows. It exits non-zero when it finds a gap, so it can gate a run.
+
+  The backfill rebuilds the `lca_combined` / `blast_combined` inputs `SPECIES_VALIDATION` would
+  have produced, reusing that module's own concatenation helpers, and hands them to the same push
+  scripts the pipeline uses. It reads from `mitogenomes/`, not `species_validation/`, so it still
+  works on an archived run whose `work` and `species_validation` directories have been pruned. It
+  pushes only the tables the audit found empty and never passes `--force`, so there is no
+  superseded history to prune and re-running it once the gaps are filled finds nothing to do.
+
 - An intron-split `cox1` is now rebuilt as `cox1_0`/`cox1_1` in `bin/coral_fix_bed.py`, the
   same reference-transfer treatment `nad5` already got.
 
@@ -301,8 +341,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `trna_rescue`, `trna_rescue_gate`, `compile_held_samples`, `annotation_qc_gate`) and unit tests
   for `orf_utils`, `mitos_to_emma`, `coral_fix_bed`, `annotation_qc_gate`, `annotation_stats`,
   `evaluate_qc_conditions`, `species_validation`, and both rescue scripts and their gates.
+- `qc_only_from_annotations.nf` now pushes the QC stage's own results to SQL through
+  `UPLOAD_ENA_RESULTS` (`ena_validation_attempts` plus `lca_validation.validator_2`), instead of
+  being entirely read-only. A sample QC'd through this entrypoint previously read as un-uploaded
+  even though its QC had run.
 
-### `Fixed`
+  The scope is deliberately the QC stage alone: this entrypoint runs no assembly, no annotation
+  and no LCA, so it writes no `mitogenome_data`, `blast_filtered_lca` or `lca` rows, and
+  `prior_upload_status_files` is empty because the five pre-QC pushes never ran. Keeping
+  `SPECIES_VALIDATION` off this path is the point of the narrow scope: under
+  `--force_db_overwrite` that module overwrites `lca_validation.validated_species_name` and
+  `validator`, which is exactly the hand-validated row this entrypoint exists to serve.
+  `--skip_upload_results true` restores the old read-only behaviour. Pinned by
+  `tests/qc_only_upload/main.nf.test`.
+
+
+#### `Fixed`
+
+- The QC-only entrypoint no longer gives every sample the vertebrate genetic code.
+
+  `qc_only_from_annotations.nf` has no samplesheet, so it could not take `meta.genetic_code`
+  the way the main pipeline does and assumed the run-level `--translation_table` for every
+  sample instead -- code 2 unless the operator remembered otherwise. That is not confined to
+  QC: `meta.genetic_code` becomes the `mgcode` in `GEN_FILES_TABLE2ASN` and the table in
+  `TRANSLATE_GENES` and `FORMAT_FILES`, so re-QCing a coral assembly through this entrypoint
+  rewrote an annotation made under code 4 as code 2 and submitted it that way.
+
+  `VALIDATED_SPECIES_QUERY` now returns the taxonomic class alongside the validated species
+  name -- same query, same round trip, no extra process -- and the entrypoint resolves the code
+  from it. The class is looked up from the validated name first and only then from the sample's
+  nominal one, since a hand-corrected species is exactly what this entrypoint exists for;
+  matching is exact species then genus, deliberately not the fuzzy family/order tiers
+  `bin/create_samplesheet.py` also has, which are loose enough to pick a reference but far too
+  loose to pick a translation table.
+
+  A class with no confirmed code falls back to `--translation_table` with a warning naming the
+  sample and the class, rather than aborting as `prepare_samplesheet` does. The abort exists to
+  stop a wrong table being baked into an annotation that is about to be made; these annotations
+  already exist, so the useful thing is to run and say which samples need the flag.
+
+- The class -> genetic code lookup moves out of `prepare_samplesheet` into
+  `lib/MitoGeneticCode.groovy`, so the main pipeline and the QC-only entrypoint resolve one
+  table instead of two. Only the lookup is shared: what to do with an unmapped class stays with
+  each caller, because they genuinely differ. Pinned by `tests/mito_genetic_code`.
+
+- A row PostgreSQL rejects no longer costs a sample its entire LCA upload.
+
+  `bin/push_lca_blast_results.py` and `bin/push_lca_raw_results.py` wrapped each row's INSERT in
+  its own `try`/`except`, which looks like per-row isolation but is not: PostgreSQL aborts the
+  whole transaction on any error, so every later row failed with `current transaction is aborted`
+  and the commit was downgraded to a rollback. The scripts then printed a tally of "succeeded"
+  rows and exited 0, so the loss left no trace -- the Nextflow task showed COMPLETED and its
+  published `.upload.txt` ended in a tick, while the table had nothing.
+
+  Each row now runs inside a savepoint (`bin/pg_row_guard.py`), so a rejected row costs that row
+  alone and the rest of the batch commits. Both scripts exit non-zero when any row failed, and
+  the tick is reserved for an upload that landed in full; a partial upload says
+  `finished with errors`. `tests/unit/test_push_lca_row_isolation.py` reproduces PostgreSQL's
+  abort semantics against a fake cursor, so the pre-fix behaviour fails it.
+
+  This cost 87 assemblies their LCA rows across `batch-12` .. `batch-20`, in three classes: a
+  `;`-joined `staxids` against `blast_filtered_lca.taxon_id` (integer), a confidence value of
+  ~1e-163 against `lca.top_confidence_score` / `lca_raw_results.confidence_score` (`real`, floor
+  ~1.18e-38), and an insert that arrived before its `mitogenome_data` parent and tripped the
+  foreign key. Migration 022 widens the three columns; `bin/backfill_lca_uploads.py` restored the
+  rows from the published output, with no pipeline re-run.
+
+- A MitoHiFi run that crashed after writing its assembly no longer disappears from the pipeline.
+
+  `MITOHIFI_CHECK_CIRCULARITY` inner-joins MitoHiFi's `coverage_mapping` output, which is
+  `optional: true`. A run that died between the final FASTA and the coverage step therefore
+  produced no circularity evidence, and the `ch_circ_verdict` join then discarded the sample
+  outright: no annotation, no QC summary, no `held_samples.tsv` row, no database row. The run
+  still reported success, because the module wrapper runs under `set +e` so the task exits 0
+  whatever MitoHiFi did.
+
+  OG2133 (*Benthalbella* sp.) is the case in point. It assembled a circular 21,236 bp contig in
+  batch 18 and then vanished: of 69 samples it was the only one with no `mtdna.upload.txt`. The
+  crash was `KeyError: 'product'` in MitoHiFi's own `getGenesList.py`, parsing the reference it
+  had been given -- AP012968.1 carries a tRNA annotated `/note="tRNA-undetermined"` with no
+  `/product`, which MitoHiFi dereferences unconditionally. Any NCBI record with a
+  qualifier-less feature reproduces it.
+
+  `ch_mitohifi_fasta_branched` gains a `partial` arm for a non-empty FASTA whose run left a
+  traceback in the command log, and that arm is now a complement in every channel that
+  establishes totality (`ch_circ_verdict`, `ch_circularity_evidence`, `ch_assembly_log`,
+  the summary inputs), so the sample reaches annotation and is held visibly at QC instead of
+  being dropped. It keeps its published reference-relevance diagnostic but stays out of the
+  Oatk fallback routing, which needs circularity evidence it never produced.
+
+  A `partial` sample carries MitoHiFi's own `was_circular` rather than a blanket unknown.
+  `bin/check_circularity.py` computes `verdict = (mitohifi_circ is True) || read_span || hifiasm`,
+  a monotone OR, so the check can only ever flip `False -> True` -- across the 27 checked
+  assemblies in batch 18, `True -> True` 19 times and `False -> True` 8 times, never the
+  reverse. A `True` is therefore exactly the verdict the check would have reached and is
+  trusted; a `False` degrades to unknown and never to `false`, because that is the
+  terminal-overlap false negative the check module exists to repair and it is unresolvable
+  without the coverage mapping.
+
+- Every test in `tests/assembly_routing` was failing before it ran.
+
+  `conf/base.config` reads `params.mitogenome_depth_max_forks` at parse time, added with the
+  coverage fork-bounding, but the suite's `nextflow.config` pre-declared only `params.outdir`.
+  All five oatk-fallback tests died with `Unknown config attribute` before reaching a workflow.
+  The param is now pre-declared alongside `outdir`, with a note to keep the list in step.
 
 - `MITOGENOME_COVERAGE`, `OATK`, `LCA` and `SPECIES_VALIDATION` now retry a walltime kill instead
   of silently dropping the sample.
@@ -481,8 +623,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared table in `bin/mito_gene_order.py` so the two annotators cannot emit different strings for
   the same feature. An unrecognised suffix or anticodon falls back to a bare gene-name product; a
   cosmetic field should never fail the run.
+- A walltime kill on `GETORGANELLE_RESEED` is retried again. Its `withName` block in
+  `conf/base.config` overrode the global error strategy and narrowed "transient" to exit 137
+  (OOM) alone, so exit 140 -- what Slurm returns when a task exceeds its time allocation --
+  fell straight through to `ignore` on attempt 1, with `maxRetries = 2` never spent.
+  `GETORGANELLE_RESEED` was the only process carrying that override; `GETORGANELLE_FROMREADS`
+  next to it has always inherited the global policy, which counts 130..145 as transient.
 
-### `Changed`
+  It cost a real assembly: in `batch-02`, `OG28.ilmn.231024` timed out at 16 h and was ignored,
+  leaving `mitogenomes/OG28/OG28.ilmn.231024.getorg1770reseed/mtdna/` holding nothing but
+  `reference_seed/` -- no FASTA, no GFA, and therefore no downstream annotation for that library.
+  The override is deleted rather than widened, so the two GetOrganelle processes now resolve to
+  one retry policy and 137 stays covered because it sits inside 130..145. Note the second attempt
+  gains only 8 hours (`Math.min(24, 16 * task.attempt).h`, capped by `max_time = 24.h`): samples
+  that exceed 16 h are usually not converging rather than running slightly long, so expect the
+  retry to buy a verdict rather than an assembly.
+
+- `WEBIN_VALIDATE` bounds each `webin-cli` call with `timeout` and retries transient failures
+  in-script, controlled by `--webin_validate_timeout_seconds` (default 900) and
+  `--webin_validate_max_attempts` (default 3). The call was previously unbounded, so a hung
+  ENA request could only end when Slurm killed the whole task: `OG16` in `batch-02` spent its
+  entire 4 h allocation inside a call that normally returns in about 5 seconds, and the
+  automatic task retry then passed in 4.
+
+  Only timeouts and infrastructure failures are retried, with a 30 s/60 s backoff; a
+  `FAIL_WEBIN` verdict is deterministic and breaks out immediately rather than re-running a
+  rejected flatfile. `webin_output` is cleared between attempts, since the classifier greps it
+  and a report left by an earlier attempt would misclassify a later one. The process still
+  ends `exit 0` and the `.webin_status.tsv` schema is unchanged -- a failing task would drop
+  the non-optional `manifest`/`status`/`log`/`reports` emits and erase the sample from the ENA
+  collation instead of recording it as failed -- so the only new value is the `webin_timeout`
+  reason, and the attempt count goes to the log.
+
+  The biocontainer ships **busybox** `timeout`, not GNU coreutils: it takes positional seconds
+  with no `--signal`/`--kill-after`, and it exits **143** on timeout rather than GNU's 124. The
+  module matches both codes so the `conda` path, which does supply GNU `timeout`, behaves the
+  same.
+- `BUILD_SOURCE_MODIFIERS`'s stub emitted files under names that did not match its `output:`
+  block (`output/bankit_metadata.csv`, `src_files/dummy.src`). The optional `src_file` emit
+  therefore produced nothing, the join into `GEN_FILES_TABLE2ASN` came out empty, and every
+  `-stub` run of `MITOGENOME_QC` was silently truncated before `table2asn` -- the workflow still
+  reported success. The stub now writes `${meta.id}.bankit_metadata*.csv` and
+  `${meta.mt_assembly_prefix}.stub.src`, matching the declared outputs.
+
+#### `Changed`
 
 - `MITOGENOME_COVERAGE` is sized from measurement: `cpus` 12 -> 4 and `memory` 16 GB -> 4 GB per
   attempt. The Aug-25 batch-19 trace for OG2288 records `%cpu=2228` (2.2 cores) and
@@ -616,55 +800,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assemblies are validated. The `assembly_prefix`-dependent statements in `001`, `002`, `011` and `012` are now
   guarded on that column still existing, so `bin/apply_ena_migrations.py` can keep replaying the whole chain.
 
-### `Fixed`
+### Work from the first half of the cycle (internally tagged 2026-08-18)
 
-- A walltime kill on `GETORGANELLE_RESEED` is retried again. Its `withName` block in
-  `conf/base.config` overrode the global error strategy and narrowed "transient" to exit 137
-  (OOM) alone, so exit 140 -- what Slurm returns when a task exceeds its time allocation --
-  fell straight through to `ignore` on attempt 1, with `maxRetries = 2` never spent.
-  `GETORGANELLE_RESEED` was the only process carrying that override; `GETORGANELLE_FROMREADS`
-  next to it has always inherited the global policy, which counts 130..145 as transient.
-
-  It cost a real assembly: in `batch-02`, `OG28.ilmn.231024` timed out at 16 h and was ignored,
-  leaving `mitogenomes/OG28/OG28.ilmn.231024.getorg1770reseed/mtdna/` holding nothing but
-  `reference_seed/` -- no FASTA, no GFA, and therefore no downstream annotation for that library.
-  The override is deleted rather than widened, so the two GetOrganelle processes now resolve to
-  one retry policy and 137 stays covered because it sits inside 130..145. Note the second attempt
-  gains only 8 hours (`Math.min(24, 16 * task.attempt).h`, capped by `max_time = 24.h`): samples
-  that exceed 16 h are usually not converging rather than running slightly long, so expect the
-  retry to buy a verdict rather than an assembly.
-
-- `WEBIN_VALIDATE` bounds each `webin-cli` call with `timeout` and retries transient failures
-  in-script, controlled by `--webin_validate_timeout_seconds` (default 900) and
-  `--webin_validate_max_attempts` (default 3). The call was previously unbounded, so a hung
-  ENA request could only end when Slurm killed the whole task: `OG16` in `batch-02` spent its
-  entire 4 h allocation inside a call that normally returns in about 5 seconds, and the
-  automatic task retry then passed in 4.
-
-  Only timeouts and infrastructure failures are retried, with a 30 s/60 s backoff; a
-  `FAIL_WEBIN` verdict is deterministic and breaks out immediately rather than re-running a
-  rejected flatfile. `webin_output` is cleared between attempts, since the classifier greps it
-  and a report left by an earlier attempt would misclassify a later one. The process still
-  ends `exit 0` and the `.webin_status.tsv` schema is unchanged -- a failing task would drop
-  the non-optional `manifest`/`status`/`log`/`reports` emits and erase the sample from the ENA
-  collation instead of recording it as failed -- so the only new value is the `webin_timeout`
-  reason, and the attempt count goes to the log.
-
-  The biocontainer ships **busybox** `timeout`, not GNU coreutils: it takes positional seconds
-  with no `--signal`/`--kill-after`, and it exits **143** on timeout rather than GNU's 124. The
-  module matches both codes so the `conda` path, which does supply GNU `timeout`, behaves the
-  same.
-
-## v2.0.0 - [2026-08-18]
-
-Second major release, and the first to carry the ENA submission path. Everything ENA-related below is new since
-v1.1.0, which shipped neither the params nor the tables: packaging, flatfile generation, Webin validation and the
-whole `sql/` migration chain. This release also hardens post-assembly routing and the assembly summary, and makes
-the migration chain replayable end to end.
-
-Nothing here breaks a released version. The `Deprecated` section records parts of the ENA layer that were built and
-then handed to a separate downstream pipeline within this same cycle, so no release ever carried the params or
-tables it retires.
+This is the v2.0.0 entry as first drafted, kept intact.
 
 **Operator note.** The `sql/` migrations are applied to the live database as they land rather than at release
 boundaries, so a database already carrying `001`-`009` is affected by `010`-`012` regardless. `010` archives
@@ -672,7 +810,7 @@ boundaries, so a database already carrying `001`-`009` is affected by `010`-`012
 `ena_submission_selections` and the `ena_submission_queue` view with no archive, so dump those first if their
 contents matter.
 
-### `Added`
+#### `Added`
 
 - Uniform, cross-platform mitogenome read depth: `MITOGENOME_COVERAGE` + `bin/mito_depth.py`. `mitogenome_data.avg_coverage`
   previously held three different quantities depending on which assembler produced the row, so comparing it across
@@ -803,7 +941,7 @@ contents matter.
   priority order: the assembly stage's findMitoReference download → a fresh `MITOHIFI_FINDMITOREFERENCE` lookup →
   the bundled `assets/refdb/anthozoa/anthozoa_reference.gb`; the reference used is published into the sample's annotation dir.
 
-### `Fixed`
+#### `Fixed`
 
 - A CDS that initiates on an alternative start codon is now declared as such even when Emma says nothing about
   it, so `SEQ_FEAT.StartCodon`/`SEQ_INST.BadProteinStart` stop quarantining otherwise clean assemblies.
@@ -983,9 +1121,9 @@ contents matter.
   `elif "incomplete" in status_text`: `"complete"` is a substring of `"incomplete"`, so a genuinely
   incomplete result would have been reported as complete.
 
-### `Dependencies`
+#### `Dependencies`
 
-### `Deprecated`
+#### `Deprecated`
 
 - Locus-tag allocation is no longer this pipeline's job. Tags are assigned and injected by a separate
   downstream submission pipeline, so every file this one emits now carries **no** `/locus_tag` on any

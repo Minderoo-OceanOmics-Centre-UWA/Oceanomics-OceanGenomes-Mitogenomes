@@ -34,6 +34,40 @@ include { selectProvenanceVariants } from '../../subworkflows/local/mitogenome_a
 // are exercised too, and a change to the TSV shapes cannot pass silently.
 include { oatkFallbackReason } from '../../subworkflows/local/mitogenome_assembly/mitohifi/main.nf'
 
+// Same reasoning again: import the real partial-failure predicate and the real
+// was_circular reader, not copies. These two decide whether a MitoHiFi assembly that
+// crashed midway is carried through the subworkflow at all, and what topology it is
+// recorded with. OG2133 was lost because the first of them did not exist.
+include { mitohifiPartialFailure; mitohifiStatsCircular } from '../../subworkflows/local/mitogenome_assembly/mitohifi/main.nf'
+
+workflow MITOHIFI_PARTIAL_FAILURE {
+    take:
+    cases   // [ label, command_log ]
+
+    main:
+    results = cases.map { label, log -> [ label, mitohifiPartialFailure(log) ] }
+
+    emit:
+    results
+}
+
+workflow MITOHIFI_STATS_CIRCULAR {
+    take:
+    cases   // [ label, contigs_stats ]
+
+    main:
+    // Groovy null does not survive the channel round-trip as a distinguishable value in
+    // the assertions, so map it to the literal 'null' string here. The distinction that
+    // matters is null-vs-false, and both are visible this way.
+    results = cases.map { label, stats ->
+        def v = mitohifiStatsCircular(stats)
+        [ label, v == null ? 'null' : v.toString() ]
+    }
+
+    emit:
+    results
+}
+
 workflow OATK_FALLBACK_ROUTING {
     take:
     cases   // [ label, gb, evidence, relevance ]

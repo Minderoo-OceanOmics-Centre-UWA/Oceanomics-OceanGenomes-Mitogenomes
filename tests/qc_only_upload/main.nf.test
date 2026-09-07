@@ -1,0 +1,78 @@
+nextflow_pipeline {
+    name "qc_only_from_annotations pushes the QC stage's own results to SQL"
+    script "../../qc_only_from_annotations.nf"
+
+    // The QC-only entrypoint exists for samples that cannot be re-derived from
+    // reads (none on disk) or from BLAST (species validated by hand). It used to
+    // be entirely read-only, so a sample QC'd this way still read as un-uploaded.
+    // These tests pin the wiring: the QC stage's two pushes run by default, and
+    // nothing else does -- there is no assembly, annotation or LCA on this path,
+    // so SPECIES_VALIDATION in particular must stay out of it. Under
+    // --force_db_overwrite that module overwrites lca_validation.validated_species_name
+    // and validator, which is exactly the hand-made row this entrypoint depends on.
+
+    test("uploads the ENA validation record and validator_2 by default") {
+        when {
+            options "-stub"
+            params {
+                annotation_files      = "${projectDir}/tests/test_data/qc_only_upload_stub/*.{fa,gff,tbl}"
+                sql_config            = "${projectDir}/test_data/sql_config.txt"
+                template_sbt          = "${projectDir}/tests/test_data/ena_stub.sbt"
+                outdir                = "$outputDir"
+                ena_study             = "PRJEB123419"
+                ena_webin_validate    = false
+                ena_validation_attempt = "stub"
+                translation_table     = 2
+            }
+        }
+
+        then {
+            def ran = { name -> workflow.trace.tasks().any { it.name.contains(name) } }
+            assertAll(
+                { assert workflow.success },
+                // The two DB writes that correspond to processes this workflow runs.
+                { assert ran('PUSH_ENA_VALIDATION_RESULTS') },
+                { assert ran('PUSH_QC_VALIDATOR') },
+                { assert ran('UPLOAD_RESULTS_SUMMARY') },
+                // QC itself still runs, and still runs on the forced-proceed path.
+                { assert ran('MITOGENOME_QC') },
+                // Scope guard: none of the pre-QC pushes belong on this entrypoint.
+                // SPECIES_VALIDATION is the dangerous one -- see the comment above.
+                { assert !ran('SPECIES_VALIDATION') },
+                { assert !ran('PUSH_MTDNA_ASSM_RESULTS') },
+                { assert !ran('PUSH_MTDNA_ANNOTATION_RESULTS') },
+                { assert !ran('PUSH_LCA_BLAST_RESULTS') },
+                { assert !ran('PUSH_LCA_RAW_RESULTS') },
+                { assert !ran('EVALUATE_QC_CONDITIONS') }
+            )
+        }
+    }
+
+    test("--skip_upload_results true restores the read-only QC pass") {
+        when {
+            options "-stub"
+            params {
+                annotation_files      = "${projectDir}/tests/test_data/qc_only_upload_stub/*.{fa,gff,tbl}"
+                sql_config            = "${projectDir}/test_data/sql_config.txt"
+                template_sbt          = "${projectDir}/tests/test_data/ena_stub.sbt"
+                outdir                = "$outputDir"
+                ena_study             = "PRJEB123419"
+                ena_webin_validate    = false
+                ena_validation_attempt = "stub"
+                translation_table     = 2
+                skip_upload_results   = true
+            }
+        }
+
+        then {
+            def ran = { name -> workflow.trace.tasks().any { it.name.contains(name) } }
+            assertAll(
+                { assert workflow.success },
+                { assert ran('MITOGENOME_QC') },
+                { assert !ran('PUSH_ENA_VALIDATION_RESULTS') },
+                { assert !ran('PUSH_QC_VALIDATOR') },
+                { assert !ran('UPLOAD_RESULTS_SUMMARY') }
+            )
+        }
+    }
+}

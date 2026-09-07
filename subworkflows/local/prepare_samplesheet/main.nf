@@ -22,6 +22,13 @@ include { samplesheetToList         } from 'plugin/nf-schema'
 // bin/create_samplesheet.py can resolve the same codes when it writes the
 // samplesheet's genetic_code column. See InvertTaxonGroups.loadGeneticCodes().
 //
+// The lookup is reached through MitoGeneticCode.forClass(), which is also what
+// qc_only_from_annotations.nf calls, so re-QCing an assembly through the standalone
+// entrypoint cannot resolve a different code than the run that produced it. Only the
+// lookup is shared; the unmapped-class policy below stays here, because the two callers
+// differ -- this one is about to bake the table into a new annotation, that one is
+// re-QCing annotations that already exist.
+//
 // Precedence: the per-sample `genetic_code` column wins over everything, then
 // the map, then defaultCode for vertebrates. There is deliberately no catch-all
 // invertebrate default: not every invertebrate is code 5, and a wrong table
@@ -37,7 +44,7 @@ def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
         }
         return parsed as int
     }
-    def mapped = InvertTaxonGroups.geneticCode(taxClass)
+    def mapped = MitoGeneticCode.forClass(taxClass)
     if (mapped != null) {
         return mapped
     }

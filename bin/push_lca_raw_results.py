@@ -31,6 +31,8 @@ import psycopg2
 import pandas as pd
 import numpy as np
 
+from pg_row_guard import row_savepoint
+
 
 # Map TSV header -> DB column. Anything not listed here is dropped.
 # Note: the DB column is `specific_epiphet` (typo retained from the schema);
@@ -212,8 +214,13 @@ def process_file(cur, path, written):
             print(f"⚠️ Skipped row with unparseable seq_id: {row.get('seq_id')!r}")
             continue
         try:
-            cur.execute(insert_query, params)
-            if cur.fetchone()[0]:
+            # The RETURNING row has to be read before the savepoint is released:
+            # RELEASE SAVEPOINT is itself a statement on this cursor and would
+            # replace the INSERT's result set.
+            with row_savepoint(cur):
+                cur.execute(insert_query, params)
+                was_insert = cur.fetchone()[0]
+            if was_insert:
                 inserted += 1
             else:
                 refreshed += 1
@@ -288,12 +295,16 @@ def main():
             f"✅ Success: lca_raw_results upload complete for {args.sample} "
             f"({mode}): {tally}."
         )
-    else:
-        print(
-            f"⚠️ lca_raw_results upload finished with errors for {args.sample} "
-            f"({mode}): {tally}, {total_failed} failed."
-        )
+        return 0
+
+    print(
+        f"⚠️ lca_raw_results upload finished with errors for {args.sample} "
+        f"({mode}): {tally}, {total_failed} failed."
+    )
+    # Non-zero so Nextflow surfaces a partial upload instead of publishing a
+    # green task whose log quietly reports missing rows.
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

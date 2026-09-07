@@ -130,6 +130,15 @@ class InvertTaxonGroups {
         ambiguousCodes = ambiguous
     }
 
+    /**
+     * Whether loadGeneticCodes() has run. geneticCode() returns null both for an
+     * unmapped class and for a map that was never parsed, so a caller that needs to
+     * tell those apart (MitoGeneticCode.forClass) asks here first.
+     */
+    static boolean geneticCodesLoaded() {
+        geneticCodes != null
+    }
+
     /** Resolved mitochondrial genetic code for a class, or null if unmapped. */
     static Integer geneticCode(taxClass) {
         geneticCodes?.get(norm(taxClass))

@@ -45,10 +45,12 @@ process BUILD_SOURCE_MODIFIERS {
     stub:
     def effective_args = "--config ${config} --og-id ${meta.id} --seq-tech ${meta.sequencing_type} --assembly-id ${meta.mt_assembly_prefix}"
     """
-    mkdir -p output src_files
-    : > output/bankit_metadata.csv
-    : > output/bankit_metadata_latlon_cleaned.csv
-    : > src_files/dummy.src
+    # Names must match the output: block exactly, otherwise src_file (optional)
+    # emits nothing and the join into GEN_FILES_TABLE2ASN is empty, silently
+    # truncating every -stub run of MITOGENOME_QC before table2asn.
+    : > ${meta.id}.bankit_metadata.csv
+    : > ${meta.id}.bankit_metadata_latlon_cleaned.csv
+    : > ${meta.mt_assembly_prefix}.stub.src
 
     cat <<-END_TOOL_PARAMS > 16_build_source_modifiers.tool_params_mqcrow.html
     <tr><td>Build Source Modifiers</td><td><samp>${effective_args}</samp></td><td>Builds GenBank source modifier files for ${meta.id} from SQL metadata.</td></tr>
