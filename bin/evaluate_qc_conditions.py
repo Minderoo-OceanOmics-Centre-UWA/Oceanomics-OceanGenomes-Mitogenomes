@@ -32,31 +32,50 @@ def main():
     proceed_qc = "false"
     species_name = "unknown"
     
-    # Check blast table for Found_in_blast_YN = "Yes"
+    # Check lca_results.tsv for Found_in_blast_YN = "Yes"
+    #
+    # Columns are resolved by NAME from the header, not by position. This used to
+    # read parts[4] and parts[2] positionally, which held only because
+    # species_validation.py happened to write them in that order -- appending a
+    # column was safe, inserting one anywhere to the left would have silently
+    # shifted what this reads into a different field. It writes validated_rank now,
+    # so make the coupling explicit rather than leaving it as positional luck. The
+    # positional read stays as a fallback for a headerless file.
     blast_found = False
+    validated_rank = ""
     try:
         with open(args.blast_table, 'r') as f:
-            # Skip header if present
-            lines = f.readlines()
-            if lines:
-                # Check if first line is header
-                if lines[0].startswith('og_id'):
-                    lines = lines[1:]
-                
-                for line in lines:
-                    if line.strip():
-                        parts = line.strip().split('\t')
-                        if len(parts) >= 5:
-                            found_in_blast = parts[4].strip()
-                            if found_in_blast.lower() == "yes":
-                                blast_found = True
-                                # Extract species name from nom_species_id (column 3, index 1)
-                                if len(parts) >= 3:
-                                    species_name = parts[2].strip()
-                                break
+            lines = [line for line in f.readlines() if line.strip()]
+
+        header = None
+        if lines and lines[0].startswith('og_id'):
+            header = [h.strip() for h in lines[0].rstrip('\n').split('\t')]
+            lines = lines[1:]
+
+        def field(parts, name, fallback_index):
+            if header and name in header:
+                idx = header.index(name)
+            else:
+                idx = fallback_index
+            return parts[idx].strip() if len(parts) > idx else ""
+
+        for line in lines:
+            parts = line.rstrip('\n').split('\t')
+            if field(parts, 'Found_in_blast_YN', 4).lower() == "yes":
+                blast_found = True
+                species_name = field(parts, 'nom_species_id', 2) or species_name
+                validated_rank = field(parts, 'validated_rank', 5)
+                break
     except Exception as e:
         print(f"Error reading blast table: {e}", file=sys.stderr)
         sys.exit(1)
+
+    if blast_found and validated_rank and validated_rank not in ("species", "N/A"):
+        # Not a hold, and not a warning: a rank-level release is a legitimate
+        # outcome. Logged so a relaxed validation is visible in the task log as
+        # well as in the database.
+        print(f"[INFO] species validated at rank '{validated_rank}': {species_name}",
+              file=sys.stderr)
     
     # Check annotation CSV for passed = "yes"
     annotation_passed = False
