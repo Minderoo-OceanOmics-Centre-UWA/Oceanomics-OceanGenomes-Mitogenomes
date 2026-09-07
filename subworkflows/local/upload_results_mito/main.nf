@@ -392,9 +392,16 @@ workflow UPLOAD_RESULTS {
     // Headerless per-sample fragments for the run-level held_samples.tsv. These
     // samples are filtered out before MITOGENOME_QC, so this subworkflow is the
     // only place their hold is recorded.
+    //
+    // The filename carries the STAGE as well as the prefix. It did not always, and every
+    // held source used the same "<prefix>.held.tsv" name: the fragments are collectFile
+    // outputs from different subworkflows that are then mixed and staged flat into
+    // fragments/, so two genuine holds on one assembly at two stages collided under one
+    // name, and COMPILE_HELD_SAMPLES' sort -u then collapsed whatever survived. An
+    // assembly can legitimately be held more than once.
     ch_held_fragments = ch_not_qc_ready
         .collectFile { meta, _species, _proceed, _circular, held_reason ->
-            [ "${meta.mt_assembly_prefix}.held.tsv",
+            [ "${meta.mt_assembly_prefix}.PRE_QC.held.tsv",
               "${meta.id}\t${meta.mt_assembly_prefix}\tPRE_QC\tproceed_qc=false: ${held_reason ?: 'conditions not met'}\n" ]
         }
 

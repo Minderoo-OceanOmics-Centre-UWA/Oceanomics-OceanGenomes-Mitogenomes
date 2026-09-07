@@ -202,7 +202,7 @@ workflow MITOGENOME_QC {
             def lines = status_file.readLines()
             def cols = lines.size() > 1 ? lines[1].split('\t', -1) : []
             def blocking = (cols.size() > 8 && cols[8]?.trim()) ? cols[8].trim() : 'unknown'
-            [ "${meta.mt_assembly_prefix}.held.tsv",
+            [ "${meta.mt_assembly_prefix}.TABLE2ASN.held.tsv",
               "${meta.id}\t${meta.mt_assembly_prefix}\tTABLE2ASN\tFAIL_TABLE2ASN: ${blocking}\n" ]
         }
 

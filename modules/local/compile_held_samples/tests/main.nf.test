@@ -1,63 +1,149 @@
 nextflow_process {
-
-    name "Test Process COMPILE_HELD_SAMPLES"
+    name "Held-sample accounting, and the run-completeness check"
     script "../main.nf"
     process "COMPILE_HELD_SAMPLES"
 
-    tag "modules"
-    tag "modules_local"
-    tag "compile_held_samples"
+    // Two batches motivated this. One sample left at the length floor (454 bp, correct
+    // and documented) and one left mid-assembly on an ignored task failure. Both ended
+    // the run in neither held_samples.tsv nor the ENA summary, with 69+30+1=100 and
+    // 65+34+1=100 as the only trace. The fragment sources catch the first; only the
+    // completeness check catches the second.
 
-    test("merges pre-QC and table2asn fragments into one sorted table") {
+    test("an under-length assembly is reported as PRE_ANNOTATION with its measurement") {
         when {
             process {
                 """
-                def a = file("\${workDir}/OG2350.ilmn.1.getorg.held.tsv")
-                a.text = "OG2350\\tOG2350.ilmn.1.getorg\\tTABLE2ASN\\tFAIL_TABLE2ASN: SEQ_FEAT.StartCodon,SEQ_FEAT.NoStop\\n"
-                def b = file("\${workDir}/OG2375.ilmn.1.getorg.held.tsv")
-                b.text = "OG2375\\tOG2375.ilmn.1.getorg\\tPRE_QC\\tproceed_qc=false: not_circular\\n"
-                input[0] = [ a, b ]
+                input[0] = [ file("\${projectDir}/modules/local/compile_held_samples/tests/data/OG1823.PRE_ANNOTATION.held.tsv", checkIfExists: true) ]
+                input[1] = file("\${projectDir}/modules/local/compile_held_samples/tests/data/samplesheet_ogs_one.txt", checkIfExists: true)
+                input[2] = file("\${projectDir}/assets/placeholders/empty_ena_run_summary.tsv", checkIfExists: true)
+                """
+            }
+        }
+        then {
+            def held = path(process.out.held[0]).text
+            assertAll(
+                { assert process.success },
+                { assert held.contains('PRE_ANNOTATION') },
+                // The byte count and the threshold are in the reason, so the row explains
+                // itself without a trip back to the run directory.
+                { assert held.contains('under_min_length:454<10000') },
+                { assert held.readLines()[0] == 'sample\tassembly_prefix\tstage\treason' }
+            )
+        }
+    }
+
+    test("an empty assembly is reported as assembly_failed:empty_fasta") {
+        when {
+            process {
+                """
+                input[0] = [ file("\${projectDir}/modules/local/compile_held_samples/tests/data/OGEMPTY.PRE_ANNOTATION.held.tsv", checkIfExists: true) ]
+                input[1] = file("\${projectDir}/modules/local/compile_held_samples/tests/data/samplesheet_ogs_empty_case.txt", checkIfExists: true)
+                input[2] = file("\${projectDir}/assets/placeholders/empty_ena_run_summary.tsv", checkIfExists: true)
                 """
             }
         }
         then {
             assertAll(
                 { assert process.success },
-                { assert path(process.out.held[0]).readLines()[0] == "sample\tassembly_prefix\tstage\treason" },
-                { assert path(process.out.held[0]).readLines().size() == 3 },
-                { assert path(process.out.held[0]).text.contains("FAIL_TABLE2ASN: SEQ_FEAT.StartCodon,SEQ_FEAT.NoStop") },
-                { assert path(process.out.held[0]).text.contains("proceed_qc=false: not_circular") },
+                { assert path(process.out.held[0]).text.contains('assembly_failed:empty_fasta') }
             )
         }
     }
 
-    test("no held samples still emits a header-only file") {
+    test("one assembly held at two stages produces two rows, not one shadowing the other") {
         when {
             process {
                 """
+                // Both fragments are for the SAME assembly prefix. While every source named
+                // its fragment '<prefix>.held.tsv' these two collided when staged flat into
+                // fragments/, and sort -u collapsed whatever survived. The stage is in the
+                // filename now, so both rows must be present.
+                input[0] = [
+                    file("\${projectDir}/modules/local/compile_held_samples/tests/data/OG1782.PRE_ANNOTATION.held.tsv", checkIfExists: true),
+                    file("\${projectDir}/modules/local/compile_held_samples/tests/data/OG1782.PRE_QC.held.tsv", checkIfExists: true)
+                ]
+                input[1] = file("\${projectDir}/modules/local/compile_held_samples/tests/data/samplesheet_ogs_reseed.txt", checkIfExists: true)
+                input[2] = file("\${projectDir}/assets/placeholders/empty_ena_run_summary.tsv", checkIfExists: true)
+                """
+            }
+        }
+        then {
+            def rows = path(process.out.held[0]).readLines().findAll { it && !it.startsWith('sample\t') }
+            assertAll(
+                { assert process.success },
+                { assert rows.size() == 2 },
+                { assert rows.any { it.contains('PRE_ANNOTATION') } },
+                { assert rows.any { it.contains('PRE_QC') } }
+            )
+        }
+    }
+
+    test("a samplesheet sample in neither set is named, and the run still succeeds") {
+        when {
+            process {
+                """
+                // OG1952's shape: no held fragment AND no mitogenome_data row, because it
+                // died on an ignored task failure mid-assembly. It is the better fixture of
+                // the two, since an implementation that derived the expected set from the
+                // database rather than from the samplesheet would fail this test.
+                input[0] = [ file("\${projectDir}/modules/local/compile_held_samples/tests/data/OG1823.PRE_ANNOTATION.held.tsv", checkIfExists: true) ]
+                input[1] = file("\${projectDir}/modules/local/compile_held_samples/tests/data/samplesheet_ogs_with_missing.txt", checkIfExists: true)
+                input[2] = file("\${projectDir}/modules/local/compile_held_samples/tests/data/ena_run_summary_one.tsv", checkIfExists: true)
+                """
+            }
+        }
+        then {
+            def report = path(process.out.completeness[0]).text
+            assertAll(
+                // Warns, does not abort: a reporting gap found at the end of a multi-day
+                // run must not throw the run away.
+                { assert process.success },
+                { assert report.contains('OG1952') },
+                { assert report.contains('unaccounted:             1') },
+                // The file is still written in full.
+                { assert path(process.out.held[0]).text.contains('OG1823') }
+            )
+        }
+    }
+
+    test("a fully accounted run produces no warning") {
+        when {
+            process {
+                """
+                input[0] = [ file("\${projectDir}/modules/local/compile_held_samples/tests/data/OG1823.PRE_ANNOTATION.held.tsv", checkIfExists: true) ]
+                input[1] = file("\${projectDir}/modules/local/compile_held_samples/tests/data/samplesheet_ogs_accounted.txt", checkIfExists: true)
+                input[2] = file("\${projectDir}/modules/local/compile_held_samples/tests/data/ena_run_summary_one.tsv", checkIfExists: true)
+                """
+            }
+        }
+        then {
+            def report = path(process.out.completeness[0]).text
+            assertAll(
+                { assert process.success },
+                { assert !report.contains('WARNING') },
+                { assert report.contains('accounted for') }
+            )
+        }
+    }
+
+    test("the header-only case still writes the file") {
+        when {
+            process {
+                """
+                // The module's standing guarantee: held_samples.tsv always exists, so its
+                // presence is a reliable end-of-run signal rather than a failure signal.
                 input[0] = []
+                input[1] = file("\${projectDir}/modules/local/compile_held_samples/tests/data/samplesheet_ogs_none.txt", checkIfExists: true)
+                input[2] = file("\${projectDir}/assets/placeholders/empty_ena_run_summary.tsv", checkIfExists: true)
                 """
             }
         }
         then {
             assertAll(
                 { assert process.success },
-                { assert path(process.out.held[0]).readLines() == ["sample\tassembly_prefix\tstage\treason"] },
+                { assert path(process.out.held[0]).readLines().size() == 1 },
+                { assert path(process.out.held[0]).readLines()[0] == 'sample\tassembly_prefix\tstage\treason' }
             )
-        }
-    }
-
-    test("stub") {
-        options "-stub"
-        when {
-            process {
-                """
-                input[0] = []
-                """
-            }
-        }
-        then {
-            assert process.success
         }
     }
 }

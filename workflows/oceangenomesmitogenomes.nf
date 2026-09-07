@@ -155,6 +155,19 @@ workflow OCEANGENOMESMITOGENOMES {
         .groupTuple()
         .map { sample_key, metas -> [ sample_key, metas[0] ] }
 
+    // What a COMPLETE run looks like: every OG the samplesheet asked for. This is the
+    // reference set for the end-of-run completeness check in COMPILE_HELD_SAMPLES.
+    //
+    // It is derived from the SAMPLESHEET CHANNELS and deliberately not from the database or
+    // from mitogenome_assembly_summary_mqc.tsv. A sample lost to an ignored task failure
+    // upstream of PUSH_MTDNA_ASSM_RESULTS has no mitogenome_data row at all, so a DB-derived
+    // expected set would omit it and the check would pass while the sample was still missing.
+    // That is the specific regression this file is here to catch.
+    ch_samplesheet_ogs = ch_samplesheet_meta
+        .map { _sample_key, meta -> meta.id }
+        .unique()
+        .collectFile(name: 'samplesheet_ogs.txt', newLine: true, sort: true)
+
     /* The if and else statements in this workflow are for when steps are skipped in the nextflow_run script.
         What it is doing is 'if' this processes isnt skipped then run the subworkflow and provide the standard outputs.
         
@@ -474,6 +487,16 @@ workflow OCEANGENOMESMITOGENOMES {
         .filter { _meta, fasta -> fasta.size() == 0 }
     ch_annotation_input = ch_all_assembly_fasta
         .filter { _meta, fasta -> fasta.size() > 0 }
+
+    // An assembly filtered out here leaves the annotation path for good, so it never reaches
+    // EVALUATE_QC_CONDITIONS and neither of the two existing held sources can see it. Without
+    // a fragment of its own it appears in neither held_samples.tsv nor the ENA summary, and
+    // the run reports success with the sample simply missing from both files a human reads.
+    ch_pre_annotation_held = ch_failed_assembly_fasta
+        .collectFile { meta, _fasta ->
+            [ "${meta.mt_assembly_prefix}.PRE_ANNOTATION.held.tsv",
+              "${meta.id}\t${meta.mt_assembly_prefix}\tPRE_ANNOTATION\tassembly_failed:empty_fasta\n" ]
+        }
 
     // Auto-curation: collapse a clean head-to-tail concatemer (an assembly ~2x
     // the true length, detected by the circularity check) to a single monomer
@@ -866,6 +889,18 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_under_length_assembly_fasta = ch_canonical_assembly_fasta
         .filter { _meta, fasta -> fastaSequenceLength(fasta) < params.mitogenome_summary_min_length }
 
+    // Second PRE_ANNOTATION source. The drop itself is correct and documented -- an assembly
+    // below the biological floor is retained for SQL and summary reporting but does not enter
+    // EMMA/MITOS/table2asn -- but until now nothing recorded it as held, so a 454 bp assembly
+    // had a mitogenome_data row and appeared in neither held_samples.tsv nor the ENA summary.
+    // The reason carries the measurement and the threshold so the row is self-explaining.
+    ch_pre_annotation_held = ch_pre_annotation_held
+        .mix(ch_under_length_assembly_fasta.collectFile { meta, fasta ->
+            [ "${meta.mt_assembly_prefix}.PRE_ANNOTATION.held.tsv",
+              "${meta.id}\t${meta.mt_assembly_prefix}\tPRE_ANNOTATION\t" +
+              "under_min_length:${fastaSequenceLength(fasta)}<${params.mitogenome_summary_min_length}\n" ]
+        })
+
     // The canonical row IS the molecule that gets annotated, measured, QC'd and submitted --
     // i.e. the SANITISE_FASTA output, not the pre-curation assembly. Building it from the
     // pre-curation channel is what filed a curated assembly's stats under an uncurated name:
@@ -978,13 +1013,23 @@ workflow OCEANGENOMESMITOGENOMES {
         )
         ch_assembly_summary_files = ch_assembly_summary_files.mix(UPLOAD_RESULTS.out.assembly_summary_files)
 
-        // One run-level held_samples.tsv: pre-QC holds (UPLOAD_RESULTS) + table2asn
-        // quarantine (MITOGENOME_QC). Always emitted, header-only when nothing held.
+        // One run-level held_samples.tsv: pre-annotation drops (this workflow), pre-QC holds
+        // (UPLOAD_RESULTS) and table2asn quarantine (MITOGENOME_QC). Always emitted,
+        // header-only when nothing held.
+        //
+        // The samplesheet OG list and the ENA run summary are what let the module check that
+        // held + submission-ready accounts for the whole run. Adding a third fragment source
+        // fixes the two known drops; only the completeness check fixes the CLASS of defect,
+        // which is that the accounting had no idea what a complete run looks like.
         COMPILE_HELD_SAMPLES (
-            UPLOAD_RESULTS.out.held_fragments
+            ch_pre_annotation_held
+                .mix(UPLOAD_RESULTS.out.held_fragments)
                 .mix(MITOGENOME_QC.out.held_fragments)
                 .collect()
-                .ifEmpty([])
+                .ifEmpty([]),
+            ch_samplesheet_ogs,
+            MITOGENOME_QC.out.ena_run_summary
+                .ifEmpty(file("${projectDir}/assets/placeholders/empty_ena_run_summary.tsv", checkIfExists: true))
         )
     } else if (!params.skip_upload_results && !params.sql_config) {
         log.warn "Skipping upload/QC because --sql_config not provided"
