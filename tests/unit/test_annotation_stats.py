@@ -341,6 +341,91 @@ class OrderVariantTests(unittest.TestCase):
             del mgo.ORDER_VARIANTS[family_key]
             del mgo.ORDER_VARIANTS[order_key]
 
+    # -- the two published clade rules --------------------------------------
+
+    def _anguilliform(self):
+        """ND6+trnE moved from upstream of CYTB to between trnT and trnP.
+
+        Published as trnT -> [control region] -> ND6 -> trnE -> trnP; since the
+        control region is not a gene and REF_GENES starts at trnF, that renders as
+        this order.
+        """
+        genes = [g for g in REF if g not in ("ND6", "TE")]
+        i = genes.index("TT") + 1
+        return genes[:i] + ["ND6", "TE"] + genes[i:]
+
+    def _macrourid(self):
+        """trnE alone moved to after trnP: the published trnT-trnP-trnE cluster."""
+        genes = [g for g in REF if g != "TE"]
+        return genes + ["TE"]
+
+    def test_anguilliform_order_passes_for_each_keyed_family(self):
+        for family in ("Congridae", "Nettastomatidae", "Colocongridae",
+                       "Muraenesocidae"):
+            s = self._run(self._anguilliform(), taxon={"family": family})
+            self.assertEqual(s["passed"], "yes", family)
+            self.assertEqual(s["order_variant"], "anguilliform_nd6_te", family)
+
+    def test_anguilliform_order_fails_in_the_families_that_are_canonical(self):
+        # THE reason this rule is family-keyed and not order-keyed. Anguillidae,
+        # Synaphobranchidae, Muraenidae and Serrivomeridae are published as
+        # retaining the typical vertebrate order; an order-rank key would grant
+        # licence across all four. If either of these passes, the rule has been
+        # widened back to the order rank.
+        for family in ("Synaphobranchidae", "Nemichthyidae", "Anguillidae",
+                       "Muraenidae", "Serrivomeridae"):
+            s = self._run(self._anguilliform(),
+                          taxon={"family": family, "order": "Anguilliformes"})
+            self.assertEqual(s["passed"], "no", family)
+
+    def test_a_canonical_anguilliform_keeps_passing_with_no_variant(self):
+        for family in ("Congridae", "Synaphobranchidae"):
+            s = self._run(REF, taxon={"family": family})
+            self.assertEqual(s["passed"], "yes", family)
+            self.assertEqual(s["order_variant"], "no", family)
+
+    def test_the_blachea_genus_row_reaches_what_the_family_row_cannot(self):
+        # Blachea is Colocongridae but resolves to a blank family in the
+        # samplesheet, so the family row cannot reach it.
+        s = self._run(self._anguilliform(),
+                      taxon={"genus": "Blachea", "family": "", "order": ""})
+        self.assertEqual(s["passed"], "yes")
+        self.assertEqual(s["order_variant"], "anguilliform_nd6_te")
+
+    def test_the_blachea_row_covers_only_the_genus_it_names(self):
+        # The paired negative: another congrid genus with the same blank taxonomy
+        # gets no rule, which is a deliberate choice rather than a surprise.
+        s = self._run(self._anguilliform(),
+                      taxon={"genus": "Ariosoma", "family": "", "order": ""})
+        self.assertEqual(s["passed"], "no")
+
+    def test_macrourid_order_passes_for_macrouridae(self):
+        s = self._run(self._macrourid(), taxon={"family": "Macrouridae"})
+        self.assertEqual(s["passed"], "yes")
+        self.assertEqual(s["order_variant"], "macrourid_te")
+
+    def test_macrourid_rule_does_not_leak_to_other_gadiforms(self):
+        s = self._run(self._macrourid(), taxon={"family": "Gadidae"})
+        self.assertEqual(s["passed"], "no")
+
+    def test_a_canonical_macrourid_keeps_passing_without_a_variant(self):
+        # The Bathygadus case. A canonical member of a rule-carrying family must
+        # not acquire an order_variant merely because its family has a rule --
+        # which matters here because Macrouridae carries several DIFFERENT
+        # rearrangement patterns across its subfamilies.
+        s = self._run(REF, taxon={"family": "Macrouridae"})
+        self.assertEqual(s["passed"], "yes")
+        self.assertEqual(s["order_correct"], "yes")
+        self.assertEqual(s["order_variant"], "no")
+
+    def test_the_two_rules_are_distinct(self):
+        # macrourid_te moves trnE alone; anguilliform_nd6_te moves ND6 with it.
+        # Neither taxon may accept the other's order.
+        self.assertEqual(
+            self._run(self._macrourid(), taxon={"family": "Congridae"})["passed"], "no")
+        self.assertEqual(
+            self._run(self._anguilliform(), taxon={"family": "Macrouridae"})["passed"], "no")
+
     def test_a_malformed_table_entry_raises(self):
         mgo = sys.modules.get("mito_gene_order") or __import__("mito_gene_order")
         bad_key = ("genus", "Malformed")
@@ -367,11 +452,13 @@ class AnnotationGapTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
-    def _run(self, genes, gaps=None, gap_threshold=50, genetic_code=2, taxon=None):
+    def _run(self, genes, gaps=None, gap_threshold=50, genetic_code=2, taxon=None,
+             core_gap_threshold=stats.DEFAULT_CORE_GAP_THRESHOLD):
         p = Path(self.tmp) / "OG1.ilmn.240101.getorg1770.emma102.gff"
-        p.write_text(gff_for(genes, gaps=gaps))
+        p.write_text(gff_for(genes, region_len=80000, gaps=gaps))
         return stats.process_gff(str(p), p.stem, genetic_code=genetic_code,
-                                 taxon=taxon, gap_threshold=gap_threshold)
+                                 taxon=taxon, gap_threshold=gap_threshold,
+                                 core_gap_threshold=core_gap_threshold)
 
     def test_a_large_interior_gap_is_reported_and_passed_is_unchanged(self):
         i = REF.index("ND4")
@@ -403,18 +490,39 @@ class AnnotationGapTests(unittest.TestCase):
         i = REF.index("ND4")
         self.assertEqual(self._run(REF, gaps={i: 62}, gap_threshold=100)["annotation_gaps"], "no")
 
-    def test_gaps_are_reported_on_the_core_profile_too(self):
+    def test_gaps_are_reported_on_the_core_profile_at_its_own_threshold(self):
         # The invert-facing half. A core-profile assembly is judged on gene
         # presence alone with order reported NA, so without this a coral with all
-        # 15 core genes and a kilobase of unannotated sequence between two of them
+        # its core genes and 30 kb of unannotated sequence between two of them
         # passes with nothing recorded at all.
         i = REF.index("ND4")
         for code in (4, 5, 9):
-            s = self._run(REF, gaps={i: 213}, genetic_code=code)
+            s = self._run(REF, gaps={i: 30832}, genetic_code=code)
             self.assertEqual(s["completeness_profile"], "core", code)
             self.assertEqual(s["order_correct"], "NA", code)
-            self.assertIn("(213)", s["annotation_gaps"], code)
+            self.assertIn("(30832)", s["annotation_gaps"], code)
             self.assertEqual(s["passed"], "yes", code)
+
+    def test_the_core_profile_uses_its_own_much_higher_threshold(self):
+        # The two profiles look for different things and one threshold cannot
+        # serve both. Measured on batch-20's 38 coral assemblies, the vertebrate
+        # 50 bp default reports 7.3 gaps per assembly and flags every one of them.
+        # A 213 bp gap is a real signal on a vertebrate and unremarkable on a coral.
+        i = REF.index("ND4")
+        self.assertIn("(213)", self._run(REF, gaps={i: 213}, genetic_code=2)["annotation_gaps"])
+        self.assertEqual(self._run(REF, gaps={i: 213}, genetic_code=4)["annotation_gaps"], "no")
+
+    def test_the_conserved_coral_intergenic_region_stays_silent(self):
+        # Batch-20's corals share a 1725 bp CO3->CO2 span, byte-identical across
+        # 20 of 38 assemblies -- plainly biology, not a defect. At any threshold
+        # low enough to report it, that one span alone flags half the batch.
+        i = REF.index("CO3")
+        self.assertEqual(self._run(REF, gaps={i: 1725}, genetic_code=4)["annotation_gaps"], "no")
+
+    def test_the_core_threshold_is_configurable(self):
+        i = REF.index("ND4")
+        s = self._run(REF, gaps={i: 213}, genetic_code=4, core_gap_threshold=100)
+        self.assertIn("(213)", s["annotation_gaps"])
 
 
 class OrderDeviationTests(unittest.TestCase):

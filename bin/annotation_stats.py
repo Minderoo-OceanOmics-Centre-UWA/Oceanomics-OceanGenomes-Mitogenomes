@@ -77,6 +77,28 @@ DEFAULT_TRNA_TOLERANCE = 2
 # raise the default to silence it.
 DEFAULT_GAP_THRESHOLD = 50
 
+# The same diagnostic on a core-profile (non-vertebrate) assembly needs a very
+# different threshold, because the two profiles are looking for different things.
+#
+# On a vertebrate the signal is a tRNA-sized hole where a tRNA should have been
+# called. That reasoning does not transfer: a cnidarian encodes only ~2 mt tRNAs,
+# so there is almost no missed-tRNA signal to find, and non-vertebrate mitogenomes
+# carry large intergenic spacers as a matter of course. Measured over batch-20's
+# 38 coral assemblies, a 50 bp threshold reports 7.3 gaps per assembly and flags
+# EVERY assembly -- a constant, not a signal. The median positive interior gap is
+# 66 bp and the 90th percentile is 1159 bp.
+#
+# 2000 bp is where it becomes informative again. Those same 38 assemblies share a
+# conserved 1725 bp CO3->CO2 intergenic region -- byte-identical across 20 of
+# them, so plainly biology rather than a defect -- and at 1500 bp that one span
+# alone flags 20 of 38. At 2000 bp exactly ONE assembly is flagged, the
+# OG2375 concatemer, whose three gaps (CO1->ND4 30832, TV->TY 3642, CO2->TG 2515)
+# name its defect precisely. That is the diagnostic doing its job.
+#
+# What it is looking for on this profile is therefore a large unannotated span --
+# a dropped gene call or an assembly artefact -- not a missing tRNA.
+DEFAULT_CORE_GAP_THRESHOLD = 2000
+
 # Adjacent pairs whose intergenic span is legitimately large and must never be
 # reported. TP->TF is the vertebrate control region, routinely ~1 kb.
 GAP_EXEMPT_PAIRS = {("TP", "TF")}
@@ -174,7 +196,7 @@ def order_deviation(found_by_coord, ref_subset):
 def process_gff(gff_path, annotation_name, class_name="",
                 trna_tolerance=DEFAULT_TRNA_TOLERANCE, genetic_code=None,
                 taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD,
-                lca_combined=None):
+                lca_combined=None, core_gap_threshold=DEFAULT_CORE_GAP_THRESHOLD):
     parts = annotation_name.split(".")
     if len(parts) != 5:
         print(f"⚠️ Warning: Unexpected annotation_name format: {annotation_name}")
@@ -234,8 +256,14 @@ def process_gff(gff_path, annotation_name, class_name="",
     # variant rule matched on. Never blocks anything -- see order_variant_taxon_check.
     taxon_check = (order_variant_taxon_check(taxon, lca_lineage_from_combined(lca_combined))
                    if lca_combined else "no")
-    gaps = annotation_gaps(gene_entries, gap_threshold)
+
+    # Profile first, because the gap threshold depends on it: the two profiles are
+    # looking for different things and a single threshold cannot serve both. See
+    # DEFAULT_CORE_GAP_THRESHOLD.
     profile = completeness_profile(genetic_code, class_name)
+    gaps = annotation_gaps(
+        gene_entries,
+        core_gap_threshold if profile == "core" else gap_threshold)
     if profile == "core":
         # Judge completeness on the conserved protein-coding + rRNA core only;
         # cnidarians and sponges legitimately lack most tRNAs, and no non-vertebrate
@@ -347,14 +375,15 @@ def process_protein_lengths(prot_dir, annotation_name):
 
 def main(gff_path, prot_dir, class_name="", trna_tolerance=DEFAULT_TRNA_TOLERANCE,
          genetic_code=None, taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD,
-         lca_combined=None):
+         lca_combined=None, core_gap_threshold=DEFAULT_CORE_GAP_THRESHOLD):
     if not os.path.isfile(gff_path):
         sys.exit(f"❌ GFF file not found: {gff_path}")
 
     annotation_name = get_annotation_name(gff_path)
     gff_summary = process_gff(gff_path, annotation_name, class_name, trna_tolerance,
                               genetic_code, taxon=taxon, gap_threshold=gap_threshold,
-                              lca_combined=lca_combined)
+                              lca_combined=lca_combined,
+                              core_gap_threshold=core_gap_threshold)
     prot_lengths = process_protein_lengths(prot_dir, annotation_name)
 
     combined = {**gff_summary, **prot_lengths}
@@ -408,6 +437,13 @@ if __name__ == "__main__":
                          "reported in annotation_gaps. Purely advisory: it never "
                          "affects passed. Default %(default)s, deliberately below the "
                          "55-75 bp hole a single missed mt-tRNA leaves.")
+    ap.add_argument("--core-gap-threshold", dest="core_gap_threshold", type=int,
+                    default=DEFAULT_CORE_GAP_THRESHOLD,
+                    help="as --gap-threshold, but for the core (non-vertebrate) "
+                         "completeness profile, which needs a far higher one: "
+                         "non-vertebrate mitogenomes carry large intergenic spacers "
+                         "routinely, so the vertebrate default flags every assembly "
+                         "and reports nothing. Default %(default)s.")
     ap.add_argument("--lca-combined", dest="lca_combined", default="",
                     help="path to this assembly's lca_combined.<prefix>.tsv. When "
                          "given, records in order_variant_taxon_check whether the "
@@ -427,4 +463,5 @@ if __name__ == "__main__":
 
     main(args.gff, Path(args.proteins), args.class_name, args.trna_tolerance,
          args.genetic_code, taxon=taxon, gap_threshold=args.gap_threshold,
-         lca_combined=args.lca_combined or None)
+         lca_combined=args.lca_combined or None,
+         core_gap_threshold=args.core_gap_threshold)

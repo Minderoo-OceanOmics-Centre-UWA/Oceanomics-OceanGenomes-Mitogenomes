@@ -418,6 +418,12 @@
                     "minimum": 1,
                     "description": "Interior intergenic span, in bp, at or above which annotation_stats.py records it in the annotation_gaps column. Purely advisory: it never affects the pass/hold decision. The default is deliberately below the 55-75 bp hole a single missed mitochondrial tRNA leaves, which is the signal that separates a real gene-order rearrangement from a missed tRNA call."
                 },
+                "annotation_gap_threshold_core": {
+                    "type": "integer",
+                    "default": 2000,
+                    "minimum": 1,
+                    "description": "As annotation_gap_threshold, but for the core (non-vertebrate) completeness profile. Non-vertebrate mitogenomes carry large intergenic spacers routinely and encode few mitochondrial tRNAs, so the vertebrate threshold flags every assembly and reports nothing. On 38 coral assemblies a 50 bp threshold gives 7.3 gaps each; 2000 bp flags only a genuine concatemer. Purely advisory: it never affects the pass/hold decision."
+                },
                 "mitogenome_oatk_length_ratio_threshold": {
                     "type": "number",
                     "default": 1.15,

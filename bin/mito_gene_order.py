@@ -160,6 +160,37 @@ def genes_by_coord(gff_path):
 # rule for whoever edits this table: a new genus row inside a rule-carrying family
 # must repeat that family's rules alongside its own.
 
+# Named once because four family keys share it.
+#
+# CONFIRMED against published records. ND6 and the conjoint trnE are translocated
+# from upstream of CYTB to between trnT and trnP, with a duplicated control region
+# moved upstream of ND6. Because REF_GENES is a linear rendering of a circular
+# molecule starting at trnF, and the control region is not a gene, the published
+# arrangement
+#
+#     ... ND5  CYTB  trnT  [CR]  ND6  trnE  trnP  [CR]  trnF ...
+#
+# renders exactly as this block rewrite. The control-region-sized span
+# (936-1,138 bp) observed between trnT and ND6 in the held assemblies is that
+# duplicated CR, which is the structural hallmark of the real rearrangement rather
+# than something a misassembly produces.
+#
+# The question this row had to answer before merging was whether trnE moved WITH
+# ND6 or stayed upstream of CYTB -- if the latter, the rewrite would be wrong in
+# its trnE half and would need reshaping rather than an accession. Every source
+# says it moves with ND6: Muraenesox cinereus (MT571331) is described as "ND6 and
+# the conjoint trnE were translocated to the location between trnT and trnP", and
+# the Ariosoma meeki comparative analysis gives the arrangement as
+# trnT -> CR -> ND6 -> trnE -> trnP -> CR.
+#
+# That also explains the 52-65 bp ND5-to-CYTB gap these assemblies carry, which
+# looked like a missed trnE: in this order ND5 is directly followed by CYTB, so
+# that span is an ordinary intergenic spacer and trnE is accounted for downstream.
+ANGUILLIFORM_ND6_TE = ("anguilliform_nd6_te",
+                       ("ND6", "TE", "CYTB", "TT"),
+                       ("CYTB", "TT", "ND6", "TE"),
+                       "per-family accessions on each key below")
+
 ORDER_VARIANTS = {
     # Scarine parrotfishes: trnM and trnQ transposed relative to the canonical
     # IQM, giving IMQ. Confirmed against independent USNM-voucher GenBank records
@@ -168,57 +199,72 @@ ORDER_VARIANTS = {
     ("genus", "Chlorurus"):   [("scarine_imq", ("TQ", "TM"), ("TM", "TQ"), "PZ234023.1")],
     # trnD and trnS2 transposed between CO1 and CO2.
     ("genus", "Diploprion"):  [("diploprion_ds", ("TS2", "TD"), ("TD", "TS2"), "PZ244822.1")],
-}
 
-# Rules that are NOT in the table yet, kept here so the shape and the evidence
-# question survive rather than being rediscovered.
-#
-# Both have strong INTERNAL evidence -- cross-assembler concordance, and a single
-# block rewrite reconciling every affected assembly exactly -- but the design rule
-# above asks for published evidence, and neither has an accession yet.
-#
-# ANGUILLIFORM_ND6_TE: ND6+trnE translocated from upstream of CYTB to between trnT
-# and trnP. Keyed per FAMILY, never at ("order", "Anguilliformes"): anguilliforms
-# in Synaphobranchidae and Nemichthyidae are byte-identical to REF_GENES and pass
-# today, so this is not an order-level synapomorphy and an order key would grant
-# licence across two families where the canonical order demonstrably holds. Before
-# it ships, pull a CONGRID, NETTASTOMATID, COLOCONGRID or MURAENESOCID reference
-# (a synaphobranchid or nemichthyid one confirms nothing) and ask it exactly one
-# question: does it annotate trnE adjacent to the relocated ND6, or upstream of
-# CYTB? If the latter, the rewrite is wrong in its trnE half and needs reshaping,
-# not just an accession.
-#
-#   ANGUILLIFORM_ND6_TE = ("anguilliform_nd6_te",
-#                          ("ND6", "TE", "CYTB", "TT"),
-#                          ("CYTB", "TT", "ND6", "TE"),
-#                          "TODO-accession")
-#   ("family", "Congridae"):       [ANGUILLIFORM_ND6_TE],
-#   ("family", "Nettastomatidae"): [ANGUILLIFORM_ND6_TE],
-#   ("family", "Colocongridae"):   [ANGUILLIFORM_ND6_TE],
-#   ("family", "Muraenesocidae"):  [ANGUILLIFORM_ND6_TE],
-#   # Blachea is Colocongridae but resolves to blank family and order in the
-#   # samplesheet, so the family rows cannot reach it. A narrow genus row with an
-#   # EXPIRY CONDITION: delete it once the samplesheet taxonomy carries
-#   # Colocongridae. Do not treat it as precedent for genus rows that exist only
-#   # to dodge missing taxonomy, and note it is the live instance of the
-#   # maintenance hazard above -- safe only because it names the same rule the
-#   # family row would have given it.
-#   ("genus", "Blachea"):          [ANGUILLIFORM_ND6_TE],
-#
-# macrourid_te: trnE ALONE translocated from between ND6 and CYTB to after trnP.
-# NOT the anguilliform rule -- ND6 stays in place here. This is the weaker of the
-# two despite affecting more samples: every affected assembly is one assembler and
-# one read type, and every one carries a 61-68 bp unannotated hole exactly where
-# canonical trnE sits. A systematic tRNA-calling miss would replicate across a
-# family exactly as faithfully as biology would. If a Macrourinae reference
-# annotates trnE in that gap, this row must NOT merge and those samples are an
-# annotation defect instead.
-#
-#   ("family", "Macrouridae"): [
-#       ("macrourid_te",
-#        ("TE", "CYTB", "TT", "TP"),
-#        ("CYTB", "TT", "TP", "TE"),
-#        "TODO-accession")],
+    # Anguilliforms, keyed per FAMILY and never at ("order", "Anguilliformes").
+    # The published family lists make that an evidence-based split rather than a
+    # cautious one: the rearrangement is reported for Congridae, Nettastomatidae,
+    # Muraenesocidae, Colocongridae, Ophichthidae and Derichthyidae, while
+    # Anguillidae, Synaphobranchidae, Muraenidae and Serrivomeridae retain the
+    # TYPICAL vertebrate order. An order key would grant licence across four
+    # families where canonical demonstrably holds, and Synaphobranchus kaupii
+    # (NC_005805) is the published negative control for exactly that.
+    #
+    # Ophichthidae and Derichthyidae are reported to share the rearrangement but
+    # have no row here, because no record was checked for them and no assembly has
+    # needed one. Add them the same way, with an accession, when one does.
+    ("family", "Congridae"):        [ANGUILLIFORM_ND6_TE],   # KR131863 Conger japonicus
+    ("family", "Nettastomatidae"):  [ANGUILLIFORM_ND6_TE],   # NC_013625 Nettastoma parviceps
+    ("family", "Colocongridae"):    [ANGUILLIFORM_ND6_TE],   # NC_013606 Coloconger cadenati
+    ("family", "Muraenesocidae"):   [ANGUILLIFORM_ND6_TE],   # MT571331 Muraenesox cinereus
+    # Blachea is Colocongridae, but resolves to a BLANK family and order in the
+    # samplesheet, so the family row above cannot reach it. Two samples in two
+    # separate batches show the identical blank taxonomy and the identical
+    # rearrangement, which is a reproducible gap in the resolver's inputs rather
+    # than an anomaly -- and both carry the order (they pass outright when told
+    # Colocongridae), so the evidence is the same NC_013606 record.
+    #
+    # EXPIRY CONDITION: delete this row once the samplesheet taxonomy carries
+    # Colocongridae for Blachea. It is a workaround for missing data, not a
+    # precedent for genus rows that exist only to dodge a taxonomy gap; the fix
+    # for the general case is the resolver, not a looser matcher here.
+    #
+    # It is also the live instance of the maintenance hazard described above -- a
+    # genus row inside a rule-carrying family shadows that family's rules for the
+    # genus entirely -- and is safe only because it names the SAME rule the family
+    # row would have given it.
+    ("genus", "Blachea"):           [ANGUILLIFORM_ND6_TE],   # NC_013606 Coloconger cadenati
+
+    # trnE ALONE translocated from between ND6 and CYTB to after trnP, giving a
+    # trnT-trnP-trnE cluster where canonical has trnE-trnT-trnP. NOT the
+    # anguilliform rule: ND6 stays in place here.
+    #
+    # This row carried a live competing hypothesis. Every affected assembly has a
+    # 61-68 bp unannotated hole exactly where canonical trnE sits, and a systematic
+    # tRNA-calling miss would replicate across a family exactly as faithfully as
+    # biology would. The rule for merging was that if a Macrourinae reference
+    # annotated trnE in that gap, the row must NOT merge and the affected samples
+    # were an annotation defect instead.
+    #
+    # It does not. Cetonurus globiceps (Macrourinae, KF751382) is described as
+    # "the commonly observed tRNAGlu-tRNAThr-tRNAPro cluster was not present ...
+    # instead a gene rearrangement of the cluster was observed to be
+    # tRNAThr-tRNAPro-tRNAGlu", and the same arrangement is reported for
+    # Ventrifossa garmani and Coelorinchus kishinouyei -- two of the genera the
+    # held assemblies belong to. The rearrangement is real, so the row merges.
+    #
+    # Family-keyed even though Macrouridae carries SEVERAL different rearrangement
+    # patterns across its subfamilies (the published Squalogadus / Trachyrincus
+    # pattern is a tRNA-Leu(UUR) translocation, not this one). That is safe because
+    # canonical is always checked first: a canonical macrourid such as a Bathygadus
+    # passes as order_correct=yes with order_variant=no, and a macrourid carrying
+    # some other rearrangement matches neither accepted order and stays held, which
+    # is the right outcome for a pattern this table does not cover.
+    ("family", "Macrouridae"): [
+        ("macrourid_te",
+         ("TE", "CYTB", "TT", "TP"),
+         ("CYTB", "TT", "TP", "TE"),
+         "KF751382")],
+}
 
 # Most specific rank wins OUTRIGHT. Ranks do not compose.
 RANK_PRECEDENCE = ("genus", "family", "order", "class")
