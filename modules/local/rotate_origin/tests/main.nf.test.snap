@@ -27,7 +27,7 @@
                         {
                             "id": "test_stub"
                         },
-                        "06_rotate.tool_params_mqcrow.html:md5,496addf8fbbcf3687036d67995e088c8"
+                        "06_rotate.tool_params_mqcrow.html:md5,f9900549c5999f68b2db5bd72bca74f8"
                     ]
                 ],
                 "2": [
@@ -46,7 +46,7 @@
                         {
                             "id": "test_stub"
                         },
-                        "06_rotate.tool_params_mqcrow.html:md5,496addf8fbbcf3687036d67995e088c8"
+                        "06_rotate.tool_params_mqcrow.html:md5,f9900549c5999f68b2db5bd72bca74f8"
                     ]
                 ],
                 "versions": [
@@ -54,7 +54,7 @@
                 ]
             }
         ],
-        "timestamp": "2026-08-24T14:25:23.981658622",
+        "timestamp": "2026-09-07T09:18:58.556384445",
         "meta": {
             "nf-test": "0.9.5",
             "nextflow": "25.04.6"
