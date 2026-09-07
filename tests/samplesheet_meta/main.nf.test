@@ -106,7 +106,7 @@ nextflow_workflow {
 
     test("non-coral invertebrate classes resolve their own genetic codes") {
         // Pins mitoGeneticCode()'s generalisation beyond Cnidaria, reading
-        // assets/mito_genetic_codes.json: Mollusca and Arthropoda (Crustacea +
+        // assets/taxonomy/mito_genetic_codes.json: Mollusca and Arthropoda (Crustacea +
         // Pycnogonida) resolve to the standard Invertebrate code (5), not the
         // Coelenterate code (4) corals use; Echinodermata keeps 9; Porifera groups
         // with Cnidaria on 4, as does Ctenophora (NCBI's table 4 scope is
@@ -180,7 +180,7 @@ nextflow_workflow {
     // whole annotation and fails table2asn terminally.
     test("an invertebrate with an unmapped class aborts and names the sample") {
         // There is no catch-all code-5 default: an invertebrate class that
-        // assets/mito_genetic_codes.json does not map must stop the run so the code
+        // assets/taxonomy/mito_genetic_codes.json does not map must stop the run so the code
         // is resolved before annotation, not silently guessed. Pterobranchia is the
         // case in point -- the class spans Rhabdopleuridae (code 24) and
         // Cephalodiscidae (33), so it cannot be resolved at class rank at all.
