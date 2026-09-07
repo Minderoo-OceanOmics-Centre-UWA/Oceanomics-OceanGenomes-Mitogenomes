@@ -42,7 +42,22 @@ process TRNA_RESCUE {
     script:
     def args   = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: meta.mt_assembly_prefix
-    def effective_args = "rescue_trna.py --annotation-dir annotation --targets ${targets} --scan-out ${scan} ${args}".replaceAll(/ +/, ' ').trim()
+    // Taxonomy for the curated gene-order variant lookup. Without it a clade whose
+    // real gene order is non-canonical has different NEIGHBOURS around a missing
+    // tRNA, so the flanking search window would bracket the wrong stretch of
+    // sequence. Same derivation as the emma upload module and
+    // modules/local/reference_divergence.
+    def klass       = (meta.class ?: '').toString().trim()
+    def family      = (meta.family ?: '').toString().trim()
+    def taxon_order = (meta.order ?: '').toString().trim()
+    def genus       = (meta.nominal_species_id ?: '').toString().trim().split(/\s+/)[0] ?: ''
+    def taxon_args  = [
+        klass       ? "--class '${klass}'"       : '',
+        family      ? "--family '${family}'"     : '',
+        taxon_order ? "--order '${taxon_order}'" : '',
+        genus       ? "--genus '${genus}'"       : '',
+    ].findAll { it }.join(' ')
+    def effective_args = "rescue_trna.py --annotation-dir annotation --targets ${targets} --scan-out ${scan} ${taxon_args} ${args}".replaceAll(/ +/, ' ').trim()
     """
     # Rebuild the annotation/ dir from the staged bundle (staged flat under
     # emma_in/ to keep it clear of this task's outputs).
@@ -61,6 +76,7 @@ process TRNA_RESCUE {
         --targets ${targets} \\
         --scan-out ${scan} \\
         --status "\$status_file" \\
+        ${taxon_args} \\
         ${args} || printf 'SKIP\\t-\\trescue_trna.py crashed\\n' > "\$status_file"
 
     [ -s "\$status_file" ] || printf 'SKIP\\t-\\tno status written\\n' > "\$status_file"

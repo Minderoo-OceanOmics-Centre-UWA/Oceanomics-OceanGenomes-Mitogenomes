@@ -34,12 +34,26 @@ from pathlib import Path
 # with annotation_stats.py and the ND4L/ATP8 gate via bin/mito_gene_order.py so
 # the gates and the QC step cannot drift on what "present and in order" means --
 # which covers HOW the GFF is read as well as what the reference order is.
-from mito_gene_order import REF_GENES, TRNA_GENES, RRNA_GENES, PCG_GENES, genes_by_coord
+from mito_gene_order import (
+    REF_GENES,
+    TRNA_GENES,
+    RRNA_GENES,
+    PCG_GENES,
+    add_taxon_arguments,
+    genes_by_coord,
+    matching_order_for,
+    taxon_from_args,
+)
 
 
-def decide(gff_path):
+def decide(gff_path, taxon=None):
     present = genes_by_coord(gff_path)
     present_set = set(present)
+
+    # See emma_rescue_gate.decide: the accepted order for this taxon, canonical
+    # unless a curated variant rule applies.
+    order_ref, _rule = matching_order_for(present, taxon)
+
     missing = [g for g in REF_GENES if g not in present_set]
 
     if not missing:
@@ -52,15 +66,14 @@ def decide(gff_path):
     if not RRNA_GENES.issubset(present_set) or not PCG_GENES.issubset(present_set):
         return "PASS", "-"
 
-    # The genes that ARE present must already be in REF order (equivalently:
-    # order_correct would be "yes"). Inserting each missing tRNA at its true
-    # coordinate then leaves the whole set ordered, and every missing tRNA's
-    # REF neighbours are present so its insertion gap is well defined.
-    ref_subset = [g for g in REF_GENES if g in present_set]
-    if present != ref_subset:
+    # The genes that ARE present must already be in an accepted order (equivalently:
+    # order_correct would be "yes" or "variant"). Inserting each missing tRNA at its
+    # true coordinate then leaves the whole set ordered, and every missing tRNA's
+    # neighbours in that order are present so its insertion gap is well defined.
+    if order_ref is None:
         return "PASS", "-"
 
-    targets = ",".join(g for g in REF_GENES if g in missing)
+    targets = ",".join(g for g in order_ref if g in missing)
     return "FIX", targets
 
 
@@ -69,10 +82,13 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gff", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
+    # FUTURE: see emma_rescue_gate.main -- no LCA exists yet at this point in the
+    # pipeline, so this gate matches on meta taxonomy only.
+    add_taxon_arguments(ap)
     args = ap.parse_args()
 
     try:
-        state, targets = decide(args.gff)
+        state, targets = decide(args.gff, taxon_from_args(args))
     except Exception:  # noqa: BLE001 - never drop a sample on a parse error
         traceback.print_exc(file=sys.stderr)
         state, targets = "PASS", "-"

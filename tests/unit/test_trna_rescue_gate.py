@@ -71,3 +71,34 @@ class GateDecisionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VariantOrderTests(unittest.TestCase):
+    """See test_emma_rescue_gate.VariantOrderTests -- the same drift, same fix."""
+
+    def _imq(self, drop=None):
+        genes = list(REF)
+        i = genes.index("TQ")
+        genes[i:i + 2] = ["TM", "TQ"]
+        if drop:
+            genes = [g for g in genes if g != drop]
+        return genes
+
+    def _decide(self, genes, taxon):
+        import tempfile
+        p = Path(tempfile.mkdtemp()) / "a.gff"
+        p.write_text(gff_for(genes))
+        return gate.decide(p, taxon)
+
+    def test_a_variant_taxon_missing_one_trna_is_offered_for_rescue(self):
+        state, targets = self._decide(self._imq(drop="TP"), {"genus": "Chlorurus"})
+        self.assertEqual(state, "FIX")
+        self.assertEqual(targets, "TP")
+
+    def test_the_same_assembly_without_the_taxonomy_is_declined(self):
+        state, _ = self._decide(self._imq(drop="TP"), None)
+        self.assertEqual(state, "PASS")
+
+    def test_an_unkeyed_genus_with_the_variant_order_is_still_declined(self):
+        state, _ = self._decide(self._imq(drop="TP"), {"genus": "Epibulus"})
+        self.assertEqual(state, "PASS")

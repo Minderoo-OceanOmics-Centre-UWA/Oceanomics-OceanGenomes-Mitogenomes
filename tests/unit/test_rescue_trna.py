@@ -179,3 +179,48 @@ class ParserTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NeighbourGapVariantOrderTests(unittest.TestCase):
+    """The flanking search window must follow the ACCEPTED gene order.
+
+    A rescued tRNA is searched for between its neighbours. In a clade whose order
+    is genuinely different those neighbours are different genes, so a
+    canonical-only window brackets the wrong stretch of sequence and the rescue
+    looks for the tRNA in the wrong place.
+    """
+
+    def setUp(self):
+        import mito_gene_order as mgo
+        self.mgo = mgo
+        # Coordinates for every gene except TM, which is the one being "rescued".
+        # Laid out in the SCARINE order (TI TM TQ ND2), so the variant window is
+        # the genuinely correct one.
+        self.variant_order, _ = mgo.ref_order_for({"genus": "Chlorurus"})
+        self.genes = {}
+        pos = 100
+        for g in self.variant_order:
+            if g != "TM":
+                self.genes[g] = (pos, pos + 50)
+            pos += 100
+
+    def test_the_variant_order_gives_the_variant_neighbours(self):
+        # In IMQ, TM sits between TI and TQ.
+        gap = rt.neighbour_gap("TM", self.genes, self.variant_order)
+        self.assertIsNotNone(gap)
+        lo, hi = gap
+        self.assertEqual(lo, max(self.genes["TI"]))
+        self.assertEqual(hi, min(self.genes["TQ"]))
+
+    def test_the_canonical_order_brackets_a_different_span(self):
+        # In canonical IQM, TM sits between TQ and ND2 -- a different, and here
+        # wrong, window. This is the defect, stated as a test.
+        gap = rt.neighbour_gap("TM", self.genes, None)
+        self.assertIsNotNone(gap)
+        lo, hi = gap
+        self.assertEqual(lo, max(self.genes["TQ"]))
+        self.assertEqual(hi, min(self.genes["ND2"]))
+        self.assertNotEqual(gap, rt.neighbour_gap("TM", self.genes, self.variant_order))
+
+    def test_a_target_absent_from_the_order_yields_no_window(self):
+        self.assertIsNone(rt.neighbour_gap("NOT_A_GENE", self.genes, None))

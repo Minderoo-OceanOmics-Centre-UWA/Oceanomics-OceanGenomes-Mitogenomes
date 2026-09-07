@@ -352,3 +352,52 @@ def _validate_order_variants():
 
 
 _validate_order_variants()
+
+
+def matching_order_for(present, taxon):
+    """The accepted order that `present` is in, or (None, None) if it is in none.
+
+    `present` is a gene-name list in genomic order, as genes_by_coord returns.
+    An order matches when `present` equals that order restricted to the genes
+    actually present -- the same test annotation_stats.py applies, factored here so
+    the QC step and the rescue gates cannot drift on it. Canonical is tried first,
+    so the returned rule_id is None unless the variant is what actually matched.
+    """
+    present_set = set(present)
+    for order, rule_id in accepted_orders_for(taxon):
+        if present == [g for g in order if g in present_set]:
+            return order, rule_id
+    return None, None
+
+
+def taxon_from_args(args):
+    """Build the rank -> value dict from a parsed argparse namespace.
+
+    Every consumer takes the same four options and builds the same dict; doing it
+    once here is the point of this module. Unresolved values are normalised away
+    inside variant_rules_for, so passing '' is safe.
+    """
+    return {
+        "genus": getattr(args, "genus", "") or "",
+        "family": getattr(args, "family", "") or "",
+        "order": getattr(args, "taxon_order", "") or "",
+        "class": getattr(args, "class_name", "") or "",
+    }
+
+
+def add_taxon_arguments(parser):
+    """Add --genus/--family/--order/--class to an argparse parser.
+
+    Taxonomy is consulted ONLY to look up a curated gene-order variant. It never
+    affects which genes are expected, only which orderings of them are accepted.
+    """
+    parser.add_argument("--genus", default="",
+                        help="genus, the first whitespace token of "
+                             "meta.nominal_species_id. Used only to look up a "
+                             "curated gene-order variant.")
+    parser.add_argument("--family", default="", help="taxonomic family. See --genus.")
+    parser.add_argument("--order", dest="taxon_order", default="",
+                        help="taxonomic order. See --genus.")
+    parser.add_argument("--class", dest="class_name", default="",
+                        help="taxonomic class. See --genus.")
+    return parser
