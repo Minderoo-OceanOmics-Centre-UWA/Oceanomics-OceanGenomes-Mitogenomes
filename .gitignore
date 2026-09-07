@@ -1,6 +1,10 @@
 .nextflow*
 work/
-data/
+# Anchored: a bare `data/` matches a directory named data at ANY depth, which
+# silently untracked every modules/local/*/tests/data fixture -- nine module test
+# suites that passed only on the working copy where the files happened to sit,
+# and failed on any fresh clone. This rule is for the repo-root data dir.
+/data/
 results/
 .DS_Store
 testing/

@@ -1,0 +1,32 @@
+##gff-version 3
+##sequence-region synthcoral.test.1.mitos2110 1 18000
+synthcoral.test.1.mitos2110	mitos	gene	100	190	.	+	.	ID=gene-ATP6;Name=MT-ATP6;Product=ATP6
+synthcoral.test.1.mitos2110	mitos	CDS	100	190	.	+	.	ID=ATP6;Parent=gene-ATP6;Name=MT-ATP6;Product=ATP6
+synthcoral.test.1.mitos2110	mitos	gene	300	390	.	+	.	ID=gene-ATP8;Name=MT-ATP8;Product=ATP8
+synthcoral.test.1.mitos2110	mitos	CDS	300	390	.	+	.	ID=ATP8;Parent=gene-ATP8;Name=MT-ATP8;Product=ATP8
+synthcoral.test.1.mitos2110	mitos	gene	500	590	.	+	.	ID=gene-CO1;Name=MT-CO1;Product=CO1
+synthcoral.test.1.mitos2110	mitos	CDS	500	590	.	+	.	ID=CO1;Parent=gene-CO1;Name=MT-CO1;Product=CO1
+synthcoral.test.1.mitos2110	mitos	gene	700	790	.	+	.	ID=gene-CO2;Name=MT-CO2;Product=CO2
+synthcoral.test.1.mitos2110	mitos	CDS	700	790	.	+	.	ID=CO2;Parent=gene-CO2;Name=MT-CO2;Product=CO2
+synthcoral.test.1.mitos2110	mitos	gene	900	990	.	+	.	ID=gene-CO3;Name=MT-CO3;Product=CO3
+synthcoral.test.1.mitos2110	mitos	CDS	900	990	.	+	.	ID=CO3;Parent=gene-CO3;Name=MT-CO3;Product=CO3
+synthcoral.test.1.mitos2110	mitos	gene	1100	1190	.	+	.	ID=gene-CYTB;Name=MT-CYTB;Product=CYTB
+synthcoral.test.1.mitos2110	mitos	CDS	1100	1190	.	+	.	ID=CYTB;Parent=gene-CYTB;Name=MT-CYTB;Product=CYTB
+synthcoral.test.1.mitos2110	mitos	gene	1300	1390	.	+	.	ID=gene-ND1;Name=MT-ND1;Product=ND1
+synthcoral.test.1.mitos2110	mitos	CDS	1300	1390	.	+	.	ID=ND1;Parent=gene-ND1;Name=MT-ND1;Product=ND1
+synthcoral.test.1.mitos2110	mitos	gene	1500	1590	.	+	.	ID=gene-ND2;Name=MT-ND2;Product=ND2
+synthcoral.test.1.mitos2110	mitos	CDS	1500	1590	.	+	.	ID=ND2;Parent=gene-ND2;Name=MT-ND2;Product=ND2
+synthcoral.test.1.mitos2110	mitos	gene	1700	1790	.	+	.	ID=gene-ND3;Name=MT-ND3;Product=ND3
+synthcoral.test.1.mitos2110	mitos	CDS	1700	1790	.	+	.	ID=ND3;Parent=gene-ND3;Name=MT-ND3;Product=ND3
+synthcoral.test.1.mitos2110	mitos	gene	1900	1990	.	+	.	ID=gene-ND4;Name=MT-ND4;Product=ND4
+synthcoral.test.1.mitos2110	mitos	CDS	1900	1990	.	+	.	ID=ND4;Parent=gene-ND4;Name=MT-ND4;Product=ND4
+synthcoral.test.1.mitos2110	mitos	gene	2100	2190	.	+	.	ID=gene-ND4L;Name=MT-ND4L;Product=ND4L
+synthcoral.test.1.mitos2110	mitos	CDS	2100	2190	.	+	.	ID=ND4L;Parent=gene-ND4L;Name=MT-ND4L;Product=ND4L
+synthcoral.test.1.mitos2110	mitos	gene	2300	2390	.	+	.	ID=gene-ND5;Name=MT-ND5;Product=ND5
+synthcoral.test.1.mitos2110	mitos	CDS	2300	2390	.	+	.	ID=ND5;Parent=gene-ND5;Name=MT-ND5;Product=ND5
+synthcoral.test.1.mitos2110	mitos	gene	2500	2590	.	+	.	ID=gene-ND6;Name=MT-ND6;Product=ND6
+synthcoral.test.1.mitos2110	mitos	CDS	2500	2590	.	+	.	ID=ND6;Parent=gene-ND6;Name=MT-ND6;Product=ND6
+synthcoral.test.1.mitos2110	mitos	gene	2700	2790	.	+	.	ID=gene-RNR1;Name=MT-RNR1;Product=RNR1
+synthcoral.test.1.mitos2110	mitos	CDS	2700	2790	.	+	.	ID=RNR1;Parent=gene-RNR1;Name=MT-RNR1;Product=RNR1
+synthcoral.test.1.mitos2110	mitos	gene	2900	2990	.	+	.	ID=gene-RNR2;Name=MT-RNR2;Product=RNR2
+synthcoral.test.1.mitos2110	mitos	CDS	2900	2990	.	+	.	ID=RNR2;Parent=gene-RNR2;Name=MT-RNR2;Product=RNR2
