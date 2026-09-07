@@ -1,0 +1,2 @@
+sample	anomaly_type	suggested_trim_region	reference_length	final_verdict_circular
+OG	concatemer	17-32	16	True
