@@ -834,14 +834,32 @@ workflow OCEANGENOMESMITOGENOMES {
                 }
             : Channel.empty()
 
-        // Region count per sample for the downstream group sizing. On this path
+        // Region count per assembly for the downstream group sizing. On this path
         // the results are already on disk, so counting the precomputed BLAST
-        // files per sample is exact and costs nothing: the fromPath channel
+        // files per assembly is exact and costs nothing: the fromPath channel
         // closes at startup, long before anything it gates.
-        ch_mitogenome_region_counts = ch_mitogenome_blast_results
-            .map { meta, _file -> [ meta, 1 ] }
+        //
+        // Derived from the ANNOTATION results, not from the BLAST results, so it
+        // is TOTAL over the assemblies that reach UPLOAD_RESULTS -- an assembly
+        // with annotation files but no BLAST files gets a count of 0 rather than
+        // no row at all. Built the other way round it was total only by accident:
+        // such an assembly appeared in neither region_counts nor the
+        // zero-region stand-in that UPLOAD_RESULTS derives BY FILTERING
+        // region_counts, so it never reached SPECIES_VALIDATION. That was survivable
+        // only while nothing downstream joined on species validation; the main
+        // annotation path has been total by construction all along, and this makes
+        // the precomputed path match it.
+        ch_mitogenome_blast_counts = ch_mitogenome_blast_results
+            .map { meta, _file -> [ meta.mt_assembly_prefix, 1 ] }
             .groupTuple(by: 0)
-            .map { meta, ones -> [ meta, ones.size() ] }
+            .map { prefix, ones -> [ prefix, ones.size() ] }
+
+        ch_mitogenome_region_counts = ch_mitogenome_annotation_results
+            .map { meta, _files -> [ meta.mt_assembly_prefix, meta ] }
+            .unique { keyed -> keyed[0] }
+            .join(ch_mitogenome_blast_counts, by: 0, remainder: true)
+            .filter { items -> items[1] != null }   // keep annotation rows only
+            .map { items -> [ items[1], (items.size() > 2 && items[2]) ? items[2] : 0 ] }
     } else {
 
         ch_mitogenome_annotation_results = Channel.empty()

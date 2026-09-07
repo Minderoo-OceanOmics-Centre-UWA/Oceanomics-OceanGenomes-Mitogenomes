@@ -261,8 +261,48 @@ workflow UPLOAD_RESULTS {
     // MODULE: Calculating the statistics of the annotations and updating the SQL database
     //
 
+    // Attach each assembly's lca_combined so annotation_stats.py can record whether
+    // the BLAST-derived lineage agreed with the rank a gene-order variant rule
+    // matched on. Advisory only -- it holds nothing.
+    //
+    // A PLAIN join, deliberately. remainder: true is a whole-run barrier here (see
+    // the note further down in this file) and has already broken a run. A plain
+    // join is only safe because SPECIES_VALIDATION is now TOTAL over
+    // annotation_results on both paths: the main path derives region_counts
+    // directly from the annotation results, the zero-region stand-in above catches
+    // the rest, and the precomputed path was made total by construction in
+    // workflows/oceangenomesmitogenomes.nf. Before that fix a precomputed assembly
+    // with annotation files but no BLAST files reached neither, and this join would
+    // have silently dropped it -- it gets its annotation stats pushed today, so
+    // that would have been a regression.
+    //
+    // The tee below is the standing insurance: it names, at end of run, any
+    // assembly that reached here with no lca_combined to pair with, because a plain
+    // join that misses emits nothing and says nothing.
+    ch_annotation_lca = SPECIES_VALIDATION.out.full
+        .map { meta, lca_combined, _blast_combined ->
+            [ meta.mt_assembly_prefix, lca_combined ]
+        }
+
+    annotation_results
+        .map { meta, _files -> [ meta.mt_assembly_prefix, true ] }
+        .join(ch_annotation_lca.map { prefix, _f -> [ prefix, true ] }, by: 0, remainder: true)
+        .filter { items -> items[1] != null && (items.size() < 3 || items[2] == null) }
+        .view { items ->
+            "WARNING: assembly '${items[0]}' reached the annotation upload with no " +
+            "lca_combined under that name and was dropped. SPECIES_VALIDATION is not " +
+            "total over annotation_results, which is a totality bug upstream, not a " +
+            "reason to loosen this join."
+        }
+
+    // tuple val(meta), path("annotation/*"), path(lca_combined)
+    ch_annotation_with_lca = annotation_results
+        .map { meta, files -> [ meta.mt_assembly_prefix, meta, files ] }
+        .join(ch_annotation_lca, by: 0)
+        .map { _prefix, meta, files, lca_combined -> [ meta, files, lca_combined ] }
+
     PUSH_MTDNA_ANNOTATION_RESULTS (
-        annotation_results, // tuple val(meta), path("annotation/*")
+        ch_annotation_with_lca,
         sql_config // params.sql_config
     )
 

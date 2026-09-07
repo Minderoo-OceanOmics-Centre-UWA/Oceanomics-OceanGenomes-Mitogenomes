@@ -81,7 +81,7 @@ if __name__ == "__main__":
         # the assembly upload, so we don't gate on row existence — we gate on
         # whether these cells are already (partially) filled.
         annotation_columns = [
-            "annotation", "extra_genes", "missing_genes", "trna_advisory", "order_correct", "order_variant", "order_deviation",
+            "annotation", "extra_genes", "missing_genes", "trna_advisory", "order_correct", "order_variant", "order_variant_taxon_check", "order_deviation",
             "annotation_gaps", "passed", "length_emma", "seqlength_12s",
             "seqlength_16s", "seqlength_co1", "cds_no", "trna_no", "rrna_no", "rrna12s",
             "rrna16s", "atp6", "atp8", "cox1", "cox2", "cox3", "cytb", "nad1", "nad2", "nad3", "nad4", "nad4l",
@@ -106,7 +106,7 @@ if __name__ == "__main__":
             -- og_num is a generated column maintained by the DB (SUBSTRING(og_id FROM 3)).
             -- It is intentionally absent from this column list: naming it here would error.
             INSERT INTO mitogenome_data (
-                og_id, tech, seq_date, code, annotation, extra_genes, missing_genes, trna_advisory, order_correct, order_variant, order_deviation, annotation_gaps,
+                og_id, tech, seq_date, code, annotation, extra_genes, missing_genes, trna_advisory, order_correct, order_variant, order_variant_taxon_check, order_deviation, annotation_gaps,
                 passed, length_emma, seqlength_12s,
                 seqlength_16s, seqlength_co1, cds_no, trna_no, rrna_no, rrna12s,
                 rrna16s, atp6, atp8, cox1, cox2, cox3, cytb, nad1, nad2, nad3, nad4, nad4l, 
@@ -117,7 +117,7 @@ if __name__ == "__main__":
                 nad2_trans, nad3_trans, nad4_trans, nad4l_trans, nad5_trans, nad6_trans
             )
             VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s, %(extra_genes)s, %(missing_genes)s, %(trna_advisory)s, %(order_correct)s, %(order_variant)s, %(order_deviation)s,
+                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s, %(extra_genes)s, %(missing_genes)s, %(trna_advisory)s, %(order_correct)s, %(order_variant)s, %(order_variant_taxon_check)s, %(order_deviation)s,
                 %(annotation_gaps)s, %(passed)s, %(length_emma)s, %(seqlength_12s)s,
                 %(seqlength_16s)s, %(seqlength_co1)s, %(cds_no)s, %(trna_no)s, %(rrna_no)s, %(rrna12s)s,
                 %(rrna16s)s, %(atp6)s, %(atp8)s, %(cox1)s, %(cox2)s, %(cox3)s, %(cytb)s, %(nad1)s, %(nad2)s, %(nad3)s, %(nad4)s, %(nad4l)s,
@@ -135,6 +135,7 @@ if __name__ == "__main__":
                 trna_advisory = EXCLUDED.trna_advisory,
                 order_correct = EXCLUDED.order_correct,
                 order_variant = EXCLUDED.order_variant,
+                order_variant_taxon_check = EXCLUDED.order_variant_taxon_check,
                 order_deviation = EXCLUDED.order_deviation,
                 annotation_gaps = EXCLUDED.annotation_gaps,
                 passed = EXCLUDED.passed,
@@ -195,7 +196,7 @@ if __name__ == "__main__":
                 nad4l_trans = EXCLUDED.nad4l_trans,
                 nad5_trans = EXCLUDED.nad5_trans,
                 nad6_trans = EXCLUDED.nad6_trans
-            RETURNING annotation, extra_genes, missing_genes, trna_advisory, order_correct, order_variant, order_deviation, annotation_gaps,
+            RETURNING annotation, extra_genes, missing_genes, trna_advisory, order_correct, order_variant, order_variant_taxon_check, order_deviation, annotation_gaps,
                 passed, length_emma, seqlength_12s,
                 seqlength_16s, seqlength_co1, cds_no, trna_no, rrna_no, rrna12s,
                 rrna16s, atp6, atp8, cox1, cox2, cox3, cytb, nad1, nad2, nad3, nad4, nad4l, 
@@ -222,6 +223,7 @@ if __name__ == "__main__":
                 # the SQL sites raise on an unknown placeholder, this one would just
                 # write nothing.
                 "order_variant": row_dict.get("order_variant"),
+                "order_variant_taxon_check": row_dict.get("order_variant_taxon_check"),
                 "order_deviation": row_dict.get("order_deviation"),
                 "annotation_gaps": row_dict.get("annotation_gaps"),
                 "passed": row_dict["passed"],

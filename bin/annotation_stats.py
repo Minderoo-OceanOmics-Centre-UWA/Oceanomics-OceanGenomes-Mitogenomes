@@ -25,6 +25,8 @@ from mito_gene_order import (
     TRNA_GENES as TRNA_NAMES,
     accepted_orders_for,
     gene_entries_by_coord,
+    lca_lineage_from_combined,
+    order_variant_taxon_check,
     parse_gff_attributes,
 )
 
@@ -171,7 +173,8 @@ def order_deviation(found_by_coord, ref_subset):
 
 def process_gff(gff_path, annotation_name, class_name="",
                 trna_tolerance=DEFAULT_TRNA_TOLERANCE, genetic_code=None,
-                taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD):
+                taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD,
+                lca_combined=None):
     parts = annotation_name.split(".")
     if len(parts) != 5:
         print(f"⚠️ Warning: Unexpected annotation_name format: {annotation_name}")
@@ -227,6 +230,10 @@ def process_gff(gff_path, annotation_name, class_name="",
     # than overloading NULL or an empty string.
     order_variant = "no"
     deviation = "no"
+    # Advisory record of whether the BLAST-derived lineage agreed with the rank a
+    # variant rule matched on. Never blocks anything -- see order_variant_taxon_check.
+    taxon_check = (order_variant_taxon_check(taxon, lca_lineage_from_combined(lca_combined))
+                   if lca_combined else "no")
     gaps = annotation_gaps(gene_entries, gap_threshold)
     profile = completeness_profile(genetic_code, class_name)
     if profile == "core":
@@ -300,7 +307,8 @@ def process_gff(gff_path, annotation_name, class_name="",
         # Which curated rule accepted a non-canonical order, so a relaxed gate stays
         # auditable after the fact. Same precedent as trna_advisory.
         "order_variant": order_variant,
-        # Advisory only: neither of these may affect `passed`.
+        # Advisory only: none of these may affect `passed`.
+        "order_variant_taxon_check": taxon_check,
         "order_deviation": deviation,
         "annotation_gaps": ";".join(gaps) if gaps else "no",
         "passed": "yes" if passed else "no",
@@ -338,13 +346,15 @@ def process_protein_lengths(prot_dir, annotation_name):
     return prot_lengths
 
 def main(gff_path, prot_dir, class_name="", trna_tolerance=DEFAULT_TRNA_TOLERANCE,
-         genetic_code=None, taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD):
+         genetic_code=None, taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD,
+         lca_combined=None):
     if not os.path.isfile(gff_path):
         sys.exit(f"❌ GFF file not found: {gff_path}")
 
     annotation_name = get_annotation_name(gff_path)
     gff_summary = process_gff(gff_path, annotation_name, class_name, trna_tolerance,
-                              genetic_code, taxon=taxon, gap_threshold=gap_threshold)
+                              genetic_code, taxon=taxon, gap_threshold=gap_threshold,
+                              lca_combined=lca_combined)
     prot_lengths = process_protein_lengths(prot_dir, annotation_name)
 
     combined = {**gff_summary, **prot_lengths}
@@ -398,6 +408,12 @@ if __name__ == "__main__":
                          "reported in annotation_gaps. Purely advisory: it never "
                          "affects passed. Default %(default)s, deliberately below the "
                          "55-75 bp hole a single missed mt-tRNA leaves.")
+    ap.add_argument("--lca-combined", dest="lca_combined", default="",
+                    help="path to this assembly's lca_combined.<prefix>.tsv. When "
+                         "given, records in order_variant_taxon_check whether the "
+                         "BLAST-derived lineage agreed with the rank a variant rule "
+                         "matched on. Advisory: it holds nothing and changes no "
+                         "verdict.")
     args = ap.parse_args()
 
     # Rank -> value, in the shape ref_order_for expects. Unresolved values are
@@ -410,4 +426,5 @@ if __name__ == "__main__":
     }
 
     main(args.gff, Path(args.proteins), args.class_name, args.trna_tolerance,
-         args.genetic_code, taxon=taxon, gap_threshold=args.gap_threshold)
+         args.genetic_code, taxon=taxon, gap_threshold=args.gap_threshold,
+         lca_combined=args.lca_combined or None)

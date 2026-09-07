@@ -8,7 +8,7 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
         'tylerpeirce/psycopg2:0.1' }"
 
     input:
-    tuple val(meta), path(annotations) 
+    tuple val(meta), path(annotations), path(lca_combined)
     path config
 
     output:
@@ -46,7 +46,11 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
     def family_arg  = family ? "--family '${family}'" : ''
     def order_arg   = taxon_order ? "--order '${taxon_order}'" : ''
     def genus_arg   = genus ? "--genus '${genus}'" : ''
-    def effective_args = ["annotation_stats.py ${args} ${class_arg} ${gcode_arg} ${family_arg} ${order_arg} ${genus_arg} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.mt_assembly_prefix}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
+    // The second taxonomy opinion, for the advisory order_variant_taxon_check.
+    // Optional: an assembly with no lca_combined (the file is staged as a
+    // placeholder) simply records 'no'.
+    def lca_arg     = lca_combined ? "--lca-combined ${lca_combined}" : ''
+    def effective_args = ["annotation_stats.py ${args} ${class_arg} ${gcode_arg} ${family_arg} ${order_arg} ${genus_arg} ${lca_arg} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.mt_assembly_prefix}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
     """
     # Compile the statistics.
     #
@@ -62,6 +66,7 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
         ${family_arg} \\
         ${order_arg} \\
         ${genus_arg} \\
+        ${lca_arg} \\
         *.gff \\
         proteins
 

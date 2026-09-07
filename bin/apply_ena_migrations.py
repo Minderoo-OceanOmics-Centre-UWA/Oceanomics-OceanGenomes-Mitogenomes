@@ -37,6 +37,7 @@ MIGRATIONS = [
     "022_lca_widen_taxon_id_and_confidence.sql",
     "023_mitogenome_data_order_variant.sql",
     "024_lca_validation_validated_rank.sql",
+    "025_mitogenome_data_order_variant_taxon_check.sql",
 ]
 
 

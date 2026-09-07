@@ -401,3 +401,77 @@ def add_taxon_arguments(parser):
     parser.add_argument("--class", dest="class_name", default="",
                         help="taxonomic class. See --genus.")
     return parser
+
+
+# --------------------------------------------- LCA lineage (advisory cross-check)
+
+# Ranks the cross-check considers, coarsest last so a caller can walk them.
+LCA_RANKS = ("genus", "family", "order", "class")
+
+
+def lca_lineage_from_combined(path):
+    """Consensus lineage from an lca_combined.<prefix>.tsv, as {rank: value}.
+
+    A rank gets a value only when EVERY non-empty row agrees on it; a rank the
+    regions disagree about is reported as absent rather than resolved by majority,
+    because the point of this file is to be a second OPINION and a split opinion is
+    not one. 'dropped' and 'Unknown' -- what calculateLCA.py writes when it declines
+    a rank or finds no lineage -- both count as absent.
+
+    Stdlib only, and NEVER raises: a missing, unreadable or malformed file returns
+    {}. This feeds an advisory column that holds nothing, so it must not be capable
+    of failing a run.
+    """
+    absent = {"", "dropped", "unknown", "na", "n/a", "none", "null"}
+    try:
+        import csv
+        with open(path, newline="") as handle:
+            rows = list(csv.DictReader(handle, delimiter="\t"))
+    except Exception:  # noqa: BLE001 - advisory only, never fail the run
+        return {}
+
+    lineage = {}
+    for rank in LCA_RANKS:
+        seen = set()
+        for row in rows:
+            value = (row.get(rank) or "").strip()
+            if value and value.lower() not in absent:
+                seen.add(value)
+        if len(seen) == 1:
+            lineage[rank] = seen.pop()
+    return lineage
+
+
+def order_variant_taxon_check(taxon, lineage):
+    """Did a second taxonomy source agree with the rank a variant rule matched on?
+
+    Returns 'agree', 'disagree:<lca_taxon>', 'unresolved', or 'no' when no rule
+    fired. Purely a recorded flag: it holds nothing and changes no verdict.
+
+    The variant table RELAXES the QC gate, so the obvious conservative design is
+    to require two independent taxonomy sources to concur before a rule fires. That
+    was rejected as a PRECONDITION, because the samples the table exists to unblock
+    include ones whose samplesheet taxon is wrong or unresolved -- requiring
+    agreement would ship the mechanism without releasing anything. Recording the
+    disagreement instead makes a rule applied to a mislabelled sample queryable
+    after the fact rather than invisible, which is the part that actually matters.
+    """
+    rules = variant_rules_for(taxon)
+    if not rules:
+        return "no"
+    taxon = taxon or {}
+    for rank in RANK_PRECEDENCE:
+        value = _normalise_rank_value(taxon.get(rank))
+        if not value:
+            continue
+        lookup = {(r, k.lower()) for (r, k) in ORDER_VARIANTS}
+        if (rank, value.lower()) not in lookup:
+            continue
+        # This is the rank the rule matched on. Ask the LCA about that same rank.
+        lca_value = (lineage or {}).get(rank, "")
+        if not lca_value:
+            return "unresolved"
+        if lca_value.strip().lower() == value.lower():
+            return "agree"
+        return f"disagree:{lca_value.strip()}"
+    return "unresolved"

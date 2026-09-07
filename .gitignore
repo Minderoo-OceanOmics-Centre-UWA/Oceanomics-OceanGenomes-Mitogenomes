@@ -18,3 +18,6 @@ taxonkit_dbs/
 # nf-test runtime
 .nf-test/
 .nf-test.log
+# nf-test writes a scratch workflow per test into the repo ROOT, named
+# .nf-test-<hash>.nf. Anchored so it cannot reach anything under tests/.
+/.nf-test-*.nf

@@ -157,3 +157,88 @@ class ConsumersAgreeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LcaLineageTests(unittest.TestCase):
+    """Consensus lineage from lca_combined, for the advisory taxonomy cross-check."""
+
+    HEADER = "seq_id\tspecies_in_LCA\tclass\torder\tfamily\tgenus\n"
+
+    def _write(self, rows):
+        p = Path(tempfile.mkdtemp()) / "lca_combined.tsv"
+        p.write_text(self.HEADER + "".join("\t".join(r) + "\n" for r in rows))
+        return str(p)
+
+    def test_a_rank_all_rows_agree_on_is_resolved(self):
+        p = self._write([
+            ["s1", "Chlorurus microrhinos", "Actinopteri", "Perciformes", "Labridae", "Chlorurus"],
+            ["s2", "Chlorurus sordidus", "Actinopteri", "Perciformes", "Labridae", "Chlorurus"],
+        ])
+        self.assertEqual(mgo.lca_lineage_from_combined(p)["genus"], "Chlorurus")
+
+    def test_a_rank_the_rows_disagree_on_is_absent(self):
+        # A split opinion is not a second opinion, so it is reported as absent
+        # rather than resolved by majority.
+        p = self._write([
+            ["s1", "a", "Actinopteri", "Perciformes", "Labridae", "Chlorurus"],
+            ["s2", "b", "Actinopteri", "Perciformes", "Labridae", "Scarus"],
+        ])
+        lineage = mgo.lca_lineage_from_combined(p)
+        self.assertNotIn("genus", lineage)
+        self.assertEqual(lineage["family"], "Labridae")
+
+    def test_dropped_and_Unknown_both_count_as_absent(self):
+        # calculateLCA.py writes 'dropped' where it declined a rank and 'Unknown'
+        # where the lineage lookup returned nothing.
+        p = self._write([
+            ["s1", "a", "Actinopteri", "Anguilliformes", "Serrivomeridae", "dropped"],
+            ["s2", "b", "Actinopteri", "Anguilliformes", "Serrivomeridae", "Unknown"],
+        ])
+        lineage = mgo.lca_lineage_from_combined(p)
+        self.assertNotIn("genus", lineage)
+        self.assertEqual(lineage["family"], "Serrivomeridae")
+
+    def test_a_missing_or_malformed_file_returns_empty_and_never_raises(self):
+        # It feeds an advisory column that holds nothing, so it must not be
+        # capable of failing a run.
+        self.assertEqual(mgo.lca_lineage_from_combined("/nonexistent/x.tsv"), {})
+        p = Path(tempfile.mkdtemp()) / "junk.tsv"
+        p.write_text("not a tsv at all\x00\n")
+        self.assertIsInstance(mgo.lca_lineage_from_combined(str(p)), dict)
+
+
+class OrderVariantTaxonCheckTests(unittest.TestCase):
+    """Recorded disagreement, never a gate.
+
+    Requiring the two taxonomy sources to AGREE before a rule may fire was
+    considered and rejected: the samples the variant table exists to unblock
+    include ones whose samplesheet taxon is wrong or unresolved, so agreement as a
+    precondition would ship the mechanism without releasing anything.
+    """
+
+    def test_agreement(self):
+        self.assertEqual(
+            mgo.order_variant_taxon_check({"genus": "Chlorurus"}, {"genus": "Chlorurus"}),
+            "agree")
+
+    def test_disagreement_names_the_lca_taxon(self):
+        self.assertEqual(
+            mgo.order_variant_taxon_check({"genus": "Chlorurus"}, {"genus": "Scarus"}),
+            "disagree:Scarus")
+
+    def test_no_lca_consensus_at_that_rank_is_unresolved(self):
+        self.assertEqual(
+            mgo.order_variant_taxon_check({"genus": "Chlorurus"}, {"family": "Labridae"}),
+            "unresolved")
+
+    def test_no_rule_means_nothing_to_check(self):
+        self.assertEqual(
+            mgo.order_variant_taxon_check({"genus": "Epibulus"}, {"genus": "Epibulus"}),
+            "no")
+
+    def test_it_checks_the_rank_the_rule_matched_on_not_a_coarser_one(self):
+        # The rule is genus-keyed, so family agreement is not what is being asked.
+        self.assertEqual(
+            mgo.order_variant_taxon_check({"genus": "Chlorurus", "family": "Labridae"},
+                                          {"family": "Labridae"}),
+            "unresolved")
