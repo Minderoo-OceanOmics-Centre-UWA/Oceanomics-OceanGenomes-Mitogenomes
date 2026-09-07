@@ -7,14 +7,15 @@ from Bio.Seq import Seq
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Translate mitochondrial CDS FASTAs (table 2)."
+        description="Translate mitochondrial CDS FASTAs using the sample's genetic code."
     )
     p.add_argument("--input", required=True, type=Path,
                    help="Either a genes directory (containing *.fa) OR a single multi-FASTA (*.genes.fa)")
     p.add_argument("--outdir", required=True, type=Path,
                    help="Output directory (proteins will be placed under outdir/proteins)")
-    p.add_argument("--table", type=int, default=2,
-                   help="NCBI translation table (default=2 vertebrate mitochondrial)")
+    p.add_argument("--table", type=int, required=True,
+                   help="NCBI mitochondrial translation table (from meta.genetic_code); "
+                        "no default -- the caller must supply it")
     return p.parse_args()
 
 def translate_file(src_fa: Path, dst_fa: Path, table: int):

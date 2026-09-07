@@ -4,6 +4,10 @@ from pathlib import Path
 import argparse, re, sys
 from Bio import SeqIO
 
+# Sibling import: Nextflow bind-mounts the whole bin/ dir onto PATH, so this
+# resolves via sys.path[0] (same pattern as bin/process_files.py).
+from orf_utils import SUPPORTED_CODES
+
 # Name→default Product for older GFFs (unchanged from your script)
 NAME2DEFAULT_PRODUCT = {
     "RNR1": "12S rRNA",
@@ -41,6 +45,10 @@ def parse_args():
     p.add_argument("--outdir", required=True, type=Path, help="Output directory")
     p.add_argument("--assembly", default=None,
                    help="Assembly/sample ID; default=FASTA stem")
+    p.add_argument("--genetic-code", dest="genetic_code", type=int, required=True,
+                   help="NCBI mitochondrial translation table (from meta.genetic_code); "
+                        "no default -- the caller must supply it, so a non-vertebrate "
+                        "sample can never be silently labelled mgcode=2")
     return p.parse_args()
 
 def main():
@@ -49,6 +57,9 @@ def main():
         sys.exit(f"FASTA not found: {args.fasta}")
     if not args.gff.exists():
         sys.exit(f"GFF not found: {args.gff}")
+    if args.genetic_code not in SUPPORTED_CODES:
+        sys.exit(f"--genetic-code {args.genetic_code} is not a supported mitochondrial "
+                 f"translation table (supported: {sorted(SUPPORTED_CODES)})")
 
     assembly = args.assembly or args.fasta.stem
     args.outdir.mkdir(parents=True, exist_ok=True)
@@ -106,7 +117,7 @@ def main():
             coord = f"{s}-{e}"
             header = (
                 f">{assembly}|{coord}|{strand}|{name} "
-                f"[organism={species}] [mgcode=2] [topology=linear] "
+                f"[organism={species}] [mgcode={args.genetic_code}] [topology=linear] "
                 f"[gene-coordinates={coord}({strand})] "
                 f"{species} mitochondrially encoded {product}"
             )

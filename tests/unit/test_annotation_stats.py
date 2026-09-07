@@ -142,5 +142,63 @@ class ReducedTrnaExpectationTests(unittest.TestCase):
             self.assertFalse(stats.has_reduced_trna_expectation(class_name))
 
 
+class CompletenessProfileTests(unittest.TestCase):
+    """Which profile an assembly is judged under.
+
+    Previously keyed on a hardcoded cnidarian class list, so a code-9 echinoderm
+    or code-5 mollusc was judged against the vertebrate 37-gene set and gene
+    order, and failed for being what it is. The resolved genetic code decides it
+    now; the class stays as the fallback for callers that have no code.
+    """
+
+    def test_code_2_is_the_vertebrate_profile(self):
+        self.assertEqual(stats.completeness_profile(2), "vertebrate")
+
+    def test_every_other_code_is_the_core_profile(self):
+        for code in (4, 5, 9, 13, 14, 21, 24, 33):
+            with self.subTest(code=code):
+                self.assertEqual(stats.completeness_profile(code), "core")
+
+    def test_code_beats_a_disagreeing_class(self):
+        # A mislabelled class must not drag a code-4 sample onto the vertebrate
+        # profile -- the class string is exactly the field known to be unreliable.
+        self.assertEqual(stats.completeness_profile(4, "Actinopteri"), "core")
+        self.assertEqual(stats.completeness_profile(2, "Anthozoa"), "vertebrate")
+
+    def test_class_is_the_fallback_when_no_code_is_given(self):
+        self.assertEqual(stats.completeness_profile(None, "Anthozoa"), "core")
+        self.assertEqual(stats.completeness_profile(None, "Actinopteri"), "vertebrate")
+        self.assertEqual(stats.completeness_profile(None, ""), "vertebrate")
+
+
+class ProfileAppliedTests(ProcessGffTests):
+    """The selected profile actually changes the verdict."""
+
+    def _run_code(self, genes, genetic_code):
+        p = Path(self.tmp) / "OG1.ilmn.240101.getorg1770.emma102.gff"
+        p.write_text(gff_for(genes))
+        return stats.process_gff(str(p), p.stem, "", 2, genetic_code)
+
+    def test_echinoderm_core_passes_without_the_vertebrate_trnas(self):
+        # 13 PCGs + 2 rRNAs, no tRNAs: complete on the core profile.
+        core = [g for g in REF if not g.startswith("T") or g.startswith("RNR")]
+        s = self._run_code(core, 9)
+        self.assertEqual(s["completeness_profile"], "core")
+        self.assertEqual(s["passed"], "yes")
+        self.assertEqual(s["order_correct"], "NA")
+
+    def test_same_annotation_fails_under_the_vertebrate_profile(self):
+        core = [g for g in REF if not g.startswith("T") or g.startswith("RNR")]
+        s = self._run_code(core, 2)
+        self.assertEqual(s["completeness_profile"], "vertebrate")
+        self.assertEqual(s["passed"], "no")
+
+    def test_vertebrate_verdict_is_unchanged_by_the_new_argument(self):
+        s = self._run_code(REF, 2)
+        self.assertEqual(s["passed"], "yes")
+        self.assertEqual(s["missing_genes"], "no")
+        self.assertEqual(s["order_correct"], "yes")
+
+
 if __name__ == "__main__":
     unittest.main()

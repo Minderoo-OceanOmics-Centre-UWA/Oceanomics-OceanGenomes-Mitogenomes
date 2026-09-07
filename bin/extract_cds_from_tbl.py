@@ -6,6 +6,10 @@ import sys
 from pathlib import Path
 from Bio import SeqIO
 
+# Sibling import: Nextflow bind-mounts the whole bin/ dir onto PATH, so this
+# resolves via sys.path[0] (same pattern as bin/process_files.py).
+from orf_utils import SUPPORTED_CODES
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Extract CDS FASTAs from a mitochondrial genome using a GenBank .tbl feature table (single sample)."
@@ -14,6 +18,10 @@ def parse_args():
     p.add_argument("--tbl",      required=True, type=Path, help="Matching .tbl feature table")
     p.add_argument("--outdir",   required=True, type=Path, help="Output directory (CDSs under outdir/cds)")
     p.add_argument("--assembly", default=None,             help="Assembly/sample ID; default=FASTA stem")
+    p.add_argument("--genetic-code", dest="genetic_code", type=int, required=True,
+                   help="NCBI mitochondrial translation table (from meta.genetic_code); "
+                        "no default -- the caller must supply it, so a non-vertebrate "
+                        "sample can never be silently labelled with the vertebrate code")
     return p.parse_args()
 
 def wrap(seq: str, width: int = 70) -> str:
@@ -26,6 +34,9 @@ def main():
         sys.exit(f"FASTA not found: {args.fasta}")
     if not args.tbl.exists():
         sys.exit(f"TBL not found: {args.tbl}")
+    if args.genetic_code not in SUPPORTED_CODES:
+        sys.exit(f"--genetic-code {args.genetic_code} is not a supported mitochondrial "
+                 f"translation table (supported: {sorted(SUPPORTED_CODES)})")
 
     assembly = args.assembly or args.fasta.stem
     out_cds  = args.outdir / "cds"
@@ -89,7 +100,7 @@ def main():
             # Build header consistent with your format
             header = (
                 f">{assembly}|{coord_str}|{direction}|MT-{gene_name} "
-                f"[organism={species}] [mgcode=2] "
+                f"[organism={species}] [mgcode={args.genetic_code}] "
                 f"[gene-coordinates={coord_str}({direction})] "
                 f"{species} mitochondrially encoded {product_name}"
             )

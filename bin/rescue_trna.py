@@ -274,7 +274,9 @@ def main():
     ap.add_argument("--min-len", type=int, default=30)
     ap.add_argument("--max-len", type=int, default=100)
     ap.add_argument("--code", type=int, default=2,
-                    help="accepted for call-site symmetry; -M vert is code-independent")
+                    help="accepted for call-site symmetry; -M vert is code-independent. "
+                         "Only the vertebrate (code 2) EMMA path reaches this rescue, so "
+                         "2 is the path's only value, not a guess.")
     args = ap.parse_args()
 
     args.ann_dir = args.annotation_dir

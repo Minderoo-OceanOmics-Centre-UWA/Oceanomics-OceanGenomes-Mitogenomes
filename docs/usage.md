@@ -101,6 +101,42 @@ phylum: it keeps its first-pass assembly, and the run log names it. See
 | `--translation_table` | Optional | Mitochondrial genetic code for vertebrate/unresolved samples (default `2`). Invertebrate codes are derived per-sample from the taxonomic `class` column (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4), so this no longer forces a single code across the whole run. |
 | `--allow_unknown_taxonomy` | Optional | Continue with a warning when a sample's taxonomic `class` is `unknown` (default `false`, i.e. the run aborts). An unknown class is treated as vertebrate by every downstream chooser, so this is for deliberate one-offs only. |
 
+The resolved per-sample code reaches every artefact that states one: the genome FASTA, the
+`.tbl`, the `mgcode` passed to table2asn, the translation table, and the `[mgcode=]` tag on
+each extracted gene, CDS and protein header. A sample whose `class` is marked
+`invertebrates=true` but has no confirmed code aborts the run rather than falling back --
+set the `genetic_code` column for it (commonly 5 for Mollusca/Annelida/Arthropoda/Porifera,
+9 for Echinodermata/Platyhelminthes, 13 for Tunicata). Note that the invertebrate annotation
+path is tuned for corals (cox1 origin rotation, coral reference DB), so review the annotation
+of any non-cnidarian sample you push through it.
+
+> **Assemblies published before this became per-sample.** Gene extraction used to hardcode
+> `[mgcode=2]`, so any non-code-2 assembly QC'd before that fix has extracted genes, CDS and
+> proteins that contradict its own genome record -- including inside the ENA candidate
+> package. The genome FASTA, `.tbl` and table2asn output were always correct; only the
+> extraction artefacts are wrong. Find them with:
+>
+> ```bash
+> # an assembly whose genome record and gene records disagree
+> grep -l 'mgcode=2' <outdir>/mitogenomes/*/*/genbank/genes/*.genes.fa
+> ```
+>
+> then re-run those through `qc_only_from_annotations.nf`, which re-derives the code per
+> sample from the SQL taxonomic class, so no `--translation_table` is needed for a mapped
+> class:
+>
+> ```bash
+> nextflow run qc_only_from_annotations.nf \
+>   --annotation_files '<outdir>/mitogenomes/OG####/*/annotation/*.{fa,fasta,gff,tbl,gb}' \
+>   --sql_config <cfg> --template_sbt <sbt> --outdir <outdir> \
+>   --skip_upload_results true -profile setonix
+> ```
+>
+> Run the first batch with `--skip_upload_results true`, confirm the headers agree, then
+> re-run without it if the ENA validation attempts should be recorded. Any sample the run
+> warns about with "no confirmed mitochondrial genetic code for class" fell back to
+> `--translation_table` and needs its code passed explicitly.
+
 `--input_dir` mode requires `--sql_config` because the enriched samplesheet generator queries
 OceanOmics metadata. Pass `--taxonkit_db_dir` as well: the generator falls back to the NCBI
 taxdump for samples the `species` table cannot resolve, and without it those samples fail the

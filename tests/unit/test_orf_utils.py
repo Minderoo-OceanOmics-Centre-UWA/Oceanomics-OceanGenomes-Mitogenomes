@@ -136,5 +136,29 @@ class RefineOrfTests(unittest.TestCase):
         self.assertEqual(res[3], "ATG")
 
 
+class UnknownCodeTests(unittest.TestCase):
+    """An unrecognised table must raise, never fall back.
+
+    The old fallback returned ("TAA","TAG") while its comment claimed the
+    vertebrate code -- but code 2 also stops on AGA/AGG, so a mistyped table
+    silently got the WRONG stop set and produced plausible-looking ORFs. Every
+    caller now resolves the code from meta.genetic_code, so an unknown value is a
+    wiring bug and has to surface as one.
+    """
+
+    def test_unsupported_code_raises(self):
+        for code in (1, 7, 99):
+            with self.subTest(code=code):
+                self.assertRaises(ValueError, orf.stop_codons, code)
+                self.assertRaises(ValueError, orf.start_codons, code)
+
+    def test_non_integer_code_raises(self):
+        self.assertRaises(ValueError, orf.stop_codons, None)
+        self.assertRaises(ValueError, orf.start_codons, "vertebrate")
+
+    def test_code_2_keeps_its_four_stops(self):
+        self.assertEqual(set(orf.stop_codons(2)), {"TAA", "TAG", "AGA", "AGG"})
+
+
 if __name__ == "__main__":
     unittest.main()
