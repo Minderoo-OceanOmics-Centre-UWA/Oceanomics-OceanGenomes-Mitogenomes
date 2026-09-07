@@ -136,3 +136,219 @@ def gene_entries_by_coord(gff_path):
 def genes_by_coord(gff_path):
     """Gene names present in the GFF, ordered by genomic start."""
     return [entry[0] for entry in gene_entries_by_coord(gff_path)]
+
+
+# --------------------------------------------------- accepted order variants
+#
+# Accepted non-canonical gene orders, keyed by taxon. Each entry rewrites one
+# CONTIGUOUS run of REF_GENES. Only add a rule with published evidence that the
+# rearrangement is real -- an unexplained order must keep failing the gate.
+#
+# This is a CURATED TABLE, not a generic tolerance, and that is the design. A rule
+# like "any single adjacent tRNA transposition is fine" would pass the exact case
+# this gate exists to catch: an assembly whose apparent transposition is really a
+# missed tRNA, leaving a tRNA-sized hole where the gene should have been called.
+# Only a known taxon with a known variant passes; an unexpected rearrangement in
+# an unexpected group still fails and gets human eyes on it.
+#
+# Entries are (rule_id, canonical_block, variant_block, evidence_accession).
+#
+# MAINTENANCE HAZARD, because most-specific-wins is NOT composition. Once a genus
+# row exists for a genus inside a family that also has a row, the family rule stops
+# applying to that genus entirely. Adding a genus row for some unrelated reason
+# would silently remove the family's rule from every member of that genus. The
+# rule for whoever edits this table: a new genus row inside a rule-carrying family
+# must repeat that family's rules alongside its own.
+
+ORDER_VARIANTS = {
+    # Scarine parrotfishes: trnM and trnQ transposed relative to the canonical
+    # IQM, giving IMQ. Confirmed against independent USNM-voucher GenBank records
+    # that annotate the same coordinates.
+    ("genus", "Hipposcarus"): [("scarine_imq", ("TQ", "TM"), ("TM", "TQ"), "PZ311005.1")],
+    ("genus", "Chlorurus"):   [("scarine_imq", ("TQ", "TM"), ("TM", "TQ"), "PZ234023.1")],
+    # trnD and trnS2 transposed between CO1 and CO2.
+    ("genus", "Diploprion"):  [("diploprion_ds", ("TS2", "TD"), ("TD", "TS2"), "PZ244822.1")],
+}
+
+# Rules that are NOT in the table yet, kept here so the shape and the evidence
+# question survive rather than being rediscovered.
+#
+# Both have strong INTERNAL evidence -- cross-assembler concordance, and a single
+# block rewrite reconciling every affected assembly exactly -- but the design rule
+# above asks for published evidence, and neither has an accession yet.
+#
+# ANGUILLIFORM_ND6_TE: ND6+trnE translocated from upstream of CYTB to between trnT
+# and trnP. Keyed per FAMILY, never at ("order", "Anguilliformes"): anguilliforms
+# in Synaphobranchidae and Nemichthyidae are byte-identical to REF_GENES and pass
+# today, so this is not an order-level synapomorphy and an order key would grant
+# licence across two families where the canonical order demonstrably holds. Before
+# it ships, pull a CONGRID, NETTASTOMATID, COLOCONGRID or MURAENESOCID reference
+# (a synaphobranchid or nemichthyid one confirms nothing) and ask it exactly one
+# question: does it annotate trnE adjacent to the relocated ND6, or upstream of
+# CYTB? If the latter, the rewrite is wrong in its trnE half and needs reshaping,
+# not just an accession.
+#
+#   ANGUILLIFORM_ND6_TE = ("anguilliform_nd6_te",
+#                          ("ND6", "TE", "CYTB", "TT"),
+#                          ("CYTB", "TT", "ND6", "TE"),
+#                          "TODO-accession")
+#   ("family", "Congridae"):       [ANGUILLIFORM_ND6_TE],
+#   ("family", "Nettastomatidae"): [ANGUILLIFORM_ND6_TE],
+#   ("family", "Colocongridae"):   [ANGUILLIFORM_ND6_TE],
+#   ("family", "Muraenesocidae"):  [ANGUILLIFORM_ND6_TE],
+#   # Blachea is Colocongridae but resolves to blank family and order in the
+#   # samplesheet, so the family rows cannot reach it. A narrow genus row with an
+#   # EXPIRY CONDITION: delete it once the samplesheet taxonomy carries
+#   # Colocongridae. Do not treat it as precedent for genus rows that exist only
+#   # to dodge missing taxonomy, and note it is the live instance of the
+#   # maintenance hazard above -- safe only because it names the same rule the
+#   # family row would have given it.
+#   ("genus", "Blachea"):          [ANGUILLIFORM_ND6_TE],
+#
+# macrourid_te: trnE ALONE translocated from between ND6 and CYTB to after trnP.
+# NOT the anguilliform rule -- ND6 stays in place here. This is the weaker of the
+# two despite affecting more samples: every affected assembly is one assembler and
+# one read type, and every one carries a 61-68 bp unannotated hole exactly where
+# canonical trnE sits. A systematic tRNA-calling miss would replicate across a
+# family exactly as faithfully as biology would. If a Macrourinae reference
+# annotates trnE in that gap, this row must NOT merge and those samples are an
+# annotation defect instead.
+#
+#   ("family", "Macrouridae"): [
+#       ("macrourid_te",
+#        ("TE", "CYTB", "TT", "TP"),
+#        ("CYTB", "TT", "TP", "TE"),
+#        "TODO-accession")],
+
+# Most specific rank wins OUTRIGHT. Ranks do not compose.
+RANK_PRECEDENCE = ("genus", "family", "order", "class")
+
+# Values that mean "the taxonomy did not resolve". All four occur in real
+# samplesheets -- see isUnresolvedTaxon in subworkflows/local/prepare_samplesheet,
+# which exists because unresolved family/order only warns while unresolved class
+# aborts -- and none of them may ever match a rule key.
+_UNRESOLVED = {"", "unknown", "na", "none", "dropped"}
+
+
+def _normalise_rank_value(value):
+    """Normalise a taxon value for key comparison, or '' if it is unresolved.
+
+    Tolerates '', None and [] as well as the literal sentinels, because all of
+    them reach here from real samplesheets.
+    """
+    if value is None or isinstance(value, (list, tuple, set, dict)):
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() in _UNRESOLVED else text
+
+
+def variant_rules_for(taxon):
+    """Rules for the FIRST rank in RANK_PRECEDENCE that matches, else [].
+
+    Most specific wins outright: a genus row shadows the family row for that
+    genus entirely rather than adding to it. Comparison is case-insensitive on
+    the stripped value.
+    """
+    taxon = taxon or {}
+    lookup = {
+        (rank, key.lower()): rules
+        for (rank, key), rules in ORDER_VARIANTS.items()
+    }
+    for rank in RANK_PRECEDENCE:
+        value = _normalise_rank_value(taxon.get(rank))
+        if not value:
+            continue
+        rules = lookup.get((rank, value.lower()))
+        if rules:
+            return rules
+    return []
+
+
+def accepted_orders_for(taxon):
+    """Every gene order this taxon may legitimately show, canonical FIRST.
+
+    Returns [(order_list, rule_id_or_None), ...]. The canonical order is always
+    present and always first, because a variant rule ADDS an accepted order, it
+    does not replace one: the rearrangement is real in the clade but not universal
+    within it, and a canonical member of a rule-carrying taxon must keep passing
+    unchanged rather than being failed for NOT having the variant. Checking
+    canonical first is also what keeps order_variant honest -- it stays "no" unless
+    the variant is the thing that actually matched.
+
+    Full order lists rather than a special-case comparison, so every consumer keeps
+    its existing logic and simply compares against more than one list.
+
+    Raises ValueError on a malformed table entry -- at import time via the
+    self-check below, so a bad edit fails loudly instead of silently mis-gating a
+    whole run.
+    """
+    canonical = (list(REF_GENES), None)
+    rules = variant_rules_for(taxon)
+    if not rules:
+        return [canonical]
+    variant, rule_id = _apply_rules(rules)
+    if variant == list(REF_GENES):
+        return [canonical]
+    return [canonical, (variant, rule_id)]
+
+
+def ref_order_for(taxon):
+    """The single most specific accepted order: the variant if one applies, else
+    canonical. For callers that need ONE ordering, such as picking the flanking
+    search window for a rescued gene. Callers deciding whether an observed order
+    is acceptable want accepted_orders_for instead.
+    """
+    orders = accepted_orders_for(taxon)
+    return orders[-1]
+
+
+def _apply_rules(rules):
+    """Rewrite REF_GENES by every rule in turn; returns (order, joined_rule_ids)."""
+    order = list(REF_GENES)
+    applied = []
+    for rule_id, canonical_block, variant_block in ((r[0], r[1], r[2]) for r in rules):
+        canonical_block = list(canonical_block)
+        variant_block = list(variant_block)
+        if sorted(canonical_block) != sorted(variant_block):
+            raise ValueError(
+                f"ORDER_VARIANTS rule '{rule_id}': variant block {variant_block} is "
+                f"not a permutation of canonical block {canonical_block}")
+        start = _contiguous_index(order, canonical_block)
+        if start is None:
+            raise ValueError(
+                f"ORDER_VARIANTS rule '{rule_id}': canonical block {canonical_block} "
+                "is not a contiguous run of the reference order")
+        order[start:start + len(canonical_block)] = variant_block
+        applied.append(rule_id)
+    return order, ";".join(applied)
+
+
+def _contiguous_index(order, block):
+    """Index at which `block` occurs as a contiguous run of `order`, else None."""
+    n = len(block)
+    for i in range(len(order) - n + 1):
+        if order[i:i + n] == block:
+            return i
+    return None
+
+
+def _validate_order_variants():
+    """Fail at import on a malformed table rather than mis-gating a run."""
+    for (rank, key), rules in ORDER_VARIANTS.items():
+        if rank not in RANK_PRECEDENCE:
+            raise ValueError(
+                f"ORDER_VARIANTS key ('{rank}', '{key}'): rank is not one of "
+                f"{RANK_PRECEDENCE}")
+        if _normalise_rank_value(key) == "":
+            raise ValueError(
+                f"ORDER_VARIANTS key ('{rank}', '{key}'): an unresolved-taxon "
+                "sentinel can never be a valid rule key")
+        for rule in rules:
+            if len(rule) != 4:
+                raise ValueError(
+                    f"ORDER_VARIANTS ('{rank}', '{key}'): expected "
+                    "(rule_id, canonical_block, variant_block, accession)")
+        ref_order_for({rank: key})
+
+
+_validate_order_variants()

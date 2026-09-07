@@ -34,13 +34,34 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
     // meta with no resolved code.
     def class_arg = meta.class ? "--class '${meta.class}'" : ''
     def gcode_arg = meta.genetic_code ? "--genetic-code ${meta.genetic_code}" : ''
-    def effective_args = ["annotation_stats.py ${args} ${class_arg} ${gcode_arg} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.mt_assembly_prefix}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
+    // Taxonomy for the curated gene-order variant lookup ONLY. It never affects
+    // completeness, only which non-canonical orders are accepted for this clade.
+    // Same shape as modules/local/reference_divergence/main.nf, which is the
+    // established pattern for reading taxonomy off meta.
+    def family      = (meta.family ?: '').toString().trim()
+    def taxon_order = (meta.order ?: '').toString().trim()
+    // There is no separate genus field on meta; the first whitespace token of the
+    // nominal species id is how bin/reference_divergence_check.py derives it too.
+    def genus       = (meta.nominal_species_id ?: '').toString().trim().split(/\s+/)[0] ?: ''
+    def family_arg  = family ? "--family '${family}'" : ''
+    def order_arg   = taxon_order ? "--order '${taxon_order}'" : ''
+    def genus_arg   = genus ? "--genus '${genus}'" : ''
+    def effective_args = ["annotation_stats.py ${args} ${class_arg} ${gcode_arg} ${family_arg} ${order_arg} ${genus_arg} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.mt_assembly_prefix}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
     """
-    # Compile the statistics
+    # Compile the statistics.
+    #
+    # imports mito_gene_order.py and orf_utils.py -- named here on purpose. Nextflow
+    # hashes only those bin/ scripts whose filenames appear as tokens in a task's
+    # command script, and neither of these is ever invoked directly: they reach the
+    # task as a Python import. Without this line, editing the shared gene-order table
+    # alone and resuming would re-run NOTHING and silently return stale results.
     annotation_stats.py \\
         $args \\
         ${class_arg} \\
         ${gcode_arg} \\
+        ${family_arg} \\
+        ${order_arg} \\
+        ${genus_arg} \\
         *.gff \\
         proteins
 

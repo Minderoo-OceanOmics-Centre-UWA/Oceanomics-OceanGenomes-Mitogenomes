@@ -35,6 +35,7 @@ MIGRATIONS = [
     "020_ena_validation_attempts_og_num.sql",
     "021_mitogenome_data_trna_advisory.sql",
     "022_lca_widen_taxon_id_and_confidence.sql",
+    "023_mitogenome_data_order_variant.sql",
 ]
 
 

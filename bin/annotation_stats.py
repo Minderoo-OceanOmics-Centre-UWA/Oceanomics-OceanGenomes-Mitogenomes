@@ -23,6 +23,7 @@ from pathlib import Path
 from mito_gene_order import (
     REF_GENES,
     TRNA_GENES as TRNA_NAMES,
+    accepted_orders_for,
     gene_entries_by_coord,
     parse_gff_attributes,
 )
@@ -61,6 +62,22 @@ CNIDARIAN_CORE = PROT_GENES + ["RNR1", "RNR2"]
 # --trna-tolerance and the matching TRNA_TOLERANCE in mitogenome_assembly_summary.py.
 VERT_CORE = set(PROT_GENES) | {"RNR1", "RNR2"}            # 13 PCG + 2 rRNA
 DEFAULT_TRNA_TOLERANCE = 2
+
+# Interior intergenic gap, in bp, at or above which annotation_gaps reports a span.
+#
+# 50 and not 100. A single missed mitochondrial tRNA leaves a 55-75 bp hole, so a
+# 100 bp threshold sits ABOVE the exact signal this diagnostic exists to catch --
+# it is what distinguishes a real transposition (a tRNA moved) from a missed call
+# (a tRNA-shaped hole left at both the origin and the destination of the apparent
+# move). The cost of reaching that low is the OriL, which runs 30-51 bp and so
+# straddles the threshold: a passing assembly reporting one ~51 bp TN->TC span is
+# expected, not a regression, and is exactly what "purely advisory" is for. Do not
+# raise the default to silence it.
+DEFAULT_GAP_THRESHOLD = 50
+
+# Adjacent pairs whose intergenic span is legitimately large and must never be
+# reported. TP->TF is the vertebrate control region, routinely ~1 kb.
+GAP_EXEMPT_PAIRS = {("TP", "TF")}
 
 
 def has_reduced_trna_expectation(class_name):
@@ -104,8 +121,57 @@ def get_annotation_name(gff_path):
     """Extracts annotation name from the GFF file basename (no extension)."""
     return Path(gff_path).stem
 
+def annotation_gaps(gene_entries, threshold=DEFAULT_GAP_THRESHOLD):
+    """Interior intergenic spans at or above `threshold`, as a formatted list.
+
+    Each is rendered 'ND4:11768-TS1:11982(213)'. The coordinate wrap (last gene
+    back to first) is skipped, because it is not an interior gap; so is any
+    consecutive pair in GAP_EXEMPT_PAIRS.
+
+    PURELY ADVISORY. This must never influence `passed`. Its job is to make a
+    held assembly explain itself -- a tRNA-sized hole sitting immediately beside
+    an apparently transposed tRNA points at the tRNA call, not at the gene order,
+    and that distinction is otherwise only visible by reading the GFF by hand.
+
+    Runs for EVERY completeness profile, not only the vertebrate one. A
+    core-profile assembly is judged on gene presence alone, so without this a
+    coral with all 15 core genes and a kilobase of unannotated sequence between
+    two of them passes with nothing recorded at all.
+    """
+    gaps = []
+    for (left_name, _ls, left_end, _lstr), (right_name, right_start, _re, _rstr) in zip(
+            gene_entries, gene_entries[1:]):
+        if (left_name, right_name) in GAP_EXEMPT_PAIRS:
+            continue
+        size = right_start - left_end - 1
+        if size >= threshold:
+            gaps.append(f"{left_name}:{left_end}-{right_name}:{right_start}({size})")
+    return gaps
+
+
+def order_deviation(found_by_coord, ref_subset):
+    """How far out of order an annotation is: genes outside the longest common
+    subsequence of the observed order against the reference order.
+
+    order_correct=no collapses "one tRNA out of place" and "half the genome is
+    inverted" into the same value, which makes a held pile impossible to triage.
+    This splits it: a low non-zero deviation says "look at this one, it is nearly
+    right", a large one says "this assembly is broken". A GROUP of samples sharing
+    a low non-zero deviation is also what a missing ORDER_VARIANTS row looks like,
+    so this is the cheapest signal for spotting the next clade variant.
+
+    PURELY ADVISORY, like annotation_gaps. difflib is stdlib, so this adds no
+    dependency to the container.
+    """
+    import difflib
+    matcher = difflib.SequenceMatcher(a=ref_subset, b=found_by_coord, autojunk=False)
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    return len(found_by_coord) - matched
+
+
 def process_gff(gff_path, annotation_name, class_name="",
-                trna_tolerance=DEFAULT_TRNA_TOLERANCE, genetic_code=None):
+                trna_tolerance=DEFAULT_TRNA_TOLERANCE, genetic_code=None,
+                taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD):
     parts = annotation_name.split(".")
     if len(parts) != 5:
         print(f"⚠️ Warning: Unexpected annotation_name format: {annotation_name}")
@@ -156,6 +222,12 @@ def process_gff(gff_path, annotation_name, class_name="",
     found_by_coord = [entry[0] for entry in gene_entries]
 
     trna_advisory = []
+    # "no" is the established nothing-to-report value in this file (missing_genes,
+    # trna_advisory, extra_genes all use it), so the new columns follow suit rather
+    # than overloading NULL or an empty string.
+    order_variant = "no"
+    deviation = "no"
+    gaps = annotation_gaps(gene_entries, gap_threshold)
     profile = completeness_profile(genetic_code, class_name)
     if profile == "core":
         # Judge completeness on the conserved protein-coding + rRNA core only;
@@ -167,12 +239,41 @@ def process_gff(gff_path, annotation_name, class_name="",
         order_correct = "NA"
         passed = len(missing) == 0
     else:
-        missing = [g for g in REF_GENES if g not in found_by_coord]
+        # Every order this taxon may legitimately show, canonical FIRST. A curated
+        # variant rule ADDS an accepted order rather than replacing the canonical
+        # one, so a canonical member of a rule-carrying taxon keeps passing and
+        # does not acquire an order_variant value merely because its family has a
+        # rule. Checking canonical first is what makes that hold.
+        candidates = accepted_orders_for(taxon)
+        order_ref, matched_rule = candidates[0]
+        order_ok = False
+        for candidate_order, rule_id in candidates:
+            candidate_subset = [g for g in candidate_order if g in found_by_coord]
+            if found_by_coord == candidate_subset:
+                order_ref, matched_rule, order_ok = candidate_order, rule_id, True
+                break
+
+        # missing is computed against the order that matched, so the reported
+        # sequence of missing genes stays consistent with the order being judged.
+        # missing and extra are set-membership tests, so a variant can only change
+        # the ORDER in which missing genes are listed, never which are missing.
+        missing = [g for g in order_ref if g not in found_by_coord]
         extra = [g for g in found_by_coord if g not in REF_GENES]
-        ref_subset = [g for g in REF_GENES if g in found_by_coord]
-        order_ok = (found_by_coord == ref_subset)
-        order_correct = "yes" if order_ok else "no"
+        ref_subset = [g for g in order_ref if g in found_by_coord]
+        if order_ok and matched_rule:
+            order_correct = "variant"
+            order_variant = matched_rule
+        else:
+            order_correct = "yes" if order_ok else "no"
         passed = len(missing) == 0 and order_ok
+        if not order_ok:
+            # Deviation against the CLOSEST accepted order, so a taxon with a rule
+            # is scored against whichever ordering it is nearer to rather than
+            # being penalised for the rule existing.
+            deviation = str(min(
+                order_deviation(found_by_coord,
+                                [g for g in candidate_order if g in found_by_coord])
+                for candidate_order, _rule in candidates))
 
         # Tolerate a small tRNA-only shortfall on an otherwise complete, correctly
         # ordered mitogenome. All 13 PCGs + both rRNAs must be present, gene order
@@ -196,6 +297,12 @@ def process_gff(gff_path, annotation_name, class_name="",
         "trna_advisory": ";".join(trna_advisory) if trna_advisory else "no",
         "extra_genes": ";".join(extra) if extra else "no",
         "order_correct": order_correct,
+        # Which curated rule accepted a non-canonical order, so a relaxed gate stays
+        # auditable after the fact. Same precedent as trna_advisory.
+        "order_variant": order_variant,
+        # Advisory only: neither of these may affect `passed`.
+        "order_deviation": deviation,
+        "annotation_gaps": ";".join(gaps) if gaps else "no",
         "passed": "yes" if passed else "no",
         # Which profile this verdict was reached under. mitogenome_assembly_summary.py
         # reads it so the run-level report cannot judge a core-profile assembly
@@ -231,13 +338,13 @@ def process_protein_lengths(prot_dir, annotation_name):
     return prot_lengths
 
 def main(gff_path, prot_dir, class_name="", trna_tolerance=DEFAULT_TRNA_TOLERANCE,
-         genetic_code=None):
+         genetic_code=None, taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD):
     if not os.path.isfile(gff_path):
         sys.exit(f"❌ GFF file not found: {gff_path}")
 
     annotation_name = get_annotation_name(gff_path)
     gff_summary = process_gff(gff_path, annotation_name, class_name, trna_tolerance,
-                              genetic_code)
+                              genetic_code, taxon=taxon, gap_threshold=gap_threshold)
     prot_lengths = process_protein_lengths(prot_dir, annotation_name)
 
     combined = {**gff_summary, **prot_lengths}
@@ -275,7 +382,32 @@ if __name__ == "__main__":
                          "gene order is correct. Tolerated tRNAs are recorded in the "
                          "trna_advisory column; missing_genes stays truthful. "
                          "0 requires a complete 37-gene annotation. Default %(default)s.")
+    ap.add_argument("--family", default="",
+                    help="taxonomic family (meta.family). Used ONLY to look up a "
+                         "curated gene-order variant; it never affects completeness.")
+    ap.add_argument("--order", dest="taxon_order", default="",
+                    help="taxonomic order (meta.order). See --family.")
+    ap.add_argument("--genus", default="",
+                    help="genus, derived as the first whitespace token of "
+                         "meta.nominal_species_id -- there is no separate genus field, "
+                         "and this is how reference_divergence_check.py derives it too. "
+                         "See --family.")
+    ap.add_argument("--gap-threshold", dest="gap_threshold", type=int,
+                    default=DEFAULT_GAP_THRESHOLD,
+                    help="interior intergenic span, in bp, at or above which a gap is "
+                         "reported in annotation_gaps. Purely advisory: it never "
+                         "affects passed. Default %(default)s, deliberately below the "
+                         "55-75 bp hole a single missed mt-tRNA leaves.")
     args = ap.parse_args()
 
+    # Rank -> value, in the shape ref_order_for expects. Unresolved values are
+    # normalised away inside the resolver, so passing '' here is safe.
+    taxon = {
+        "genus": args.genus,
+        "family": args.family,
+        "order": args.taxon_order,
+        "class": args.class_name,
+    }
+
     main(args.gff, Path(args.proteins), args.class_name, args.trna_tolerance,
-         args.genetic_code)
+         args.genetic_code, taxon=taxon, gap_threshold=args.gap_threshold)

@@ -412,6 +412,12 @@
                     "maximum": 5,
                     "description": "Maximum number of tRNAs a vertebrate mitogenome annotation may be missing and still pass the QC/ENA gate, provided all 13 protein-coding genes and both rRNAs are present and gene order is correct. Tolerated tRNAs are recorded in the trna_advisory column; missing_genes stays truthful. Set to 0 to require a complete 37-gene annotation."
                 },
+                "annotation_gap_threshold": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "description": "Interior intergenic span, in bp, at or above which annotation_stats.py records it in the annotation_gaps column. Purely advisory: it never affects the pass/hold decision. The default is deliberately below the 55-75 bp hole a single missed mitochondrial tRNA leaves, which is the signal that separates a real gene-order rearrangement from a missed tRNA call."
+                },
                 "mitogenome_oatk_length_ratio_threshold": {
                     "type": "number",
                     "default": 1.15,
