@@ -22,13 +22,17 @@ process EXTRACT_GENES_GB {
 
     script:
     def asm = (meta.mt_assembly_prefix ?: meta.sample_id ?: fasta.baseName)
+    // Per-sample mitochondrial translation table, same idiom as GEN_FILES_TABLE2ASN
+    // and FORMAT_FILES. It becomes the [mgcode=] tag on every extracted CDS header.
+    def gcode = task.ext.code ?: meta.genetic_code
 
     """
     extract_cds_from_tbl.py \\
         --fasta ${fasta} \\
         --tbl ${tbl} \\
         --outdir . \\
-        --assembly ${asm} 
+        --assembly ${asm} \\
+        --genetic-code ${gcode}
     
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

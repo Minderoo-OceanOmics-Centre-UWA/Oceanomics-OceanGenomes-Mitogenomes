@@ -1,0 +1,4 @@
+##gff-version 3
+##organism Acropora millepora
+OG1	Emma	gene	1	12	.	+	.	ID=gene-CO1;Name=CO1;Product=cytochrome c oxidase subunit I
+OG1	Emma	CDS	1	12	.	+	.	ID=cds-CO1;Parent=gene-CO1;Name=CO1

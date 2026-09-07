@@ -712,6 +712,9 @@ class AnnotationJoinTests(unittest.TestCase):
                 "num_cds": "11",
                 "missing_genes": "TS2;TD;CO2;TK;ATP8",
                 "frameshift_flag": "",
+                # Absent from this fixture's header: a stats CSV written before the
+                # column existed reads as the vertebrate profile.
+                "completeness_profile": "",
             },
         )
 
@@ -835,6 +838,53 @@ class PrefixBoundaryTests(unittest.TestCase):
             mas.path_carries_prefix(Path(f"/w/{child}.annotation_stats.csv"), child))
         self.assertFalse(
             mas.path_carries_prefix(Path(f"/w/{self.PARENT}.contigs_stats.tsv"), child))
+
+
+class CoreProfileGeneCountTests(unittest.TestCase):
+    """--expected-gene-count is a vertebrate figure; it must not judge a core row.
+
+    The 37-gene total assumes the vertebrate complement. Cnidarians carry ~15
+    genes because most of their tRNAs are nuclear-encoded, so applying 37 to them
+    reported missing_genes on finished mitogenomes and contradicted
+    annotation_stats.py, which had already passed the same assembly on the
+    PCG+rRNA core. The profile the annotation step recorded decides it here.
+    The 13-PCG check is true for these lineages too, so it still applies.
+    """
+
+    def apply(self, row):
+        mas.apply_qc(row, THRESHOLDS)
+        return row.get("manual_review_reason", ""), row.get(mas.BLOCKING_KEY, "")
+
+    def test_core_row_short_on_trnas_is_not_flagged(self):
+        # 15 genes: 13 PCGs + 2 rRNAs, the whole cnidarian complement.
+        reason, blocking = self.apply(complete_row(
+            num_genes="15", num_cds="13", completeness_profile="core"))
+        self.assertNotIn("missing_genes", reason)
+        self.assertEqual(blocking, "")
+
+    def test_same_row_on_the_vertebrate_profile_is_flagged(self):
+        reason, _blocking = self.apply(complete_row(
+            num_genes="15", num_cds="13", completeness_profile="vertebrate"))
+        self.assertIn("missing_genes", reason)
+
+    def test_core_row_missing_a_pcg_still_blocks(self):
+        # The core profile relaxes the tRNA total, never the protein-coding core.
+        reason, blocking = self.apply(complete_row(
+            num_genes="14", num_cds="12", completeness_profile="core"))
+        self.assertIn("missing_protein_coding_genes", reason)
+        self.assertIn("missing_protein_coding_genes", blocking)
+
+    def test_absent_column_keeps_the_vertebrate_expectation(self):
+        # Rows written before the column existed must behave exactly as before.
+        reason, _blocking = self.apply(complete_row(num_genes="15", num_cds="13"))
+        self.assertIn("missing_genes", reason)
+
+    def test_expected_gene_count_for_reads_the_column(self):
+        self.assertIsNone(mas.expected_gene_count_for(
+            {"completeness_profile": "core"}, THRESHOLDS))
+        self.assertEqual(mas.expected_gene_count_for(
+            {"completeness_profile": "vertebrate"}, THRESHOLDS), 37)
+        self.assertEqual(mas.expected_gene_count_for({}, THRESHOLDS), 37)
 
 
 if __name__ == "__main__":

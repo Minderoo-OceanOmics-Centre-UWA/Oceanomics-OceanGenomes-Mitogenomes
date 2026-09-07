@@ -44,9 +44,20 @@ def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
         return mapped
     }
     if (isInvert) {
+        // Deliberately a hard stop, not a fallback. create_samplesheet.py marks far
+        // more classes invertebrates=true than MitoGeneticCode maps, so this fires
+        // for molluscs, annelids, arthropods, sponges and tunicates. Guessing a code
+        // for them would also route them down an invertebrate annotation path that is
+        // tuned for corals (cox1 origin rotation, the coral reference DB, cnidarian
+        // QC thresholds) and has not been validated for any other lineage -- a
+        // silently wrong annotation instead of a stop the operator can act on.
         error "Sample ${sampleId}: class '${taxClass ?: 'unknown'}' has no known " +
-              "mitochondrial genetic code -- add it to lib/MitoGeneticCode.groovy " +
-              "or set the genetic_code column"
+              "mitochondrial genetic code. Set the genetic_code column on this sample " +
+              "(commonly 5 for Mollusca/Annelida/Arthropoda/Porifera, 9 for " +
+              "Echinodermata/Platyhelminthes, 13 for Tunicata), or add the class to " +
+              "lib/MitoGeneticCode.groovy if the code is confirmed for the whole class. " +
+              "Note the invertebrate annotation path is tuned for corals (cox1 rotation, " +
+              "coral reference DB), so review the annotation for a non-cnidarian sample."
     }
     return defaultCode
 }

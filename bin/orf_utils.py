@@ -53,20 +53,34 @@ START_CODONS_BY_CODE = {
     33: ("TTG", "CTG", "ATG", "GTG"),
 }
 
-# The vertebrate code (2) is the conservative fallback for an unknown table:
-# it is the strictest stop set and a permissive-enough start set.
-_DEFAULT_STARTS = ("ATG", "GTG")
-_DEFAULT_STOPS = ("TAA", "TAG")
-
 SUPPORTED_CODES = frozenset(START_CODONS_BY_CODE) & frozenset(STOP_CODONS_BY_CODE)
 
 
+# There is deliberately NO fallback for an unknown table. Every caller now resolves
+# the code from meta.genetic_code and validates it, so an unrecognised value means a
+# wiring bug, not an exotic organism -- and the previous silent default was wrong in
+# both directions: it claimed the vertebrate code while actually returning the
+# code-4/5/9 stop set (code 2 also stops on AGA/AGG). Failing loudly is the only way
+# a wrong table cannot reach a submitted annotation.
+def _require(code):
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        raise ValueError(f"genetic code {code!r} is not an integer")
+    if code not in SUPPORTED_CODES:
+        raise ValueError(
+            f"genetic code {code} is not a supported mitochondrial translation "
+            f"table (supported: {sorted(SUPPORTED_CODES)})"
+        )
+    return code
+
+
 def start_codons(code):
-    return START_CODONS_BY_CODE.get(int(code), _DEFAULT_STARTS)
+    return START_CODONS_BY_CODE[_require(code)]
 
 
 def stop_codons(code):
-    return STOP_CODONS_BY_CODE.get(int(code), _DEFAULT_STOPS)
+    return STOP_CODONS_BY_CODE[_require(code)]
 
 
 # --------------------------------------------------------------------------- #

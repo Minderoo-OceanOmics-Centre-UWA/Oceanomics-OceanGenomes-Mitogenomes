@@ -267,19 +267,24 @@ workflow MITOGENOME_ANNOTATION {
     // and the sample is held at the QC gate as now (unless the residual shortfall
     // is within annotation_trna_tolerance).
     //
-    // The rescue is vertebrate-code only (tRNAscan-SE's -M vert model, and the
-    // canonical REF gene order the gate checks). That is expressed as an explicit
-    // branch here rather than `ext.when` on the processes: a process skipped by
-    // ext.when emits nothing, which -- exactly like an ignored failure -- would
-    // silently drop every non-code-2 sample at the join below. Branching keeps
-    // them visible and passes them straight through.
+    // The rescue is vertebrate-only, and it needs BOTH conditions it is keyed on:
+    // tRNAscan-SE's -M vert covariance model, and the canonical vertebrate REF gene
+    // order the gate checks for ("present and in order"). Keying on the code alone
+    // said only half of that, so an explicit genetic_code column on a vertebrate --
+    // or any future path that brings an invert bundle here -- could have changed
+    // which annotator's output got rescued without the branch reading as wrong.
+    //
+    // Expressed as an explicit branch rather than `ext.when` on the processes: a
+    // process skipped by ext.when emits nothing, which -- exactly like an ignored
+    // failure -- would silently drop every ineligible sample at the join below.
+    // Branching keeps them visible and passes them straight through.
     //
     ch_trna_eligible = ch_emma_results.branch { meta, _bundle ->
-        code2: meta.genetic_code == 2
+        vert_code2: !meta.invertebrates && meta.genetic_code == 2
         other: true
     }
 
-    TRNA_RESCUE_GATE ( ch_trna_eligible.code2 )
+    TRNA_RESCUE_GATE ( ch_trna_eligible.vert_code2 )
 
     ch_trna_gate = TRNA_RESCUE_GATE.out.decision
         .map { meta, dfile ->
@@ -287,7 +292,7 @@ workflow MITOGENOME_ANNOTATION {
             [ meta, parts[0].trim(), parts.size() > 1 ? parts[1].trim() : '-' ]  // [meta, FIX|PASS, targets]
         }
 
-    ch_trna_branched = ch_trna_eligible.code2.join(ch_trna_gate, remainder: true)
+    ch_trna_branched = ch_trna_eligible.vert_code2.join(ch_trna_gate, remainder: true)
         .filter { row -> row[1] != null }
         .map { row ->
             [ row[0], row[1],
@@ -311,9 +316,9 @@ workflow MITOGENOME_ANNOTATION {
             .map { meta, bundle, targets, scan -> [meta, bundle, scan, targets] }
     )
 
-    // Vertebrate annotation bundle used from here on: non-code-2 and PASS bundles
-    // unchanged, FIX patched, and any FIX whose scan or rescue failed falls back
-    // to the bundle it went in with.
+    // Vertebrate annotation bundle used from here on: ineligible (non-vertebrate
+    // or non-code-2) and PASS bundles unchanged, FIX patched, and any FIX whose
+    // scan or rescue failed falls back to the bundle it went in with.
     ch_emma_results_trna = ch_trna_eligible.other
         .mix(ch_trna_pass)
         .mix(

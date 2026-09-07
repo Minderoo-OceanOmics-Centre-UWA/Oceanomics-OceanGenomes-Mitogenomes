@@ -485,6 +485,10 @@ def parse_annotation_stats(files: Iterable[Path], prefix: str) -> dict[str, str]
             "num_cds": format_number(num_cds),
             "missing_genes": first_value(row, ["missing_genes", "num_missing"]),
             "frameshift_flag": parse_bool(first_value(row, ["frameshift", "frameshift_flag", "frameshifts"])),
+            # Which completeness profile annotation_stats.py judged this assembly
+            # under. Absent on rows written before that column existed, which
+            # read_expected_gene_count() treats as the vertebrate profile.
+            "completeness_profile": first_value(row, ["completeness_profile"]),
         }
     return {}
 
@@ -978,7 +982,8 @@ def apply_qc(row: dict[str, str], thresholds: Thresholds) -> None:
         and length > thresholds.max_length
     ):
         reasons.append("length_outside_expected_range")
-    if thresholds.expected_gene_count is not None and num_genes is not None and num_genes < thresholds.expected_gene_count:
+    expected_genes = expected_gene_count_for(row, thresholds)
+    if expected_genes is not None and num_genes is not None and num_genes < expected_genes:
         reasons.append("missing_genes")
     # Protein-coding-gene check. More robust than the total gene count: a collapse
     # can drop several PCGs while tRNAs keep num_genes near the expected total, so
@@ -1059,6 +1064,23 @@ BLOCKING_KEY = "_blocking_reason"
 SUPERSEDED_KEY = "_superseded"
 
 
+def expected_gene_count_for(row: dict[str, str], thresholds: Thresholds) -> int | None:
+    """The total-gene expectation that applies to THIS assembly, or None.
+
+    --expected-gene-count is a run-level knob, but the 37-gene total is a
+    vertebrate figure: cnidarians carry ~15 genes because most of their tRNAs are
+    nuclear-encoded, and no invertebrate follows the vertebrate complement. Applying
+    37 to them reported missing_genes on finished mitogenomes and contradicted
+    annotation_stats.py, which had already passed the same assembly on the
+    PCG+rRNA core. Rows judged under the core profile therefore get no total-gene
+    expectation; the protein-coding-gene check (13 PCGs, true for these lineages
+    too) still applies and still blocks.
+    """
+    if (row.get("completeness_profile") or "").strip().lower() == "core":
+        return None
+    return thresholds.expected_gene_count
+
+
 def is_complete_core(row: dict[str, str], thresholds: Thresholds) -> bool:
     """A finished mitogenome: circular, all protein-coding genes present, length
     in the expected range, and at most TRNA_TOLERANCE tRNAs short. Soft flags on
@@ -1075,8 +1097,9 @@ def is_complete_core(row: dict[str, str], thresholds: Thresholds) -> bool:
         return False
     if thresholds.max_length is not None and (length is None or length > thresholds.max_length):
         return False
-    if thresholds.expected_gene_count is not None and num_genes is not None:
-        if num_genes < thresholds.expected_gene_count - thresholds.trna_tolerance:
+    expected_genes = expected_gene_count_for(row, thresholds)
+    if expected_genes is not None and num_genes is not None:
+        if num_genes < expected_genes - thresholds.trna_tolerance:
             return False
     return True
 
@@ -1092,11 +1115,12 @@ def blocking_reasons(row: dict[str, str], reasons: list[str], thresholds: Thresh
         return list(reasons)
     num_cds = parse_number(row.get("num_cds"))
     num_genes = parse_number(row.get("num_genes"))
+    expected_genes = expected_gene_count_for(row, thresholds)
     trna_only_shortfall = (
         thresholds.expected_pcg_count is not None and num_cds is not None
         and num_cds >= thresholds.expected_pcg_count
-        and thresholds.expected_gene_count is not None and num_genes is not None
-        and 0 < (thresholds.expected_gene_count - num_genes) <= thresholds.trna_tolerance
+        and expected_genes is not None and num_genes is not None
+        and 0 < (expected_genes - num_genes) <= thresholds.trna_tolerance
     )
     advisory = set(ADVISORY_WHEN_COMPLETE)
     if trna_only_shortfall:

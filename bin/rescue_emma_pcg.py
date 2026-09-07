@@ -296,7 +296,10 @@ def main():
     ap.add_argument("--annotation-dir", required=True, type=Path)
     ap.add_argument("--targets", required=True, help="comma list from {ND4L,ATP8}")
     ap.add_argument("--ref-faa", required=True, type=Path)
-    ap.add_argument("--code", type=int, default=2)
+    ap.add_argument("--code", type=int, default=2,
+                    help="mito genetic code. Only the vertebrate (code 2) EMMA path "
+                         "reaches this rescue -- the annotation subworkflow branches "
+                         "on it -- so 2 is the path's only value, not a guess.")
     ap.add_argument("--status", required=True, type=Path)
     ap.add_argument("--min-pid", type=float, default=55.0)
     ap.add_argument("--min-cov", type=float, default=0.75)

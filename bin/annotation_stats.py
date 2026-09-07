@@ -38,6 +38,10 @@ CNIDARIA_CLASSES = {
     "anthozoa", "hydrozoa", "scyphozoa", "cubozoa",
     "staurozoa", "myxozoa", "polypodiozoa", "cnidaria",
 }
+# The conserved protein-coding + rRNA core. Named for the lineage that motivated it,
+# but it is the completeness set for EVERY non-vertebrate translation table now (see
+# completeness_profile): 13 PCGs + 2 rRNAs is the shared expectation, and gene order
+# is not evaluated because no non-vertebrate reference order is defined here.
 CNIDARIAN_CORE = PROT_GENES + ["RNR1", "RNR2"]
 
 # The 22 vertebrate mt tRNAs (the T* entries of REF_GENES) and the conserved
@@ -52,6 +56,31 @@ DEFAULT_TRNA_TOLERANCE = 2
 
 def is_cnidarian(class_name):
     return (class_name or "").strip().lower() in CNIDARIA_CLASSES
+
+
+# The vertebrate profile is the only one with a defined reference gene order and a
+# 22-tRNA expectation, and it applies to exactly one translation table: code 2.
+VERTEBRATE_CODE = 2
+
+
+def completeness_profile(genetic_code=None, class_name=""):
+    """Return 'vertebrate' or 'core' -- which completeness profile to judge by.
+
+    Keyed on the resolved mitochondrial genetic code, because that is what the
+    rest of the pipeline already resolves per sample (meta.genetic_code) and it is
+    the property that actually determines whether the vertebrate 37-gene profile
+    applies. The class string is only a fallback for callers that have no code:
+    keying on the class list alone meant a code-9 echinoderm or code-5 mollusc was
+    judged against vertebrate gene order and the 22-tRNA count, and failed for
+    being what it is.
+
+    Every non-vertebrate table gets the conserved PCG+rRNA core with gene order
+    reported NA, since no non-vertebrate reference order is defined here.
+    """
+    if genetic_code is not None:
+        return "vertebrate" if int(genetic_code) == VERTEBRATE_CODE else "core"
+    return "core" if is_cnidarian(class_name) else "vertebrate"
+
 
 def parse_gff_attributes(attr_str):
     return dict(
@@ -73,7 +102,8 @@ def get_annotation_name(gff_path):
     """Extracts annotation name from the GFF file basename (no extension)."""
     return Path(gff_path).stem
 
-def process_gff(gff_path, annotation_name, class_name="", trna_tolerance=DEFAULT_TRNA_TOLERANCE):
+def process_gff(gff_path, annotation_name, class_name="",
+                trna_tolerance=DEFAULT_TRNA_TOLERANCE, genetic_code=None):
     parts = annotation_name.split(".")
     if len(parts) != 5:
         print(f"⚠️ Warning: Unexpected annotation_name format: {annotation_name}")
@@ -126,10 +156,12 @@ def process_gff(gff_path, annotation_name, class_name="", trna_tolerance=DEFAULT
     found_by_coord = [g[0] for g in gene_entries]
 
     trna_advisory = []
-    if is_cnidarian(class_name):
-        # Judge completeness on the conserved protein-coding + rRNA core only;
-        # cnidarians legitimately lack most tRNAs, and their gene order is not
-        # the vertebrate order, so order is reported as NA rather than failed.
+    profile = completeness_profile(genetic_code, class_name)
+    if profile == "core":
+        # Judge completeness on the conserved protein-coding + rRNA core only.
+        # Cnidarians legitimately lack most tRNAs, and no non-vertebrate lineage
+        # follows the vertebrate gene order, so order is reported as NA rather
+        # than failed.
         missing = [g for g in CNIDARIAN_CORE if g not in found_by_coord]
         extra = [g for g in found_by_coord if g not in REF_GENES]
         order_correct = "NA"
@@ -165,6 +197,11 @@ def process_gff(gff_path, annotation_name, class_name="", trna_tolerance=DEFAULT
         "extra_genes": ";".join(extra) if extra else "no",
         "order_correct": order_correct,
         "passed": "yes" if passed else "no",
+        # Which profile this verdict was reached under. mitogenome_assembly_summary.py
+        # reads it so the run-level report cannot judge a core-profile assembly
+        # against the vertebrate 37-gene expectation this step deliberately did not
+        # apply -- the two would otherwise disagree on the same annotation.
+        "completeness_profile": profile,
         "total_length": total_length if total_length is not None else "NA",
         "num_cds": len(cds_genes),
         "num_trna": len(trna_genes),
@@ -193,12 +230,14 @@ def process_protein_lengths(prot_dir, annotation_name):
         print(f"✅ All translated genes present in {annotation_name}")
     return prot_lengths
 
-def main(gff_path, prot_dir, class_name="", trna_tolerance=DEFAULT_TRNA_TOLERANCE):
+def main(gff_path, prot_dir, class_name="", trna_tolerance=DEFAULT_TRNA_TOLERANCE,
+         genetic_code=None):
     if not os.path.isfile(gff_path):
         sys.exit(f"❌ GFF file not found: {gff_path}")
 
     annotation_name = get_annotation_name(gff_path)
-    gff_summary = process_gff(gff_path, annotation_name, class_name, trna_tolerance)
+    gff_summary = process_gff(gff_path, annotation_name, class_name, trna_tolerance,
+                              genetic_code)
     prot_lengths = process_protein_lengths(prot_dir, annotation_name)
 
     combined = {**gff_summary, **prot_lengths}
@@ -219,9 +258,16 @@ if __name__ == "__main__":
     ap.add_argument("gff", help="path to the annotation .gff")
     ap.add_argument("proteins", help="path to the proteins/ directory")
     ap.add_argument("--class", dest="class_name", default="",
-                    help="taxonomic class (e.g. Anthozoa); selects the completeness "
-                         "profile. Cnidarian classes are judged on the PCG+rRNA core "
-                         "only. Defaults to the vertebrate 22-tRNA profile.")
+                    help="taxonomic class (e.g. Anthozoa). Fallback profile selector "
+                         "for callers with no --genetic-code: cnidarian classes are "
+                         "judged on the PCG+rRNA core only, everything else gets the "
+                         "vertebrate 22-tRNA profile. --genetic-code wins when both "
+                         "are given.")
+    ap.add_argument("--genetic-code", dest="genetic_code", type=int, default=None,
+                    help="NCBI mitochondrial translation table (from meta.genetic_code). "
+                         "Selects the completeness profile: code 2 is judged against the "
+                         "vertebrate 37-gene set and gene order, every other table "
+                         "against the conserved PCG+rRNA core with order reported NA.")
     ap.add_argument("--trna-tolerance", dest="trna_tolerance", type=int,
                     default=DEFAULT_TRNA_TOLERANCE,
                     help="max tRNAs a non-cnidarian mitogenome may be missing and "
@@ -231,4 +277,5 @@ if __name__ == "__main__":
                          "0 requires a complete 37-gene annotation. Default %(default)s.")
     args = ap.parse_args()
 
-    main(args.gff, Path(args.proteins), args.class_name, args.trna_tolerance)
+    main(args.gff, Path(args.proteins), args.class_name, args.trna_tolerance,
+         args.genetic_code)

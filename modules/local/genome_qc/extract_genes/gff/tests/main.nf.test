@@ -1,0 +1,67 @@
+nextflow_process {
+
+    name "Test Process EXTRACT_GENES_GFF"
+    script "../main.nf"
+    process "EXTRACT_GENES_GFF"
+
+    tag "modules"
+    tag "modules_local"
+    tag "extract_genes_gff"
+
+    // What this module can silently get wrong is the genetic code it hands the
+    // extractor: the script writes it into the [mgcode=] tag of every gene header
+    // that ends up in the ENA candidate package, and it used to be hardcoded to 2
+    // regardless of the sample. So these tests pin the resolution of
+    // meta.genetic_code onto the command line. The header the script builds from
+    // that value is covered by tests/unit/test_extract_genes_mgcode.py.
+    test("passes a coral's code 4 through to the extractor, not the vertebrate default") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'OG1', sequencing_type:'ilmn', genetic_code:4, invertebrates:true,
+                      mt_assembly_prefix:'OG1.ilmn.240101.getorg1770' ],
+                    file("\${projectDir}/modules/local/genome_qc/extract_genes/gff/tests/data/OG1.ilmn.240101.getorg1770.emma102.fa", checkIfExists: true),
+                    file("\${projectDir}/modules/local/genome_qc/extract_genes/gff/tests/data/OG1.ilmn.240101.getorg1770.emma102.gff", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.tool_params[0][1]).text.contains("--genetic-code 4") },
+                { assert !path(process.out.tool_params[0][1]).text.contains("--genetic-code 2") }
+            )
+        }
+    }
+
+    test("passes a vertebrate's code 2 through unchanged") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'OG2', sequencing_type:'ilmn', genetic_code:2, invertebrates:false,
+                      mt_assembly_prefix:'OG2.ilmn.240101.getorg1770' ],
+                    file("\${projectDir}/modules/local/genome_qc/extract_genes/gff/tests/data/OG1.ilmn.240101.getorg1770.emma102.fa", checkIfExists: true),
+                    file("\${projectDir}/modules/local/genome_qc/extract_genes/gff/tests/data/OG1.ilmn.240101.getorg1770.emma102.gff", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.tool_params[0][1]).text.contains("--genetic-code 2") }
+            )
+        }
+    }
+}

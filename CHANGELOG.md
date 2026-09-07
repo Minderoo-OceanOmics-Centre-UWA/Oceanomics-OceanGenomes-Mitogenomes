@@ -24,6 +24,48 @@ first drafted on 2026-08-18; the second is that original entry, kept intact. Bot
 
 ### Work that landed after 2026-08-18
 
+#### `Fixed`
+
+- Gene and CDS extraction no longer labels every sample with the vertebrate genetic code.
+
+  `bin/extract_genes_gff.py` and `bin/extract_cds_from_tbl.py` wrote a literal `[mgcode=2]`
+  into every FASTA header they emitted, and neither module passed a code at all. They were
+  the last step in the QC chain still ignoring `meta.genetic_code`. A code-4 coral therefore
+  carried `[mgcode=4]` on its genome FASTA and `transl_table 4` in its `.tbl`, but `[mgcode=2]`
+  on all 13 extracted genes -- and on the proteins, since `bin/translate_genes.py` copies the
+  record description verbatim. Because the concatenated `*.genes.fa` is shipped in the ENA
+  candidate package, single packages went out holding a code-4 genome record beside code-2
+  gene records.
+
+  Both scripts now take a required `--genetic-code`, validated against
+  `orf_utils.SUPPORTED_CODES`, and both modules resolve it the way every other QC module does
+  (`task.ext.code ?: meta.genetic_code`). There is deliberately no default: a wrong table
+  reaching a submitted annotation is worse than a stopped task.
+
+  Already-published assemblies keep the wrong tag until re-QCed -- see `docs/usage.md`.
+
+- The run-level assembly summary no longer judges invertebrates against a vertebrate gene count.
+
+  `--expected-gene-count` (37) is a vertebrate figure, applied run-wide. Cnidarians carry ~15
+  genes because most of their tRNAs are nuclear-encoded, so finished coral mitogenomes were
+  reported as `missing_genes` -- contradicting `annotation_stats.py`, which had already passed
+  the same assembly on the protein-coding + rRNA core. `annotation_stats.py` now records the
+  profile it used in a `completeness_profile` column and `mitogenome_assembly_summary.py`
+  honours it. The 13-PCG check is true for these lineages too, so it still applies and still
+  blocks.
+
+- `annotation_stats.py` selects its completeness profile from the resolved genetic code rather
+  than a hardcoded cnidarian class list. Code 2 is judged against the vertebrate 37-gene set
+  and gene order; every other table against the conserved core. Keying on the class list meant
+  a code-9 echinoderm or code-5 mollusc was judged against vertebrate gene order and failed for
+  being what it is. `--class` remains as the fallback for callers with no code.
+
+- `orf_utils.start_codons()` / `stop_codons()` raise on an unrecognised table instead of
+  silently falling back. The old fallback returned `("TAA","TAG")` while its comment claimed
+  the vertebrate code -- but code 2 also stops on `AGA`/`AGG`, so a mistyped table quietly got
+  the wrong stop set. Stale argparse defaults that implied a table were removed from
+  `translate_genes.py` (`--table`) and `mitos_to_emma.py` (`--code`).
+
 #### `Added`
 
 - `bin/audit_lca_db_coverage.py` and `bin/backfill_lca_uploads.py`: find published LCA results

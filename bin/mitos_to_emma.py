@@ -350,7 +350,10 @@ def main():
     ap.add_argument("--genome", required=True, type=Path, help="Assembly FASTA")
     ap.add_argument("--prefix", required=True, help="Output prefix (id.tech.date.assembler.mitos<ver>)")
     ap.add_argument("--outdir", required=True, type=Path, help="EMMA-style output dir")
-    ap.add_argument("--code", type=int, default=5, help="Mito genetic code (default 5, invertebrate)")
+    ap.add_argument("--code", type=int, required=True,
+                    help="Mito genetic code (from meta.genetic_code); no default -- the "
+                         "caller must supply it. It is written as the transl_table "
+                         "qualifier, so a stale default would mislabel the annotation.")
     ap.add_argument("--species", default="", help="Species name for ##organism")
     ap.add_argument("--linear", action="store_true",
                     help="Mark the genome as linear (Is_circular=False) in the GFF "
