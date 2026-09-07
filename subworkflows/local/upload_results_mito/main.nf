@@ -93,12 +93,27 @@ def attachCircularityEvidence(qc_pairs, circularity_evidence) {
         .map { _prefix, meta, blast, stats, evidence -> [ meta, blast, stats, evidence ] }
 }
 
-// Attach each sample's assembly upload receipt to its QC-ready row, keyed on
-// mt_assembly_prefix.
+// Gate a channel on each sample's committed assembly upload receipt, keyed on
+// mt_assembly_prefix. Returns the rows unchanged, but only once their mitogenome_data row
+// exists.
 //
-// qc_rows is [ meta, species_name, proceed_qc, circular ]; upload_rows is the raw
-// PUSH_MTDNA_ASSM_RESULTS.out.upload, i.e. [ meta, receipt ]. Returns qc_rows unchanged for
-// the samples whose assembly row has been committed.
+// upload_rows is the raw PUSH_MTDNA_ASSM_RESULTS.out.upload, i.e. [ meta, receipt ].
+//
+// THREE call sites, and they are not all about depth. mitogenome_data carries three inbound
+// foreign keys (sql/018_mitogenome_data_og_num_first.sql:215-223): fk_mitogenome_lca on lca,
+// fk_mitogenome_lca_raw_results on lca_raw_results, and fk_mitogenome_lca_validation on
+// lca_validation. Each is (og_id, tech, seq_date, code) -- exactly mt_assembly_prefix, which
+// is why the 4-part prefix is not a compromise key here but the constraint itself. None of
+// SPECIES_VALIDATION, PUSH_LCA_RAW_RESULTS or PUSH_LCA_BLAST_RESULTS had a data dependency on
+// the parent push, so Nextflow was free to schedule them first, and did: the child insert
+// then failed on the foreign key while the run reported success. PUSH_LCA_BLAST_RESULTS is
+// covered transitively because it consumes SPECIES_VALIDATION.out.full, so gating
+// grouped_blast_lca gates it too -- no fourth call site.
+//
+// The `annotation` component of the 5-part lca_validation identity is deliberately NOT part
+// of this key: it is not in meta at this stage (species_validation.py derives it inside the
+// task from the BLAST query id), and the FK does not use it. Anything that identifies or
+// repairs an lca_validation ROW still needs all five parts.
 //
 // The receipt is a pure ordering dependency: ENA metadata reads mean_depth from
 // mitogenome_data, so QC must not race ahead of the committed row. The key must be the prefix
@@ -116,15 +131,34 @@ def attachCircularityEvidence(qc_pairs, circularity_evidence) {
 // _collapsed or _concat assembly had no receipt under its own name and would have been dropped
 // here even after the evidence join was fixed. reseed / _rgj happened to survive only because
 // they get a provenance row of their own that collided with the right name by accident.
-def attachAssemblyUploadReceipt(qc_rows, upload_rows) {
-    return qc_rows
-        .map { meta, species_name, proceed_qc, circular ->
-            [ meta.mt_assembly_prefix, meta, species_name, proceed_qc, circular ]
+def gateOnAssemblyReceipt(rows, upload_rows, label) {
+    // rows is any tuple whose FIRST element is meta; the shape is preserved. Keying by
+    // index rather than destructuring is what lets one helper serve tuples of different
+    // arity -- [meta, blast, lca], [meta, lca_raw] and [meta, species, proceed, circular]
+    // all gate the same way, and hand-rolling a third copy is how the REF_GENES drift
+    // documented in bin/mito_gene_order.py happened.
+    def keyed = rows.map { row -> [ (row[0].mt_assembly_prefix) ] + row }
+    def receipts = upload_rows.map { meta, receipt -> [ meta.mt_assembly_prefix, receipt ] }
+
+    // Diagnostic tee ONLY, same shape and same reasoning as attachCircularityEvidence:
+    // a plain join that misses its key emits nothing and says nothing, and introducing a
+    // new join is introducing a new silent-drop risk. This branch is allowed the remainder
+    // join's whole-run wait precisely because nothing depends on it.
+    keyed
+        .map { items -> [ items[0], true ] }
+        .join(receipts.map { prefix, _receipt -> [ prefix, true ] }, by: 0, remainder: true)
+        .filter { items -> items[1] != null && (items.size() < 3 || items[2] == null) }
+        .view { items ->
+            "WARNING: assembly '${items[0]}' reached ${label} with no committed " +
+            "mitogenome_data upload receipt under that name. Its FK parent row was never " +
+            "written, or the receipt is keyed by a different name."
         }
-        .join(upload_rows.map { meta, receipt -> [ meta.mt_assembly_prefix, receipt ] }, by: 0)
-        .map { _prefix, meta, species_name, proceed_qc, circular, _receipt ->
-            [ meta, species_name, proceed_qc, circular ]
-        }
+
+    return keyed
+        .join(receipts, by: 0)
+        // Drop the join key we added at the front and the receipt the join appended at the
+        // back, restoring the caller's original tuple shape.
+        .map { items -> items[1..-2] }
 }
 
 def groupResultsByRegionCount(results, region_counts) {
@@ -203,12 +237,23 @@ workflow UPLOAD_RESULTS {
         .join(grouped_lca, by: 0)
         .mix(ch_zero_region_blast_lca)
 
+    // Gate on the committed mitogenome_data row before species validation writes
+    // lca_validation (and, transitively, before PUSH_LCA_BLAST_RESULTS writes lca):
+    // both carry a foreign key to it. Note the zero-region stand-ins are mixed in ABOVE
+    // this line on purpose -- they arrive from region_counts rather than from the grouped
+    // channels, and they still get an lca_validation row, so they need gating too.
+    grouped_blast_lca_gated = gateOnAssemblyReceipt(
+        grouped_blast_lca,
+        PUSH_MTDNA_ASSM_RESULTS.out.upload,
+        'species validation'
+    )
+
     //
     // MODULE: Checking the LCA results against the nominal species ID in the SQL database
     //
 
     SPECIES_VALIDATION (
-        grouped_blast_lca, // tuple val(meta), path(blast_filtered), path(lca_filtered)
+        grouped_blast_lca_gated, // tuple val(meta), path(blast_filtered), path(lca_filtered)
         sql_config // params.sql_config
     )
 
@@ -239,8 +284,17 @@ workflow UPLOAD_RESULTS {
     //         hits to insert, so there is no row to push.
     grouped_lca_raw = groupResultsByRegionCount(lca_raw_results, region_counts)
 
+    // lca_raw_results carries fk_mitogenome_lca_raw_results, so the same receipt gate
+    // applies. This is the LARGER of the two failure populations, not the smaller: gating
+    // only SPECIES_VALIDATION would close one FK child and leave this one open.
+    grouped_lca_raw_gated = gateOnAssemblyReceipt(
+        grouped_lca_raw,
+        PUSH_MTDNA_ASSM_RESULTS.out.upload,
+        'raw LCA upload'
+    )
+
     PUSH_LCA_RAW_RESULTS (
-        grouped_lca_raw, // tuple val(meta), path(lca_raw.*.tsv)
+        grouped_lca_raw_gated, // tuple val(meta), path(lca_raw.*.tsv)
         sql_config // params.sql_config
     )
 
@@ -294,11 +348,11 @@ workflow UPLOAD_RESULTS {
     )
 
     // Filter for samples that meet both conditions, then gate each on its own committed
-    // assembly upload row. See attachAssemblyUploadReceipt for why the key is the prefix:
+    // assembly upload row. See gateOnAssemblyReceipt for why the key is the prefix:
     // when this was a whole-meta join it matched NOTHING once the assembly-upload barrier was
     // removed -- 123 samples cleared the gate, all 123 had a matching upload row by prefix,
     // and MITOGENOME_QC still received zero.
-    ch_qc_ready = attachAssemblyUploadReceipt(
+    ch_qc_ready = gateOnAssemblyReceipt(
         EVALUATE_QC_CONDITIONS.out.evaluation
             .map { meta, species_file, proceed_file, circular_file ->
                 def species_name = species_file.text.trim()
@@ -309,7 +363,8 @@ workflow UPLOAD_RESULTS {
             .filter { meta, species_name, proceed_qc, circular ->
                 proceed_qc == "true"
             },
-        PUSH_MTDNA_ASSM_RESULTS.out.upload
+        PUSH_MTDNA_ASSM_RESULTS.out.upload,
+        'the QC gate'
     )
 
     // Log samples that will proceed to QC

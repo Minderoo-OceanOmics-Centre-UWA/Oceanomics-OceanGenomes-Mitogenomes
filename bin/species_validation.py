@@ -199,6 +199,16 @@ def upsert_lca_validation(
 
 
 def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_file, assembly_prefix=None, force=False):
+    """Write the per-region summary TSV and, when validated, upsert lca_validation.
+
+    Returns True on success, False if a database write failed. The caller MUST
+    propagate that into the exit status: a failed lca_validation write used to
+    print and return normally, so the task exited 0 and Nextflow saw success --
+    which is exactly how rows lost to the foreign-key write-ordering race stayed
+    invisible until someone read a per-sample upload log. The sibling pushers
+    (push_lca_raw_results.py, push_lca_blast_results.py) already fail loudly via
+    bin/pg_row_guard.py; this brings the third writer into line.
+    """
     db_params = load_db_config(config_path)
     # File-naming prefix only: an OG can have multiple assembly attempts, so
     # combined/summary filenames must be qualified with the unique per-assembly
@@ -292,13 +302,17 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
         )
         key = parse_assembly_key_from_blast(f"blast_combined.{prefix}.tsv")
         if key is None:
+            # Expected for a zero-region sample: its blast_combined is the empty
+            # placeholder, so there is no sequence id to derive a key from. Not an
+            # error, and deliberately not fatal.
             print(
-                "❌ Could not derive (og_id, tech, seq_date, code, annotation) from "
+                "⚠️ Could not derive (og_id, tech, seq_date, code, annotation) from "
                 f"blast_combined.{prefix}.tsv — skipping lca_validation upsert."
             )
-        else:
-            upsert_lca_validation(db_params, key, None, validator="nf-core", force=force)
-        return
+            return True
+        return upsert_lca_validation(
+            db_params, key, None, validator="nf-core", force=force
+        )
 
     # Push the validation result to the lca_validation table. We only write a
     # row when the sample is validated (Found_in_blast_YN = Yes for at least
@@ -307,16 +321,19 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
         key = parse_assembly_key_from_blast(f"blast_combined.{prefix}.tsv")
         if key is None:
             print(
-                "❌ Could not derive (og_id, tech, seq_date, code, annotation) from "
+                "⚠️ Could not derive (og_id, tech, seq_date, code, annotation) from "
                 f"blast_combined.{prefix}.tsv — skipping lca_validation upsert."
             )
-        else:
-            upsert_lca_validation(db_params, key, db_species, validator="nf-core", force=force)
-    else:
-        print(
-            f"ℹ️ Sample {og_id} not validated (no Found_in_blast_YN=Yes) — "
-            "skipping lca_validation upsert."
+            return True
+        return upsert_lca_validation(
+            db_params, key, db_species, validator="nf-core", force=force
         )
+
+    print(
+        f"ℹ️ Sample {og_id} not validated (no Found_in_blast_YN=Yes) — "
+        "skipping lca_validation upsert."
+    )
+    return True
 
 
 # ---------------------------
@@ -366,7 +383,7 @@ if __name__ == "__main__":
 
     prefix = args.assembly_prefix or args.og_id
     output_file = f"lca_results.{prefix}.tsv"
-    compare_lca_and_blast(
+    ok = compare_lca_and_blast(
         args.config_file,
         args.og_id,
         lca_files,
@@ -375,3 +392,6 @@ if __name__ == "__main__":
         assembly_prefix=args.assembly_prefix,
         force=args.force,
     )
+    # Non-zero on a failed DB write so Nextflow sees the failure. The summary TSV is
+    # still written either way, so a retry or a -resume has the same inputs.
+    sys.exit(0 if ok else 1)
