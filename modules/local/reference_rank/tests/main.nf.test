@@ -20,10 +20,17 @@ nextflow_process {
         when {
             process {
                 """
+                // unrelated_reads.fq.gz, NOT reads.fq.gz. This test used to pass the
+                // shared reads file, whose single read is byte-identical to all three
+                // candidate references -- so every candidate recruited it perfectly
+                // (score 1.0000, 40 matched bases) and the module chose the first one.
+                // The test could never have exercised the behaviour it names. The
+                // replacement read shares no 11-mer with the candidates in either
+                // orientation, so nothing maps and the no-signal path is reached.
                 def data = "\${projectDir}/modules/local/reference_rank/tests/data"
                 input[0] = Channel.of([
                     [ id:'OG56', mt_assembly_prefix:'OG56.test', sequencing_type:'hifi' ],
-                    file("\${data}/reads.fq.gz", checkIfExists: true),
+                    file("\${data}/unrelated_reads.fq.gz", checkIfExists: true),
                     [ file("\${data}/PZ697398.fasta"), file("\${data}/PZ697399.fasta"), file("\${data}/PZ697400.fasta") ],
                     [ file("\${data}/PZ697398.gb"),    file("\${data}/PZ697399.gb"),    file("\${data}/PZ697400.gb") ]
                 ])
