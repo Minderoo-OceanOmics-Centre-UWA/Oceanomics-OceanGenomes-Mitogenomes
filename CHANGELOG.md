@@ -167,6 +167,33 @@ first drafted on 2026-08-18; the second is that original entry, kept intact. Bot
 
 #### `Fixed`
 
+- The QC-only entrypoint no longer gives every sample the vertebrate genetic code.
+
+  `qc_only_from_annotations.nf` has no samplesheet, so it could not take `meta.genetic_code`
+  the way the main pipeline does and assumed the run-level `--translation_table` for every
+  sample instead -- code 2 unless the operator remembered otherwise. That is not confined to
+  QC: `meta.genetic_code` becomes the `mgcode` in `GEN_FILES_TABLE2ASN` and the table in
+  `TRANSLATE_GENES` and `FORMAT_FILES`, so re-QCing a coral assembly through this entrypoint
+  rewrote an annotation made under code 4 as code 2 and submitted it that way.
+
+  `VALIDATED_SPECIES_QUERY` now returns the taxonomic class alongside the validated species
+  name -- same query, same round trip, no extra process -- and the entrypoint resolves the code
+  from it. The class is looked up from the validated name first and only then from the sample's
+  nominal one, since a hand-corrected species is exactly what this entrypoint exists for;
+  matching is exact species then genus, deliberately not the fuzzy family/order tiers
+  `bin/create_samplesheet.py` also has, which are loose enough to pick a reference but far too
+  loose to pick a translation table.
+
+  A class with no confirmed code falls back to `--translation_table` with a warning naming the
+  sample and the class, rather than aborting as `prepare_samplesheet` does. The abort exists to
+  stop a wrong table being baked into an annotation that is about to be made; these annotations
+  already exist, so the useful thing is to run and say which samples need the flag.
+
+- The class -> genetic code lookup moves out of `prepare_samplesheet` into
+  `lib/MitoGeneticCode.groovy`, so the main pipeline and the QC-only entrypoint resolve one
+  table instead of two. Only the lookup is shared: what to do with an unmapped class stays with
+  each caller, because they genuinely differ. Pinned by `tests/mito_genetic_code`.
+
 - `MITOGENOME_COVERAGE`, `OATK`, `LCA` and `SPECIES_VALIDATION` now retry a walltime kill instead
   of silently dropping the sample.
 

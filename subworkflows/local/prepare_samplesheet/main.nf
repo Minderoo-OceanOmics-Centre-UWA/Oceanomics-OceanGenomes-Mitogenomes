@@ -20,11 +20,17 @@ include { samplesheetToList         } from 'plugin/nf-schema'
 //   * vertebrates (and anything unresolved but NOT flagged invertebrate) fall
 //     back to defaultCode (vertebrate, 2).
 //
+// The class -> code lookup itself lives in lib/MitoGeneticCode.groovy, shared with
+// qc_only_from_annotations.nf so that re-QCing an assembly through the standalone
+// entrypoint cannot resolve a different code than the run that produced it. Only the
+// unmapped-class policy differs between the two, and it stays with each caller.
+//
 // An `invertebrates=true` sample whose class is not in the known map raises
 // rather than silently defaulting: as more invertebrate lineages are validated
 // (e.g. bivalves are code 5) a wrong default would mistranslate the whole
-// annotation and fail table2asn terminally. Add the class here, or set the
-// per-sample `genetic_code` samplesheet column, which wins over this map.
+// annotation and fail table2asn terminally. Add the class to
+// lib/MitoGeneticCode.groovy, or set the per-sample `genetic_code` samplesheet
+// column, which wins over this map.
 def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
     if (explicitCode != null && explicitCode.toString().trim() != '') {
         def parsed = explicitCode.toString().trim()
@@ -33,18 +39,14 @@ def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
         }
         return parsed as int
     }
-    def c = (taxClass ?: '').toString().trim().toLowerCase()
-    if (c in ['anthozoa', 'hydrozoa', 'scyphozoa', 'cubozoa', 'staurozoa', 'myxozoa', 'polypodiozoa']) {
-        return 4
-    }
-    if (c in ['asteroidea', 'ophiuroidea', 'echinoidea', 'holothuroidea', 'crinoidea',
-              'rhabditophora', 'trematoda', 'cestoda', 'monogenea', 'turbellaria']) {
-        return 9
+    def mapped = MitoGeneticCode.forClass(taxClass)
+    if (mapped != null) {
+        return mapped
     }
     if (isInvert) {
         error "Sample ${sampleId}: class '${taxClass ?: 'unknown'}' has no known " +
-              "mitochondrial genetic code -- add it to mitoGeneticCode() or set " +
-              "the genetic_code column"
+              "mitochondrial genetic code -- add it to lib/MitoGeneticCode.groovy " +
+              "or set the genetic_code column"
     }
     return defaultCode
 }
