@@ -151,6 +151,46 @@ change, both for the better:
 - **Sabellida** drops below the bar and now resolves to its class (Polychaeta, cox1)
   rather than its old order-level trnH.
 
+### Effect on coral annotation
+
+`CORAL_ANNOTATION_FIX` is the one consumer that copies CONTENT out of the reference
+rather than grading against it: `coral_fix_bed.py` BLAST-transfers the 16S rRNA and the
+intron-split nad5 (and the cox1 exons when cox1 is intron-split too), so a changed
+reference can change deposited sequence, not just a status line. "Same taxonomic tier"
+does not establish that it does not.
+
+Measured directly with
+[`bin/audit_coral_annotation_diff.py`](../../bin/audit_coral_annotation_diff.py), which
+re-annotates published corals from their own MITOS output (no MITOS2 re-run needed: the
+reference enters only at `coral_fix_bed.py --ref-gb`, and `annotation/mitos_raw/result.bed`
+is already published). 37 corals from batch-20 and NOVA_260724_JP, of which **11 receive a
+different reference** under the widened database:
+
+| samples | before | after |
+|---|---|---|
+| OG2327, OG2351, OG2354, OG2360 | *Hydnophora exesa* | *Coelastrea aspera* |
+| OG2353, OG2357, OG2358, OG2359, OG2362, OG2367 | *Montipora efflorescens* | *Montipora mollis* |
+| OG2352 | *Pavona decussata* | *Pavona clavus* |
+
+**All 37 are byte-identical**, including those 11: same re-origined genome and same
+per-gene translations, 13 PCGs, no internal stops, and the same `annotation_qc_gate.py`
+verdict (35 PASS, 2 FIX) across every arm. The widened anthozoa database is inert for
+coral annotation.
+
+The audit runs three arms, because the published annotation was produced by older code on
+this branch and a two-way diff could not tell a reference change from a code change:
+`PUBLISHED` (on disk), `OLDREF` (today's code, old reference) and `NEWREF` (today's code,
+new reference). `PUBLISHED` and `OLDREF` also agree for all 37, so coral annotation output
+has not drifted either.
+
+One implementation note worth keeping, because two obvious designs are wrong: the
+cox1-rotated genome the MITOS BED refers to is **not** published (`annotation/<prefix>.fa`
+is the re-origined genome, a different frame), so it is reconstructed and then verified
+against the published annotation. It cannot be verified on cox1 position (`rotate_to_cox1.py`
+does not always land cox1 at offset 0) nor on cox1 content (the fixer repairs cox1 -
+OG2361's raw-BED cox1 is 873 bp against a published CO1 of 1572 bp). The check therefore
+compares genes the fixer never rewrites, requiring several independent agreements.
+
 Arthropoda subtracts Hexapoda (`txid6960`), Arachnida (`txid6854`) and Myriapoda
 (`txid61985`). Those are >95% of arthropod RefSeq mitogenomes, none of them is anything
 OceanOmics sequences, and leaving them in both truncated the search at `--retmax` and
