@@ -1,0 +1,88 @@
+nextflow_workflow {
+    name "Published origin anchor lookup by taxonomic order and class"
+    script "./main.nf"
+    workflow "ORIGIN_ANCHOR"
+
+    test("order wins over class, class over group, and nothing resolves to null") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    // --- Anthozoa: one class, four orders, four different answers ---
+                    ['S1',  'Scleractinia',    'Anthozoa'],
+                    ['S2',  'Malacalcyonacea', 'Anthozoa'],
+                    ['S3',  'Zoantharia',      'Anthozoa'],
+                    ['S4',  'Scleralcyonacea', 'Anthozoa'],
+                    ['S5',  'Actiniaria',      'Anthozoa'],
+                    // --- Porifera: class level, and two classes that inherit the group ---
+                    ['S6',  '',                'Demospongiae'],
+                    ['S7',  '',                'Hexactinellida'],
+                    ['S8',  '',                'Calcarea'],
+                    // --- Echinoderms: the class level really does differ per class ---
+                    ['S9',  '',                'Echinoidea'],
+                    ['S10', 'Valvatida',       'Asteroidea'],
+                    ['S11', 'Amphilepidida',   'Ophiuroidea'],
+                    // --- Molluscs: cephalopods are not cox1 ---
+                    ['S12', 'Sepiida',         'Cephalopoda'],
+                    ['S13', 'Chitonida',       'Polyplacophora'],
+                    // --- Unresolved taxonomy must still answer ---
+                    ['S14', '',                'unknown'],
+                    ['S15', '',                ''],
+                    ['S16', null,              null],
+                    ['S17', '',                'Actinopteri']
+                )
+                """
+            }
+        }
+
+        then {
+            def anchor = { id -> workflow.out.resolved.find { it[0] == id }[3] }
+            assertAll(
+                { assert workflow.success },
+
+                // Stony corals keep tRNA-Met (63.8% of 58 RefSeq records). This is the
+                // single most important row: resolving Scleractinia from the Anthozoa
+                // class aggregate instead would rotate every already-submitted stony
+                // coral off its deposited origin and change its ENA checksum.
+                { assert anchor('S1') == 'TM' },
+                // ...while its sibling orders do not. Octocorals deposit from rrnL.
+                { assert anchor('S2') == 'RNR2' },
+                { assert anchor('S3') == 'CO1' },
+                { assert anchor('S4') == 'CO1' },
+                // Actiniaria's own tally is n=15, below min_records, so it falls to the
+                // class (no majority) and then to the default rather than pinning ND5.
+                { assert anchor('S5') == 'CO1' },
+
+                // Sponges are the other non-cox1 case, and they arrive by two different
+                // routes: Demospongiae clears the class bar on its own (92.7% of 41),
+                // Hexactinellida is n=4 and inherits the porifera group (89.7% of 58).
+                { assert anchor('S6') == 'RNR2' },
+                { assert anchor('S7') == 'RNR2' },
+                // Calcarea has NO records in the reference database at all, so it has no
+                // class row. Without the group step it would take the cox1 default.
+                { assert anchor('S8') == 'RNR2' },
+
+                // Echinoderms split by class: urchins deposit from tRNA-Phe (75.6%),
+                // brittle stars from cox1 (66.7%), and sea stars have no majority at
+                // any level, so Acanthaster takes the default.
+                { assert anchor('S9') == 'TF' },
+                { assert anchor('S10') == 'CO1' },
+                { assert anchor('S11') == 'CO1' },
+
+                // Cephalopods deposit from cox3 (73.8% of 107), which the Mollusca
+                // phylum aggregate (cox1 63.4%) hides.
+                { assert anchor('S12') == 'CO3' },
+                { assert anchor('S13') == 'CO1' },
+
+                // Unlike the genetic-code lookup, this one must NEVER return null: a
+                // missing anchor is a hard failure downstream, a wrong one just rotates
+                // a circle. Every unresolved form takes the default.
+                { assert anchor('S14') == 'CO1' },
+                { assert anchor('S15') == 'CO1' },
+                { assert anchor('S16') == 'CO1' },
+                { assert anchor('S17') == 'CO1' },
+                { assert workflow.out.resolved.every { it[3] != null } }
+            )
+        }
+    }
+}

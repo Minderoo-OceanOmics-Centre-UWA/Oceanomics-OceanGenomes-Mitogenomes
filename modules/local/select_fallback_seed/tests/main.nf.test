@@ -1,0 +1,165 @@
+nextflow_process {
+
+    name "Test Process SELECT_FALLBACK_SEED"
+    script "../main.nf"
+    process "SELECT_FALLBACK_SEED"
+
+    tag "modules"
+    tag "modules_local"
+    tag "select_fallback_seed"
+
+    // The case SELECT_REFERENCE_DB cannot serve: a first pass that produced no
+    // contig, so there is no assembly to rank a group database against. That used
+    // to reseed from the WHOLE group -- all 647 arthropods for INV12_ANOMURA, which
+    // held 20 Anomura records. Here taxonomy bounds the group first and a fixed read
+    // subsample ranks what survives.
+    //
+    // Fixture is the same 3-record minidb slice the sibling selector uses: two
+    // Scleractinia (Acroporidae, Oculinidae) and one Zoantharia (Parazoanthidae), so
+    // an order-level query must drop the zoanthid. The reads are 150 bp tiles of the
+    // 3 kb NC_083272.1 slice, so the ranking has one unambiguous right answer.
+
+    def MINIDB = "modules/local/select_reference_db/tests/data/minidb"
+    def READS  = "modules/local/select_fallback_seed/tests/data"
+
+    test("taxonomy bounds the group and reads pick the record they came from") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', mt_assembly_prefix:'test',
+                      nominal_species_id:'Acropora cervicornis',
+                      family:'Acroporidae', order:'Scleractinia', 'class':'Anthozoa' ],
+                    [ file("\${projectDir}/${READS}/on_target_R1.fastq.gz", checkIfExists: true),
+                      file("\${projectDir}/${READS}/on_target_R2.fastq.gz", checkIfExists: true) ],
+                    file("\${projectDir}/${MINIDB}", checkIfExists: true),
+                    'minidb'
+                ])
+                """
+            }
+        }
+
+        then {
+            def status = path(process.out.status[0][1]).text
+            def seed   = path(process.out.seed_fasta[0][1]).text
+            def genes  = path(process.out.label_fasta[0][1]).text
+            assertAll(
+                { assert process.success },
+                { assert status.startsWith("SELECTED_SEED") },
+                // the nominal name resolves, so it must not settle for the order
+                { assert status.contains("tier=nominal") },
+                { assert status.contains("reference_gap=none") },
+                { assert status.contains("chosen=NC_083272.1") },
+                // read support is audited, not merely asserted
+                { assert status =~ /best=NC_083272\.1 ref_cov=[0-9.]+ reads=[0-9]+/ },
+
+                // seed is the chosen record only -- the whole-group seed is the bug
+                { assert seed.count(">") == 1 },
+                { assert seed.contains("NC_083272.1") },
+                { assert !seed.contains("NC_086801.1") },
+
+                // --genes is subset to the same record, so labelling cannot pull in
+                // genes from a coral the sample is not
+                { assert genes.contains("NC_083272.1") },
+                { assert !genes.contains("NC_086801.1") },
+
+                // the annotation/QC reference is rebuilt from the tracked artifacts
+                { assert path(process.out.reference[0][1]).text.contains("Acropora cervicornis") },
+                { assert path(process.out.reference[0][1]).text =~ /\n     CDS / }
+            )
+        }
+    }
+
+    test("an order-level query drops the out-of-order record") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'ord', mt_assembly_prefix:'ord',
+                      nominal_species_id:'Scleractinia sp.',
+                      family:'', order:'Scleractinia', 'class':'Anthozoa' ],
+                    [ file("\${projectDir}/${READS}/on_target_R1.fastq.gz", checkIfExists: true) ],
+                    file("\${projectDir}/${MINIDB}", checkIfExists: true),
+                    'minidb'
+                ])
+                """
+            }
+        }
+
+        then {
+            def status = path(process.out.status[0][1]).text
+            assertAll(
+                { assert process.success },
+                { assert status.startsWith("SELECTED_SEED") },
+                // 'Scleractinia sp.' is not an organism in the manifest, so the
+                // cascade steps past nominal (and past the blank family) to order
+                { assert status.contains("tier=order") },
+                { assert status.contains("candidates=2") },
+                { assert status.contains("chosen=NC_083272.1") }
+            )
+        }
+    }
+
+    test("a taxon absent from the manifest reports the gap instead of hiding it") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'gap', mt_assembly_prefix:'gap',
+                      nominal_species_id:'Tjalfiella sp.',
+                      family:'Tjalfiellidae', order:'Platyctenida', 'class':'Tentaculata' ],
+                    [ file("\${projectDir}/${READS}/on_target_R1.fastq.gz", checkIfExists: true) ],
+                    file("\${projectDir}/${MINIDB}", checkIfExists: true),
+                    'minidb'
+                ])
+                """
+            }
+        }
+
+        then {
+            def status = path(process.out.status[0][1]).text
+            assertAll(
+                { assert process.success },
+                // Falling back to the whole group is allowed -- silently is not. Every
+                // rank that missed is named, so a genuine reference gap (INV05_FARREA:
+                // no Farrea mitogenome exists anywhere) is auditable after the run
+                // rather than indistinguishable from an ordinary seed selection.
+                { assert status.contains("tier=group") },
+                { assert status.contains("reference_gap=nominal:Tjalfiella sp.") },
+                { assert status.contains("family:Tjalfiellidae") },
+                { assert status.contains("order:Platyctenida") },
+                { assert status.contains("candidates=3") }
+            )
+        }
+    }
+
+    test("reads that align to nothing still exit 0 with an audited status") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'nohit', mt_assembly_prefix:'nohit',
+                      nominal_species_id:'Acropora cervicornis',
+                      family:'Acroporidae', order:'Scleractinia', 'class':'Anthozoa' ],
+                    [ file("\${projectDir}/${READS}/off_target_R1.fastq.gz", checkIfExists: true) ],
+                    file("\${projectDir}/${MINIDB}", checkIfExists: true),
+                    'minidb'
+                ])
+                """
+            }
+        }
+
+        then {
+            def status = path(process.out.status[0][1]).text
+            assertAll(
+                // A rescue path that aborts the run is worse than a coarse rescue:
+                // this fires only for samples that already have nothing.
+                { assert process.success },
+                { assert status.startsWith("SELECTED_SEED") },
+                { assert status.contains("no_read_hits") },
+                // still emits a usable seed, chosen by taxonomy alone
+                { assert path(process.out.seed_fasta[0][1]).text.count(">") >= 1 }
+            )
+        }
+    }
+}

@@ -1,7 +1,7 @@
-import configparser
 import csv
 import importlib.util
 import io
+import json
 import os
 import sys
 import tempfile
@@ -19,70 +19,18 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-class FakeCursor:
-    """Routes fetchone() by the most recent query so one fake DB can back both
-    get_species_for_ogid (SELECT ... FROM sample) and upsert_lca_validation
-    (SELECT ... FROM lca_validation / INSERT INTO lca_validation)."""
-
-    def __init__(self, sample_species, existing_lca_row, log):
-        self.sample_species = sample_species
-        self.existing_lca_row = existing_lca_row
-        self.log = log
-        self._last_query = None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return False
-
-    def execute(self, query, params=None):
-        self._last_query = query
-        self.log.append((query, params))
-
-    def fetchone(self):
-        if "FROM sample" in self._last_query:
-            return (self.sample_species,) if self.sample_species is not None else None
-        if "FROM lca_validation" in self._last_query:
-            return self.existing_lca_row
-        return None
-
-
-class FakeConnection:
-    def __init__(self, sample_species, existing_lca_row, log):
-        self.cursor_instance = FakeCursor(sample_species, existing_lca_row, log)
-
-    def cursor(self):
-        return self.cursor_instance
-
-    def commit(self):
-        pass
-
-    def rollback(self):
-        pass
-
-    def close(self):
-        pass
-
-
-def make_config(root):
-    path = root / "oceanomics.cfg"
-    config = configparser.ConfigParser()
-    config["postgres"] = {
-        "dbname": "test", "user": "u", "password": "p", "host": "h", "port": "5432",
-    }
-    with path.open("w") as fh:
-        config.write(fh)
-    return path
-
-
 class NoNominalSpeciesTests(unittest.TestCase):
-    """No nominal_species_id on the sample row: still write the summary file
-    (with N/A comparison columns) and still upsert an lca_validation row with
-    validated_species_name=None, so PUSH_LCA_BLAST_RESULTS still runs and the
-    sample isn't silently absent from lca_validation."""
+    """No nominal species for the sample: still write the summary file (with N/A
+    comparison columns) and still emit a validation record asking for an
+    lca_validation row with validated_species_name=None, so PUSH_LCA_BLAST_RESULTS
+    still runs and the sample isn't silently absent from lca_validation.
 
-    def _run(self, force):
+    No database anywhere in here on purpose: species_validation.py is DB-free QC
+    now, and the fake psycopg2 these tests used to install is what its being
+    DB-bound looked like from the outside.
+    """
+
+    def _run(self, nominal_species=None, blast_sciname="blast"):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             prefix = "OG470.ilmn.230607.getorg1770"
@@ -94,45 +42,37 @@ class NoNominalSpeciesTests(unittest.TestCase):
 
             blast_path = root / "blast.12s.tsv"
             with blast_path.open("w") as fh:
-                fh.write(f"{prefix}.emma102\tsubject1\tsome\tblast\tfields\n")
+                # blast_combined is headerless; column 4 (index 3) is the hit's
+                # scientific name, which is what the nominal ID is matched against.
+                fh.write(f"{prefix}.emma102\tsubject1\t1234\t{blast_sciname}\tfields\n")
 
-            config_path = make_config(root)
-
-            log = []
-
-            def fake_connect(**_kwargs):
-                return FakeConnection(sample_species=None, existing_lca_row=None, log=log)
-
-            class FakePsycopg2:
-                connect = staticmethod(fake_connect)
-
-            original_psycopg2 = MODULE.psycopg2
+            record_path = f"validation_record.{prefix}.json"
             original_cwd = Path.cwd()
-            MODULE.psycopg2 = FakePsycopg2
             os.chdir(root)
             try:
                 buffer = io.StringIO()
                 with redirect_stdout(buffer):
                     MODULE.compare_lca_and_blast(
-                        str(config_path),
+                        nominal_species,
                         "OG470",
                         [str(lca_path)],
                         [str(blast_path)],
                         f"lca_results.{prefix}.tsv",
                         assembly_prefix=prefix,
-                        force=force,
+                        record_file=record_path,
                     )
             finally:
-                MODULE.psycopg2 = original_psycopg2
                 os.chdir(original_cwd)
 
             output = buffer.getvalue()
             with (root / f"lca_results.{prefix}.tsv").open() as fh:
                 summary_rows = list(csv.reader(fh, delimiter="\t"))
-            return output, summary_rows, log
+            with (root / record_path).open() as fh:
+                record = json.load(fh)
+            return output, summary_rows, record
 
     def test_writes_na_summary_columns(self):
-        output, rows, _log = self._run(force=False)
+        output, rows, _record = self._run()
         self.assertIn("has no nominal_species_id", output)
         self.assertEqual(
             rows[0],
@@ -141,20 +81,55 @@ class NoNominalSpeciesTests(unittest.TestCase):
         )
         self.assertEqual(rows[1][2:], ["N/A", "N/A", "N/A", "N/A"])
 
-    def test_upserts_lca_validation_row_with_null_species(self):
-        _output, _rows, log = self._run(force=False)
-        insert_calls = [
-            (query, params)
-            for query, params in log
-            if query and "INSERT INTO lca_validation" in query
-        ]
-        self.assertEqual(len(insert_calls), 1)
-        _query, params = insert_calls[0]
-        self.assertIsNone(params["validated_species_name"])
-        self.assertEqual(params["og_id"], "OG470")
-        self.assertEqual(params["tech"], "ilmn")
-        self.assertEqual(params["annotation"], "emma102")
-        self.assertEqual(params["validator"], "nf-core")
+    def test_records_an_upsert_with_null_species(self):
+        _output, _rows, record = self._run()
+        self.assertEqual(record["action"], "upsert")
+        self.assertIsNone(record["validated_species_name"])
+        self.assertEqual(record["key"]["og_id"], "OG470")
+        self.assertEqual(record["key"]["tech"], "ilmn")
+        self.assertEqual(record["key"]["annotation"], "emma102")
+        self.assertEqual(record["validator"], "nf-core")
+
+    def test_the_nominal_species_comes_from_the_argument_not_a_database(self):
+        """The samplesheet is the source of truth. Passing it here is what lets the
+        whole QC gate run with no --sql_config."""
+        output, rows, record = self._run(
+            nominal_species="Genus species", blast_sciname="Genus species"
+        )
+        self.assertNotIn("has no nominal_species_id", output)
+        # nom_species_id column reflects the value we passed, and the sample
+        # validates against BLAST evidence for that same name.
+        self.assertEqual(rows[1][2], "Genus species")
+        self.assertEqual(rows[1][4], "Yes")
+        self.assertEqual(record["action"], "upsert")
+        self.assertEqual(record["validated_species_name"], "Genus species")
+        self.assertEqual(record["validated_rank"], "species")
+
+    def test_an_unsupported_label_records_a_skip_rather_than_a_row(self):
+        """Held samples must leave any existing lca_validation row untouched, so the
+        record asks for nothing rather than upserting an unvalidated result."""
+        _output, rows, record = self._run(
+            nominal_species="Genus species", blast_sciname="Unrelated species"
+        )
+        self.assertEqual(rows[1][4], "No")
+        self.assertEqual(record["action"], "skip")
+        self.assertIn("not validated", record["reason"])
+
+    def test_a_blank_nominal_species_is_treated_as_absent(self):
+        """meta.nominal_species_id is optional; an empty string is a legitimate
+        state, not a name to match against."""
+        output, _rows, record = self._run(nominal_species="   ")
+        self.assertIn("has no nominal_species_id", output)
+        self.assertEqual(record["action"], "upsert")
+        self.assertIsNone(record["validated_species_name"])
+
+    def test_the_module_opens_no_database(self):
+        """Regression guard on the split itself: if a DB import or a config loader
+        comes back into this script, the QC gate silently becomes DB-bound again."""
+        self.assertFalse(hasattr(MODULE, "psycopg2"))
+        self.assertFalse(hasattr(MODULE, "load_db_config"))
+        self.assertFalse(hasattr(MODULE, "get_species_for_ogid"))
+        self.assertFalse(hasattr(MODULE, "upsert_lca_validation"))
 
 
 if __name__ == "__main__":

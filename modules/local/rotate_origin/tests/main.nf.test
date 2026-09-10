@@ -18,7 +18,7 @@ nextflow_process {
                 """
                 input[0] = Channel.of([
                     [ id:'test_mollusca' ],
-                    file("${projectDir}/modules/local/select_coral_reference/tests/data/query.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/query.fa", checkIfExists: true),
                     file("${projectDir}/assets/panels/cox1/mollusca.faa", checkIfExists: true)
                 ])
                 """
@@ -43,7 +43,7 @@ nextflow_process {
                 """
                 input[0] = Channel.of([
                     [ id:'test_stub' ],
-                    file("${projectDir}/modules/local/select_coral_reference/tests/data/query.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/query.fa", checkIfExists: true),
                     file("${projectDir}/assets/panels/cox1/arthropoda.faa", checkIfExists: true)
                 ])
                 """

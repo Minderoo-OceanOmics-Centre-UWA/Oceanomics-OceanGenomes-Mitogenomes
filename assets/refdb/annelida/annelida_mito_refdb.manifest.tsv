@@ -1,168 +1,168 @@
-group	accession	organism	family	length_bp	n_cds	n_rrna	source
-annelida	NC_063475.1	Acanthobdella peledina		18528	13	2	refseq
-annelida	NC_069205.1	Paracanthobdella livanowi		15500	13	2	refseq
-annelida	NC_064503.1	Paralvinella palmiformis	Alvinellidae	16386	13	2	refseq
-annelida	NC_037947.1	Cryptonome barbada	Amphinomidae	15013	13	2	refseq
-annelida	NC_087808.1	Antonbruunia milenae	Antonbruunidae	17540	13	2	refseq
-annelida	NC_046790.1	Aphrodita australis	Aphroditidae	15288	13	2	refseq
-annelida	NC_028710.1	Chaetopterus variopedatus	Chaetopteridae	16143	13	2	refseq
-annelida	NC_060816.1	Chrysopetalum debile	Chrysopetalidae	16295	13	2	refseq
-annelida	NC_060815.1	Craseoschema thyasiricola	Chrysopetalidae	15301	13	2	refseq
-annelida	NC_037390.1	Cirriformia cf. tentaculata HK-2018	Cirratulidae	15495	13	2	refseq
-annelida	NC_044092.1	Timarete posteria	Cirratulidae	15497	13	2	refseq
-annelida	NC_070077.1	Enchytraeus irregularis	Enchytraeidae	15228	13	2	refseq
-annelida	NC_036150.1	Erpobdella japonica	Erpobdellidae	14725	13	2	refseq
-annelida	NC_023927.1	Erpobdella octoculata	Erpobdellidae	14407	13	2	refseq
-annelida	NC_072219.1	Mooreobdella quaternaria	Erpobdellidae	14964	13	2	refseq
-annelida	NC_023124.1	Marphysa sanguinea	Eunicidae	15159	13	2	refseq
-annelida	NC_037236.1	Marphysa tamurai	Eunicidae	15163	13	2	refseq
-annelida	NC_060759.1	Marphysa victori	Eunicidae	15891	13	2	refseq
-annelida	NC_050262.1	Manayunkia occidentalis	Fabriciidae	15103	13	2	refseq
-annelida	NC_072218.1	Alboglossiphonia lata	Glossiphoniidae	15227	13	2	refseq
-annelida	NC_069206.1	Baicaloclepsis echinulata	Glossiphoniidae	15120	13	2	refseq
-annelida	NC_069207.1	Baicaloclepsis grubei	Glossiphoniidae	14751	13	2	refseq
-annelida	NC_072220.1	Batracobdella cancricola	Glossiphoniidae	15309	13	2	refseq
-annelida	NC_069202.1	Glossiphonia complanata	Glossiphoniidae	15468	13	2	refseq
-annelida	NC_072606.1	Helobdella europaea	Glossiphoniidae	18661	13	2	refseq
-annelida	NC_030269.1	Placobdella lamothei	Glossiphoniidae	15190	13	2	refseq
-annelida	NC_069203.1	Theromyzon tessulatum	Glossiphoniidae	15913	13	2	refseq
-annelida	NC_071182.1	Torix tukubana	Glossiphoniidae	14814	13	2	refseq
-annelida	NC_034783.1	Pontoscolex corethrurus	Glossoscolecidae	14835	13	2	refseq
-annelida	NC_026995.1	Goniada japonica	Goniadidae	15327	13	2	refseq
-annelida	NC_058234.1	Haemadipsa crenata	Haemadipsidae	14725	13	2	refseq
-annelida	NC_087824.1	Haemadipsa hainana	Haemadipsidae	15800	13	2	refseq
-annelida	NC_072221.1	Haemadipsa yanyuanensis	Haemadipsidae	14527	13	2	refseq
-annelida	NC_023928.1	Whitmania acranulata	Haemopidae	14462	13	2	refseq
-annelida	NC_023926.1	Whitmania laevis	Haemopidae	14433	13	2	refseq
-annelida	NC_013569.1	Whitmania pigra	Haemopidae	14426	13	2	refseq
-annelida	NC_066969.1	Leocrates chinensis	Hesionidae	15601	13	2	refseq
-annelida	NC_064058.1	Sirsoe methanicola	Hesionidae	17403	13	2	refseq
-annelida	NC_072217.1	Dinobdella ferox	Hirudinidae	14538	13	2	refseq
-annelida	NC_023925.1	Hirudinaria manillensis	Hirudinidae	14470	13	2	refseq
-annelida	NC_023776.1	Hirudo nipponia	Hirudinidae	14414	13	2	refseq
-annelida	NC_061323.1	Poecilobdella javanica	Hirudinidae	15030	13	2	refseq
-annelida	NC_066400.1	Aporrectodea caliginosa	Lumbricidae	15089	13	2	refseq
-annelida	NC_046733.1	Aporrectodea rosea	Lumbricidae	15086	13	2	refseq
-annelida	NC_066720.1	Aporrectodea trapezoides	Lumbricidae	14998	13	2	refseq
-annelida	NC_066721.1	Aporrectodea tuberculata	Lumbricidae	15125	13	2	refseq
-annelida	NC_079968.1	Dendrobaena veneta	Lumbricidae	15475	13	2	refseq
-annelida	NC_065212.1	Eisenia andrei	Lumbricidae	15714	13	2	refseq
-annelida	NC_065213.1	Eisenia fetida	Lumbricidae	16560	13	2	refseq
-annelida	NC_066399.1	Eisenia nordenskioldi	Lumbricidae	15290	13	2	refseq
-annelida	NC_001673.1	Lumbricus terrestris	Lumbricidae	14998	13	2	refseq
-annelida	NC_069204.1	Lumbriculus variegatus	Lumbriculidae	15883	13	2	refseq
-annelida	NC_028711.1	Magelona mirabilis	Magelonidae	15239	13	2	refseq
-annelida	NC_069297.1	Asychis amphiglyptus	Maldanidae	15918	13	2	refseq
-annelida	NC_006321.1	Clymenella torquata	Maldanidae	15538	13	2	refseq
-annelida	NC_025292.1	Amynthas aspergillum	Megascolecidae	15115	13	2	refseq
-annelida	NC_029863.1	Amynthas carnosus	Megascolecidae	15160	13	2	refseq
-annelida	NC_027832.1	Amynthas corticis	Megascolecidae	15126	13	2	refseq
-annelida	NC_029866.1	Amynthas cucullatus	Megascolecidae	15122	13	2	refseq
-annelida	NC_065012.1	Amynthas deogyusanensis	Megascolecidae	15257	13	2	refseq
-annelida	NC_027258.1	Amynthas gracilis	Megascolecidae	15161	13	2	refseq
-annelida	NC_029864.1	Amynthas hupeiensis	Megascolecidae	15069	13	2	refseq
-annelida	NC_029879.1	Amynthas jiriensis	Megascolecidae	15151	13	2	refseq
-annelida	NC_027831.1	Amynthas longisiphonus	Megascolecidae	15176	13	2	refseq
-annelida	NC_029872.1	Amynthas moniliatus	Megascolecidae	15133	13	2	refseq
-annelida	NC_029865.1	Amynthas morrisi	Megascolecidae	15026	13	2	refseq
-annelida	NC_029870.1	Amynthas pectiniferus	Megascolecidae	15188	13	2	refseq
-annelida	NC_029871.1	Amynthas robustus	Megascolecidae	15013	13	2	refseq
-annelida	NC_063588.1	Amynthas seungpanensis	Megascolecidae	15085	13	2	refseq
-annelida	NC_029868.1	Amynthas triastriatus	Megascolecidae	15160	13	2	refseq
-annelida	NC_029867.1	Duplodicodrilus schmardae	Megascolecidae	15156	13	2	refseq
-annelida	NC_027257.1	Metaphire californica	Megascolecidae	15147	13	2	refseq
-annelida	NC_029869.1	Metaphire guillelmi	Megascolecidae	15174	13	2	refseq
-annelida	NC_023836.1	Metaphire vulgaris	Megascolecidae	15061	13	2	refseq
-annelida	NC_009631.1	Perionyx excavatus	Megascolecidae	15083	13	2	refseq
-annelida	NC_060488.1	Tonoscolex birmanicus	Megascolecidae	15170	13	2	refseq
-annelida	NC_059817.1	Melinna cristata	Melinnidae	15696	13	2	refseq
-annelida	NC_087882.1	Struwela camposi	Microphthalmidae	15488	13	2	refseq
-annelida	NC_066398.1	Drawida ghilarovi	Moniligastridae	15080	13	2	refseq
-annelida	NC_058285.1	Drawida gisti	Moniligastridae	14648	13	2	refseq
-annelida	NC_028050.1	Drawida japonica	Moniligastridae	14648	13	2	refseq
-annelida	NC_060814.1	Iheyomytilidicola lauensis	Nautiliniellidae	15783	13	2	refseq
-annelida	NC_087810.1	Micronephthys minuta	Nephtyidae	16335	13	2	refseq
-annelida	NC_051993.1	Alitta succinea	Nereididae	15409	13	2	refseq
-annelida	NC_035507.1	Hediste diadroma	Nereididae	15765	13	2	refseq
-annelida	NC_057074.1	Hediste diversicolor	Nereididae	15904	13	2	refseq
-annelida	NC_050679.1	Hediste japonica	Nereididae	15783	13	2	refseq
-annelida	NC_030040.1	Namalycastis abiuma	Nereididae	15265	13	2	refseq
-annelida	NC_035893.1	Neanthes glandicincta	Nereididae	16126	13	2	refseq
-annelida	NC_082301.1	Nectoneanthes multignatha	Nereididae	15446	13	2	refseq
-annelida	NC_086458.1	Nectoneanthes oxypoda	Nereididae	15668	13	2	refseq
-annelida	NC_082300.1	Nectoneanthes uchiwa	Nereididae	15447	13	2	refseq
-annelida	NC_086457.1	Nereis pelagica	Nereididae	15764	13	2	refseq
-annelida	NC_053360.1	Nereis zonata	Nereididae	15757	13	2	refseq
-annelida	NC_032361.1	Paraleonnates uschakovi	Nereididae	15540	13	2	refseq
-annelida	NC_023943.1	Perinereis aibuhitensis	Nereididae	15852	13	2	refseq
-annelida	NC_065094.1	Perinereis camiguinoides	Nereididae	15819	12	2	refseq
-annelida	NC_051994.1	Perinereis cultrifera	Nereididae	17056	13	2	refseq
-annelida	NC_063944.1	Perinereis linea	Nereididae	15853	13	2	refseq
-annelida	NC_020609.1	Perinereis nuntia	Nereididae	15824	13	2	refseq
-annelida	NC_065095.1	Perinereis vancaurica	Nereididae	15832	12	2	refseq
-annelida	NC_085286.1	Perinereis wilsoni	Nereididae	15817	13	2	refseq
-annelida	NC_051995.1	Platynereis bicanaliculata	Nereididae	15868	13	2	refseq
-annelida	NC_052845.1	Platynereis cf. australis PA-2020	Nereididae	16037	13	2	refseq
-annelida	NC_000931.1	Platynereis dumerilii	Nereididae	15619	13	2	refseq
-annelida	NC_051996.1	Platynereis massiliensis	Nereididae	17502	13	2	refseq
-annelida	NC_025561.1	Tylorrhynchus heterochetus	Nereididae	16106	13	2	refseq
-annelida	NC_058588.1	Diopatra cuprea	Onuphidae	15050	13	2	refseq
-annelida	NC_007933.1	Orbinia latreillii	Orbiniidae	15558	13	2	refseq
-annelida	NC_028712.1	Owenia fusiformis	Oweniidae	16204	13	2	refseq
-annelida	NC_034807.1	Ozobranchus jantseanus	Ozobranchidae	14864	13	2	refseq
-annelida	NC_012618.1	Phascolosoma esculenta	Phascolosomatidae	15494	13	2	refseq
-annelida	NC_031412.1	Phascolosoma pacificum	Phascolosomatidae	16039	13	2	refseq
-annelida	NC_049135.1	Phascolosoma similis	Phascolosomatidae	16237	13	2	refseq
-annelida	NC_087881.1	Phyllodoce medipapillata	Phyllodocidae	15741	13	2	refseq
-annelida	NC_087807.1	Glyphohesione klatti	Pilargidae	15490	13	2	refseq
-annelida	NC_087805.1	Pilargis verrucosa	Pilargidae	15131	13	2	refseq
-annelida	NC_087809.1	Pilargis wolfi	Pilargidae	15506	13	2	refseq
-annelida	NC_087806.1	Synelmis amoureuxi	Pilargidae	18460	13	2	refseq
-annelida	NC_064338.1	Calliobdella nodulifera	Piscicolidae	16972	13	2	refseq
-annelida	NC_065392.1	Codonobdella sp. B45A	Piscicolidae	14486	13	2	refseq
-annelida	NC_035308.1	Pterobdella arugamensis	Piscicolidae	16161	13	2	refseq
-annelida	NC_064376.1	Branchipolynoe onnuriensis	Polynoidae	16272	13	2	refseq
-annelida	NC_062818.1	Branchipolynoe segonzaci	Polynoidae	15755	13	2	refseq
-annelida	NC_081955.1	Harmothoe imbricata	Polynoidae	15694	13	2	refseq
-annelida	NC_063122.1	Hyperhalosydna striata	Polynoidae	15226	13	2	refseq
-annelida	NC_061913.1	Pseudopotamilla reniformis	Sabellidae	16452	13	2	refseq
-annelida	NC_056279.1	Sabella spallanzanii	Sabellidae	15581	13	2	refseq
-annelida	NC_052721.1	Pharyngocirrus uchidai	Saccocirridae	15415	13	2	refseq
-annelida	NC_072222.1	Barbronia weberi	Salifidae	14888	13	2	refseq
-annelida	NC_072223.1	Barbronia yunnanensis	Salifidae	15092	13	2	refseq
-annelida	NC_061743.1	Hydroides elegans	Serpulidae	22046	12	2	refseq
-annelida	NC_032055.1	Spirobranchus giganteus	Serpulidae	22058	12	2	refseq
-annelida	NC_082192.1	Alaysia spiralis	Siboglinidae	15040	13	2	refseq
-annelida	NC_082193.1	Arcovestia ivanovi	Siboglinidae	14953	13	2	refseq
-annelida	NC_026856.1	Escarpia spicata	Siboglinidae	15445	13	2	refseq
-annelida	NC_026857.1	Galathealinum brachiosum	Siboglinidae	14779	13	2	refseq
-annelida	NC_082191.1	Lamellibrachia barhami	Siboglinidae	15019	13	2	refseq
-annelida	NC_082190.1	Lamellibrachia columna	Siboglinidae	15115	13	2	refseq
-annelida	NC_082189.1	Lamellibrachia donwalshi	Siboglinidae	14982	13	2	refseq
-annelida	NC_026858.1	Lamellibrachia luymesi	Siboglinidae	14991	13	2	refseq
-annelida	NC_027854.1	Lamellibrachia satsuma	Siboglinidae	15037	13	2	refseq
-annelida	NC_026859.1	Oasisia alvinae	Siboglinidae	14849	13	2	refseq
-annelida	NC_085348.1	Oligobrachia dogieli	Siboglinidae	16236	13	2	refseq
-annelida	NC_037085.1	Paraescarpia echinospica	Siboglinidae	15280	13	2	refseq
-annelida	NC_024653.1	Ridgeia piscesae	Siboglinidae	15002	13	2	refseq
-annelida	NC_026860.1	Riftia pachyptila	Siboglinidae	14987	13	2	refseq
-annelida	NC_026855.1	Sclerolinum brattstromi	Siboglinidae	15383	13	2	refseq
-annelida	NC_026861.1	Seepiophila jonesi	Siboglinidae	15092	13	2	refseq
-annelida	NC_026833.1	Siboglinum fiordicum	Siboglinidae	19502	13	2	refseq
-annelida	NC_084115.1	Siboglinum plumosum	Siboglinidae	15291	13	2	refseq
-annelida	NC_026862.1	Tevnia jerichonana	Siboglinidae	14891	13	2	refseq
-annelida	NC_049136.1	Siphonosoma cumanense	Sipunculidae	15917	13	2	refseq
-annelida	NC_011826.1	Sipunculus nudus	Sipunculidae	15502	13	2	refseq
-annelida	NC_061377.1	Polydora hoplura	Spionidae	17707	12	2	refseq
-annelida	NC_069058.1	Sternaspis chinensis	Sternaspidae	15298	13	2	refseq
-annelida	NC_069059.1	Sternaspis liui	Sternaspidae	15299	13	2	refseq
-annelida	NC_068907.1	Sternaspis sendalli	Sternaspidae	15287	13	2	refseq
-annelida	NC_031402.1	Eusyllis blomstrandi	Syllidae	14712	13	2	refseq
-annelida	NC_031403.1	Myrianida brachycephala	Syllidae	15032	13	2	refseq
-annelida	NC_065765.1	Ramisyllis kingghidorahi	Syllidae	16517	13	2	refseq
-annelida	NC_027699.1	Ramisyllis multicaudata	Syllidae	15748	13	2	refseq
-annelida	NC_031404.1	Typosyllis antoni	Syllidae	16897	13	2	refseq
-annelida	NC_088773.1	Loimia medusa	Terebellidae	16023	13	2	refseq
-annelida	NC_011014.1	Terebellides stroemii	Trichobranchidae	15755	13	2	refseq
-annelida	NC_006379.1	Urechis caupo	Urechidae	15113	13	2	refseq
-annelida	NC_012768.1	Urechis unicinctus	Urechidae	15761	13	2	refseq
+group	accession	organism	family	length_bp	n_cds	n_rrna	source	lineage
+annelida	NC_063475.1	Acanthobdella peledina		18528	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Acanthobdellida;Acanthobdella
+annelida	NC_069205.1	Paracanthobdella livanowi		15500	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Acanthobdellida;Paracanthobdella
+annelida	NC_064503.1	Paralvinella palmiformis	Alvinellidae	16386	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Terebellida;Terebelliformia;Alvinellidae;Paralvinella
+annelida	NC_037947.1	Cryptonome barbada	Amphinomidae	15013	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Eunicida;Amphinomidae;Cryptonome
+annelida	NC_087808.1	Antonbruunia milenae	Antonbruunidae	17540	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Antonbruunidae;Antonbruunia
+annelida	NC_046790.1	Aphrodita australis	Aphroditidae	15288	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Aphroditidae;Aphrodita
+annelida	NC_028710.1	Chaetopterus variopedatus	Chaetopteridae	16143	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Chaetopteridae;Chaetopterus
+annelida	NC_060816.1	Chrysopetalum debile	Chrysopetalidae	16295	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Chrysopetalidae;Chrysopetalum
+annelida	NC_060815.1	Craseoschema thyasiricola	Chrysopetalidae	15301	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Chrysopetalidae;Craseoschema
+annelida	NC_037390.1	Cirriformia cf. tentaculata HK-2018	Cirratulidae	15495	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Terebellida;Cirratuliformia;Cirratulidae;Cirriformia
+annelida	NC_044092.1	Timarete posteria	Cirratulidae	15497	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Terebellida;Cirratuliformia;Cirratulidae;Timarete
+annelida	NC_070077.1	Enchytraeus irregularis	Enchytraeidae	15228	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Enchytraeida;Enchytraeidae;Enchytraeus
+annelida	NC_036150.1	Erpobdella japonica	Erpobdellidae	14725	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Erpobdelliformes;Erpobdellidae;Erpobdella
+annelida	NC_023927.1	Erpobdella octoculata	Erpobdellidae	14407	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Erpobdelliformes;Erpobdellidae;Erpobdella
+annelida	NC_072219.1	Mooreobdella quaternaria	Erpobdellidae	14964	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Erpobdelliformes;Erpobdellidae;Mooreobdella
+annelida	NC_023124.1	Marphysa sanguinea	Eunicidae	15159	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Eunicida;Eunicidae;Marphysa
+annelida	NC_037236.1	Marphysa tamurai	Eunicidae	15163	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Eunicida;Eunicidae;Marphysa
+annelida	NC_060759.1	Marphysa victori	Eunicidae	15891	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Eunicida;Eunicidae;Marphysa
+annelida	NC_050262.1	Manayunkia occidentalis	Fabriciidae	15103	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Fabriciidae;Manayunkia
+annelida	NC_072218.1	Alboglossiphonia lata	Glossiphoniidae	15227	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Rhynchobdellida;Glossiphoniidae;Alboglossiphonia
+annelida	NC_069206.1	Baicaloclepsis echinulata	Glossiphoniidae	15120	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Rhynchobdellida;Glossiphoniidae;Baicaloclepsis
+annelida	NC_069207.1	Baicaloclepsis grubei	Glossiphoniidae	14751	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Rhynchobdellida;Glossiphoniidae;Baicaloclepsis
+annelida	NC_072220.1	Batracobdella cancricola	Glossiphoniidae	15309	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Rhynchobdellida;Glossiphoniidae;Batracobdella
+annelida	NC_069202.1	Glossiphonia complanata	Glossiphoniidae	15468	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Rhynchobdellida;Glossiphoniidae;Glossiphonia
+annelida	NC_072606.1	Helobdella europaea	Glossiphoniidae	18661	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Rhynchobdellida;Glossiphoniidae;Helobdella
+annelida	NC_030269.1	Placobdella lamothei	Glossiphoniidae	15190	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Rhynchobdellida;Glossiphoniidae;Placobdella
+annelida	NC_069203.1	Theromyzon tessulatum	Glossiphoniidae	15913	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Rhynchobdellida;Glossiphoniidae;Theromyzon
+annelida	NC_071182.1	Torix tukubana	Glossiphoniidae	14814	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Rhynchobdellida;Glossiphoniidae;Torix
+annelida	NC_034783.1	Pontoscolex corethrurus	Glossoscolecidae	14835	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Glossoscolecidae;Pontoscolex
+annelida	NC_026995.1	Goniada japonica	Goniadidae	15327	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Goniadidae;Goniada
+annelida	NC_058234.1	Haemadipsa crenata	Haemadipsidae	14725	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Haemadipsidae;Haemadipsa
+annelida	NC_087824.1	Haemadipsa hainana	Haemadipsidae	15800	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Haemadipsidae;Haemadipsa
+annelida	NC_072221.1	Haemadipsa yanyuanensis	Haemadipsidae	14527	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Haemadipsidae;Haemadipsa
+annelida	NC_023928.1	Whitmania acranulata	Haemopidae	14462	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Haemopidae;Whitmania
+annelida	NC_023926.1	Whitmania laevis	Haemopidae	14433	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Haemopidae;Whitmania
+annelida	NC_013569.1	Whitmania pigra	Haemopidae	14426	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Haemopidae;Whitmania
+annelida	NC_066969.1	Leocrates chinensis	Hesionidae	15601	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Hesionidae;Leocrates
+annelida	NC_064058.1	Sirsoe methanicola	Hesionidae	17403	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Hesionidae;Sirsoe
+annelida	NC_072217.1	Dinobdella ferox	Hirudinidae	14538	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Hirudinidae;Dinobdella
+annelida	NC_023925.1	Hirudinaria manillensis	Hirudinidae	14470	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Hirudinidae;Hirudinaria
+annelida	NC_023776.1	Hirudo nipponia	Hirudinidae	14414	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Hirudinidae;Hirudo
+annelida	NC_061323.1	Poecilobdella javanica	Hirudinidae	15030	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Hirudiniformes;Hirudinidae;Poecilobdella
+annelida	NC_066400.1	Aporrectodea caliginosa	Lumbricidae	15089	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Lumbricidae;Lumbricinae;Aporrectodea
+annelida	NC_046733.1	Aporrectodea rosea	Lumbricidae	15086	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Lumbricidae;Lumbricinae;Aporrectodea
+annelida	NC_066720.1	Aporrectodea trapezoides	Lumbricidae	14998	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Lumbricidae;Lumbricinae;Aporrectodea
+annelida	NC_066721.1	Aporrectodea tuberculata	Lumbricidae	15125	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Lumbricidae;Lumbricinae;Aporrectodea
+annelida	NC_079968.1	Dendrobaena veneta	Lumbricidae	15475	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Lumbricidae;Lumbricinae;Dendrobaena
+annelida	NC_065212.1	Eisenia andrei	Lumbricidae	15714	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Lumbricidae;Lumbricinae;Eisenia
+annelida	NC_065213.1	Eisenia fetida	Lumbricidae	16560	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Lumbricidae;Lumbricinae;Eisenia
+annelida	NC_066399.1	Eisenia nordenskioldi	Lumbricidae	15290	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Lumbricidae;Lumbricinae;Eisenia
+annelida	NC_001673.1	Lumbricus terrestris	Lumbricidae	14998	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Lumbricina;Lumbricidae;Lumbricinae;Lumbricus
+annelida	NC_069204.1	Lumbriculus variegatus	Lumbriculidae	15883	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Lumbriculida;Lumbriculidae;Lumbriculus
+annelida	NC_028711.1	Magelona mirabilis	Magelonidae	15239	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Spionida;Magelonidae;Magelona
+annelida	NC_069297.1	Asychis amphiglyptus	Maldanidae	15918	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Scolecida;Maldanidae;Asychis
+annelida	NC_006321.1	Clymenella torquata	Maldanidae	15538	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Scolecida;Maldanidae;Clymenella
+annelida	NC_025292.1	Amynthas aspergillum	Megascolecidae	15115	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029863.1	Amynthas carnosus	Megascolecidae	15160	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_027832.1	Amynthas corticis	Megascolecidae	15126	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029866.1	Amynthas cucullatus	Megascolecidae	15122	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_065012.1	Amynthas deogyusanensis	Megascolecidae	15257	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_027258.1	Amynthas gracilis	Megascolecidae	15161	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029864.1	Amynthas hupeiensis	Megascolecidae	15069	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029879.1	Amynthas jiriensis	Megascolecidae	15151	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_027831.1	Amynthas longisiphonus	Megascolecidae	15176	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029872.1	Amynthas moniliatus	Megascolecidae	15133	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029865.1	Amynthas morrisi	Megascolecidae	15026	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029870.1	Amynthas pectiniferus	Megascolecidae	15188	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029871.1	Amynthas robustus	Megascolecidae	15013	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_063588.1	Amynthas seungpanensis	Megascolecidae	15085	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029868.1	Amynthas triastriatus	Megascolecidae	15160	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Amynthas
+annelida	NC_029867.1	Duplodicodrilus schmardae	Megascolecidae	15156	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Duplodicodrilus
+annelida	NC_027257.1	Metaphire californica	Megascolecidae	15147	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Metaphire
+annelida	NC_029869.1	Metaphire guillelmi	Megascolecidae	15174	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Metaphire
+annelida	NC_023836.1	Metaphire vulgaris	Megascolecidae	15061	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Metaphire
+annelida	NC_009631.1	Perionyx excavatus	Megascolecidae	15083	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Perionyx
+annelida	NC_060488.1	Tonoscolex birmanicus	Megascolecidae	15170	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Crassiclitellata;Megascolecida;Megascolecidae;Tonoscolex
+annelida	NC_059817.1	Melinna cristata	Melinnidae	15696	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Terebellida;Terebelliformia;Melinnidae;Melinna
+annelida	NC_087882.1	Struwela camposi	Microphthalmidae	15488	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Microphthalmidae;Struwela
+annelida	NC_066398.1	Drawida ghilarovi	Moniligastridae	15080	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Moniligastrida;Moniligastridae;Drawida
+annelida	NC_058285.1	Drawida gisti	Moniligastridae	14648	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Moniligastrida;Moniligastridae;Drawida
+annelida	NC_028050.1	Drawida japonica	Moniligastridae	14648	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Oligochaeta;Moniligastrida;Moniligastridae;Drawida
+annelida	NC_060814.1	Iheyomytilidicola lauensis	Nautiliniellidae	15783	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nautiliniellidae;Iheyomytilidicola
+annelida	NC_087810.1	Micronephthys minuta	Nephtyidae	16335	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nephtyidae;Micronephthys
+annelida	NC_051993.1	Alitta succinea	Nereididae	15409	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Alitta
+annelida	NC_035507.1	Hediste diadroma	Nereididae	15765	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Hediste
+annelida	NC_057074.1	Hediste diversicolor	Nereididae	15904	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Hediste;Hediste diversicolor species group
+annelida	NC_050679.1	Hediste japonica	Nereididae	15783	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Hediste
+annelida	NC_030040.1	Namalycastis abiuma	Nereididae	15265	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Namalycastis
+annelida	NC_035893.1	Neanthes glandicincta	Nereididae	16126	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Neanthes
+annelida	NC_082301.1	Nectoneanthes multignatha	Nereididae	15446	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Nectoneanthes
+annelida	NC_086458.1	Nectoneanthes oxypoda	Nereididae	15668	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Nectoneanthes
+annelida	NC_082300.1	Nectoneanthes uchiwa	Nereididae	15447	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Nectoneanthes
+annelida	NC_086457.1	Nereis pelagica	Nereididae	15764	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Nereis
+annelida	NC_053360.1	Nereis zonata	Nereididae	15757	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Nereis
+annelida	NC_032361.1	Paraleonnates uschakovi	Nereididae	15540	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Paraleonnates
+annelida	NC_023943.1	Perinereis aibuhitensis	Nereididae	15852	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Perinereis
+annelida	NC_065094.1	Perinereis camiguinoides	Nereididae	15819	12	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Perinereis
+annelida	NC_051994.1	Perinereis cultrifera	Nereididae	17056	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Perinereis
+annelida	NC_063944.1	Perinereis linea	Nereididae	15853	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Perinereis
+annelida	NC_020609.1	Perinereis nuntia	Nereididae	15824	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Perinereis
+annelida	NC_065095.1	Perinereis vancaurica	Nereididae	15832	12	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Perinereis
+annelida	NC_085286.1	Perinereis wilsoni	Nereididae	15817	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Perinereis
+annelida	NC_051995.1	Platynereis bicanaliculata	Nereididae	15868	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Platynereis
+annelida	NC_052845.1	Platynereis cf. australis PA-2020	Nereididae	16037	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Platynereis
+annelida	NC_000931.1	Platynereis dumerilii	Nereididae	15619	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Platynereis
+annelida	NC_051996.1	Platynereis massiliensis	Nereididae	17502	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Platynereis
+annelida	NC_025561.1	Tylorrhynchus heterochetus	Nereididae	16106	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Nereididae;Tylorrhynchus
+annelida	NC_058588.1	Diopatra cuprea	Onuphidae	15050	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Eunicida;Onuphidae;Diopatra
+annelida	NC_007933.1	Orbinia latreillii	Orbiniidae	15558	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Scolecida;Orbiniidae;Orbinia
+annelida	NC_028712.1	Owenia fusiformis	Oweniidae	16204	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Oweniida;Oweniidae;Owenia
+annelida	NC_034807.1	Ozobranchus jantseanus	Ozobranchidae	14864	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Oceanobdelliformes;Ozobranchidae;Ozobranchus
+annelida	NC_012618.1	Phascolosoma esculenta	Phascolosomatidae	15494	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Sipuncula;Phascolosomatidea;Phascolosomatiformes;Phascolosomatidae;Phascolosoma
+annelida	NC_031412.1	Phascolosoma pacificum	Phascolosomatidae	16039	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Sipuncula;Phascolosomatidea;Phascolosomatiformes;Phascolosomatidae;Phascolosoma
+annelida	NC_049135.1	Phascolosoma similis	Phascolosomatidae	16237	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Sipuncula;Phascolosomatidea;Phascolosomatiformes;Phascolosomatidae;Phascolosoma
+annelida	NC_087881.1	Phyllodoce medipapillata	Phyllodocidae	15741	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Phyllodocidae;Phyllodoce
+annelida	NC_087807.1	Glyphohesione klatti	Pilargidae	15490	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Pilargidae;Glyphohesione
+annelida	NC_087805.1	Pilargis verrucosa	Pilargidae	15131	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Pilargidae;Pilargis
+annelida	NC_087809.1	Pilargis wolfi	Pilargidae	15506	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Pilargidae;Pilargis
+annelida	NC_087806.1	Synelmis amoureuxi	Pilargidae	18460	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Pilargidae;Synelmis
+annelida	NC_064338.1	Calliobdella nodulifera	Piscicolidae	16972	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Oceanobdelliformes;Piscicolidae;Calliobdella
+annelida	NC_065392.1	Codonobdella sp. B45A	Piscicolidae	14486	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Oceanobdelliformes;Piscicolidae;Codonobdella
+annelida	NC_035308.1	Pterobdella arugamensis	Piscicolidae	16161	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Oceanobdelliformes;Piscicolidae;Pterobdella
+annelida	NC_064376.1	Branchipolynoe onnuriensis	Polynoidae	16272	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Polynoidae;Branchipolynoe
+annelida	NC_062818.1	Branchipolynoe segonzaci	Polynoidae	15755	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Polynoidae;Branchipolynoe
+annelida	NC_081955.1	Harmothoe imbricata	Polynoidae	15694	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Polynoidae;Harmothoe
+annelida	NC_063122.1	Hyperhalosydna striata	Polynoidae	15226	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Polynoidae;Hyperhalosydna
+annelida	NC_061913.1	Pseudopotamilla reniformis	Sabellidae	16452	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Sabellidae;Pseudopotamilla
+annelida	NC_056279.1	Sabella spallanzanii	Sabellidae	15581	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Sabellidae;Sabella
+annelida	NC_052721.1	Pharyngocirrus uchidai	Saccocirridae	15415	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Polychaeta incertae sedis;Saccocirridae;Pharyngocirrus
+annelida	NC_072222.1	Barbronia weberi	Salifidae	14888	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Erpobdelliformes;Salifidae;Barbronia
+annelida	NC_072223.1	Barbronia yunnanensis	Salifidae	15092	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Clitellata;Hirudinea;Hirudinida;Erpobdelliformes;Salifidae;Barbronia
+annelida	NC_061743.1	Hydroides elegans	Serpulidae	22046	12	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Serpulidae;Hydroides
+annelida	NC_032055.1	Spirobranchus giganteus	Serpulidae	22058	12	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Serpulidae;Spirobranchus
+annelida	NC_082192.1	Alaysia spiralis	Siboglinidae	15040	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Alaysia
+annelida	NC_082193.1	Arcovestia ivanovi	Siboglinidae	14953	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Arcovestia
+annelida	NC_026856.1	Escarpia spicata	Siboglinidae	15445	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Escarpia
+annelida	NC_026857.1	Galathealinum brachiosum	Siboglinidae	14779	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Galathealinum
+annelida	NC_082191.1	Lamellibrachia barhami	Siboglinidae	15019	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Lamellibrachia
+annelida	NC_082190.1	Lamellibrachia columna	Siboglinidae	15115	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Lamellibrachia
+annelida	NC_082189.1	Lamellibrachia donwalshi	Siboglinidae	14982	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Lamellibrachia
+annelida	NC_026858.1	Lamellibrachia luymesi	Siboglinidae	14991	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Lamellibrachia
+annelida	NC_027854.1	Lamellibrachia satsuma	Siboglinidae	15037	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Lamellibrachia
+annelida	NC_026859.1	Oasisia alvinae	Siboglinidae	14849	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Oasisia
+annelida	NC_085348.1	Oligobrachia dogieli	Siboglinidae	16236	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Oligobrachia
+annelida	NC_037085.1	Paraescarpia echinospica	Siboglinidae	15280	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Paraescarpia
+annelida	NC_024653.1	Ridgeia piscesae	Siboglinidae	15002	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Ridgeia
+annelida	NC_026860.1	Riftia pachyptila	Siboglinidae	14987	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Riftia
+annelida	NC_026855.1	Sclerolinum brattstromi	Siboglinidae	15383	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Sclerolinum
+annelida	NC_026861.1	Seepiophila jonesi	Siboglinidae	15092	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Seepiophila
+annelida	NC_026833.1	Siboglinum fiordicum	Siboglinidae	19502	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Siboglinum
+annelida	NC_084115.1	Siboglinum plumosum	Siboglinidae	15291	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Siboglinum
+annelida	NC_026862.1	Tevnia jerichonana	Siboglinidae	14891	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Sabellida;Siboglinidae;Tevnia
+annelida	NC_049136.1	Siphonosoma cumanense	Sipunculidae	15917	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Sipuncula;Sipunculidea;Golfingiida;Sipunculidae;Siphonosoma
+annelida	NC_011826.1	Sipunculus nudus	Sipunculidae	15502	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Sipuncula;Sipunculidea;Golfingiida;Sipunculidae;Sipunculus
+annelida	NC_061377.1	Polydora hoplura	Spionidae	17707	12	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Spionida;Spionidae;Polydora
+annelida	NC_069058.1	Sternaspis chinensis	Sternaspidae	15298	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Terebellida;Cirratuliformia;Sternaspidae;Sternaspis
+annelida	NC_069059.1	Sternaspis liui	Sternaspidae	15299	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Terebellida;Cirratuliformia;Sternaspidae;Sternaspis
+annelida	NC_068907.1	Sternaspis sendalli	Sternaspidae	15287	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Terebellida;Cirratuliformia;Sternaspidae;Sternaspis
+annelida	NC_031402.1	Eusyllis blomstrandi	Syllidae	14712	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Syllidae;Eusyllis
+annelida	NC_031403.1	Myrianida brachycephala	Syllidae	15032	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Syllidae;Myrianida
+annelida	NC_065765.1	Ramisyllis kingghidorahi	Syllidae	16517	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Syllidae;Ramisyllis
+annelida	NC_027699.1	Ramisyllis multicaudata	Syllidae	15748	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Syllidae;Ramisyllis
+annelida	NC_031404.1	Typosyllis antoni	Syllidae	16897	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Errantia;Phyllodocida;Syllidae;Typosyllis
+annelida	NC_088773.1	Loimia medusa	Terebellidae	16023	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Terebellida;Terebelliformia;Terebellidae;Loimia
+annelida	NC_011014.1	Terebellides stroemii	Trichobranchidae	15755	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Sedentaria;Canalipalpata;Terebellida;Terebelliformia;Trichobranchidae;Terebellides
+annelida	NC_006379.1	Urechis caupo	Urechidae	15113	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Echiura;Xenopneusta;Urechidae;Urechis
+annelida	NC_012768.1	Urechis unicinctus	Urechidae	15761	13	2	refseq	Eukaryota;Metazoa;Spiralia;Lophotrochozoa;Annelida;Polychaeta;Echiura;Xenopneusta;Urechidae;Urechis

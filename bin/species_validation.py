@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
+"""Compare per-region LCA/BLAST calls against the nominal species and write the
+per-region summary TSV plus a validation record for the lca_validation upsert.
+
+This script performs NO database access. It used to both read the nominal species
+from the DB and write the lca_validation row itself, which meant the QC verdict it
+produces -- Found_in_blast_YN, which the whole QC gate turns on -- could only be
+computed when a database was reachable. The nominal species now comes from the
+samplesheet (meta.nominal_species_id, passed as --nominal-species) and the upsert
+is performed by bin/push_species_validation.py from the record written here.
+"""
 import argparse
 import csv
+import json
 import re
 from collections import namedtuple
-import configparser
 import sys
-
-try:
-    import psycopg2
-except ImportError:  # Allows unit tests to inject a connection factory.
-    psycopg2 = None
 
 from species_name_utils import (
     UNRESOLVED_TAXON_TOKENS,
@@ -19,18 +24,6 @@ from species_name_utils import (
 )
 
 SPECIES_IN_LCA_COLUMN = "species_in_LCA"   # <--- NEW
-
-def load_db_config(config_file):
-    config = configparser.ConfigParser()
-    config.read(config_file)
-
-    return {
-        'dbname': config.get('postgres', 'dbname'),
-        'user': config.get('postgres', 'user'),
-        'password': config.get('postgres', 'password'),
-        'host': config.get('postgres', 'host'),
-        'port': config.getint('postgres', 'port')
-    }
 
 def concatenate_files(file_list, output_file):
     with open(output_file, 'w') as outfile:
@@ -61,20 +54,49 @@ def concatenate_lca_files(file_list, output_file):
 def normalise_name(name):
     return name.strip().lower().replace('_', ' ')
 
-def get_species_for_ogid(db_params, og_id):
-    query = "SELECT nominal_species_id FROM sample WHERE og_id = %s"
-    try:
-        conn = psycopg2.connect(**db_params)
-        with conn.cursor() as cur:
-            cur.execute(query, (og_id,))
-            result = cur.fetchone()
-            return result[0] if result else None
-    except Exception as e:
-        print(f"[ERROR] Database access failed: {e}")
-        return None
-    finally:
-        if conn:
-            conn.close()
+def write_validation_record(
+    output_file, action, reason=None, key=None, validated_species_name=None,
+    validator="nf-core", validated_rank=None, lca_genus=None,
+):
+    """Write the lca_validation record for bin/push_species_validation.py.
+
+    ALWAYS written, even when nothing should be upserted, so the record channel is
+    total over the samples that reach validation: a pusher that silently receives
+    nothing for a sample is indistinguishable from one that was never run, which is
+    the failure mode the upload-receipt gating exists to make visible. ``action`` is
+    'upsert' or 'skip', and a skip carries the reason it was skipped.
+
+    The key is the assembly naming convention (og_id, tech, seq_date, code,
+    annotation), matching the lca_validation composite key.
+    """
+    record = {
+        "action": action,
+        "reason": reason,
+        "key": None if key is None else {
+            "og_id": key[0],
+            "tech": key[1],
+            "seq_date": key[2],
+            "code": key[3],
+            "annotation": key[4],
+        },
+        "validated_species_name": validated_species_name,
+        "validator": validator,
+        # The rank the evidence actually supported. A relaxed gate stays honest
+        # only if what was relaxed is recorded, and a genus-level release must be
+        # distinguishable from a species-level one after the fact.
+        "validated_rank": validated_rank,
+        # For a family-level release, the genus the LCA resolved. Submitting
+        # 'Ophidiidae sp.' when the pipeline already resolved Lamprogrammus throws
+        # away information, so record it: these surface as label-upgrade candidates
+        # for a curator, and validated_rank makes them selectable if a later policy
+        # wants to hold family matches for curation instead.
+        "lca_genus": lca_genus,
+    }
+    with open(output_file, "w") as handle:
+        json.dump(record, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    print(f"[INFO] Validation record written to: {output_file} (action={action})")
+    return True
 
 # The BLAST hits for one assembly, parsed rather than kept as a text blob.
 BlastHits = namedtuple("BlastHits", ["species", "genera"])
@@ -196,119 +218,6 @@ def parse_assembly_key_from_blast(blast_file):
     return None
 
 
-def upsert_lca_validation(
-    db_params, key, validated_species_name, validator="nf-core", force=False,
-    validated_rank=None, lca_genus=None
-):
-    """
-    Insert/update the lca_validation row for this sample with the validated
-    species name and validator tag. The composite key matches the assembly
-    naming convention: (og_id, tech, seq_date, code, annotation).
-
-    Guard: if an existing row carries a validator tag other than "nf-core",
-    the row was probably set by a human reviewer or another pipeline and
-    must not be silently overwritten by an automated re-run. Skip the
-    upsert in that case unless ``force=True``.
-    """
-    og_id, tech, seq_date, code, annotation = key
-    params = {
-        "og_id": og_id,
-        "tech": tech,
-        "seq_date": seq_date,
-        "code": code,
-        "annotation": annotation,
-        "validated_species_name": validated_species_name,
-        "validator": validator,
-        # The rank the evidence actually supported. A relaxed gate stays honest
-        # only if what was relaxed is recorded, and a genus-level release must be
-        # distinguishable from a species-level one after the fact.
-        "validated_rank": validated_rank,
-        # For a family-level release, the genus the LCA resolved. Submitting
-        # 'Ophidiidae sp.' when the pipeline already resolved Lamprogrammus throws
-        # away information, so record it: these surface as label-upgrade candidates
-        # for a curator, and validated_rank makes them selectable if a later policy
-        # wants to hold family matches for curation instead.
-        "lca_genus": lca_genus,
-    }
-    conn = None
-    try:
-        conn = psycopg2.connect(**db_params)
-        with conn.cursor() as cur:
-            if not force:
-                cur.execute(
-                    """
-                    SELECT validator, validated_species_name
-                    FROM lca_validation
-                    WHERE og_id = %(og_id)s
-                      AND tech = %(tech)s
-                      AND seq_date = %(seq_date)s
-                      AND code = %(code)s
-                      AND annotation = %(annotation)s
-                    """,
-                    params,
-                )
-                existing = cur.fetchone()
-                if existing is not None:
-                    existing_validator, existing_species = existing
-                    if (
-                        existing_validator is not None
-                        and str(existing_validator).strip().lower() != "nf-core"
-                    ):
-                        print(
-                            "⚠️ Existing values preserved for lca_validation "
-                            f"{og_id}.{tech}.{seq_date}.{code}.{annotation}: "
-                            f"validator='{existing_validator}' (not 'nf-core'); "
-                            "pass --force to overwrite."
-                        )
-                        print(
-                            "📌 Preserved stored values: "
-                            f"{{'validator': '{existing_validator}', "
-                            f"'validated_species_name': '{existing_species}'}}"
-                        )
-                        return True
-
-            upsert_query = """
-            INSERT INTO lca_validation (
-                og_id, tech, seq_date, code, annotation,
-                validated_species_name, validator, validated_rank, lca_genus
-            )
-            VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s,
-                %(validated_species_name)s, %(validator)s, %(validated_rank)s,
-                %(lca_genus)s
-            )
-            ON CONFLICT (og_id, tech, seq_date, code, annotation)
-            DO UPDATE SET
-                validated_species_name = EXCLUDED.validated_species_name,
-                validator = EXCLUDED.validator,
-                validated_rank = EXCLUDED.validated_rank,
-                lca_genus = EXCLUDED.lca_genus
-            """
-            cur.execute(upsert_query, params)
-        conn.commit()
-        if force:
-            print(
-                "✅ Success: lca_validation overwritten (--force) for "
-                f"{og_id}.{tech}.{seq_date}.{code}.{annotation} "
-                f"-> validated_species_name='{validated_species_name}', validator='{validator}'"
-            )
-        else:
-            print(
-                "✅ Success: lca_validation upserted for "
-                f"{og_id}.{tech}.{seq_date}.{code}.{annotation} "
-                f"-> validated_species_name='{validated_species_name}', validator='{validator}'"
-            )
-        return True
-    except Exception as e:
-        if conn is not None:
-            conn.rollback()
-        print(f"❌ Database error while writing lca_validation: {e}")
-        return False
-    finally:
-        if conn is not None:
-            conn.close()
-
-
 # LCA lineage values that mean "the LCA declined to resolve this rank".
 # calculateLCA.py writes 'dropped' where it declined, and 'Unknown' where the
 # lineage lookup returned nothing. Both must count as absent, or a rank match
@@ -376,31 +285,31 @@ def match_at_rank(nominal, blast_hits, row):
     return "No", "unmatched"
 
 
-def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_file, assembly_prefix=None, force=False):
-    """Write the per-region summary TSV and, when validated, upsert lca_validation.
+def compare_lca_and_blast(nominal_species, og_id, lca_files, blast_files, output_file, assembly_prefix=None, record_file=None):
+    """Write the per-region summary TSV and the lca_validation record.
 
-    Returns True on success, False if a database write failed. The caller MUST
-    propagate that into the exit status: a failed lca_validation write used to
-    print and return normally, so the task exited 0 and Nextflow saw success --
-    which is exactly how rows lost to the foreign-key write-ordering race stayed
-    invisible until someone read a per-sample upload log. The sibling pushers
-    (push_lca_raw_results.py, push_lca_blast_results.py) already fail loudly via
-    bin/pg_row_guard.py; this brings the third writer into line.
+    Returns True on success. This function no longer touches the database: the
+    record it writes is what bin/push_species_validation.py upserts, and that
+    pusher is the one responsible for failing loudly on a bad write (via
+    bin/pg_row_guard.py, as the sibling pushers already do). Keeping the QC
+    comparison DB-free is what lets it run when uploads are skipped.
+
+    ``nominal_species`` is the sample's nominal_species_id, supplied by the caller
+    from the samplesheet. None means the sample has no nominal ID to compare
+    against, which is a legitimate state, not an error.
     """
-    db_params = load_db_config(config_path)
     # File-naming prefix only: an OG can have multiple assembly attempts, so
     # combined/summary filenames must be qualified with the unique per-assembly
     # prefix (meta.mt_assembly_prefix) to avoid colliding with other attempts
-    # for the same OG. The DB lookups and output row content still use the
-    # real og_id.
+    # for the same OG. The output row content still uses the real og_id.
     prefix = assembly_prefix or og_id
+    record_file = record_file or f"validation_record.{prefix}.json"
 
     # Combine files
     concatenate_lca_files(lca_files, f"lca_combined.{prefix}.tsv")
     concatenate_files(blast_files, f"blast_combined.{prefix}.tsv")
 
-    # Get nominal_species_id from DB
-    db_species = get_species_for_ogid(db_params, og_id)
+    db_species = nominal_species.strip() if nominal_species and nominal_species.strip() else None
     has_nominal_species = db_species is not None
 
     if has_nominal_species:
@@ -420,7 +329,7 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
     else:
         raw_db_species = None
         print(
-            f"[WARN] OG ID '{og_id}' nominal species not found in database — "
+            f"[WARN] OG ID '{og_id}' has no nominal species — "
             "species match columns will be recorded as N/A."
         )
 
@@ -508,12 +417,15 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
                 "⚠️ Could not derive (og_id, tech, seq_date, code, annotation) from "
                 f"blast_combined.{prefix}.tsv — skipping lca_validation upsert."
             )
-            return True
-        return upsert_lca_validation(
-            db_params, key, None, validator="nf-core", force=force
+            return write_validation_record(
+                record_file, "skip", reason="no assembly key in blast_combined"
+            )
+        return write_validation_record(
+            record_file, "upsert", key=key, validated_species_name=None,
+            reason="no nominal_species_id",
         )
 
-    # Push the validation result to the lca_validation table. We only write a
+    # Record the validation result for the lca_validation table. We only ask for a
     # row when the sample is validated (Found_in_blast_YN = Yes for at least
     # one region) so unvalidated samples leave the existing DB row untouched.
     if sample_validated:
@@ -523,12 +435,14 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
                 "⚠️ Could not derive (og_id, tech, seq_date, code, annotation) from "
                 f"blast_combined.{prefix}.tsv — skipping lca_validation upsert."
             )
-            return True
+            return write_validation_record(
+                record_file, "skip", reason="no assembly key in blast_combined"
+            )
         # One rank per assembly in practice, but be explicit if the regions
         # disagree rather than silently picking one.
         rank = ";".join(sorted(validated_ranks)) if validated_ranks else "unmatched"
-        return upsert_lca_validation(
-            db_params, key, db_species, validator="nf-core", force=force,
+        return write_validation_record(
+            record_file, "upsert", key=key, validated_species_name=db_species,
             validated_rank=rank,
             lca_genus=family_release_genus if rank == "family" else None,
         )
@@ -537,7 +451,9 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
         f"ℹ️ Sample {og_id} not validated (no Found_in_blast_YN=Yes) — "
         "skipping lca_validation upsert."
     )
-    return True
+    return write_validation_record(
+        record_file, "skip", reason="not validated (no Found_in_blast_YN=Yes)"
+    )
 
 
 # ---------------------------
@@ -546,18 +462,19 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=(
-            "Compare per-region LCA / BLAST results against the nominal species "
-            "stored in the OceanOmics DB, write a summary TSV, and (when "
-            "validated) upsert the result into the lca_validation table."
+            "Compare per-region LCA / BLAST results against the sample's nominal "
+            "species, write a summary TSV, and write the validation record that "
+            "bin/push_species_validation.py upserts into lca_validation."
         )
     )
     parser.add_argument(
-        "--force",
-        action="store_true",
+        "--nominal-species",
+        default=None,
         help=(
-            "Overwrite an existing lca_validation row even when its validator "
-            "is something other than 'nf-core' (e.g. a human reviewer). Off "
-            "by default."
+            "The sample's nominal_species_id, from the samplesheet "
+            "(meta.nominal_species_id). Omit or pass an empty string for a "
+            "sample with no nominal ID: the species-match columns are then "
+            "recorded as N/A, which is a legitimate state rather than an error."
         ),
     )
     parser.add_argument(
@@ -570,7 +487,14 @@ if __name__ == "__main__":
             "og_id when omitted."
         ),
     )
-    parser.add_argument("config_file")
+    parser.add_argument(
+        "--record-file",
+        default=None,
+        help=(
+            "Where to write the lca_validation record. Defaults to "
+            "validation_record.<prefix>.json."
+        ),
+    )
     parser.add_argument("og_id")
     parser.add_argument(
         "lca_files",
@@ -588,14 +512,12 @@ if __name__ == "__main__":
     prefix = args.assembly_prefix or args.og_id
     output_file = f"lca_results.{prefix}.tsv"
     ok = compare_lca_and_blast(
-        args.config_file,
+        args.nominal_species,
         args.og_id,
         lca_files,
         blast_files,
         output_file,
         assembly_prefix=args.assembly_prefix,
-        force=args.force,
+        record_file=args.record_file,
     )
-    # Non-zero on a failed DB write so Nextflow sees the failure. The summary TSV is
-    # still written either way, so a retry or a -resume has the same inputs.
     sys.exit(0 if ok else 1)

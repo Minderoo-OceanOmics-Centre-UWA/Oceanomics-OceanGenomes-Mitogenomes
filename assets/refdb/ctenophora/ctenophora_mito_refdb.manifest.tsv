@@ -1,5 +1,17 @@
-group	accession	organism	family	length_bp	n_cds	n_rrna	source
-ctenophora	NC_045305.1	Beroe cucumis	Beroidae	10487	10	2	refseq
-ctenophora	NC_038065.1	Beroe forskalii	Beroidae	13338	13	2	refseq
-ctenophora	NC_016117.1	Mnemiopsis leidyi	Bolinopsidae	10326	11	2	refseq
-ctenophora	NC_045864.1	Hormiphora californensis	Pleurobrachiidae	12564	14	2	refseq
+group	accession	organism	family	length_bp	n_cds	n_rrna	source	lineage
+ctenophora	PQ559638.1	Benthoplana meteoris	Benthoplanidae	9984	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Platyctenida;Benthoplanidae;Benthoplana
+ctenophora	PQ559639.1	Benthoplana meteoris	Benthoplanidae	9984	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Platyctenida;Benthoplanidae;Benthoplana
+ctenophora	PX922688.1	Vallicula multiformis	Benthoplanidae	9963	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Platyctenida;Benthoplanidae;Vallicula
+ctenophora	PX922695.1	Vallicula multiformis	Benthoplanidae	9963	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Platyctenida;Benthoplanidae;Vallicula
+ctenophora	NC_045305.1	Beroe cucumis	Beroidae	10487	10	2	refseq	Eukaryota;Metazoa;Ctenophora;Nuda;Beroida;Beroidae;Beroe
+ctenophora	PX606260.1	Beroe cucumis	Beroidae	10945	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Nuda;Beroida;Beroidae;Beroe
+ctenophora	MG655624.1	Beroe forskalii	Beroidae	13357	13	2	genbank	Eukaryota;Metazoa;Ctenophora;Nuda;Beroida;Beroidae;Beroe
+ctenophora	NC_038065.1	Beroe forskalii	Beroidae	13338	13	2	refseq	Eukaryota;Metazoa;Ctenophora;Nuda;Beroida;Beroidae;Beroe
+ctenophora	NC_016117.1	Mnemiopsis leidyi	Bolinopsidae	10326	11	2	refseq	Eukaryota;Metazoa;Ctenophora;Tentaculata;Lobata;Bolinopsidae;Mnemiopsis
+ctenophora	PZ506865.1	Euplokamis sp.	Euplokamidae	12769	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Cydippida;Euplokamidae;Euplokamis
+ctenophora	PQ559643.1	Lyrocteis imperatoris	Lyroctenidae	10934	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Platyctenida;Lyroctenidae;Lyrocteis
+ctenophora	MN544301.1	Hormiphora californensis	Pleurobrachiidae	12555	14	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Cydippida;Pleurobrachiidae;Hormiphora
+ctenophora	NC_045864.1	Hormiphora californensis	Pleurobrachiidae	12564	14	2	refseq	Eukaryota;Metazoa;Ctenophora;Tentaculata;Cydippida;Pleurobrachiidae;Hormiphora
+ctenophora	PP329435.1	Pleurobrachia globosa	Pleurobrachiidae	16292	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Cydippida;Pleurobrachiidae;Pleurobrachia
+ctenophora	PP327218.1	Tjalfiella sp.	Tjalfiellidae	11397	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Platyctenida;Tjalfiellidae;Tjalfiella
+ctenophora	PP331237.1	Tjalfiella sp.	Tjalfiellidae	11020	11	2	genbank	Eukaryota;Metazoa;Ctenophora;Tentaculata;Platyctenida;Tjalfiellidae;Tjalfiella

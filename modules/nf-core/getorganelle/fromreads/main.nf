@@ -8,15 +8,24 @@ process GETORGANELLE_FROMREADS {
         'biocontainers/getorganelle:1.7.7.0--pyh7cba7a3_0' }"
 
     input:
-    tuple val(meta), path(fastp), val(organelle_type), path(db)
+    // `genes` is the sample's curated group gene database (assets/refdb/<group>/
+    // <group>_mito_refdb.label.fasta), or [] for a vertebrate / a class with no
+    // curated database, in which case no --genes flag is emitted and the command
+    // line is byte-identical to the stock-labelling behaviour.
+    tuple val(meta), path(fastp), val(organelle_type), path(db), path(genes)
 
     output:
     tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}.fasta")            , emit: fasta
     tuple val(meta), path("mtdna/${meta.mt_assembly_prefix}.get_org.log.txt")  , emit: log
     path("mtdna/*.selected_graph.gfa")                                               , emit: org_assm_graph,  optional: true
     path("mtdna/*extended_K*.assembly_graph.fastg")                                  , emit: raw_assm_graph,  optional: true
-    path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.fastg")  , emit: simp_assm_graph,  optional: true
-    path("mtdna/*extended_K*.assembly_graph.fastg.extend-animal_mt.csv")    , emit: contig_label,     optional: true
+    // extend-* rather than extend-animal_mt: GetOrganelle names these after the
+    // LabelDatabase it actually used, which with --genes is the group database
+    // (e.g. ...extend-mollusca_mito_refdb.label.fastg). Both are optional outputs,
+    // so a stale extend-animal_mt glob would not error -- it would just silently
+    // emit nothing for every invertebrate and starve ch_summary_files.
+    path("mtdna/*extended_K*.assembly_graph.fastg.extend-*.fastg")           , emit: simp_assm_graph,  optional: true
+    path("mtdna/*extended_K*.assembly_graph.fastg.extend-*.csv")             , emit: contig_label,     optional: true
     // path("mtdna/*")                                                         , emit: etc // have only included the files we want above, uncomment if you want everything
     tuple val(meta), path("02_getorganelle_fromreads.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                                                     , emit: versions
@@ -27,7 +36,11 @@ process GETORGANELLE_FROMREADS {
     script:
     def args   = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
-    def effective_args = [args, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
+    // --genes overrides the LabelDatabase used to slim the assembly graph; -F still
+    // supplies the SeedDatabase that recruits the reads, so read recruitment is
+    // unchanged by construction. Mirrors modules/local/getorganelle/reseed.
+    def genes_arg = genes ? "--genes ${genes}" : ''
+    def effective_args = [args, genes_arg, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
 
     // Use persistent output directory for checkpoint/resume capability
     def checkpoint_base = "${params.outdir}/getorganelle_checkpoints"
@@ -37,6 +50,7 @@ process GETORGANELLE_FROMREADS {
 
     get_organelle_from_reads.py \\
         $args \\
+        $genes_arg \\
         --prefix ${prefix}. \\
         -F $organelle_type \\
         --config-dir $db \\
@@ -64,8 +78,8 @@ process GETORGANELLE_FROMREADS {
     # Assembly graph outputs may be absent if GetOrganelle bailed out very early.
     for f in $output_dir/*.selected_graph.gfa; do cp "\$f" mtdna/; done
     for f in $output_dir/*extended_K*.assembly_graph.fastg; do cp "\$f" mtdna/; done
-    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-animal_mt.fastg; do cp "\$f" mtdna/; done
-    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-animal_mt.csv; do cp "\$f" mtdna/; done
+    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-*.fastg; do cp "\$f" mtdna/; done
+    for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-*.csv; do cp "\$f" mtdna/; done
 
     # The assembled organelle FASTA (`*1.1.*.fasta`) is only produced when
     # GetOrganelle successfully assembled a contig. When the run finishes
@@ -92,7 +106,10 @@ process GETORGANELLE_FROMREADS {
     stub:
     def prefix = task.ext.prefix ?: "${meta.mt_assembly_prefix}"
     def args   = task.ext.args ?: ''
-    def effective_args = [args, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
+    def genes_arg = genes ? "--genes ${genes}" : ''
+    // The touched extend-animal_mt.* names below still match the extend-* output
+    // globs, and deliberately document the no---genes (stock labelling) case.
+    def effective_args = [args, genes_arg, "--prefix ${prefix}.", "-F ${organelle_type}", "--config-dir ${db}", "-t ${task.cpus}", "-1 ${fastp[0]}", "-2 ${fastp[1]}"].findAll { it?.toString()?.trim() }.join(' ')
     """
     mkdir -p mtdna
        

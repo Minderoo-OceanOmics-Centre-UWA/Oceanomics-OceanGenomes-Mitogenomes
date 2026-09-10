@@ -1,0 +1,52 @@
+accession	type	gene	product	parts
+NC_083272.1	CDS	ND5	NADH dehydrogenase subunit 5	10178-10895:1,4486-5605:1
+NC_083272.1	rRNA	rrn12	12S ribosomal RNA	110-1092:1
+NC_083272.1	CDS	COX3	cytochrome c oxidase subunit III	2085-2874:1
+NC_083272.1	CDS	COX2	cytochrome c oxidase subunit II	2930-3674:1
+NC_083272.1	CDS	ND4L	NADH dehydrogenase subunit 4L	3705-4005:1
+NC_083272.1	CDS	ND3	NADH dehydrogenase subunit 3	4037-4394:1
+NC_083272.1	tRNA	trnW(uca)	tRNA-Trp	5635-5706:1
+NC_083272.1	CDS	ATP8	ATP synthase F0 subunit 8	5737-5956:1
+NC_083272.1	CDS	COX1	cytochrome c oxidase subunit I	5937-7539:1
+NC_083272.1	tRNA	trnM(cau)	tRNA-Met	7745-7816:1
+NC_083272.1	rRNA	rrn16	16S ribosomal RNA	7990-9997:1
+NC_083272.1	CDS	ND1	NADH dehydrogenase subunit 1	11221-12205:1
+NC_083272.1	CDS	CYTB	cytochrome b	12315-13473:1
+NC_083272.1	CDS	ND2	NADH dehydrogenase subunit 2	13998-15096:1
+NC_083272.1	CDS	ND6	NADH dehydrogenase subunit 6	15128-15722:1
+NC_083272.1	CDS	ATP6	ATP synthase F0 subunit 6	15790-16489:1
+NC_083272.1	CDS	ND4	NADH dehydrogenase subunit 4	16640-18116:1
+NC_086801.1	CDS	COX1	cytochrome c oxidase subunit I	0-888:1,2256-2973:1
+NC_086801.1	CDS	ND4L	NADH dehydrogenase subunit 4L	3035-3335:1
+NC_086801.1	CDS	ATP8	ATP synthase F0 subunit 8	3455-3674:1
+NC_086801.1	CDS	ATP6	ATP synthase F0 subunit 6	3834-4563:1
+NC_086801.1	rRNA		small subunit ribosomal RNA	4695-5891:1
+NC_086801.1	CDS	ND2	NADH dehydrogenase subunit 2	6336-7482:1
+NC_086801.1	tRNA		tRNA-Met	7645-7716:1
+NC_086801.1	rRNA		large subunit ribosomal RNA	7762-10474:1
+NC_086801.1	CDS	ND5	NADH dehydrogenase subunit 5	10827-11544:1,13711-14803:1
+NC_086801.1	CDS	ND1	NADH dehydrogenase subunit 1	11965-12955:1
+NC_086801.1	CDS	ND3	NADH dehydrogenase subunit 3	13165-13522:1
+NC_086801.1	tRNA		tRNA-Trp	14836-14906:1
+NC_086801.1	CDS	COX2	cytochrome c oxidase subunit II	14975-15728:1
+NC_086801.1	CDS	ND4	NADH dehydrogenase subunit 4	16066-17542:1
+NC_086801.1	CDS	ND6	NADH dehydrogenase subunit 6	17726-18383:1
+NC_086801.1	CDS	CYTB	cytochrome b	18601-19795:1
+NC_086801.1	CDS	COX3	cytochrome c oxidase subunit III	19987-20776:1
+NC_088089.1	rRNA		large subunit ribosomal RNA	0-1999:1
+NC_088089.1	CDS	ND5	NADH dehydrogenase subunit 5	1999-2709:1,12848-13953:1
+NC_088089.1	CDS	ND1	NADH dehydrogenase subunit 1	2821-3769:1
+NC_088089.1	CDS	CYTB	cytochrome b	3793-4933:1
+NC_088089.1	CDS	ND2	NADH dehydrogenase subunit 2	5153-6245:1
+NC_088089.1	CDS	ND6	NADH dehydrogenase subunit 6	6245-6812:1
+NC_088089.1	CDS	ATP6	ATP synthase subunit 6	6849-7530:1
+NC_088089.1	CDS	ND4	NADH dehydrogenase subunit 4	7529-8975:1
+NC_088089.1	rRNA		small subunit ribosomal RNA	8975-10137:1
+NC_088089.1	CDS	COX2	cytochrome c oxidase subunit II	10137-10929:1
+NC_088089.1	CDS	COX3	cytochrome c oxidase subunit III	11094-11874:1
+NC_088089.1	CDS	ND4L	NADH dehydrogenase subunit 4L	12050-12350:1
+NC_088089.1	CDS	ND3	NADH dehydrogenase subunit 3	12349-12694:1
+NC_088089.1	tRNA		tRNA-Tyr	13952-14023:1
+NC_088089.1	CDS	ATP8	ATP synthase subunit 8	14023-14221:1
+NC_088089.1	CDS	COX1	cytochrome c oxidase subunit I	14220-15780:1
+NC_088089.1	tRNA		tRNA-Met	15769-15841:1

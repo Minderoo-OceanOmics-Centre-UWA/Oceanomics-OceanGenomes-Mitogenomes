@@ -2,8 +2,15 @@
 // the intron-split nad5 and (where cox1 is intron-split too) the two cox1 exons
 // from a close coral reference (GenBank) at the BED level, then re-running the
 // existing EMMA adapter (mitos_to_emma.py) so the
-// gff / cds/ / proteins/ standardisation, splice-join, translation and trnM
+// gff / cds/ / proteins/ standardisation, splice-join, translation and published
 // re-origin are all reused unchanged.
+//
+// The re-origin is per-taxon (--origin-gene, from assets/taxonomy/mito_origin_anchors.json),
+// NOT trnM for everything as it once was. This module must pass the same anchor MITOS2
+// passes: it re-runs the adapter from the raw BED in the pre-rotation frame, so if only
+// one of the two call sites were updated, a FIX and a PASS anthozoan of the same species
+// would be published on different origins with nothing to flag it. mitos_to_emma.py
+// makes --origin-gene REQUIRED so that divergence fails loudly instead.
 //
 // Emits the SAME channels as MITOS2 so the annotation subworkflow can mix the
 // repaired (FIX) and untouched (PASS) anthozoans without rewiring. Runs in the
@@ -25,7 +32,9 @@ process CORAL_ANNOTATION_FIX {
     input:
     // genome = the cox1-rotated fasta MITOS2 annotated (ROTATE_ORIGIN.out.fasta),
     // bed = MITOS2's raw result.bed, reference_gb = the resolved coral reference.
-    tuple val(meta), path(genome), path(bed), path(reference_gb)
+    // origin_gene = the MITOS feature key the published genome is re-origined to,
+    // resolved per taxon in mitogenome_annotation_lca. Must match what MITOS2 got.
+    tuple val(meta), path(genome), path(bed), path(reference_gb), val(origin_gene)
 
     output:
     tuple val(meta), path("annotation/cds/*CO1*.fa"),  emit: co1_sequences, optional: true
@@ -52,8 +61,9 @@ process CORAL_ANNOTATION_FIX {
         def mitos_tag = '2110'
         def topology_arg = (meta.circular == false) ? '--linear' : ''
         def mitos_prefix = "${prefix}.mitos${mitos_tag}"
+        def origin_arg = "--origin-gene ${origin_gene}"
         def effective_args = ["coral_fix_bed.py --bed ${bed} --genome ${genome} --ref-gb ${reference_gb} --code ${gcode} ${base_args}".replaceAll(/ +/, ' ').trim(),
-                              "mitos_to_emma.py --bed result.fixed.bed --genome ${genome} --code ${gcode} ${topology_arg}".replaceAll(/ +/, ' ').trim()].join('; ')
+                              "mitos_to_emma.py --bed result.fixed.bed --genome ${genome} --code ${gcode} ${topology_arg} ${origin_arg}".replaceAll(/ +/, ' ').trim()].join('; ')
         """
         mkdir -p annotation
 
@@ -68,7 +78,8 @@ process CORAL_ANNOTATION_FIX {
             ${base_args}
 
         # 2) Re-run the EMMA adapter on the patched BED (joins, translation,
-        #    cds/proteins extraction and the trnM re-origin are all reused).
+        #    cds/proteins extraction and the published re-origin are all reused).
+        #    --origin-gene must be the same anchor MITOS2 was given for this sample.
         mitos_to_emma.py \\
             --bed result.fixed.bed \\
             --genome ${genome} \\
@@ -76,6 +87,7 @@ process CORAL_ANNOTATION_FIX {
             --outdir annotation \\
             --code ${gcode} \\
             --species "${species}" \\
+            ${origin_arg} \\
             ${topology_arg}
 
         # Provenance: collect the fix artefacts in their OWN subdir (mitos_fix/) so

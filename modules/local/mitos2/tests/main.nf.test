@@ -1,0 +1,55 @@
+nextflow_process {
+
+    name "Test Process MITOS2"
+    script "../main.nf"
+    process "MITOS2"
+
+    tag "modules"
+    tag "modules_local"
+    tag "mitos2"
+
+    // Pins the 3-element per-sample input tuple. `origin_gene` is the MITOS feature
+    // key the PUBLISHED genome is re-origined to, resolved per taxon in
+    // mitogenome_annotation_lca and handed in here rather than looked up in the
+    // module -- the same convention every other taxon decision in this pipeline
+    // follows (cox1PanelGroup, seedDbGroup, isCoralFixEligible).
+    //
+    // There is a second call site for the same underlying script
+    // (CORAL_ANNOTATION_FIX, which re-runs mitos_to_emma.py on a patched BED), and
+    // exactly one of the two runs per sample. If this tuple were to lose the anchor
+    // while the other kept it, FIX and PASS anthozoans of the same species would be
+    // published on different origins with nothing to flag it. mitos_to_emma.py makes
+    // --origin-gene required so that fails loudly; this test pins the shape that
+    // feeds it.
+
+    test("stub: the anchor is carried per sample alongside the genome") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_scleractinia',
+                      mt_assembly_prefix:'test_scleractinia.ilmn.260101.getorg1770',
+                      genetic_code: 4,
+                      circular: true ],
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/query.fa", checkIfExists: true),
+                    'TM'
+                ])
+                input[1] = file("${projectDir}/assets/panels/cox1", checkIfExists: true)
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                // The resolved anchor must reach the MultiQC tool-params row: "why does
+                // this genome start where it does?" is the first question asked of a
+                // published mitogenome, and that row is where an operator will look.
+                { assert path(process.out.tool_params[0][1]).text.contains('--origin-gene TM') }
+            )
+        }
+    }
+}

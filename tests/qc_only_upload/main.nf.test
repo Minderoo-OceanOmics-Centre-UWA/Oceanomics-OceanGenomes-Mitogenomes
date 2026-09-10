@@ -35,7 +35,7 @@ nextflow_pipeline {
                 { assert ran('PUSH_QC_VALIDATOR') },
                 { assert ran('UPLOAD_RESULTS_SUMMARY') },
                 // QC itself still runs, and still runs on the forced-proceed path.
-                { assert ran('MITOGENOME_QC') },
+                { assert ran('ENA_SUBMISSION_PREP') },
                 // Scope guard: none of the pre-QC pushes belong on this entrypoint.
                 // SPECIES_VALIDATION is the dangerous one -- see the comment above.
                 { assert !ran('SPECIES_VALIDATION') },
@@ -68,7 +68,7 @@ nextflow_pipeline {
             def ran = { name -> workflow.trace.tasks().any { it.name.contains(name) } }
             assertAll(
                 { assert workflow.success },
-                { assert ran('MITOGENOME_QC') },
+                { assert ran('ENA_SUBMISSION_PREP') },
                 { assert !ran('PUSH_ENA_VALIDATION_RESULTS') },
                 { assert !ran('PUSH_QC_VALIDATOR') },
                 { assert !ran('UPLOAD_RESULTS_SUMMARY') }

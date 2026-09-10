@@ -1,0 +1,87 @@
+nextflow_workflow {
+
+    name "Annotator routing binds every channel (MITOGENOME_ANNOTATION, stubbed)"
+    script "./main.nf"
+    workflow "CORAL_ANNOTATION_GATE"
+    tag "subworkflows"
+    tag "mitogenome_annotation"
+
+    // Guards against tuple-arity drift between a module's emit and the closure consuming it.
+    // The failure this exists for -- a three-param filter on the four-element
+    // MITOS2.out.gff_proteins -- aborted the whole session from inside the filter operator, so
+    // `workflow.success` alone catches it: no assertion on the annotation content is needed.
+
+    test("a coral, a non-coral invert and a vertebrate each route to their annotator") {
+
+        options "-stub"
+
+        when {
+            params {
+                curated_blast_db = "/stub/curated.fasta"
+                nt_blast_db      = "/stub/nt"
+                mitos_refdb      = "${projectDir}/assets"
+                taxonkit_db_dir  = "$outputDir/taxonkit"
+            }
+            workflow {
+                """
+                def data = "${projectDir}/tests/test_data/coral_annotation_gate"
+                def ref  = file("\${data}/stub_reference.gb")
+
+                // Anthozoa -> MITOS2 -> the Cnidaria-only QC gate -> the coral fixer.
+                def coral = [
+                    id: 'OGCORAL', class: 'Anthozoa', species: 'Goniastrea retiformis',
+                    invertebrates: true, genetic_code: 4,
+                    mt_assembly_prefix: 'OGCORAL.ilmn.260101.getorg1770',
+                    mt_assembly_run_prefix: 'OGCORAL.ilmn.260101.getorg1770'
+                ]
+                // Gastropoda -> MITOS2, but NOT the gate: it leaves via ch_mitos_*_passthrough,
+                // so this covers the other side of the same filter.
+                def snail = [
+                    id: 'OGSNAIL', class: 'Gastropoda', species: 'Nerita atramentosa',
+                    invertebrates: true, genetic_code: 5,
+                    mt_assembly_prefix: 'OGSNAIL.ilmn.260101.getorg1770',
+                    mt_assembly_run_prefix: 'OGSNAIL.ilmn.260101.getorg1770'
+                ]
+                // Vertebrate -> EMMA, so a change to the invert branch cannot quietly
+                // reroute the fish path this pipeline still runs.
+                def fish = [
+                    id: 'OGFISH', class: 'Actinopteri', species: 'Gigantura chuni',
+                    invertebrates: false, genetic_code: 2,
+                    mt_assembly_prefix: 'OGFISH.hifi.260101.v323mitohifi',
+                    mt_assembly_run_prefix: 'OGFISH.hifi.260101.v323mitohifi'
+                ]
+
+                input[0] = Channel.of(
+                    [ coral, file("\${data}/OGCORAL.ilmn.260101.getorg1770.fasta") ],
+                    [ snail, file("\${data}/OGSNAIL.ilmn.260101.getorg1770.fasta") ],
+                    [ fish,  file("\${data}/OGFISH.hifi.260101.v323mitohifi.fasta") ]
+                )
+                input[1] = Channel.of([coral, ref], [snail, ref], [fish, ref])
+                """
+            }
+        }
+
+        then {
+            def ran = { proc -> workflow.trace.tasks().findAll { it.name.contains(proc) } }
+
+            assertAll(
+                { assert workflow.success },
+                // Both invertebrates annotate with MITOS2, the vertebrate with EMMA.
+                { assert ran('MITOS2').size() == 2 },
+                { assert ran('EMMA (').size() == 1 },
+                // The gate is Cnidaria-only: exactly one sample enters it, and it is the coral.
+                // Any arity mismatch on its input channel aborts the run before this.
+                { assert ran('ANNOTATION_QC_GATE').size() == 1 },
+                { assert ran('ANNOTATION_QC_GATE')[0].name.contains('OGCORAL') },
+                // ANNOTATION_QC_GATE's stub always decides FIX, so the coral must go on to
+                // reference selection and the fixer -- and only the coral.
+                { assert ran('SELECT_REFERENCE_DB').size() == 1 },
+                { assert ran('CORAL_ANNOTATION_FIX').size() == 1 },
+                { assert ran('CORAL_ANNOTATION_FIX')[0].name.contains('OGCORAL') },
+                // Every sample still leaves with an annotation bundle: the coral via the
+                // fixer, the snail via passthrough, the fish via EMMA.
+                { assert workflow.out.annotation_results.size() == 3 }
+            )
+        }
+    }
+}

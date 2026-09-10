@@ -21,15 +21,32 @@ assembly FASTA and writes an EMMA-shaped directory:
 Coordinates and sequences are derived from the BED so the result is independent
 of MITOS2's GFF/FASTA header formatting, which varies between releases.
 
-Re-origin to tRNA-Met: the EMMA-shaped genome is published starting at trnM's 5'
-end (reverse-complementing first if trnM is on the minus strand), matching how
-coral mitogenomes are deposited in NCBI. trnM's position comes from MITOS's own
+Re-origin to --origin-gene: the EMMA-shaped genome is published starting at the
+5' end of the anchor gene the caller names (reverse-complementing first if that
+gene is on the minus strand). The anchor's position comes from MITOS's own
 annotation -- no extra tool or BLAST is needed -- and the genome, GFF and per-gene
-FASTAs are all shifted together so they stay consistent. The upstream cox1
-pre-rotation (rotate_to_cox1.py) still runs first purely to keep MITOS from
-splitting the nad5 group I intron across the linearisation point; this step then
-moves the final origin onto trnM. Skipped for linear molecules and when no trnM
-is annotated (genome then stays on the cox1 origin).
+FASTAs are all shifted together so they stay consistent.
+
+The anchor is per-taxon, resolved by the caller from
+assets/taxonomy/mito_origin_anchors.json. It is NOT trnM for everything, which is
+what this script used to do while claiming trnM matched "how coral mitogenomes are
+deposited in NCBI". Measured across the curated RefSeq databases in assets/refdb/,
+trnM is the deposited origin for Porifera 0%, Annelida 0%, Ctenophora 0%,
+Echinodermata 0.7%, Mollusca 0.8% and Arthropoda 1.9%. It IS the convention for
+Scleractinia (63.8%), which is where the rule came from and where it still applies;
+Anthozoa as a whole is rrnL 33.9% / cox1 28.5% / trnM 17.6%, i.e. no majority.
+
+Two rotations, two different jobs. The upstream cox1 pre-rotation
+(rotate_to_cox1.py) runs first purely to move the LINEARISATION POINT off an
+intron-split gene so MITOS annotates cleanly, and cox1 is a good universal choice
+for that because it is conserved and findable by tblastn. This step then sets the
+PUBLISHED origin, which is a deposition convention and has to be per-taxon. The
+second cannot be folded into the first: tRNA-Met and rrnL are not findable by
+protein search, which is why they need MITOS's annotation to exist first.
+
+Skipped for linear molecules. When the anchor gene is not annotated the genome
+falls back to --origin-fallback (cox1 by default, which is where the pre-rotation
+already put it) and, failing that, stays on the pre-rotation origin.
 
 Usage:
     mitos_to_emma.py --bed result.bed --genome asm.fa \
@@ -80,7 +97,7 @@ PRODUCT = {
 # via bin/mito_gene_order.py so both annotators emit byte-identical products.
 # trna_product() falls back to a bare gene-name product if the suffix or anticodon
 # isn't recognised -- a cosmetic field should never fail the run.
-from mito_gene_order import trna_product
+from mito_gene_order import TRNA_AA, trna_product
 
 
 def map_gene_name(raw):
@@ -283,22 +300,50 @@ def gene_nt_seq(genome, chrom, start, end, strand):
     return seq.reverse_complement() if strand == "-" else seq
 
 
-def trnmet_origin(features):
-    """Locate tRNA-Met's 5' end for re-origining, or None if MITOS found no trnM.
+def anchor_origin(features, anchor):
+    """Locate ``anchor``'s 5' end for re-origining, or None if MITOS did not call it.
 
-    Returns (pos, rc) where ``pos`` is the 1-based genomic coordinate of trnM's
-    5' end in the current (cox1-rotated) orientation and ``rc`` is True when trnM
-    sits on the minus strand, meaning the whole molecule must be reverse-
-    complemented so trnM reads 5'->3' on the plus strand from position 1 -- the
-    orientation NCBI coral mitogenomes are deposited in.
+    Returns (pos, rc) where ``pos`` is the 1-based genomic coordinate of the anchor's
+    5' end in the current (pre-rotation) orientation and ``rc`` is True when the anchor
+    sits on the minus strand, meaning the whole molecule must be reverse-complemented
+    so the anchor reads 5'->3' on the plus strand from position 1 -- the orientation
+    these records are deposited in.
+
+    exons[0] is the 5'-most piece in MITOS transcript order, which matters for the
+    multi-exon anchors: a tRNA is single-exon, but cox1 is intron-split in some sponge
+    families and rrnL can be called in pieces too, and the origin belongs at the start
+    of the gene, not the start of its largest exon.
     """
-    exons = features.get("TM")
+    exons = features.get(anchor)
     if not exons:
         return None
-    # trnM is single-exon; exons[0] is the 5'-most piece in MITOS transcript order.
     e = exons[0]
     # On the minus strand the 5' end is the higher genomic coordinate (end).
     return (e["end"], True) if e["strand"] == "-" else (e["start"], False)
+
+
+# Short, readable names for the log lines. The bare MITOS keys ("TM", "RNR2") are
+# what the code and the asset speak, but an operator reading a run log should not
+# have to translate them.
+ANCHOR_LABEL = {
+    "CO1": "cox1", "CO2": "cox2", "CO3": "cox3", "CYTB": "cytb",
+    "RNR1": "rrnS (12S)", "RNR2": "rrnL (16S)",
+}
+
+
+def anchor_label(key):
+    """Human-readable name for an anchor key, e.g. 'TM' -> 'tRNA-Met'.
+
+    Not trna_product(): that needs an anticodon to produce 'tRNA-Met(CAU)' and
+    degrades to the bare key ('tRNA-TM') without one, which is no more readable
+    than the key itself. Here only the amino acid is wanted.
+    """
+    if key in ANCHOR_LABEL:
+        return ANCHOR_LABEL[key]
+    if key and key.startswith("T") and len(key) > 1:
+        aa = TRNA_AA.get(key[1:])
+        return f"tRNA-{aa}" if aa else key
+    return key
 
 
 def _flip(strand):
@@ -306,10 +351,11 @@ def _flip(strand):
 
 
 def reorigin_seq(seq, pos, rc, seq_len):
-    """Re-origin a circular sequence so ``pos`` (trnM's 5' end) becomes base 1.
+    """Re-origin a circular sequence so ``pos`` (the anchor's 5' end) becomes base 1.
 
-    Mirrors reorigin_features: on a minus-strand trnM the molecule is reverse-
-    complemented first, then rotated so trnM's 5' end is position 1.
+    Mirrors reorigin_features: on a minus-strand anchor the molecule is reverse-
+    complemented first, then rotated so the anchor's 5' end is position 1. Gene-agnostic
+    by construction -- it only ever sees a coordinate and a strand flag.
     """
     if rc:
         seq = seq.reverse_complement()
@@ -319,9 +365,9 @@ def reorigin_seq(seq, pos, rc, seq_len):
 
 
 def reorigin_features(features, pos, rc, seq_len):
-    """Shift every feature coordinate into the trnM-origined frame.
+    """Shift every feature coordinate into the anchor-origined frame.
 
-    ``pos`` is trnM's 5' end in the current orientation. When ``rc`` each feature
+    ``pos`` is the anchor's 5' end in the current orientation. When ``rc`` each feature
     is first remapped onto the reverse complement (coords mirrored, strand
     flipped) so the whole transform stays consistent with reorigin_seq; then all
     coordinates are rotated so ``pos`` becomes position 1. A feature that ends up
@@ -354,6 +400,21 @@ def main():
                     help="Mito genetic code (from meta.genetic_code); no default -- the "
                          "caller must supply it. It is written as the transl_table "
                          "qualifier, so a stale default would mislabel the annotation.")
+    ap.add_argument("--origin-gene", required=True, metavar="KEY",
+                    help="MITOS/EMMA feature key the published genome is re-origined to "
+                         "(CO1, RNR2, TM, TF, ...), or NONE to skip re-origining. Resolved "
+                         "per taxon by the caller from assets/taxonomy/mito_origin_anchors.json. "
+                         "REQUIRED, like --code and for the same kind of reason: there are two "
+                         "call sites (MITOS2 and CORAL_ANNOTATION_FIX, one per sample), and a "
+                         "default here would let one of them be updated without the other, "
+                         "silently publishing FIX and PASS corals of the same species on "
+                         "different origins. A missing flag must fail loudly instead.")
+    ap.add_argument("--origin-fallback", default="CO1", metavar="KEY",
+                    help="Anchor to use when --origin-gene is not annotated, or NONE to leave "
+                         "the genome on the pre-rotation origin. Defaults to CO1, which is "
+                         "where rotate_to_cox1.py already put the molecule -- and re-origining "
+                         "to MITOS's own cox1 call is more precise than the tblastn "
+                         "back-extrapolation the pre-rotation used.")
     ap.add_argument("--species", default="", help="Species name for ##organism")
     ap.add_argument("--linear", action="store_true",
                     help="Mark the genome as linear (Is_circular=False) in the GFF "
@@ -383,27 +444,44 @@ def main():
                 e["chrom"] = chrom
     seq_len = len(genome[chrom].seq)
 
-    # Re-origin the published genome to tRNA-Met (NCBI coral convention), reusing
-    # MITOS's own trnM call. The upstream cox1 pre-rotation already lifted the
-    # anthozoan nad5 group I intron off the linearisation point so MITOS annotated
-    # every gene in order; here we just shift the genome + all coordinates so base
-    # 1 is trnM's 5' end. Only for circular molecules -- rotating a linear contig
-    # would be wrong. If MITOS found no trnM, leave the genome on the cox1 origin
-    # (still valid, just not the NCBI convention) so the run never fails on a
-    # missing tRNA.
-    origin = trnmet_origin(features) if not args.linear else None
+    # Re-origin the published genome to its taxon's deposition anchor, reusing MITOS's
+    # own call for that gene. The upstream cox1 pre-rotation already lifted any
+    # intron-split gene (the anthozoan nad5 group I intron) off the linearisation point
+    # so MITOS annotated every gene in order; here we just shift the genome + all
+    # coordinates so base 1 is the anchor's 5' end. Only for circular molecules --
+    # rotating a linear contig would be wrong.
+    #
+    # The ladder never fails the run on a missing gene: anchor, then fallback, then
+    # leave it where the pre-rotation put it. For the rrnL and trnF taxa the fallback
+    # is a real improvement over the old behaviour rather than a degradation -- a sponge
+    # whose RNR2 MITOS missed now lands on MITOS's own cox1 call, which is more precise
+    # than the tblastn back-extrapolation that produced the pre-rotation origin.
+    origin, used = None, None
+    if not args.linear and (args.origin_gene or "").upper() != "NONE":
+        for candidate in (args.origin_gene, args.origin_fallback):
+            if not candidate or candidate.upper() == "NONE":
+                continue
+            origin = anchor_origin(features, candidate)
+            if origin is not None:
+                used = candidate
+                break
+
     if origin is not None:
         pos, rc = origin
+        if used != args.origin_gene:
+            print(f"[mitos_to_emma] WARNING: no {anchor_label(args.origin_gene)} annotated; "
+                  f"falling back to {anchor_label(used)}.", file=sys.stderr)
         features = reorigin_features(features, pos, rc, seq_len)
         rotated = reorigin_seq(genome[chrom].seq, pos, rc, seq_len)
         genome[chrom] = SeqRecord(rotated, id=genome[chrom].id,
                                   description=genome[chrom].description)
-        print(f"[mitos_to_emma] re-origined {chrom} to tRNA-Met 5' end "
+        print(f"[mitos_to_emma] re-origined {chrom} to {anchor_label(used)} 5' end "
               f"(was pos {pos}{', minus strand -> reverse-complemented' if rc else ''}); "
-              "position 1 is now trnM.")
-    elif not args.linear:
-        print("[mitos_to_emma] WARNING: no tRNA-Met annotated; leaving genome on "
-              "the cox1 origin.", file=sys.stderr)
+              f"position 1 is now {anchor_label(used)}.")
+    elif not args.linear and (args.origin_gene or "").upper() != "NONE":
+        print(f"[mitos_to_emma] WARNING: neither {anchor_label(args.origin_gene)} nor "
+              f"{anchor_label(args.origin_fallback)} annotated; leaving genome on the "
+              f"rotate_to_cox1 origin.", file=sys.stderr)
 
     args.outdir.mkdir(parents=True, exist_ok=True)
     cds_dir = args.outdir / "cds"

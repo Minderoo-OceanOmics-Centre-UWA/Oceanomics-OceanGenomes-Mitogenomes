@@ -18,7 +18,7 @@ include { MITOS2                 } from '../../../modules/local/mitos2'
 include { ANNOTATION_QC_GATE     } from '../../../modules/local/annotation_qc_gate'
 include { CORAL_ANNOTATION_FIX   } from '../../../modules/local/coral_annotation_fix'
 include { REFERENCE_RELEVANCE    } from '../../../modules/local/reference_relevance'
-include { SELECT_CORAL_REFERENCE } from '../../../modules/local/select_coral_reference'
+include { SELECT_REFERENCE_DB } from '../../../modules/local/select_reference_db'
 include { BLAST_BLASTN           } from '../../../modules/nf-core/blast/blastn'
 include { LCA                    } from '../../../modules/local/LCA'
 include { PREPARE_LCA_DATABASES  } from '../../../modules/local/lca/prepare_databases'
@@ -64,7 +64,7 @@ def countAnnotatedRegions(files) {
     }
 }
 
-// Did SELECT_CORAL_REFERENCE pick a reference for this sample? Its status line starts
+// Did SELECT_REFERENCE_DB pick a reference for this sample? Its status line starts
 // with SELECTED / SELECTED_LOW_CONFIDENCE when a DB record aligned (and a reference.gb
 // was written), or NONE when nothing did. Read the always-emitted status so the fixer
 // can branch on a per-sample VALUE rather than a remainder join against the optional
@@ -76,6 +76,22 @@ def coralReferenceSelected(statusFile) {
     } catch (ignored) {
         return false
     }
+}
+
+// Which gene this sample's PUBLISHED mitogenome is re-origined to, as a MITOS feature
+// key. A per-sample `origin_gene` meta key wins if one is set -- the same precedence the
+// genetic_code samplesheet column has over mito_genetic_codes.json -- then the measured
+// per-taxon table, which always answers.
+//
+// Nothing sets meta.origin_gene today, and reading an absent key costs no hash change.
+// It exists as the resubmission escape hatch: changing an anchor changes the published
+// sequence's checksum, so ENA treats a re-run sample as a different sequence. Pinning
+// the old anchor for one sample then needs only an `origin_gene` samplesheet column,
+// not a code change. (The order-level table already keeps Scleractinia on trnM, so the
+// exposure is limited to inverts whose anchor actually moves: octocorals and sponges.)
+def originAnchorFor(meta) {
+    def explicit = meta.origin_gene?.toString()?.trim()
+    return explicit ? explicit : InvertTaxonGroups.originAnchor(meta.order, meta.class)
 }
 
 /*
@@ -97,6 +113,13 @@ workflow MITOGENOME_ANNOTATION {
 
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
+
+    // Parse the published-origin anchor table once (idempotent, like
+    // MitoGeneticCode.load in prepare_samplesheet). Fails fast if the asset is missing
+    // or was generated without the order level, which would silently rotate stony
+    // corals off tRNA-Met.
+    InvertTaxonGroups.loadOriginAnchors(
+        file("${projectDir}/assets/taxonomy/mito_origin_anchors.json", checkIfExists: true))
 
     //
     // MODULE: Download taxonomy database
@@ -328,6 +351,21 @@ workflow MITOGENOME_ANNOTATION {
                 .map { row -> [ row[0], row.size() > 2 && row[2] ? row[2] : row[1] ] }
         )
 
+    // TWO ROTATIONS, TWO DIFFERENT JOBS -- do not merge them.
+    //
+    // This one (ROTATE_ORIGIN, below) sets the LINEARISATION POINT before annotation, so
+    // intron-split genes no longer straddle it and MITOS can annotate cleanly. cox1 is a
+    // good universal choice for that: conserved, and findable by tblastn against a
+    // protein panel without any annotation existing yet.
+    //
+    // The PUBLISHED origin is set afterwards by mitos_to_emma.py --origin-gene, from the
+    // per-taxon table in assets/taxonomy/mito_origin_anchors.json (see originAnchorFor
+    // above). That one is a deposition convention, not an annotation aid, and it is
+    // measured per taxon rather than fixed: Scleractinia trnM 63.8%, Porifera rrnL
+    // 89.7%, Echinoidea trnF 75.6%, most others cox1. The second step cannot be folded
+    // into the first, because tRNA-Met and rrnL are not findable by protein search --
+    // they need MITOS's own annotation to exist first.
+    //
     // Re-origin invert assemblies to the cox1 start before MITOS2 so intron-split
     // genes (e.g. the hexacoral nad5 group I intron) no longer straddle
     // GetOrganelle's linearisation point. This mirrors EMMA's `--rotate MT-TF`
@@ -354,7 +392,7 @@ workflow MITOGENOME_ANNOTATION {
     )
 
     MITOS2 (
-        ROTATE_ORIGIN.out.fasta,
+        ROTATE_ORIGIN.out.fasta.map { meta, fasta -> [ meta, fasta, originAnchorFor(meta) ] },
         ch_mitos_refdb
     )
 
@@ -375,7 +413,15 @@ workflow MITOGENOME_ANNOTATION {
     // real evidence once this batch has run.
     //
     ANNOTATION_QC_GATE (
-        MITOS2.out.gff_proteins.filter { meta, _gff, _proteins -> InvertTaxonGroups.isCoralFixEligible(meta.class) }
+        // [meta, gff, proteins/, cds/] -- this destructuring must track BOTH
+        // MITOS2.out.gff_proteins and ANNOTATION_QC_GATE's input tuple. When cds/ was added
+        // for the PCG ORF check this closure kept three params, and Groovy cannot spread a
+        // four-element list into it: every invertebrate run aborted the whole session (not
+        // just the task -- an operator failure ignores errorStrategy) the moment the first
+        // MITOS2 task emitted.
+        MITOS2.out.gff_proteins.filter { meta, _gff, _proteins, _cds ->
+            InvertTaxonGroups.isCoralFixEligible(meta.class)
+        }
     )
 
     ch_gate = ANNOTATION_QC_GATE.out.decision
@@ -408,20 +454,29 @@ workflow MITOGENOME_ANNOTATION {
     // wrong/coarse species label can no longer hand a wrong-family reference to
     // the fixer. The bundled curated anthozoan reference is the only fallback (used
     // just for the rare sample no DB record aligns to).
-    ch_coral_db = Channel.fromPath("${projectDir}/assets/refdb/anthozoa/anthozoa_mito_refdb.gb", checkIfExists: true).first()
+    // The chosen record is rebuilt from the group's tracked fasta + manifest +
+    // features (bin/refdb_record.py) rather than sliced out of a stored .gb, which
+    // is no longer tracked for any group -- 84 MB across the eight of them,
+    // rewritten into history on every rebuild.
+    ch_coral_db = Channel.fromPath("${projectDir}/assets/refdb/anthozoa", checkIfExists: true).first()
 
-    SELECT_CORAL_REFERENCE ( ch_fix_base.map { meta, genome, _bed -> [meta, genome] }, ch_coral_db )
-    ch_selected_ref = SELECT_CORAL_REFERENCE.out.reference   // [meta, reference.gb]
+    SELECT_REFERENCE_DB (
+        ch_fix_base.map { meta, genome, _bed -> [meta, genome] }
+            .combine(ch_coral_db)
+            .map { meta, genome, refdb -> [meta, genome, refdb, 'anthozoa'] },
+        'reference'
+    )
+    ch_selected_ref = SELECT_REFERENCE_DB.out.reference   // [meta, reference.gb]
 
     ch_fix_selected = ch_fix_base.join(ch_selected_ref)
         .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }
 
     // Fallback: a FIX sample for which the selector emitted no reference (status NONE:
     // no DB record aligned) gets the bundled curated anthozoan reference. The unselected
-    // set is read from SELECT_CORAL_REFERENCE.out.status, which is emitted for EVERY FIX
+    // set is read from SELECT_REFERENCE_DB.out.status, which is emitted for EVERY FIX
     // sample, so this is a plain per-sample join (the sample falls back the moment its own
     // status arrives) rather than a remainder join that waits for the whole run to close.
-    ch_coral_ref_unselected = SELECT_CORAL_REFERENCE.out.status
+    ch_coral_ref_unselected = SELECT_REFERENCE_DB.out.status
         .filter { _meta, status_file -> !coralReferenceSelected(status_file) }
         .map { meta, _status_file -> [meta, true] }
     ch_curated_ref = Channel.fromPath("${projectDir}/assets/refdb/anthozoa/anthozoa_reference.gb", checkIfExists: true).first()
@@ -430,7 +485,12 @@ workflow MITOGENOME_ANNOTATION {
         .combine(ch_curated_ref)
         .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }
 
+    // The anchor is appended here, once, for both the selected and fallback arms, so a
+    // FIX anthozoan is published on exactly the same origin as a PASS one of the same
+    // taxon. mitos_to_emma.py makes --origin-gene required, so if this map were ever
+    // dropped the run would fail loudly rather than quietly splitting the two paths.
     ch_coral_fix_input = ch_fix_selected.mix(ch_fix_fallback)
+        .map { meta, genome, bed, ref -> [meta, genome, bed, ref, originAnchorFor(meta)] }
 
     CORAL_ANNOTATION_FIX ( ch_coral_fix_input )
 
@@ -456,7 +516,7 @@ workflow MITOGENOME_ANNOTATION {
                                               TRNA_RESCUE_GATE.out.versions, TRNA_SCAN.out.versions, TRNA_RESCUE.out.versions,
                                               ROTATE_ORIGIN.out.versions, MITOS2.out.versions,
                                               ANNOTATION_QC_GATE.out.versions, CORAL_ANNOTATION_FIX.out.versions,
-                                              SELECT_CORAL_REFERENCE.out.versions)
+                                              SELECT_REFERENCE_DB.out.versions)
 
     //
     // Use mix() to process CO1, 12s and 16s sequences through blast
@@ -543,7 +603,9 @@ workflow MITOGENOME_ANNOTATION {
 
     // Collect MultiQC files
     // Need to update this section to include everything
-    ch_multiqc_files = ch_multiqc_files.mix(BLAST_BLASTN.out.summary.collect{it[1]})
+    // summary is a plain Path channel, not [meta, path]. Path[1] returns the second
+    // component (for example "pawsey1348"), creating bogus MultiQC inputs.
+    ch_multiqc_files = ch_multiqc_files.mix(BLAST_BLASTN.out.summary)
     ch_multiqc_files = ch_multiqc_files.mix(ch_annot_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(BLAST_BLASTN.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(LCA.out.tool_params.collect { it[1] })

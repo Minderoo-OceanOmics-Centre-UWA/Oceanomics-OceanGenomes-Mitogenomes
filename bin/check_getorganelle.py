@@ -182,6 +182,15 @@ def main():
     args = p.parse_args()
 
     getorg_circ = coerce_bool(args.getorg_circular)
+    # `seq` / L is the FIRST record: the reference-coverage, length-ratio and
+    # tandem-repeat tests below all describe one molecule, so they must not be fed
+    # a concatenation of unrelated scaffolds. `total_len` is every record summed,
+    # and is what `assembly_length` reports -- a fragmented GetOrganelle result is
+    # the normal case here (it is exactly what needsReseed branches on), so
+    # reporting the first contig as the assembly's length understated it badly:
+    # INV04_BOLOCERA's 12-scaffold, 14,745 bp reseed was recorded as 268 bp.
+    # bin/check_circularity.py (OATK) keeps first-record semantics on purpose --
+    # there a second record is an anomaly it warns about, not the expected shape.
     nrec, seq, total_len = read_records(args.fasta)
     L = len(seq)
     note = "ok"
@@ -265,18 +274,22 @@ def main():
     def fmt(v):
         return "NA" if v is None else ("True" if v is True else ("False" if v is False else str(v)))
 
+    # first_record_length is appended at the end, never inserted: readers key on the
+    # header (pandas in push_mtdna_assm_results.try_parse_getorg_check,
+    # mitogenome_assembly_summary), but appending keeps positional readers working too.
     cols = ["sample", "getorg_circular", "num_records", "reference_coverage", "reference_max_gap",
             "circular_by_reference", "final_verdict_circular", "circular_corrected",
             "assembly_length", "reference_length", "length_ratio", "excess_bp", "length_anomaly",
             "tandem_repeat", "repeat_region", "anomaly_type", "suggested_trim_region",
-            "curation_suggestion", "note"]
+            "curation_suggestion", "note", "first_record_length"]
     vals = [args.sample, fmt(getorg_circ), nrec,
             (f"{ref_cov*100:.1f}%" if ref_cov is not None else "NA"),
             (ref_gap if ref_gap is not None else "NA"),
             fmt(circular_by_reference), fmt(final_circular), ("yes" if circular_corrected else "no"),
-            L, (ref_len if ref_len else "NA"), fmt(length_ratio), fmt(excess),
+            total_len, (ref_len if ref_len else "NA"), fmt(length_ratio), fmt(excess),
             ("yes" if length_anomaly else ("no" if length_anomaly is False else "NA")),
-            ("yes" if repeat else "no"), repeat_region, anomaly_type, suggested_trim, curation, note]
+            ("yes" if repeat else "no"), repeat_region, anomaly_type, suggested_trim, curation, note,
+            L]
 
     os.makedirs(os.path.dirname(args.out_evidence) or ".", exist_ok=True)
     with open(args.out_evidence, "w") as out:

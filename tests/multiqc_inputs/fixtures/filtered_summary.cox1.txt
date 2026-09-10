@@ -1,0 +1,2 @@
+sample	hits
+cox1	3

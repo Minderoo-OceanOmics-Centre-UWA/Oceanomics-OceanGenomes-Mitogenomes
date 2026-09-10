@@ -23,7 +23,7 @@ process MITOGENOME_ASSEMBLY_SUMMARY {
     def maxLength = params.mitogenome_summary_max_length != null ? "--max-length ${params.mitogenome_summary_max_length}" : ''
     def expectedGenes = params.mitogenome_summary_expected_gene_count != null ? "--expected-gene-count ${params.mitogenome_summary_expected_gene_count}" : ''
     def expectedPcgs = params.mitogenome_summary_expected_pcg_count != null ? "--expected-pcg-count ${params.mitogenome_summary_expected_pcg_count}" : ''
-    // Same knob annotation_stats.py gets via PUSH_MTDNA_ANNOTATION_RESULTS, so the
+    // Same knob annotation_stats.py gets via ANNOTATION_STATS, so the
     // QC report's tRNA allowance cannot drift from the pass/hold gate's.
     def trnaTolerance = params.annotation_trna_tolerance != null ? "--trna-tolerance ${params.annotation_trna_tolerance}" : ''
     """

@@ -346,10 +346,24 @@ def main():
         df = fetch_bankit_metadata(conn, args.og_id, args.seq_tech)
 
     if df.empty:
-        print(f"❌ No metadata found for sample {args.og_id} with tech {args.seq_tech}")
-        pd.DataFrame().to_csv(f"{args.og_id}.bankit_metadata.csv", index=False)
-        pd.DataFrame().to_csv(f"{args.og_id}.bankit_metadata_latlon_cleaned.csv", index=False)
-        return
+        # Fail rather than write empty tables. The query SELECTs only from sample,
+        # but it INNER-filters on mitogenome_data (WHERE m.og_id / m.tech), so an
+        # empty result almost always means the mitogenome_data parent row does not
+        # exist yet -- not that the specimen has no collection metadata.
+        #
+        # This used to write two empty CSVs and exit 0, which produced a package
+        # with no source modifiers at all and said so only in the task log. That
+        # was survivable while submission prep was gated behind the committed
+        # upload receipt and the row was therefore guaranteed. Prep now runs with
+        # --skip_upload_results, where a sample new to the database genuinely has
+        # no row, and a silent empty .src there would reach a submitter looking
+        # exactly like a specimen with nothing recorded about it.
+        raise SystemExit(
+            f"❌ No metadata found for {args.og_id} (tech: {args.seq_tech}). "
+            "The mitogenome_data row this query filters on is missing, or the "
+            "specimen has no sample record. Upload the assembly results first "
+            "(run without --skip_upload_results), or fix the sample record."
+        )
 
     # Format dates
     df["Collection_date"] = pd.to_datetime(df["date_collected"], errors="coerce")

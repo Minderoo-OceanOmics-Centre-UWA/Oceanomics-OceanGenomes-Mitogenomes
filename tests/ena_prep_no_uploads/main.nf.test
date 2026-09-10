@@ -1,0 +1,48 @@
+nextflow_pipeline {
+    name "ENA submission prep runs with the database writes skipped"
+    script "../../tests/ena_submission_prep_stub.nf"
+
+    // The reported symptom: a run given --sql_config still did not start submission
+    // prep, because the guard in workflows/oceangenomesmitogenomes.nf was
+    // `!params.skip_upload_results && params.sql_config` and only its second half was
+    // satisfied. Prep never wrote to the database; it was coupled to the writes by one
+    // thing, the assembly-receipt gate, which existed because PREPARE_ENA_METADATA read
+    // mean_depth back out of the row this run had just written.
+    //
+    // That number is measured by MITOGENOME_COVERAGE and now travels down the QC tuple
+    // as a file, so prep depends on no write at all. This pins that: the whole prep
+    // chain runs with --skip_upload_results set, and not one pusher is involved.
+
+    test("the prep chain runs under --skip_upload_results and pushes nothing") {
+        when {
+            options "-stub"
+            params {
+                outdir                 = "$outputDir"
+                sql_config             = "${projectDir}/test_data/sql_config.txt"
+                template_sbt           = "${projectDir}/tests/test_data/ena_stub.sbt"
+                ena_study              = "PRJEB123419"
+                ena_webin_validate     = false
+                ena_validation_attempt = "stub"
+                skip_upload_results    = true
+            }
+        }
+
+        then {
+            def ran = { name -> workflow.trace.tasks().any { it.name.contains(name) } }
+            assertAll(
+                { assert workflow.success },
+                // The two steps that read from the database, and the packaging they feed.
+                { assert ran('PREPARE_ENA_METADATA') },
+                { assert ran('BUILD_SOURCE_MODIFIERS') },
+                { assert ran('FORMAT_FILES') },
+                { assert ran('GEN_FILES_TABLE2ASN') },
+                { assert ran('ENA_FLATFILE') },
+                { assert ran('BUILD_ENA_CANDIDATE_PACKAGE') },
+                // No write, and therefore nothing to order behind. If a pusher turns up
+                // here the read/write split has been undone.
+                { assert !ran('PUSH_') },
+                { assert !ran('UPLOAD_RESULTS') }
+            )
+        }
+    }
+}

@@ -24,6 +24,8 @@ in-order by a rescue gate and out-of-order by the QC step. Both readers now live
 here, for the same reason REF_GENES does.
 """
 
+import re
+
 # Reference gene order (tRNA, rRNA, CDS) -- the standard vertebrate set.
 REF_GENES = [
     "TF", "RNR1", "TV", "RNR2", "TL2", "ND1", "TI", "TQ",
@@ -521,3 +523,181 @@ def order_variant_taxon_check(taxon, lineage):
             return "agree"
         return f"disagree:{lca_value.strip()}"
     return "unresolved"
+
+
+# ------------------------------------------------- reference-DB gene vocabulary
+#
+# The curated reference databases under assets/refdb/ are RefSeq records from
+# eight phyla, and their gene vocabulary is not one vocabulary. The same gene
+# appears as COX1 / cox1 / COI / COXI / "cytochrome c oxidase subunit I"; the
+# large rRNA as rrnL / l-rRNA / 16S ribosomal RNA / RRN16; and -- the trap that
+# matters most -- tRNA rows routinely carry an EMPTY `gene` column with only
+# "tRNA-Met" in `product`. A mapper that reads `gene` alone silently drops every
+# tRNA from the tally, which is exactly how a first cut of the origin-anchor
+# table reported Echinoidea as cox1 when the answer is tRNA-Phe (75.6%).
+#
+# The three-letter amino-acid lookup below must be a real map, NOT a first-letter
+# shortcut: Phe and Pro both start with P, and Thr/Trp/Tyr all start with T.
+
+_AA3_TO_1 = {
+    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
+    "GLN": "Q", "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I",
+    "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
+    "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
+}
+
+# Reference-DB spellings -> EMMA key, for the non-tRNA features. Keys are
+# upper-cased and stripped before lookup.
+_REFDB_EXACT = {
+    "COX1": "CO1", "CO1": "CO1", "COI": "CO1", "COXI": "CO1", "MT-CO1": "CO1",
+    "COX2": "CO2", "CO2": "CO2", "COII": "CO2", "COXII": "CO2", "MT-CO2": "CO2",
+    "COX3": "CO3", "CO3": "CO3", "COIII": "CO3", "COXIII": "CO3", "MT-CO3": "CO3",
+    "COB": "CYTB", "CYTB": "CYTB", "CYB": "CYTB", "MT-CYB": "CYTB",
+    "ATP6": "ATP6", "ATPASE6": "ATP6", "ATPASE 6": "ATP6", "MT-ATP6": "ATP6",
+    "ATP8": "ATP8", "ATPASE8": "ATP8", "ATPASE 8": "ATP8", "MT-ATP8": "ATP8",
+    "RNL": "RNR2", "RRNL": "RNR2", "L-RRNA": "RNR2", "LARGE SUBUNIT RIBOSOMAL RNA": "RNR2",
+    "16S RIBOSOMAL RNA": "RNR2", "16S RRNA": "RNR2", "RRN16": "RNR2", "MT-RNR2": "RNR2",
+    "RNS": "RNR1", "RRNS": "RNR1", "S-RRNA": "RNR1", "SMALL SUBUNIT RIBOSOMAL RNA": "RNR1",
+    "12S RIBOSOMAL RNA": "RNR1", "12S RRNA": "RNR1", "RRN12": "RNR1", "MT-RNR1": "RNR1",
+}
+
+_ND_RE = re.compile(r"^(?:ND|NAD|NADH)[- ]?(\d+)(L?)$")
+_ND_PRODUCT_RE = re.compile(r"NADH DEHYDROGENASE SUBUNIT (\d+)(L?)")
+_TRNA_NAME_RE = re.compile(r"TRNA[-_]?([A-Z]{3})")
+# trnL2 / trnS1 / trnM(cat) / trnL2(tta) -- the DB's own compact tRNA spelling.
+_TRN_COMPACT_RE = re.compile(r"^TRN([A-Z])(\d?)")
+
+
+def refdb_gene_to_emma(feature_type, gene, product):
+    """Map one assets/refdb/*/features.tsv row to its EMMA gene key, or None.
+
+    ``feature_type`` is the TSV's `type` column (CDS / tRNA / rRNA); ``gene`` and
+    ``product`` are its `gene` and `product` columns, either of which may be empty.
+
+    Returns None for anything unrecognised rather than guessing. Callers must
+    COUNT and REPORT the Nones instead of dropping them: a silent drop here
+    biases whatever is being tallied, and the bias is invisible because the
+    remaining rows still look reasonable.
+
+    tRNA-Leu and tRNA-Ser come back as bare 'TL' / 'TS' because the reference DBs
+    very often do not record which of the two copies a row is, while MITOS always
+    emits TL1/TL2/TS1/TS2. Those two keys are therefore NOT valid MITOS feature
+    keys and a caller that needs one must reject them explicitly.
+    """
+    ftype = (feature_type or "").strip()
+    for raw in (gene, product):
+        text = (raw or "").strip().upper()
+        if not text:
+            continue
+        if ftype == "tRNA" or text.startswith("TRNA") or text.startswith("TRN"):
+            m = _TRNA_NAME_RE.search(text)
+            if m and m.group(1) in _AA3_TO_1:
+                one = _AA3_TO_1[m.group(1)]
+                # A copy number, when the DB bothered to record one: trnL2, trnS1.
+                copy = re.search(r"TRN[A-Z](\d)", text)
+                return "T" + one + (copy.group(1) if copy and one in ("L", "S") else "")
+            m = _TRN_COMPACT_RE.match(text)
+            if m:
+                return "T" + m.group(1) + (m.group(2) if m.group(1) in ("L", "S") else "")
+            continue
+        if text in _REFDB_EXACT:
+            return _REFDB_EXACT[text]
+        m = _ND_RE.match(text) or _ND_PRODUCT_RE.search(text)
+        if m:
+            return f"ND{m.group(1)}{m.group(2).upper()}"
+        if "SUBUNIT" in text and "OXIDASE" in text:
+            if "III" in text or text.rstrip().endswith(" 3"):
+                return "CO3"
+            if "II" in text or text.rstrip().endswith(" 2"):
+                return "CO2"
+            return "CO1"
+        if "CYTOCHROME B" in text:
+            return "CYTB"
+        if "ATP SYNTHASE" in text:
+            m = re.search(r"SUBUNIT (\d)", text)
+            if m:
+                return f"ATP{m.group(1)}"
+    return None
+
+
+def load_origin_anchors(path):
+    """Parse assets/taxonomy/mito_origin_anchors.json -> (orders, classes, groups, policy).
+
+    Mirrors InvertTaxonGroups.loadOriginAnchors() in lib/, with the same duplicate-key
+    and vocabulary checks, so a malformed asset fails the same way whichever side reads
+    it first -- the same reason mito_genetic_codes.json has both a Groovy and a Python
+    reader instead of one copy per language.
+
+    object_pairs_hook is not optional: json.load silently keeps the LAST of two
+    duplicate keys, so a table with `scleractinia` listed twice would resolve to
+    whichever happened to be written second, with no error anywhere.
+    """
+    import json
+
+    def _no_dupes(pairs):
+        seen = {}
+        for key, value in pairs:
+            if key in seen:
+                raise ValueError(f"{path}: duplicate key '{key}'")
+            seen[key] = value
+        return seen
+
+    with open(path) as handle:
+        payload = json.load(handle, object_pairs_hook=_no_dupes)
+
+    policy = payload.get("policy") or {}
+    orders = {k.lower(): v["anchor"] for k, v in (payload.get("orders") or {}).items()}
+    classes = {k.lower(): v["anchor"] for k, v in (payload.get("classes") or {}).items()}
+    groups = {k.lower(): v["anchor"] for k, v in (payload.get("groups") or {}).items()}
+
+    default = policy.get("default_anchor")
+    for label, table in (("orders", orders), ("classes", classes), ("groups", groups)):
+        for key, anchor in table.items():
+            if not is_valid_anchor(anchor):
+                raise ValueError(
+                    f"{path}: {label}['{key}'] anchor '{anchor}' is not a MITOS feature key"
+                )
+    if not is_valid_anchor(default):
+        raise ValueError(f"{path}: policy.default_anchor '{default}' is not a MITOS feature key")
+
+    return orders, classes, groups, policy
+
+
+def is_valid_anchor(key):
+    """Whether ``key`` is a feature key mitos_to_emma can actually look up.
+
+    Rejects the ambiguous bare 'TL'/'TS' that refdb_gene_to_emma emits when the
+    reference DB did not record which tRNA-Leu/tRNA-Ser copy a row is. Those are
+    real tallies but they are not addressable in a MITOS annotation, so an anchor
+    table must never ship one.
+    """
+    if not key or not isinstance(key, str):
+        return False
+    key = key.strip()
+    if key in PCG_GENES or key in RRNA_GENES:
+        return True
+    if key in ("TL", "TS"):
+        return False
+    return key in TRNA_GENES
+
+
+def resolve_origin_anchor(taxon_order, taxon_class, orders, classes, groups, policy,
+                          group_of_class=None):
+    """Resolve one sample's published-origin anchor: order, then class, then group.
+
+    Never returns None -- an unmapped taxon takes policy.default_anchor. That is the
+    cox1PanelGroup() trade-off, not the seedDbGroup() one: a wrong anchor rotates a
+    circle (cosmetic, reversible, and mitos_to_emma falls back when the gene is not
+    annotated), whereas no anchor at all is a hard failure.
+    """
+    order_key = _normalise_rank_value(taxon_order).lower()
+    class_key = _normalise_rank_value(taxon_class).lower()
+    if order_key and order_key in orders:
+        return orders[order_key]
+    if class_key and class_key in classes:
+        return classes[class_key]
+    if group_of_class and class_key:
+        group = group_of_class.get(class_key)
+        if group and group in groups:
+            return groups[group]
+    return policy.get("default_anchor", "CO1")

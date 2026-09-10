@@ -1,7 +1,11 @@
 import importlib.util
+import io
+import os
 import sys
+import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stderr
 from pathlib import Path
 
 
@@ -23,6 +27,7 @@ class FakeCursor:
     def __init__(self):
         self.queries = []
         self.result = None
+        self.empty = False
 
     def __enter__(self):
         return self
@@ -33,7 +38,7 @@ class FakeCursor:
     def execute(self, query, values):
         self.queries.append(" ".join(query.split()))
         if "FROM mitogenome_data" in query:
-            self.result = [(123.5,)]
+            self.result = [] if self.empty else [(123.5,)]
         else:
             raise AssertionError(f"unexpected query: {query}")
 
@@ -52,9 +57,10 @@ class FakeConnection:
         return self.cursor_instance
 
 
-def fetch():
+def fetch(depth_tsv=None):
     connection = FakeConnection()
     args = Namespace(
+        depth_tsv=depth_tsv,
         og_id="OG910",
         assembly_prefix="OG910.hifi.241127.v3mitohifi",
         annotation_version="emma102",
@@ -90,11 +96,12 @@ class PrepareEnaMetadataTests(unittest.TestCase):
         """--ena_study names the study validation ran against, not a target."""
         metadata, _ = fetch()
         self.assertEqual(metadata["validation_study"], "PRJEB123419")
-        self.assertEqual(metadata["schema_version"], 2)
+        self.assertEqual(metadata["schema_version"], 3)
 
     def test_other_metadata_still_collected(self):
         metadata, _ = fetch()
         self.assertEqual(metadata["mean_depth"], 123.5)
+        self.assertEqual(metadata["mean_depth_source"], "database")
         self.assertEqual(metadata["program"], "MitoHiFi 3")
         self.assertEqual(metadata["platform"], "PACBIO_SMRT")
         self.assertEqual(metadata["scientific_name"], "Choerodon rubescens")
@@ -108,6 +115,63 @@ class PrepareEnaMetadataTests(unittest.TestCase):
         self.assertEqual(MODULE.platform_for_tech("hifi"), "PACBIO_SMRT")
         self.assertEqual(MODULE.platform_for_tech("ilmn"), "ILLUMINA")
         self.assertEqual(MODULE.platform_for_tech("hic"), "ILLUMINA")
+
+
+class MeanDepthSourceTests(unittest.TestCase):
+    """Coverage comes from this run's measurement, and the database is the fallback.
+
+    The precedence is the whole reason submission prep can run with
+    --skip_upload_results: reading the file instead of the row this run writes is
+    what removed the ordering dependency on the upload.
+    """
+
+    def _depth_file(self, text):
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".mito_depth.tsv", delete=False
+        )
+        handle.write(text)
+        handle.close()
+        self.addCleanup(os.unlink, handle.name)
+        return handle.name
+
+    def test_the_pipeline_measurement_wins_over_the_stored_row(self):
+        """A re-assembled molecule must not report the previous run's depth."""
+        path = self._depth_file("sample\tmean_depth\nOG910\t812.5\n")
+        metadata, cursor = fetch(depth_tsv=path)
+        self.assertEqual(metadata["mean_depth"], 812.5)
+        self.assertEqual(metadata["mean_depth_source"], "pipeline")
+        # The stored 123.5 was never even queried.
+        self.assertEqual(cursor.queries, [])
+
+    def test_the_database_is_used_when_there_is_no_measurement(self):
+        """--skip_mitogenome_depth and precomputed assemblies land here."""
+        path = self._depth_file("sample\tmean_depth\n")
+        metadata, cursor = fetch(depth_tsv=path)
+        self.assertEqual(metadata["mean_depth"], 123.5)
+        self.assertEqual(metadata["mean_depth_source"], "database")
+        self.assertTrue(any("FROM mitogenome_data" in q for q in cursor.queries))
+
+    def test_neither_source_is_reported_as_none_not_zero(self):
+        """A false COVERAGE 0 is worse than no COVERAGE at all."""
+        connection = FakeConnection()
+        connection.cursor_instance.empty = True
+        args = Namespace(
+            depth_tsv=None,
+            og_id="OG910",
+            assembly_prefix="OG910.hifi.241127.v3mitohifi",
+            annotation_version="emma102",
+            full_seqid="OG910.hifi.241127.v3mitohifi.emma102",
+            tech="hifi",
+            seq_date="241127",
+            code="v3mitohifi",
+            study="PRJEB123419",
+            scientific_name="Choerodon rubescens",
+        )
+        with redirect_stderr(io.StringIO()) as err:
+            metadata = MODULE.fetch_metadata(connection, args)
+        self.assertIsNone(metadata["mean_depth"])
+        self.assertEqual(metadata["mean_depth_source"], "none")
+        self.assertIn("no mean_depth", err.getvalue())
 
 
 if __name__ == "__main__":

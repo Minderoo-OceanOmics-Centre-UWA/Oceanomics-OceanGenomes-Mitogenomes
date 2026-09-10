@@ -1,0 +1,46 @@
+nextflow_workflow {
+    name "BLAST summaries reach MultiQC as files, not as path components"
+    script "./main.nf"
+    workflow "MULTIQC_INPUT_SHAPES"
+
+    tag "multiqc_inputs"
+
+    test("mixing the plain Path channel keeps real files; indexing it does not") {
+        when {
+            workflow {
+                """
+                def fx = "${projectDir}/tests/multiqc_inputs/fixtures"
+                input[0] = Channel.of(
+                    file("\${fx}/filtered_summary.cox1.txt"),
+                    file("\${fx}/filtered_summary.nd2.txt"),
+                    file("\${fx}/filtered_summary.rrnl.txt")
+                )
+                """
+            }
+        }
+
+        then {
+            def fixed = workflow.out.fixed
+            def buggy = workflow.out.buggy
+            assertAll(
+                { assert workflow.success },
+
+                // What MultiQC must receive: every summary, each a readable file.
+                { assert fixed.size() == 3 },
+                { assert fixed.every { new File(it.toString()).isFile() } },
+                { assert fixed.collect { new File(it.toString()).name }.sort() ==
+                         ['filtered_summary.cox1.txt',
+                          'filtered_summary.nd2.txt',
+                          'filtered_summary.rrnl.txt'] },
+
+                // And what it must never receive. Indexing a Path yields a bare
+                // directory component -- no separator, not a file, and identical
+                // for every input, which is why one bogus name repeated 48 times.
+                { assert buggy.every { !new File(it.toString()).isFile() } },
+                { assert buggy.every { !it.toString().contains('/') } },
+                { assert buggy.every { !it.toString().startsWith('filtered_summary') } },
+                { assert buggy.collect { it.toString() }.unique().size() == 1 }
+            )
+        }
+    }
+}

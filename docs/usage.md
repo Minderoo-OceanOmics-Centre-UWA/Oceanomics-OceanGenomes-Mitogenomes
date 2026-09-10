@@ -90,6 +90,9 @@ that matches your container/conda environment.
 | `--oatk_mito_db` | With Oatk fallback | Path to the OatkDB `<clade>_mito.fam` profile-HMM (index files staged beside it). Required when `--enable_oatk_fallback true`. |
 | `--oatk_syncmer_size`, `--oatk_syncmer_coverage` | Optional | Syncmer size (`-k`, default `1001`) and coverage (`-c`, default `30`) passed to Oatk/syncasm. |
 | `--skip_getorganelle_reseed` | Optional | Disable the automatic GetOrganelle reseed pass on failed/fragmented first passes (default `false`). |
+| `--getorganelle_firstpass_group_genes` | Optional | Label the FIRST GetOrganelle pass with the sample's curated group gene database instead of only the stock `animal_mt` LabelDatabase (default `true`). The stock seed still recruits the reads; only labelling changes. |
+| `--getorganelle_empty_first_pass_rescue` | Optional | Reseed a first pass that produced no contig at all from the sample's whole curated group database (default `true`). Without it an empty first pass cannot select a seed subset and can never be reseeded. |
+| `--hinted_memory_base_gb` | Optional | Attempt-1 memory (GB) for `GETORGANELLE_FROMREADS`, `GETORGANELLE_RESEED` and `OATK` when no per-sample hint exists (default `64`). On Setonix the memory request is what is billed, so this dominates SU. |
 
 Invertebrate reseeds take their seed and gene-label database from the curated per-phylum databases in
 `assets/refdb/<group>/`, chosen from the sample's `class` (Cnidaria → anthozoa, Gastropoda → mollusca,
@@ -568,8 +571,17 @@ The main workflow supports coarse-grained skipping and reuse of pre-computed art
 - `--skip_mitogenome_annotation` – skip EMMA / BLAST / LCA; optional inputs
   `--precomputed_mitogenome_annotation_results`, `--precomputed_mitogenome_blast_results`, and
   `--precomputed_mitogenome_lca_results` allow you to feed downstream modules.
-- `--skip_upload_results` – disable SQL upload modules and QC gating. Use when working offline or on
-  staging environments without database access.
+- `--skip_upload_results` – disable the SQL upload modules, and only those. Local QC is unaffected:
+  annotation statistics, species validation, the QC gate, the QC summary and the held-samples report all
+  still run, and the assembly summary still gets its annotation columns. ENA submission prep is unaffected
+  too: it reads from the database without writing to it, so it runs whenever `--sql_config` is supplied.
+  Use when working offline or on staging environments without database access.
+- `--skip_ena_submission_prep` – disable table2asn, the ENA flat file and candidate packaging. Separate
+  from `--skip_upload_results` because that flag no longer doubles as an off switch for this stage. Note
+  that submission prep needs both `--sql_config` (it reads collection date, country and coordinates) and
+  `--ena_study`; without a study it is skipped with a warning, since a study is what marks a run as doing
+  submission work. `BUILD_SOURCE_MODIFIERS` fails rather than emitting an empty source-modifiers table for
+  a sample whose `mitogenome_data` row does not exist yet.
 - `--skip_hic_fastp` – skip fastp trimming of raw Hi-C reads (they are trimmed by default before
   GetOrganelle; Illumina reads bypass fastp because the draft-genome pipeline already trims them).
 

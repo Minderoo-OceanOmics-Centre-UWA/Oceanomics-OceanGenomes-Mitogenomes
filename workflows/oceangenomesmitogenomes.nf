@@ -18,7 +18,8 @@ include { MITOGENOME_ANNOTATION     } from '../subworkflows/local/mitogenome_ann
 include { COLLAPSE_CONCATEMER       } from '../modules/local/collapse_concatemer'
 include { MIRROR_MTDNA_TO_COLLAPSED } from '../modules/local/mirror_mtdna_to_collapsed'
 include { UPLOAD_RESULTS; UPLOAD_ENA_RESULTS } from '../subworkflows/local/upload_results_mito'
-include { MITOGENOME_QC             } from '../subworkflows/local/mitogenome_qc'
+include { MITOGENOME_QC            } from '../subworkflows/local/mitogenome_qc'
+include { ENA_SUBMISSION_PREP             } from '../subworkflows/local/ena_submission_prep'
 include { COMPILE_HELD_SAMPLES      } from '../modules/local/compile_held_samples'
 include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
 include { MITOGENOME_COVERAGE      } from '../modules/local/mitogenome_coverage/main'
@@ -126,6 +127,23 @@ def collapseAction(tsv) {
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+    /* The if and else statements in this workflow are for when steps are skipped in the nextflow_run script.
+        What it is doing is 'if' this processes isnt skipped then run the subworkflow and provide the standard outputs.
+        
+        Then 'else if' is if the process has been skipped then we will create the required input for the following
+        subworkflows using the predefined file paths for the output in the nextflow.config, the "precomputed_*" file
+        paths. 
+            The relevant information is extracted to create the meta map from the parts of the file name. This is
+            assuming that files are named with the sample id, then the type of sequencing, the date and then the other
+            information in the file name, all seperated by a '.'
+            The mitogenome sections assume that the files are named as above, $sample_id.$sequencing_technology.$date with
+            additional information added to this with each proccess. The assembly process will add a .getorganelle${version}
+            after the inital prefix and befor the file extension. Then the annotation process will add a .emma${version} to 
+            the previous prefix.
+        
+        The 'else' statement is then just creating and empty channel if neither of the previous steps worked.
+    */
+    
 workflow OCEANGENOMESMITOGENOMES {
 
     take:
@@ -167,25 +185,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .map { _sample_key, meta -> meta.id }
         .unique()
         .collectFile(name: 'samplesheet_ogs.txt', newLine: true, sort: true)
-
-    /* The if and else statements in this workflow are for when steps are skipped in the nextflow_run script.
-        What it is doing is 'if' this processes isnt skipped then run the subworkflow and provide the standard outputs.
-        
-        Then 'else if' is if the process has been skipped then we will create the required input for the following
-        subworkflows using the predefined file paths for the output in the nextflow.config, the "precomputed_*" file
-        paths. 
-            The relevant information is extracted to create the meta map from the parts of the file name. This is
-            assuming that files are named with the sample id, then the type of sequencing, the date and then the other
-            information in the file name, all seperated by a '.'
-            The mitogenome sections assume that the files are named as above, $sample_id.$sequencing_technology.$date with
-            additional information added to this with each proccess. The assembly process will add a .getorganelle${version}
-            after the inital prefix and befor the file extension. Then the annotation process will add a .emma${version} to 
-            the previous prefix.
-        
-        The 'else' statement is then just creating and empty channel if neither of the previous steps worked.
-    */
-
-    
+   
     // Per-sample reference GenBanks (findMitoReference, from the assembly stage)
     // reused by the anthozoan annotation fixer. Partial / empty on precomputed or
     // skip paths; the annotation subworkflow re-resolves any sample missing one.
@@ -973,85 +973,185 @@ workflow OCEANGENOMESMITOGENOMES {
     )
 
     //
+    // SUBWORKFLOW: MITOGENOME_QC
+    //
+    // The verdict: species comparison, annotation statistics, the gate that combines
+    // them, and the per-sample QC summary. Runs UNCONDITIONALLY, because none of it
+    // touches the database. It used to sit inside the upload guard below, which meant
+    // a run with --skip_upload_results (or no --sql_config at all) produced no gene
+    // counts, no completeness verdict, no held-samples accounting, and an assembly
+    // summary whose annotation columns were empty for every sample.
+    //
+    // Per-sample circularity-check evidence from both assemblers feeds the QC
+    // gate (anomaly block; the circular condition itself comes via meta.circular).
+    // Keyed by mt_assembly_prefix and total over the canonical assemblies, which is what
+    // lets the gate attach it with a plain join instead of collecting the whole channel.
+    ch_mitogenome_circularity_evidence = ch_canonical_circularity_evidence
+
+    MITOGENOME_QC (
+        ch_mitogenome_annotation_results,
+        ch_mitogenome_blast_results,
+        ch_mitogenome_lca_results,
+        ch_mitogenome_circularity_evidence,
+        ch_mitogenome_region_counts
+    )
+
+    // The annotation statistics reach MITOGENOME_ASSEMBLY_SUMMARY from here, not from
+    // the uploader. This single line is what fills num_genes / num_cds /
+    // missing_genes / frameshift_flag; when it lived inside the guard those columns
+    // were empty in every run that skipped uploads.
+    ch_assembly_summary_files = ch_assembly_summary_files.mix(MITOGENOME_QC.out.assembly_summary_files)
+
+    // Keyed on mt_assembly_prefix, not the whole meta map. Both sides descend from
+    // MITOGENOME_ANNOTATION so their metas usually agree, but each is restored from its own
+    // cache entry on a -resume, and a whole-map join that stops agreeing drops every sample
+    // SILENTLY -- the failure mode that emptied the QC gate one operator upstream (see the
+    // upload-receipt join in upload_results_mito). Hardened defensively: mt_assembly_prefix
+    // is a field of both metas, so prefix equality is implied by map equality and this can
+    // only ever match the same pairs or more, and it is 1:1 on both sides (one QC row and
+    // one annotation bundle per assembly) so there is no fan-out.
+    def ch_qc_input = MITOGENOME_QC.out.qc_ready
+        .map { meta, species_name, proceed_qc, circular ->
+            [ meta.mt_assembly_prefix, meta, species_name, proceed_qc, circular ]
+        }
+        .join(
+            ch_mitogenome_annotation_results.map { meta, files -> [ meta.mt_assembly_prefix, files ] },
+            by: 0
+        )
+        .map { _prefix, meta, species_name, proceed_qc, circular, annotation_files ->
+            [ meta.mt_assembly_prefix, meta, species_name, proceed_qc, circular, annotation_files ]
+        }
+        // Attach this run's coverage measurement, same pattern and same reasoning as the
+        // depth join in buildAssemblyUploadRows above: remainder:true so a sample that
+        // legitimately has no depth (--skip_mitogenome_depth, or a precomputed assembly
+        // with no reads channel) still reaches submission prep with the placeholder,
+        // while matched rows emit as they arrive and nothing is pinned to end of run.
+        //
+        // This is what replaced the upload-receipt gate. PREPARE_ENA_METADATA used to
+        // SELECT mean_depth back out of the mitogenome_data row this run had just
+        // written, so submission prep had to wait for that write and could not run at
+        // all with --skip_upload_results. The number was ours the whole time.
+        .join(
+            ch_mito_depth.map { meta, tsv -> [ meta.mt_assembly_prefix, tsv ] },
+            by: 0,
+            remainder: true
+        )
+        .filter { items -> items[1] != null }   // keep QC rows; drop depth-only remainder
+        .map { items ->
+            def depth = (items.size() > 6 && items[6] != null) ? items[6] : no_depth_file
+            [ items[1], items[2], items[3], items[4], items[5], depth ]
+        }
+
+    //
     // SUBWORKFLOW: UPLOAD_RESULTS
     //
-    // Conditional uploading of results to SQL and species check - only run if not skipped
-    // All these processes access the OceanOmics PostgreSQL database.
-    def ch_qc_input = Channel.empty()
-    if (!params.skip_upload_results && params.sql_config) {
-        // Per-sample circularity-check evidence from both assemblers feeds the QC
-        // gate (anomaly block; the circular condition itself comes via meta.circular).
-        // Keyed by mt_assembly_prefix and total over the canonical assemblies, which is what
-        // lets the gate attach it with a plain join instead of collecting the whole channel.
-        ch_mitogenome_circularity_evidence = ch_canonical_circularity_evidence
-
+    // The database WRITES, and only these. --skip_upload_results means "skip the
+    // PostgreSQL writes" and nothing more: the QC above and the submission prep below
+    // both still run.
+    def run_uploads = !params.skip_upload_results && params.sql_config
+    if (run_uploads) {
         UPLOAD_RESULTS (
             ch_mitogenome_assembly_results,
-            ch_mitogenome_annotation_results,
-            ch_mitogenome_blast_results,
-            ch_mitogenome_lca_results,
+            MITOGENOME_QC.out.annotation_stats,
+            MITOGENOME_QC.out.validation_records,
+            MITOGENOME_QC.out.species_validation_full,
             ch_mitogenome_lca_raw_results,
-            ch_mitogenome_circularity_evidence,
             ch_mitogenome_region_counts,
             sql_config // params.sql_config
         )
+    }
 
-        // Keyed on mt_assembly_prefix, not the whole meta map. Both sides descend from
-        // MITOGENOME_ANNOTATION so their metas usually agree, but each is restored from its own
-        // cache entry on a -resume, and a whole-map join that stops agreeing drops every sample
-        // SILENTLY -- the failure mode that emptied the QC gate one operator upstream (see the
-        // upload-receipt join in upload_results_mito). Hardened defensively: mt_assembly_prefix
-        // is a field of both metas, so prefix equality is implied by map equality and this can
-        // only ever match the same pairs or more, and it is 1:1 on both sides (one QC row and
-        // one annotation bundle per assembly) so there is no fan-out.
-        ch_qc_input = UPLOAD_RESULTS.out.qc_ready
-            .map { meta, species_name, proceed_qc, circular ->
-                [ meta.mt_assembly_prefix, meta, species_name, proceed_qc, circular ]
-            }
-            .join(
-                ch_mitogenome_annotation_results.map { meta, files -> [ meta.mt_assembly_prefix, files ] },
-                by: 0
-            )
-            .map { _prefix, meta, species_name, proceed_qc, circular, annotation_files ->
-                [ meta, species_name, proceed_qc, circular, annotation_files ]
-            }
-
-        // If the LCA validation is correct, then run the QC to prepare for submission to GenBank
-        // Need to add this into the pipeline.
-        // Now that protein lengths are being added to the database it could provide a list of 
-        // non submitted mitogenomes they can be grouped with to submit and then say when there is a 
-        // group of similar mitogenomes they can be submitted as a batch.
-        MITOGENOME_QC (
-            ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false), path(annotation/*)
+    //
+    // SUBWORKFLOW: ENA_SUBMISSION_PREP
+    //
+    // If the LCA validation is correct, then run the QC to prepare for submission to GenBank
+    // Need to add this into the pipeline.
+    // Now that protein lengths are being added to the database it could provide a list of
+    // non submitted mitogenomes they can be grouped with to submit and then say when there is a
+    // group of similar mitogenomes they can be submitted as a batch.
+    //
+    // Needs --sql_config but NOT the writes: it only READS from the database
+    // (BUILD_SOURCE_MODIFIERS wants collection date, country and coordinates, which
+    // exist nowhere else). It used to sit inside the write guard above, gated on the
+    // committed mitogenome_data receipt, because PREPARE_ENA_METADATA read mean_depth
+    // back out of the row this run had just written. That number is measured by
+    // MITOGENOME_COVERAGE and now travels down ch_qc_input as a file, so there is no
+    // longer a write to order behind and no reason for the gate. gateOnAssemblyReceipt
+    // is untouched and still guards the four pushers inside UPLOAD_RESULTS.
+    //
+    // BUILD_SOURCE_MODIFIERS still filters on the mitogenome_data row existing. For a
+    // sample with no row yet it now fails loudly rather than emitting an empty .src;
+    // see the empty-result branch in bin/build_source_modifiers.py.
+    //
+    // params.ena_study is the marker that a run does submission work at all: it has no
+    // default on purpose (nextflow.config), and ENA_SUBMISSION_PREP hard-errors without
+    // it because a candidate packaged under the wrong study namespace is worse than one
+    // not packaged. That error was unreachable while prep sat behind the upload guard.
+    // Now that prep runs on --sql_config alone, a run that never intended to submit --
+    // an upload-only production run, the invert test panel -- would abort on it. So the
+    // study gates prep rather than failing it, and prep keeps its strict PRJEB check for
+    // anyone who did set one.
+    def run_ena_prep = params.sql_config && params.ena_study && !params.skip_ena_submission_prep
+    def ch_prep_held       = Channel.empty()
+    def ch_ena_run_summary = Channel.empty()
+    if (run_ena_prep) {
+        ENA_SUBMISSION_PREP (
+            ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false), path(annotation/*), path(mito_depth.tsv)
         )
+        ch_prep_held       = ENA_SUBMISSION_PREP.out.held_fragments
+        ch_ena_run_summary = ENA_SUBMISSION_PREP.out.ena_run_summary
+    }
+
+    //
+    // SUBWORKFLOW: UPLOAD_ENA_RESULTS
+    //
+    // A pusher, so it needs both the writes and the prep that produces its records.
+    if (run_uploads && run_ena_prep) {
         UPLOAD_ENA_RESULTS (
-            MITOGENOME_QC.out.ena_validation_records,
+            ENA_SUBMISSION_PREP.out.ena_validation_records,
             UPLOAD_RESULTS.out.upload_status_files,
             sql_config
         )
-        ch_assembly_summary_files = ch_assembly_summary_files.mix(UPLOAD_RESULTS.out.assembly_summary_files)
-
-        // One run-level held_samples.tsv: pre-annotation drops (this workflow), pre-QC holds
-        // (UPLOAD_RESULTS) and table2asn quarantine (MITOGENOME_QC). Always emitted,
-        // header-only when nothing held.
-        //
-        // The samplesheet OG list and the ENA run summary are what let the module check that
-        // held + submission-ready accounts for the whole run. Adding a third fragment source
-        // fixes the two known drops; only the completeness check fixes the CLASS of defect,
-        // which is that the accounting had no idea what a complete run looks like.
-        COMPILE_HELD_SAMPLES (
-            ch_pre_annotation_held
-                .mix(UPLOAD_RESULTS.out.held_fragments)
-                .mix(MITOGENOME_QC.out.held_fragments)
-                .collect()
-                .ifEmpty([]),
-            ch_samplesheet_ogs,
-            MITOGENOME_QC.out.ena_run_summary
-                .ifEmpty(file("${projectDir}/assets/placeholders/empty_ena_run_summary.tsv", checkIfExists: true))
-        )
-    } else if (!params.skip_upload_results && !params.sql_config) {
-        log.warn "Skipping upload/QC because --sql_config not provided"
     }
+
+    if (!params.sql_config) {
+        log.warn "No --sql_config provided: SQL uploads and ENA submission prep are off. Local QC still runs."
+    } else {
+        if (params.skip_upload_results) {
+            log.warn "--skip_upload_results is set: SQL uploads are off. Local QC and ENA submission prep still run."
+        }
+        if (params.skip_ena_submission_prep) {
+            log.warn "--skip_ena_submission_prep is set: ENA submission prep is off."
+        }
+        else if (!params.ena_study) {
+            log.warn "No --ena_study provided: ENA submission prep is off. Everything else, " +
+                     "including the SQL uploads, is unaffected."
+        }
+    }
+
+    // One run-level held_samples.tsv: pre-annotation drops (this workflow), pre-QC holds
+    // (MITOGENOME_QC) and table2asn quarantine (ENA_SUBMISSION_PREP). Always emitted,
+    // header-only when nothing held, and now also emitted when uploads are skipped --
+    // the accounting is a local report and never needed the database.
+    //
+    // The samplesheet OG list and the ENA run summary are what let the module check that
+    // held + submission-ready accounts for the whole run. Adding a third fragment source
+    // fixes the two known drops; only the completeness check fixes the CLASS of defect,
+    // which is that the accounting had no idea what a complete run looks like.
+    //
+    // ch_samplesheet_ogs is built from the samplesheet, not from the database, so the
+    // completeness check works unchanged with no --sql_config. The ENA run summary falls
+    // back to its existing placeholder when submission prep did not run.
+    COMPILE_HELD_SAMPLES (
+        ch_pre_annotation_held
+            .mix(MITOGENOME_QC.out.held_fragments)
+            .mix(ch_prep_held)
+            .collect()
+            .ifEmpty([]),
+        ch_samplesheet_ogs,
+        ch_ena_run_summary
+            .ifEmpty(file("${projectDir}/assets/placeholders/empty_ena_run_summary.tsv", checkIfExists: true))
+    )
 
     //
     // MODULE: Mitogenome assembly summary for MultiQC custom content
@@ -1075,9 +1175,14 @@ workflow OCEANGENOMESMITOGENOMES {
     if (!params.skip_mitogenome_assembly_getorg) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_GETORG.out.multiqc_files)}
     if (!params.skip_mitogenome_assembly_hifi) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_MITOHIFI.out.multiqc_files)}
     if (!params.skip_mitogenome_annotation) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ANNOTATION.out.multiqc_files)}
-    if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS.out.multiqc_files)}
-    if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)}
-    if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_ENA_RESULTS.out.multiqc_files)}
+    // Unguarded: MITOGENOME_QC always runs, so its per-sample QC summary, annotation
+    // statistics and species-validation tables reach the report with or without a database.
+    ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)
+    // Each follows the condition its own subworkflow ran under: submission prep no
+    // longer shares the uploads' guard, so it must not share their mix guard either.
+    if (run_uploads) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS.out.multiqc_files)}
+    if (run_ena_prep) {ch_multiqc_files = ch_multiqc_files.mix(ENA_SUBMISSION_PREP.out.multiqc_files)}
+    if (run_uploads && run_ena_prep) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_ENA_RESULTS.out.multiqc_files)}
 
     // 
     // Collect all versions from subworkflows
@@ -1096,20 +1201,20 @@ workflow OCEANGENOMESMITOGENOMES {
     if (!params.skip_mitogenome_annotation) {
         ch_versions = ch_versions.mix(MITOGENOME_ANNOTATION.out.versions)
     }
-    // Upload + QC subworkflows provide versions; guard independently
-    if (!params.skip_upload_results && params.sql_config) {
+    // QC always runs; only the upload subworkflows are guarded.
+    ch_versions = ch_versions.mix(MITOGENOME_QC.out.versions)
+    // Upload subworkflows provide versions; guard independently
+    if (run_uploads) {
         ch_versions = ch_versions.mix(UPLOAD_RESULTS.out.versions)
     }
-    // Run of MITOGENOME_QC depends on upstream evaluation; include if present
-    if (!params.skip_upload_results && params.sql_config) {
-        ch_versions = ch_versions.mix(MITOGENOME_QC.out.versions)
+    if (run_ena_prep) {
+        ch_versions = ch_versions.mix(ENA_SUBMISSION_PREP.out.versions)
     }
-    if (!params.skip_upload_results && params.sql_config) {
+    if (run_uploads && run_ena_prep) {
         ch_versions = ch_versions.mix(UPLOAD_ENA_RESULTS.out.versions)
     }
-    if (!params.skip_upload_results && params.sql_config) {
-        ch_versions = ch_versions.mix(COMPILE_HELD_SAMPLES.out.versions)
-    }
+    // COMPILE_HELD_SAMPLES always runs now, so its versions are always available.
+    ch_versions = ch_versions.mix(COMPILE_HELD_SAMPLES.out.versions)
 
 
 

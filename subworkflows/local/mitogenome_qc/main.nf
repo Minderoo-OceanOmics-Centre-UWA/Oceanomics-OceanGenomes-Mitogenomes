@@ -1,389 +1,378 @@
 /*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    IMPORT MODULES / SUBWORKFLOWS / FUNCTIONS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-*/
-// Helper functions
-include { softwareVersionsToYAML    } from '../../nf-core/utils_nfcore_pipeline'
-include { enaStudyAnnotate; validateEnaStudy } from '../utils_ena_targets/main'
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    MITOGENOME QC
 
-// Mitogenome assembly
-include { BUILD_SOURCE_MODIFIERS} from '../../../modules/local/genome_qc/build_source_modifiers'
-include { FORMAT_FILES          } from '../../../modules/local/genome_qc/format_files'
-include { EXTRACT_GENES_GFF     } from '../../../modules/local/genome_qc/extract_genes/gff'
-include { EXTRACT_GENES_GB      } from '../../../modules/local/genome_qc/extract_genes/gb'
-include { TRANSLATE_GENES       } from '../../../modules/local/genome_qc/translate_genes'
-include { GEN_FILES_TABLE2ASN   } from '../../../modules/local/genome_qc/gen_files_table2asn'
-include { PARSE_TABLE2ASN_VALIDATION } from '../../../modules/local/genome_qc/parse_table2asn_validation'
-include { ENA_FLATFILE          } from '../../../modules/local/genome_qc/ena_flatfile'
-include { PREPARE_ENA_METADATA  } from '../../../modules/local/genome_qc/prepare_ena_metadata'
-include { BUILD_ENA_CANDIDATE_PACKAGE } from '../../../modules/local/genome_qc/build_ena_candidate_package'
-include { WEBIN_VALIDATE        } from '../../../modules/local/genome_qc/webin_validate'
-include { ENA_VALIDATION_RESULT } from '../../../modules/local/genome_qc/ena_validation_result'
-include { ENA_VALIDATION_SUMMARY} from '../../../modules/local/genome_qc/ena_validation_summary'
-// include { DIAGNOSTICS           } from '../../../modules/local/genome_qc/diagnostics'
-// include { GROUPER               } from '../../../modules/local/genome_qc/grouper'
-// include { SUBMITTER             } from '../../../modules/local/genome_qc/submitter'
+        - Decides whether an assembly is good enough to proceed: the species
+          comparison, the annotation statistics, the gate that combines them, and
+          the per-sample QC summary.
+
+        - Contains NO database access, on purpose. Every one of these steps used to
+          live inside UPLOAD_RESULTS behind
+          `if (!params.skip_upload_results && params.sql_config)`, which meant the
+          only way to learn whether a mitogenome was any good was to also write it to
+          PostgreSQL. A run with --skip_upload_results, or with no --sql_config at
+          all -- which is how the invertebrate work is developed -- produced no gene
+          counts, no completeness verdict, no held-samples accounting, and an
+          assembly summary whose annotation columns were empty for every sample.
+
+        - The rule this file exists to enforce: a process either produces a verdict
+          (here) or writes to the database (upload_results_mito), never both.
+          SPECIES_VALIDATION and the old PUSH_MTDNA_ANNOTATION_RESULTS each did both,
+          and that is the whole reason QC was reachable only through the uploader.
+
+        - Runs downstream of annotation and upstream of ENA_SUBMISSION_PREP, which
+          takes the samples this gate releases and prepares them for submission.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+include { SPECIES_VALIDATION     } from '../../../modules/local/species_validation'
+include { ANNOTATION_STATS       } from '../../../modules/local/annotation_stats'
+include { EVALUATE_QC_CONDITIONS } from '../../../modules/local/evaluate_qc_conditions'
+include { QC_SUMMARY             } from '../../../modules/local/multiqc/qc_summary'
+
+// Group a per-region result channel ([meta, file], up to one item per annotated
+// region) into one [meta, [files]] item per sample, WITHOUT waiting for the
+// upstream channel to close.
+//
+// INVARIANT for this pipeline: a groupTuple whose source is task-derived MUST carry a
+// groupKey (or an explicit size:). A bare one is a whole-run barrier by definition -- it
+// cannot emit anything until its source channel is complete, which for the LCA/BLAST
+// results means every such task in the whole run has finished. That is what stopped a
+// finished sample from reaching species validation and QC until the slowest sample in the
+// run caught up. groupKey attaches the expected item count to each key, so groupTuple can
+// close each sample's group as soon as that sample's own regions are in.
+//
+// The same operator has since bitten twice more, both times as "one queued task and nothing
+// downstream runs at all": the assembly-upload selection in workflows/oceangenomesmitogenomes.nf
+// (fixed by disambiguating upstream so no grouping is needed) and ch_ena_validation_inputs in
+// subworkflows/local/ena_submission_prep (left in place deliberately -- see the note there for why a
+// constant size would be wrong). Where a correct count is not available, remove the need to
+// group rather than guessing a size.
+//
+// The count comes from region_counts ([meta, 0..3]), emitted once per sample by
+// MITOGENOME_ANNOTATION. It is exact for both channels because BLAST_BLASTN emits
+// one filtered result per region unconditionally, and LCA now emits one lca and
+// one lca_raw per region unconditionally too (header-only when a region had no
+// valid hits) -- see modules/local/LCA.
+//
+// combine(by: 0) rather than join(by: 0): join consumes one item per key, so it
+// would match only the first of a sample's up to three regions.
+def groupResultsByRegionCount(results, region_counts) {
+    return results
+        .combine(region_counts, by: 0)
+        .map { meta, result_file, n_regions -> [ groupKey(meta, n_regions), result_file ] }
+        .groupTuple()
+        // Unwrap the GroupKey back to the plain meta map so key equality still
+        // holds for the joins downstream.
+        .map { key, files -> [ key.getGroupTarget(), files.flatten() ] }
+}
+
+// Attach each sample's circularity-check evidence to its QC-gate input, keyed on
+// mt_assembly_prefix, WITHOUT waiting for the evidence channel to close.
+//
+// qc_pairs is [ meta, blast_filtered, annotation_stats ]; circularity_evidence is
+// [ mt_assembly_prefix, circularity_check.tsv ], one row per canonical assembly.
+//
+// A plain join emits each key the moment both sides hold it, so a sample crosses the gate as
+// soon as its OWN work is done. The two alternatives both reintroduce a whole-run wait:
+// collecting the evidence (toList/collect) yields a value channel that emits only when its
+// source CLOSES, and join(..., remainder: true) can only classify an unmatched row at close
+// too. Either way one unfinished assembly anywhere in the run pins every finished sample.
+//
+// The key is mt_assembly_prefix, not the whole meta map: meta gains `circular` between the
+// assembly stage and here (and gains it again on the collapse path), and on a -resume the two
+// sides carry meta restored from different cache entries, so whole-map equality is not a
+// reliable join key -- the same failure documented for the oatk reference join.
+//
+// Both sides now key on the assembly's IDENTITY, the curated FASTA basename. They did not
+// always: the evidence side was keyed by the sample-level assembly prefix while this side had
+// been re-stamped to the basename, so for every curated assembly (reseed / _rgj / _collapsed)
+// the join simply never matched. A plain join has no way to report that -- it emits nothing
+// and says nothing -- so 23 of 168 finished assemblies vanished between species validation and
+// the QC gate with no error, no warning and no empty output to notice. Hence the tee below.
+def attachCircularityEvidence(qc_pairs, circularity_evidence) {
+    def keyed = qc_pairs.map { meta, blast, stats -> [ meta.mt_assembly_prefix, meta, blast, stats ] }
+
+    // Diagnostic tee ONLY. The main path keeps its plain join, because emitting each sample the
+    // moment its own work lands is load-bearing here (see above). This branch is allowed the
+    // remainder join's whole-run wait precisely because nothing depends on it: it exists to
+    // name, at end of run, any assembly that reached the gate and found no evidence to pair
+    // with. A silent key miss is what made the original defect invisible; this makes the next
+    // one say so.
+    keyed
+        .map { prefix, _meta, _blast, _stats -> [ prefix, true ] }
+        .join(circularity_evidence.map { prefix, _ev -> [ prefix, true ] }, by: 0, remainder: true)
+        .filter { items -> items[1] != null && (items.size() < 3 || items[2] == null) }
+        .view { items ->
+            "WARNING: assembly '${items[0]}' reached the QC gate with no circularity evidence " +
+            "under that name and was dropped. Its evidence is keyed by a different name, which " +
+            "means an assembly identity was not stamped from its FASTA basename."
+        }
+
+    return keyed
+        .join(circularity_evidence, by: 0)
+        .map { _prefix, meta, blast, stats, evidence -> [ meta, blast, stats, evidence ] }
+}
+
+
 
 /*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    RUN MITOGENOME ASSEMBLY WORKFLOW
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    RUN MITOGENOME QC WORKFLOW
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
 workflow MITOGENOME_QC {
 
     take:
-    mitogenome_qc // tuple val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false), path(annotation/*)
+    annotation_results     // tuple val(meta), path("annotation/*")
+    blast_filtered_results // tuple val(meta), path(blast filtered) — one per annotated region
+    lca_results            // tuple val(meta), path(lca) — one per annotated region
+    circularity_evidence   // tuple val(mt_assembly_prefix), path(circularity_check.tsv) — one row per canonical assembly
+    region_counts          // tuple val(meta), val(0..3) — CO1/12s/16s regions this sample annotated
 
     main:
 
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
-    ch_validated_ena_flatfile = channel.empty()
-    def sql_config_file = file(params.sql_config, checkIfExists: true)
-    def template_sbt_file = file(params.template_sbt, checkIfExists: true)
 
-    // Fail on a missing or malformed study before any candidate is packaged, not
-    // at the point one is about to be submitted under the wrong namespace.
-    validateEnaStudy(params)
+    //
+    // Re grouping the CO1, 12s and 16s BLAST and LCA results per sample
+    //
 
-    // Per-sample circularity verdict (resolved at the QC gate) carried as a value
-    // so the table2asn topology/completeness modifiers reflect the real assembly,
-    // rather than asserting a circular topology on every sample. Dropped from the
-    // FORMAT_FILES input so that process keeps its existing signature.
-    // The four-part mt_assembly_prefix remains the output-directory identity.
-    // The annotation-bearing FASTA/TBL basename is the public ENA sequence and
-    // ASSEMBLYNAME identity (for example ...v3mitohifi.emma102).
-    ch_ena_named = mitogenome_qc.map { meta, species, proceed, circular, files ->
-        def annotation_tbl = files.find { it.name.endsWith('.tbl') }
-        def annotation_fa = files.find { it.name.endsWith('.fa') || it.name.endsWith('.fasta') }
-        def full_seqid = annotation_tbl?.baseName ?: annotation_fa?.baseName
-        if (!full_seqid) {
-            error "Cannot derive the annotated full SeqID for ${meta.id}: annotation bundle has no TBL/FASTA"
+    grouped_lca   = groupResultsByRegionCount(lca_results, region_counts)
+    grouped_blast = groupResultsByRegionCount(blast_filtered_results, region_counts)
+
+    // A sample whose annotation yielded none of CO1/12s/16s never enters BLAST or
+    // LCA, so it appears in neither grouped channel. Without this it would be
+    // dropped by the join below and never reach SPECIES_VALIDATION at all -- no
+    // QC verdict, no lca_results row, silently absent from the run's output.
+    // Feed it through on empty stand-ins instead: species_validation.py combines
+    // them to a header-only lca_combined and an empty blast_combined, finds no
+    // nominal-species hit, and records the sample as not validated. That is the
+    // correct outcome for a sample with nothing to validate against, and it is
+    // reached immediately rather than at the end of the run.
+    def empty_lca_file   = file("${projectDir}/assets/placeholders/empty_lca.tsv", checkIfExists: true)
+    def empty_blast_file = file("${projectDir}/assets/placeholders/empty_blast_filtered.tsv", checkIfExists: true)
+
+    ch_zero_region_blast_lca = region_counts
+        .filter { _meta, n_regions -> n_regions == 0 }
+        .map { meta, _n_regions -> [ meta, [ empty_blast_file ], [ empty_lca_file ] ] }
+
+    grouped_blast_lca = grouped_blast
+        .join(grouped_lca, by: 0)
+        .mix(ch_zero_region_blast_lca)
+
+    //
+    // MODULE: Checking the LCA results against the nominal species ID
+    //
+    // No upload-receipt gate here, and none is needed: this writes nothing to the
+    // database. The gate exists to order FK children after their mitogenome_data
+    // parent, and the only FK child in this lineage is now PUSH_SPECIES_VALIDATION,
+    // which is gated at its own call site in upload_results_mito.
+    //
+    SPECIES_VALIDATION (
+        grouped_blast_lca // tuple val(meta), path(blast_filtered), path(lca_filtered)
+    )
+
+    //
+    // MODULE: Calculating the statistics of the annotations
+    //
+
+    // Attach each assembly's lca_combined so annotation_stats.py can record whether
+    // the BLAST-derived lineage agreed with the rank a gene-order variant rule
+    // matched on. Advisory only -- it holds nothing.
+    //
+    // A PLAIN join, deliberately. remainder: true is a whole-run barrier here (see
+    // the note in attachCircularityEvidence above) and has already broken a run. A
+    // plain join is only safe because SPECIES_VALIDATION is TOTAL over
+    // annotation_results on both paths: the main path derives region_counts
+    // directly from the annotation results, the zero-region stand-in above catches
+    // the rest, and the precomputed path was made total by construction in
+    // workflows/oceangenomesmitogenomes.nf. Before that fix a precomputed assembly
+    // with annotation files but no BLAST files reached neither, and this join would
+    // have silently dropped it -- it gets its annotation stats computed today, so
+    // that would have been a regression.
+    //
+    // The tee below is the standing insurance: it names, at end of run, any
+    // assembly that reached here with no lca_combined to pair with, because a plain
+    // join that misses emits nothing and says nothing.
+    ch_annotation_lca = SPECIES_VALIDATION.out.full
+        .map { meta, lca_combined, _blast_combined ->
+            [ meta.mt_assembly_prefix, lca_combined ]
         }
-        if (!full_seqid.startsWith("${meta.id}.")) {
-            error "Annotated SeqID '${full_seqid}' does not belong to specimen ${meta.id}"
+
+    annotation_results
+        .map { meta, _files -> [ meta.mt_assembly_prefix, true ] }
+        .join(ch_annotation_lca.map { prefix, _f -> [ prefix, true ] }, by: 0, remainder: true)
+        .filter { items -> items[1] != null && (items.size() < 3 || items[2] == null) }
+        .view { items ->
+            "WARNING: assembly '${items[0]}' reached the annotation statistics with no " +
+            "lca_combined under that name and was dropped. SPECIES_VALIDATION is not " +
+            "total over annotation_results, which is a totality bug upstream, not a " +
+            "reason to loosen this join."
         }
-        def annotation_version = full_seqid.tokenize('.').last()
-        // The run's ENA study is attached once here so every ENA step downstream
-        // reads the same value from meta and no join key changes shape.
-        def meta_ext = enaStudyAnnotate(params, meta + [
-            full_seqid: full_seqid,
-            annotation_version: annotation_version,
-            scientific_name: species
-        ])
-        [ meta_ext, species, proceed, circular, files ]
+
+    // tuple val(meta), path("annotation/*"), path(lca_combined)
+    ch_annotation_with_lca = annotation_results
+        .map { meta, files -> [ meta.mt_assembly_prefix, meta, files ] }
+        .join(ch_annotation_lca, by: 0)
+        .map { _prefix, meta, files, lca_combined -> [ meta, files, lca_combined ] }
+
+    ANNOTATION_STATS (
+        ch_annotation_with_lca
+    )
+
+    //
+    // SUBWORKFLOW: Evaluate the mitogenome and if it can continue on to final QC
+    //
+    /*  This solution provides a conditional QC subworkflow that evaluates two conditions and only proceeds with QC processes when **both** are satisfied:
+        1. ✅ **LCA results**: Any row has the nominal species ID in the filtered blast
+            results: `Found_in_blast_YN = "Yes"`
+        2. ✅ **Annotation CSV**: The `passed` column value is `"yes"` when there are no
+            missing genes and the genes are in the right order.
+    */
+
+    // Attach the per-sample circularity-check evidence so the gate can block length/repeat
+    // anomalies (concatemers, control-region VNTRs, unresolved over-length assemblies) from
+    // progressing to QC. Assemblies that never reached a check (failed / no-contig /
+    // precomputed with no *_check.tsv on disk) carry the empty-check stand-in from the
+    // assembly stage, so they are never dropped and never blocked on this condition.
+    //
+    // The evidence arrives as one row per canonical assembly, keyed by mt_assembly_prefix,
+    // so it can be attached with a plain join: each sample crosses the gate as soon as its
+    // OWN evidence, species validation and annotation stats are in.
+    //
+    // This previously collected the whole evidence channel into a lookup map
+    // (circularity_evidence.toList()) to avoid a remainder join's whole-run wait. That traded
+    // one barrier for another: toList() is a value channel that emits only when its source
+    // CLOSES, and the source runs back to the assembly subworkflows, so a single assembly
+    // still queued held every finished sample at this gate. Run
+    // mitogenomes-missing-audit-5 hit exactly that -- 135 samples validated and uploaded,
+    // EVALUATE_QC_CONDITIONS never ran once, because one sample's REFERENCE_RANK was stuck
+    // behind a maintenance reservation.
+    //
+    // The fix is upstream totality rather than a cleverer operator here: every emitted
+    // assembly carries an evidence row (assets/placeholders/empty_circularity_check.tsv where no check
+    // ran), so there is no "missing evidence" case left for a lookup fallback or a remainder
+    // path to cover, and no reason to wait for the channel to close. Deliberately no
+    // placeholder fallback at this point: if the contract upstream ever breaks, the sample
+    // should visibly fail to reach QC rather than be silently gated on a stand-in that says
+    // "no anomaly".
+    ch_qc_conditions = attachCircularityEvidence(
+        SPECIES_VALIDATION.out.summary.join(ANNOTATION_STATS.out.stats, by: 0),
+        circularity_evidence
+    )
+
+    //
+    // MODULE: evaluating the results to determine if to process the sample through QC
+    //
+
+    EVALUATE_QC_CONDITIONS (
+        ch_qc_conditions // tuple val(meta), path(blast_filtered), path(annotation_stats.csv), path(circularity_check.tsv)
+    )
+
+    // Filter for samples that meet both conditions.
+    //
+    // This used to be gated on the assembly upload receipt, because ENA_SUBMISSION_PREP
+    // read mean_depth back out of mitogenome_data and could not race ahead of the
+    // committed row. Gating the VERDICT on a database write is what made QC unreachable
+    // without a database, which is the defect this subworkflow fixes. The gate first
+    // moved to ENA_SUBMISSION_PREP's own input, and is now gone entirely: coverage
+    // travels to submission prep as the depth TSV this run measured, so nothing
+    // downstream waits on a write. gateOnAssemblyReceipt still guards the pushers.
+    ch_qc_ready = EVALUATE_QC_CONDITIONS.out.evaluation
+        .map { meta, species_file, proceed_file, circular_file ->
+            def species_name = species_file.text.trim()
+            def proceed_qc = proceed_file.text.trim()
+            def circular = circular_file.text.trim()
+            return [ meta, species_name, proceed_qc, circular ]
+        }
+        .filter { meta, species_name, proceed_qc, circular ->
+            proceed_qc == "true"
+        }
+
+    // Log samples that will proceed to QC
+    ch_qc_ready.view { meta, species_name, proceed_qc, circular ->
+        "Sample ${meta.id} will proceed to QC with species: ${species_name} (circular: ${circular})"
     }
 
-    ch_circular = ch_ena_named.map { meta, _species, _proceed, circular, _files -> [ meta, circular ] }
-    ch_format_input = ch_ena_named.map { meta, species, proceed, _circular, files -> [ meta, species, proceed, files ] }
-
-    //
-    // MODULE: Format files to align better with GenBank requirements and generate the cmt file
-    //
-    // mitogenome_qc.view { "Input to FORMAT_FILES: $it" }
-
-    FORMAT_FILES (
-        ch_format_input   // tuple val(meta), val(species_name), val(proceed_qc true/false), path(input_dir) - input dir is the annotation outputs directory
-    )
-    // output is tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), emit: processed_files
-    ch_multiqc_files = ch_multiqc_files.mix(FORMAT_FILES.out.tool_params.collect { it[1] })
-    ch_versions = ch_versions.mix(FORMAT_FILES.out.versions.first())
-
-    // INSDC locus tags are deliberately absent from everything this pipeline
-    // emits: a separate submission pipeline owns tag allocation and injects them
-    // into the flat file before Webin.  table2asn will report NO_LOCUS_TAGS for
-    // every record as a result, which is why that discrepancy code is advisory
-    // in bin/parse_table2asn_validation.py.
-    PREPARE_ENA_METADATA(
-        ch_ena_named.map { meta, _species, _proceed, _circular, _files -> meta },
-        sql_config_file
-    )
-    ch_versions = ch_versions.mix(PREPARE_ENA_METADATA.out.versions.first())
-
-
-    // meta_only_ch = mitogenome_qc.map { meta, species_name, proceed_qc, emma_path -> 
-    //     meta 
-    // }
-
-    //
-    // MODULE: Build the Source Modifiers table from SQL database
-    //
-
-    BUILD_SOURCE_MODIFIERS (
-        FORMAT_FILES.out.meta, // val(meta)
-        sql_config_file // val(db_config)
-    )
-    ch_multiqc_files = ch_multiqc_files.mix(BUILD_SOURCE_MODIFIERS.out.tool_params.collect { it[1] })
-    ch_versions = ch_versions.mix(BUILD_SOURCE_MODIFIERS.out.versions.first())
-
-
-    //
-    // MODULE: Extract all gene sequences including tRNAs, either using a gff file. 
-    //
-
-    EXTRACT_GENES_GFF (
-        FORMAT_FILES.out.gff    //tuple val(meta), path(fasta), path(gff)
-    )
-    ch_multiqc_files = ch_multiqc_files.mix(EXTRACT_GENES_GFF.out.tool_params.collect { it[1] })
-    ch_versions = ch_versions.mix(EXTRACT_GENES_GFF.out.versions.first())
-
-    //
-    // MODULE: Extract all coding sequenses using a tbl/gb file. 
-    //
-
-    // EXTRACT_GENES_GB (
-    //     FORMAT_FILES.out.gb    //tuple val(meta), path(fasta), path(tbl)
-    // )
-    // ch_versions = ch_versions.mix(EXTRACT_GENES_GB.out.versions.first())
-
-    //
-    // MODULE: Translate all cds to protein sequence
-    //
-
-    TRANSLATE_GENES (
-        EXTRACT_GENES_GFF.out.genes_dir    // tuple val(meta), path(genes_path)
-    )
-    ch_multiqc_files = ch_multiqc_files.mix(TRANSLATE_GENES.out.tool_params.collect { it[1] })
-    ch_versions = ch_versions.mix(TRANSLATE_GENES.out.versions.first())
-    // ch_multiqc_files = ch_multiqc_files.mix(TRANSLATE_GENES.out.proteins_dir)
-    
-    //
-    // MODULE: Generate files and run table2asn
-    //
-    ch_processed_files = FORMAT_FILES.out.processed_files
-        .join(BUILD_SOURCE_MODIFIERS.out.src_file, by:0)
-        .join(ch_circular, by:0)
-
-    GEN_FILES_TABLE2ASN (
-        ch_processed_files, // tuple val(meta), path("processed/*.{fa,fasta}"), path("processed/*.{gb,tbl}"), path("processed/*.cmt"), path("*.src"), val(circular)
-        template_sbt_file // sbt template generated from genbank, specific for OceanOmics
-    )
-    ch_table2asn_parser_input = GEN_FILES_TABLE2ASN.out.val_file
-        .join(GEN_FILES_TABLE2ASN.out.discrepancy_file, by: 0)
-        .join(ch_circular, by: 0)
-    PARSE_TABLE2ASN_VALIDATION(ch_table2asn_parser_input)
-    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.tool_params.collect { it[1] })
-    ch_versions = ch_versions.mix(GEN_FILES_TABLE2ASN.out.versions.first())
-    // Feed raw and normalised table2asn validation output into MultiQC inputs.
-    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.val_file.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.stats_file.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(GEN_FILES_TABLE2ASN.out.discrepancy_file.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(PARSE_TABLE2ASN_VALIDATION.out.findings.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(PARSE_TABLE2ASN_VALIDATION.out.status.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(PARSE_TABLE2ASN_VALIDATION.out.qc_flags.collect { it[1] })
-    ch_versions = ch_versions.mix(PARSE_TABLE2ASN_VALIDATION.out.versions.first())
-
-    // ERROR/REJECT validator findings and FATAL discrepancy findings quarantine
-    // only that sample. Warnings remain visible but continue to ENA conversion.
-    // Branch (not filter) so the quarantined complement is available locally: it is the exact
-    // set of samples ENA_FLATFILE / package / Webin never run for, and it lets each of those
-    // optional stages emit an explicit per-sample NOT_RUN row below, making the ENA validation
-    // record a FIXED-size group that releases per sample (no close-time remainder). gbf_file is
-    // a required table2asn output, so pass + quarantined partition every sample exactly.
-    ch_table2asn_branched = GEN_FILES_TABLE2ASN.out.gbf_file
-        .join(PARSE_TABLE2ASN_VALIDATION.out.status, by: 0)
-        .branch { _meta, _gbf, status_file ->
-            def rows = status_file.readLines()
-            pass: rows.size() > 1 && rows[1].split('\\t', -1)[1] == 'PASS'
-            fail: true
+    // Filter for samples that dont meet the conditions
+    ch_not_qc_ready = EVALUATE_QC_CONDITIONS.out.evaluation
+        .join(EVALUATE_QC_CONDITIONS.out.reason, by: 0)
+        .map { meta, species_file, proceed_file, circular_file, reason_file ->
+            def species_name = species_file.text.trim()
+            def proceed_qc = proceed_file.text.trim()
+            def circular = circular_file.text.trim()
+            def held_reason = reason_file.text.trim()
+            return [ meta, species_name, proceed_qc, circular, held_reason ]
         }
-    ch_table2asn_pass = ch_table2asn_branched.pass.map { meta, gbf, _status_file -> tuple(meta, gbf) }
-    // Quarantined metas: no ENA_FLATFILE, package or Webin runs for these.
-    ch_ena_quarantined = ch_table2asn_branched.fail.map { meta, _gbf, _status_file -> meta }
-
-    // Headerless per-sample fragments for the run-level held_samples.tsv: the
-    // table2asn quarantine set, with the blocking validator codes (status.tsv
-    // column 9). table2asn FAIL is terminal -- no feedback loop -- so surfacing
-    // it here is the only record outside the ENA validation summary.
-    ch_held_fragments = ch_table2asn_branched.fail
-        .collectFile { meta, _gbf, status_file ->
-            def lines = status_file.readLines()
-            def cols = lines.size() > 1 ? lines[1].split('\t', -1) : []
-            def blocking = (cols.size() > 8 && cols[8]?.trim()) ? cols[8].trim() : 'unknown'
-            [ "${meta.mt_assembly_prefix}.TABLE2ASN.held.tsv",
-              "${meta.id}\t${meta.mt_assembly_prefix}\tTABLE2ASN\tFAIL_TABLE2ASN: ${blocking}\n" ]
+        .filter { meta, species_name, proceed_qc, circular, held_reason ->
+            proceed_qc == "false"
+        }
+        .view { meta, species_name, proceed_qc, circular, held_reason ->
+            "Sample ${meta.id} will NOT proceed to QC - ${held_reason ?: 'conditions not met'}"
         }
 
-    ENA_FLATFILE(ch_table2asn_pass)
-    ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.tool_params.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.status.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(ENA_FLATFILE.out.checks.collect { it[1] })
-    ch_versions = ch_versions.mix(ENA_FLATFILE.out.versions.first())
-
-    // ENA_FLATFILE writes the .embl(.gz) -- and therefore package + Webin run -- ONLY when
-    // conversion_status == PASS (the module gzips the flat file solely on PASS). Branch its
-    // always-emitted status so "converted" vs "conversion failed" is a local per-sample value,
-    // giving the exact complement for the embl / package / Webin NOT_RUN rows below without a
-    // remainder join. Samples that reached ENA_FLATFILE but did not convert have no embl,
-    // package or Webin outputs, exactly like the quarantined ones.
-    ch_flatfile_status_branched = ENA_FLATFILE.out.status.branch { _meta, status_file ->
-        def rows = status_file.readLines()
-        pass: rows.size() > 1 && rows[1].split('\\t', -1)[1] == 'PASS'
-        fail: true
-    }
-    ch_ena_no_embl = ch_ena_quarantined
-        .mix( ch_flatfile_status_branched.fail.map { meta, _status_file -> meta } )
-
-    // Flat file format check first: it is the pipeline's last ENA gate, and the
-    // package records its verdict, so the build has to see the result. The
-    // status file is emitted for a failing flat file too, so a FAIL still
-    // produces a package that says why -- it does not silently drop a sample.
-    if (params.ena_webin_validate) {
-        if (!secrets.WEBIN_USERNAME || !secrets.WEBIN_PASSWORD) {
-            error "Nextflow secrets WEBIN_USERNAME and WEBIN_PASSWORD are required when --ena_webin_validate is enabled."
+    // Headerless per-sample fragments for the run-level held_samples.tsv. These
+    // samples are filtered out before ENA_SUBMISSION_PREP, so this subworkflow is the
+    // only place their hold is recorded.
+    //
+    // The filename carries the STAGE as well as the prefix. It did not always, and every
+    // held source used the same "<prefix>.held.tsv" name: the fragments are collectFile
+    // outputs from different subworkflows that are then mixed and staged flat into
+    // fragments/, so two genuine holds on one assembly at two stages collided under one
+    // name, and COMPILE_HELD_SAMPLES' sort -u then collapsed whatever survived. An
+    // assembly can legitimately be held more than once.
+    ch_held_fragments = ch_not_qc_ready
+        .collectFile { meta, _species, _proceed, _circular, held_reason ->
+            [ "${meta.mt_assembly_prefix}.PRE_QC.held.tsv",
+              "${meta.id}\t${meta.mt_assembly_prefix}\tPRE_QC\tproceed_qc=false: ${held_reason ?: 'conditions not met'}\n" ]
         }
 
-        WEBIN_VALIDATE(ENA_FLATFILE.out.embl_file, params.ena_validation_attempt)
-        ch_multiqc_files = ch_multiqc_files.mix(WEBIN_VALIDATE.out.tool_params.collect { it[1] })
-        ch_multiqc_files = ch_multiqc_files.mix(WEBIN_VALIDATE.out.status.collect { it[1] })
-        ch_versions = ch_versions.mix(WEBIN_VALIDATE.out.versions.first())
-        ch_validated_ena_flatfile = WEBIN_VALIDATE.out.validated_flatfile
-    }
-
-    ch_ena_package_base = FORMAT_FILES.out.processed_files
-        .map { meta, sample_fa, sample_tbl, _sample_cmt -> [ meta, sample_fa, sample_tbl ] }
-        // GFF only: FORMAT_FILES.out.gff also carries the fasta, and staging the
-        // same basename twice would collide in the task work directory.
-        .join(FORMAT_FILES.out.gff.map { meta, _sample_fa, sample_gff -> [ meta, sample_gff ] }, by: 0)
-        // Concatenated gene FASTA only: genes_dir would also stage the per-CDS singles.
-        .join(EXTRACT_GENES_GFF.out.genes_fa, by: 0)
-        .join(ENA_FLATFILE.out.embl_file, by: 0)
-        .join(PREPARE_ENA_METADATA.out.metadata, by: 0)
-
-    // An empty list stages no file, which the module reads as NOT_REQUESTED.
-    // Without this the join would starve the build whenever validation is off.
-    ch_ena_package_input = params.ena_webin_validate
-        ? ch_ena_package_base.join(WEBIN_VALIDATE.out.status, by: 0)
-        : ch_ena_package_base.map { it + [ [] ] }
-    BUILD_ENA_CANDIDATE_PACKAGE(ch_ena_package_input)
-    ch_multiqc_files = ch_multiqc_files.mix(BUILD_ENA_CANDIDATE_PACKAGE.out.tool_params.collect { it[1] })
-    ch_versions = ch_versions.mix(BUILD_ENA_CANDIDATE_PACKAGE.out.versions.first())
-
-    // Collate every reached gate into one durable record per assembly. Each optional
-    // contributor is made TOTAL by emitting an explicit per-sample NOT_RUN row for the samples
-    // it did not run on, so EVERY sample contributes the SAME fixed number of files:
-    //   PARSE status (always) + conversion status + conversion checks + embl + package metadata
-    //   [+ Webin status + Webin manifest]  =  5  (or 7 with --ena_webin_validate).
-    // With the count fixed and known, a constant groupKey releases each sample's record the
-    // moment its own files arrive -- no bare groupTuple, and NO close-time remainder -- so a
-    // quarantined or conversion-failed sample streams exactly like a fully-passing one.
     //
-    // Complements are local per-sample sets (no remainder join): conversion status + checks run
-    // for every table2asn PASS, so their NOT_RUN complement is the quarantined set; embl,
-    // package and Webin run only when conversion PASSed, so their complement is quarantined +
-    // conversion-failed (ch_ena_no_embl).
-    //
-    // The NOT_RUN placeholders are named so collate_ena_validation.py IGNORES them: it reads
-    // only the .table2asn_status.tsv / .ena_conversion_status.tsv / .webin_status.tsv suffixes
-    // and already infers NOT_RUN / SKIPPED / NOT_REQUESTED from a stage's ABSENCE. The record is
-    // therefore byte-identical to the bare-groupTuple version -- collate sees the same real
-    // status files and the same absences; the placeholders only make the group size fixed.
-    def notrun_flatfile_status  = file("${projectDir}/assets/placeholders/ena_not_run/flatfile_status.not_run",  checkIfExists: true)
-    def notrun_flatfile_checks  = file("${projectDir}/assets/placeholders/ena_not_run/flatfile_checks.not_run",  checkIfExists: true)
-    def notrun_flatfile_embl    = file("${projectDir}/assets/placeholders/ena_not_run/flatfile_embl.not_run",    checkIfExists: true)
-    def notrun_package_metadata = file("${projectDir}/assets/placeholders/ena_not_run/package_metadata.not_run", checkIfExists: true)
-    def notrun_webin_status     = file("${projectDir}/assets/placeholders/ena_not_run/webin_status.not_run",     checkIfExists: true)
-    def notrun_webin_manifest   = file("${projectDir}/assets/placeholders/ena_not_run/webin_manifest.not_run",   checkIfExists: true)
-
-    ch_ena_validation_files = PARSE_TABLE2ASN_VALIDATION.out.status                              // always, all samples
-        .mix( ENA_FLATFILE.out.status )                                                          // conversion status: PASS set
-        .mix( ch_ena_quarantined.map { meta -> [ meta, notrun_flatfile_status ] } )              //   + NOT_RUN: quarantined
-        .mix( ENA_FLATFILE.out.checks )                                                          // conversion checks: PASS set
-        .mix( ch_ena_quarantined.map { meta -> [ meta, notrun_flatfile_checks ] } )              //   + NOT_RUN: quarantined
-        .mix( ENA_FLATFILE.out.embl_file )                                                       // embl: converted set
-        .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_flatfile_embl ] } )                    //   + NOT_RUN: quarantined + conv-failed
-        .mix( BUILD_ENA_CANDIDATE_PACKAGE.out.metadata )                                         // package metadata: converted set
-        .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_package_metadata ] } )                 //   + NOT_RUN: quarantined + conv-failed
-    def ena_record_slots = (params.ena_webin_validate as boolean) ? 7 : 5
-    if (params.ena_webin_validate) {
-        ch_ena_validation_files = ch_ena_validation_files
-            .mix( WEBIN_VALIDATE.out.status )                                                     // Webin status: converted set
-            .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_webin_status ] } )                  //   + NOT_RUN: quarantined + conv-failed
-            .mix( WEBIN_VALIDATE.out.manifest )                                                   // Webin manifest: converted set
-            .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_webin_manifest ] } )                //   + NOT_RUN: quarantined + conv-failed
-    }
-
-    // Fixed, known contributor count per sample -> constant groupKey + plain groupTuple, so
-    // every sample (passing, quarantined or conversion-failed) releases its record on its own
-    // as soon as its `ena_record_slots` files arrive. ENA_VALIDATION_SUMMARY below still
-    // collects across the whole run.
-    ch_ena_validation_inputs = ch_ena_validation_files
-        .map { meta, validation_file -> tuple( groupKey(meta.full_seqid ?: meta.mt_assembly_prefix, ena_record_slots), meta, validation_file ) }
-        .groupTuple(by: 0)
-        .map { _key, metas, validation_files -> tuple(metas[0], validation_files.flatten()) }
-
-    // No ena_study here: it is per candidate now and read from meta.ena_study.
-    ena_validation_settings = [
-        validation_mode: 'pipeline',
-        validation_attempt: params.ena_validation_attempt,
-        webin_requested: params.ena_webin_validate as boolean
-    ]
-    ENA_VALIDATION_RESULT(ch_ena_validation_inputs, ena_validation_settings)
-    ENA_VALIDATION_SUMMARY(ENA_VALIDATION_RESULT.out.record.map { _meta, record -> record }.collect())
-
-    ch_multiqc_files = ch_multiqc_files.mix(ENA_VALIDATION_SUMMARY.out.multiqc)
-    ch_versions = ch_versions
-        .mix(ENA_VALIDATION_RESULT.out.versions.first())
-        .mix(ENA_VALIDATION_SUMMARY.out.versions)
-    
-    //
-    // MODULE: Interperate the translation diagnostics from table2asn output
-    //
-
-    // DIAGNOSTICS (
-
-    // )
-
-    //
-    // MODULE: Group similar mitogenomes
-    //
-    /* Need to write a module for here that will check the database for other mitogenomes
-        that have not been submitted or have an accession number in the SQL database.
-        It will then find other mitogenomes that have the same transflated protein
-        fingerprint and group them for submission.
-        Maybe the mitogenomes that are ready for submission need to be noted in the SQL
-        database so that they can be grouped together. Maybe there can be a ready directory
-        and mitogenomes are put into a directory with other ones that match them and at then
-        periodically they get sent, either when they hit 10 or at the start of each week. */
-
-
-    //
-    // MODULE: Genbank submitter
-    //
-
-    // SUBMITTER (
-
-    // )
-
+    // Build a per-sample QC summary TSV for MultiQC
+    qc_summary_input = EVALUATE_QC_CONDITIONS.out.evaluation
+        .join(ANNOTATION_STATS.out.stats, by: 0)
+        .map { meta, species_file, proceed_file, circular_file, annotation_csv -> [ meta, species_file, proceed_file, annotation_csv ] }
+    QC_SUMMARY (
+        qc_summary_input // tuple val(meta), path(species_name.txt), path(proceed_qc.txt), path(annotation_stats.csv)
+    )
 
     //
     // Subworkflow finishing steps.
     //
 
     // Collect MultiQC files
-    // Need to update this section to include everything
-    // ch_multiqc_files = ch_multiqc_files.mix(BLAST_BLASTN.out.summary.collect{it[1]})
-    // ch_versions = ch_versions.mix(EMMA.out.versions.first())
-    // ch_versions = ch_versions.mix(BLAST_BLASTN.out.versions.first())
-    // ch_versions = ch_versions.mix(LCA.out.versions.first())
-
-
+    //  - Species validation outputs (per-sample TSVs)
+    //  - Annotation statistics CSVs
+    //  - QC evaluation flags (for quick visibility in report) and summary table
+    ch_multiqc_files = ch_multiqc_files.mix(SPECIES_VALIDATION.out.summary.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(ANNOTATION_STATS.out.stats.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(EVALUATE_QC_CONDITIONS.out.evaluation.map { meta, species_file, proceed_file, circular_file -> proceed_file })
+    ch_multiqc_files = ch_multiqc_files.mix(QC_SUMMARY.out.table.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(SPECIES_VALIDATION.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(ANNOTATION_STATS.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(EVALUATE_QC_CONDITIONS.out.tool_params.collect { it[1] })
+    ch_versions = ch_versions.mix(SPECIES_VALIDATION.out.versions.first())
+    ch_versions = ch_versions.mix(ANNOTATION_STATS.out.versions.first())
+    ch_versions = ch_versions.mix(EVALUATE_QC_CONDITIONS.out.versions)
 
     //
     // Emit outputs
     //
 
     emit:
-    multiqc_files           = ch_multiqc_files             // channel: [ path(multiqc_files) ]
-    versions                = ch_versions              // channel: [ path(versions.yml) ]
-    ena_flatfile            = ENA_FLATFILE.out.embl_file
-    validated_ena_flatfile  = ch_validated_ena_flatfile
-    ena_validation_records = ENA_VALIDATION_RESULT.out.record
-    ena_validation_summary = ENA_VALIDATION_SUMMARY.out.multiqc
-    ena_run_summary         = ENA_VALIDATION_SUMMARY.out.run_summary
-    held_fragments          = ch_held_fragments            // channel: path(<prefix>.held.tsv) — one row per table2asn quarantine
-    ena_candidate_packages  = BUILD_ENA_CANDIDATE_PACKAGE.out.package_dir
-    ena_candidate_metadata  = BUILD_ENA_CANDIDATE_PACKAGE.out.metadata
+    qc_ready               = ch_qc_ready                  // channel: [ val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false) ]
+    held_fragments         = ch_held_fragments            // channel: path(<prefix>.PRE_QC.held.tsv) — one row per pre-QC hold
+    // The annotation statistics CSV, for MITOGENOME_ASSEMBLY_SUMMARY. This is the
+    // channel whose absence left num_genes/num_cds/missing_genes empty for every
+    // sample in any run without a database.
+    assembly_summary_files = ANNOTATION_STATS.out.stats.map { _meta, stats -> stats }
+    annotation_stats       = ANNOTATION_STATS.out.stats   // channel: [ val(meta), path(annotation_stats.csv) ]
+    validation_records     = SPECIES_VALIDATION.out.validation_record // channel: [ val(meta), path(validation_record.json) ]
+    species_validation_full = SPECIES_VALIDATION.out.full // channel: [ val(meta), path(lca_combined), path(blast_combined) ]
+    evaluation             = EVALUATE_QC_CONDITIONS.out.evaluation
+    multiqc_files          = ch_multiqc_files             // channel: [ path(multiqc_files) ]
+    versions               = ch_versions                  // channel: [ path(versions.yml) ]
 }

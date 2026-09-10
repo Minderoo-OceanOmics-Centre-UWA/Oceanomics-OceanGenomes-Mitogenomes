@@ -450,6 +450,32 @@
                     "default": 10,
                     "description": "Minimum number of genes a reference must yield to build the reseed custom gene (label) database. References below this keep the first-pass GetOrganelle assembly instead of reseeding."
                 },
+                "reseed_seed_top_n": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "Number of ranked mitochondrial reference records supplied to the invertebrate GetOrganelle reseed. A small panel is more robust than one reference for fragmented first passes without diluting recruitment with a whole phylum database."
+                },
+                "reseed_length_tolerance": {
+                    "type": "number",
+                    "default": 1.5,
+                    "minimum": 1.0,
+                    "description": "Minimum fold difference in total assembly length required before length overrides contiguity when choosing between the first-pass and reseed GetOrganelle assemblies."
+                },
+                "reseed_fallback_read_subsample": {
+                    "type": "integer",
+                    "default": 50000,
+                    "minimum": 100,
+                    "description": "Maximum number of reads sampled to rank taxonomy-shortlisted references when an invertebrate first pass is empty."
+                },
+                "reseed_fallback_max_candidates": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200,
+                    "description": "Maximum number of taxonomically shortlisted reference genomes compared with reads for an empty-first-pass invertebrate rescue."
+                },
                 "hic_fastp_args": {
                     "type": "string",
                     "description": "Override the fastp arguments used to trim raw Hi-C reads before GetOrganelle."
@@ -500,6 +526,21 @@
                     "type": "integer",
                     "default": 30,
                     "description": "Syncmer coverage threshold (-c) passed to Oatk/syncasm."
+                },
+                "getorganelle_firstpass_group_genes": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Label the first GetOrganelle pass with the sample's curated group gene database instead of only the stock animal_mt LabelDatabase. The stock seed still recruits the reads; only labelling changes. Set false to restore stock labelling."
+                },
+                "getorganelle_empty_first_pass_rescue": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Reseed a first pass that produced no contig at all from the sample's whole curated group database. Without it an empty first pass cannot select a seed subset and can never be reseeded."
+                },
+                "hinted_memory_base_gb": {
+                    "type": "integer",
+                    "default": 64,
+                    "description": "Attempt-1 memory (GB) for the attempt-scaled processes (GETORGANELLE_FROMREADS, GETORGANELLE_RESEED, OATK) when no per-sample memory hint was recorded. Setonix bills the memory request, so this dominates SU."
                 }
             }
         },
@@ -527,7 +568,13 @@
                 },
                 "skip_upload_results": {
                     "type": "boolean",
-                    "description": "Skip SQL upload modules and QC gating."
+                    "description": "Skip the PostgreSQL writes. Local QC and ENA submission prep still run.",
+                    "help_text": "Turns off every process that writes to the OceanOmics database, and nothing else. Local QC always runs: annotation statistics, species validation against the samplesheet's nominal_species_id, the QC gate, the per-sample QC summary, the held-samples report and the assembly summary's annotation columns. ENA submission prep runs too whenever --sql_config is supplied, because it only reads from the database; use --skip_ena_submission_prep to turn that off separately. Coverage for the ENA manifest comes from the pipeline's own depth measurement rather than from the mitogenome_data row, so it is correct even when nothing was written."
+                },
+                "skip_ena_submission_prep": {
+                    "type": "boolean",
+                    "description": "Skip table2asn, the ENA flat file and candidate packaging. Requires --sql_config when not skipped.",
+                    "help_text": "ENA_SUBMISSION_PREP reads collection date, country and coordinates from the OceanOmics database, so it needs --sql_config, but it writes nothing and therefore runs regardless of --skip_upload_results. This flag is the separate off switch for it: --skip_upload_results used to double as one, which is what kept submission prep from running in database-read-only mode. Prep also requires --ena_study, which has no default; without one it is skipped with a warning rather than failing the run, because a study is the marker that a run does submission work at all. Note that BUILD_SOURCE_MODIFIERS requires the sample's mitogenome_data row to exist, so prep on a sample that has never been uploaded will fail rather than emit an empty source-modifiers table."
                 },
                 "skip_hic_fastp": {
                     "type": "boolean",

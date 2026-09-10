@@ -7,13 +7,18 @@
 // basename, while the upload side carries the assembly stage's meta -- and on a -resume each
 // is restored from its own cache entry. While this was a whole-meta join it matched nothing
 // and dropped every sample silently: run mitogenomes-missing-audit-5 put 123 samples through
-// the gate, had an upload row for all 123, and still ran MITOGENOME_QC zero times.
+// the gate, had an upload row for all 123, and still ran ENA_SUBMISSION_PREP zero times.
 //
-// The same helper now also gates the two writers of mitogenome_data's FK children --
-// SPECIES_VALIDATION (lca_validation, and lca transitively) and PUSH_LCA_RAW_RESULTS
-// (lca_raw_results) -- which arrive as 3- and 2-element tuples. GATE_TUPLE_SHAPES below pins
-// that the helper preserves an arbitrary tuple shape, because a shape bug there would
-// corrupt a process input rather than announce itself.
+// The same helper also gates every writer of mitogenome_data's FK children --
+// PUSH_SPECIES_VALIDATION (lca_validation), PUSH_LCA_BLAST_RESULTS (lca) and
+// PUSH_LCA_RAW_RESULTS (lca_raw_results) -- which arrive as 3- and 2-element tuples.
+// GATE_TUPLE_SHAPES below pins that the helper preserves an arbitrary tuple shape, because a
+// shape bug there would corrupt a process input rather than announce itself.
+//
+// Two of those gates used to be inherited rather than declared: PUSH_LCA_BLAST_RESULTS and the
+// annotation push consumed channels derived from a SPECIES_VALIDATION whose input was gated.
+// That stopped working when species validation became DB-free QC running upstream of the
+// uploader, so each pusher now takes the gate at its own call site.
 
 nextflow.enable.dsl = 2
 
@@ -37,7 +42,7 @@ process COMMIT_UPLOAD {
     """
 }
 
-// Stands in for MITOGENOME_QC: records which samples were released, and when.
+// Stands in for ENA_SUBMISSION_PREP: records which samples were released, and when.
 process CONSUME_QC {
     input:
     tuple val(meta), val(species_name), val(proceed_qc), val(circular)

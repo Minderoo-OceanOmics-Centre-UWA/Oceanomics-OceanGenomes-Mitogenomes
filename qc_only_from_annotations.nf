@@ -16,7 +16,7 @@ params.skip_upload_results = params.skip_upload_results == null ? false : params
     - Genetic code: resolved per sample from the taxonomic class that query also returns,
       via MitoGeneticCode.forClass(); --translation_table is the fallback for a class with
       no confirmed code (a warning names each such sample).
-    - Action: run MITOGENOME_QC, then push that stage's own results to SQL via
+    - Action: run ENA_SUBMISSION_PREP, then push that stage's own results to SQL via
       UPLOAD_ENA_RESULTS (ena_validation_attempts + lca_validation.validator_2).
       Only the QC stage's uploads run here -- there is no assembly, annotation or
       LCA on this path, so nothing writes mitogenome_data, blast_filtered_lca or lca.
@@ -24,7 +24,7 @@ params.skip_upload_results = params.skip_upload_results == null ? false : params
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-include { MITOGENOME_QC } from './subworkflows/local/mitogenome_qc/main'
+include { ENA_SUBMISSION_PREP } from './subworkflows/local/ena_submission_prep/main'
 include { UPLOAD_ENA_RESULTS } from './subworkflows/local/upload_results_mito/main'
 include { VALIDATED_SPECIES_QUERY } from './modules/local/validated_species_query/main'
 
@@ -91,7 +91,7 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
                 mt_assembly_prefix: mt_assembly_prefix,
                 // Placeholder only. The real per-sample code is resolved below from
                 // the taxonomic class VALIDATED_SPECIES_QUERY returns, and overwrites
-                // this before MITOGENOME_QC ever sees the meta. It is set here so that
+                // this before ENA_SUBMISSION_PREP ever sees the meta. It is set here so that
                 // anything reading the meta between here and that point (and any
                 // future consumer of ch_annotations_grouped) still finds a valid code
                 // rather than null.
@@ -139,7 +139,8 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
             [ meta.annotation_prefix, tax_class ]
         }
 
-    // Build the tuple shape required by MITOGENOME_QC.
+    // Build the tuple shape required by ENA_SUBMISSION_PREP.
+    def no_depth_file = file("${projectDir}/assets/placeholders/empty_mito_depth.tsv", checkIfExists: true)
     ch_qc_input = ch_annotations_grouped
         .map { meta, files -> [ meta.annotation_prefix, meta, files ] }
         .join(ch_species, by: 0)
@@ -160,17 +161,22 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
                          "explicitly if that is wrong for this sample."
             }
             def qc_meta = meta + [ genetic_code: mapped_code ?: default_code ]
-            tuple(qc_meta, species_name, true, qc_meta.circular as boolean, files)
+            // No depth measurement in this entrypoint: it re-QCs existing annotations and
+            // runs no assembly, so MITOGENOME_COVERAGE never produced a TSV. The
+            // header-only placeholder makes PREPARE_ENA_METADATA fall back to the stored
+            // mitogenome_data.mean_depth, which is the right answer here -- these samples
+            // were assembled and uploaded by an earlier run.
+            tuple(qc_meta, species_name, true, qc_meta.circular as boolean, files, no_depth_file)
         }
 
-    MITOGENOME_QC(
+    ENA_SUBMISSION_PREP(
         ch_qc_input
     )
 
     // Push the QC stage's own results to SQL. The scope is deliberately the QC
     // stage only: this entrypoint runs no assembly, no annotation and no LCA, so
     // it pushes no mitogenome_data, blast_filtered_lca or lca rows. That also
-    // keeps SPECIES_VALIDATION out of this path, which matters -- under
+    // keeps PUSH_SPECIES_VALIDATION out of this path, which matters -- under
     // --force_db_overwrite that module overwrites lca_validation.validated_species_name
     // and validator, and this entrypoint exists precisely for samples whose species
     // was validated by hand and cannot be re-derived from BLAST.
@@ -180,7 +186,7 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
     // validation and validator_2 pushes alone.
     if (!params.skip_upload_results) {
         UPLOAD_ENA_RESULTS(
-            MITOGENOME_QC.out.ena_validation_records,
+            ENA_SUBMISSION_PREP.out.ena_validation_records,
             Channel.empty(),
             sql_config_file
         )

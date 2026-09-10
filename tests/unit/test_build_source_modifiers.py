@@ -12,10 +12,14 @@ geo_loc_name resolution lives in bin/geo_loc_name_utils.py and is covered by
 tests/unit/test_geo_loc_name_utils.py.
 """
 
+import contextlib
 import importlib.util
+import os
 import sys
+import tempfile
 import types
 import unittest
+from argparse import Namespace
 from datetime import date, timedelta
 from pathlib import Path
 from unittest import mock
@@ -219,6 +223,60 @@ class ParseCoordinateTests(unittest.TestCase):
 
     def test_non_numeric_is_rejected(self):
         self.assertIsNone(MODULE.parse_coordinate("not a coordinate", "lat"))
+
+
+class MissingParentRowTests(unittest.TestCase):
+    """An empty query result must fail the task, not write empty tables.
+
+    fetch_bankit_metadata SELECTs only from sample but filters on mitogenome_data
+    (WHERE m.og_id / m.tech), so an empty result nearly always means the parent
+    row is missing rather than that the specimen has no collection metadata.
+
+    This used to print and exit 0, which was survivable only while submission prep
+    was gated behind the committed upload receipt. Prep now runs under
+    --skip_upload_results, where a sample new to the database genuinely has no row,
+    and an empty .src would reach a submitter looking like a specimen with nothing
+    recorded about it.
+    """
+
+    def _run_main(self, empty):
+        class FakeFrame:
+            def __init__(self, empty):
+                self.empty = empty
+
+        @contextlib.contextmanager
+        def fake_connect(**_kwargs):
+            yield object()
+
+        args = Namespace(config="db.cfg", og_id="OG910", seq_tech="hifi")
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with mock.patch.object(MODULE, "parse_args", return_value=args), \
+                     mock.patch.object(MODULE, "load_db_config", return_value={}), \
+                     mock.patch.object(MODULE, "psycopg2") as fake_psycopg2, \
+                     mock.patch.object(
+                         MODULE, "fetch_bankit_metadata",
+                         return_value=FakeFrame(empty)
+                     ):
+                    fake_psycopg2.connect = fake_connect
+                    with self.assertRaises(SystemExit) as raised:
+                        MODULE.main()
+                return raised.exception, sorted(os.listdir(tmp))
+            finally:
+                os.chdir(cwd)
+
+    def test_a_missing_row_exits_non_zero(self):
+        exc, _files = self._run_main(empty=True)
+        self.assertNotEqual(exc.code, 0)
+        self.assertIn("OG910", str(exc.code))
+        self.assertIn("hifi", str(exc.code))
+
+    def test_a_missing_row_writes_no_empty_tables(self):
+        """The silent artefact is the actual defect; the exit code is the fix."""
+        _exc, files = self._run_main(empty=True)
+        self.assertEqual([name for name in files if name.endswith(".csv")], [])
 
 
 if __name__ == "__main__":

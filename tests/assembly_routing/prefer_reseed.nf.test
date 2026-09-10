@@ -1,0 +1,63 @@
+nextflow_workflow {
+    name "The reseed replaces the first pass only when it is actually better"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "PREFER_RESEED"
+
+    // Guards the rule that published a 12-scaffold reseed over a 2-scaffold first
+    // pass: the predicate was `rs_fasta.size() > 0`, under a comment claiming it
+    // chose "the better of" the two. The fixture sizes are the real panel numbers.
+
+    test("size, contiguity, circularity and emptiness each decide in the right order") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    // INV04_BOLOCERA: the reseed is far more fragmented (12 vs 2) but
+                    // recovered ~5x the sequence, so size decides and it still wins.
+                    ['inv04_recovered_much_more', file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv04_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv04_first.fa"),  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
+                    // INV01_ACANTHOGORGIA: 1,914 bp in 6 contigs vs 1,192 in 4. At 1.61x
+                    // the length rule fires (just), so the reseed wins on having recovered
+                    // 60% more sequence. Both are far short of a ~19 kb mitogenome and head
+                    // for the concat path either way, which is why length is the more useful
+                    // signal here; it is also the case nearest the tolerance boundary, so it
+                    // is what pins the tolerance down.
+                    ['inv01_recovered_more',     file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv01_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv01_first.fa"),  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
+                    // Equal length, reseed shattered: first pass wins on contiguity.
+                    ['fragmented_reseed_loses',   file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/frag_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/frag_first.fa"),  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
+                    // Circularity outranks both size and contiguity, in either direction.
+                    ['circular_reseed_wins',      file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/frag_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/circular.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/frag_first.fa"),  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
+                    ['circular_firstpass_wins',   file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv04_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv04_first.fa"),  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/circular.log"), 1.5],
+                    // The original rule, preserved: an empty reseed never wins.
+                    ['empty_reseed_loses',        file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/empty.fa"),       file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv04_first.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
+                    // ...and an empty first pass cannot be kept over a real reseed.
+                    ['empty_firstpass_loses',     file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv04_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/empty.fa"),        file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5]
+                )
+                """
+            }
+        }
+        then {
+            def verdicts = workflow.out.results
+                .collect { it instanceof String ? evaluate(it) : it }
+                .collectEntries { [(it[0]): it[1]] }
+            assertAll(
+                { assert workflow.success },
+                { assert verdicts.size() == 7 },
+                { assert verdicts['inv04_recovered_much_more'] == 'true' },
+                { assert verdicts['inv01_recovered_more'] == 'true' },
+                { assert verdicts['fragmented_reseed_loses'] == 'false' },
+                { assert verdicts['circular_reseed_wins'] == 'true' },
+                { assert verdicts['circular_firstpass_wins'] == 'false' },
+                { assert verdicts['empty_reseed_loses'] == 'false' },
+                { assert verdicts['empty_firstpass_loses'] == 'true' }
+            )
+        }
+    }
+}

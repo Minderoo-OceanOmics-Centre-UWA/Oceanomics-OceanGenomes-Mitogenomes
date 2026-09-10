@@ -172,6 +172,10 @@ For general nf-core best practices (custom configs, resource tuning, module over
 - `--annotation_files` – standalone QC-only input glob for precomputed `fa/fasta/gff/tbl/gb` annotation bundles.
 - `--skip_mitogenome_assembly_getorg`, `--skip_mitogenome_assembly_hifi`, `--skip_mitogenome_annotation`,
   `--skip_upload_results` plus matching `--precomputed_*` paths allow staged re-runs and reuse of existing outputs.
+  `--skip_upload_results` turns off the SQL writes and nothing else: local QC (annotation statistics, species
+  validation, the QC gate, the held-samples report) always runs, and ENA submission prep runs too whenever
+  `--sql_config` is given, because it only reads from the database. Use `--skip_ena_submission_prep` to turn
+  that off separately.
   Finer toggles: `--skip_getorganelle_reseed` (disable the reseed pass), `--skip_hic_fastp` (skip Hi-C trimming) and
   `--force_db_overwrite` (overwrite existing SQL rows instead of insert-only).
 
@@ -198,7 +202,8 @@ JSON and keep `-c` for infrastructure overrides.
 Final results are published under `--outdir` with predictable subdirectories:
 
 - `mitogenomes/` – assemblies, annotations, BLAST/LCA outputs, and GenBank packaging artefacts per sample.
-- `species_validation/` and `sql_uploaded_data/` – per-sample SQL upload logs and QC summaries.
+- `species_validation/`, `qc/` and `sql_uploaded_data/` – per-sample species-validation tables, QC summaries and
+  SQL upload logs. Only `sql_uploaded_data/` depends on a database; the rest are written on every run.
 - `multiqc/` – consolidated HTML report plus supporting data.
 - `pipeline_info/` – Nextflow reports, parameter snapshots, software versions, and validated samplesheet copies.
 

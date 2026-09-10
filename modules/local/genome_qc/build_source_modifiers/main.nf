@@ -47,7 +47,7 @@ process BUILD_SOURCE_MODIFIERS {
     """
     # Names must match the output: block exactly, otherwise src_file (optional)
     # emits nothing and the join into GEN_FILES_TABLE2ASN is empty, silently
-    # truncating every -stub run of MITOGENOME_QC before table2asn.
+    # truncating every -stub run of ENA_SUBMISSION_PREP before table2asn.
     : > ${meta.id}.bankit_metadata.csv
     : > ${meta.id}.bankit_metadata_latlon_cleaned.csv
     : > ${meta.mt_assembly_prefix}.stub.src

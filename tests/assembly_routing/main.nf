@@ -40,6 +40,29 @@ include { oatkFallbackReason } from '../../subworkflows/local/mitogenome_assembl
 // recorded with. OG2133 was lost because the first of them did not exist.
 include { mitohifiPartialFailure; mitohifiStatsCircular } from '../../subworkflows/local/mitogenome_assembly/mitohifi/main.nf'
 
+// Same reasoning again: import the real reseed-vs-first-pass predicate. It used to be
+// `rs_fasta.size() > 0` under a comment claiming it picked "the better of" the two, so
+// any non-empty reseed displaced the first pass -- which is how INV04_BOLOCERA published
+// a 12-scaffold reseed over its own 2-scaffold first pass. The cases below are that
+// sample and its panel-mate, at their real sizes.
+include { preferReseed } from '../../subworkflows/local/mitogenome_assembly/getorganelle/main.nf'
+
+// The predicate that decides between the top-n seed subset and the whole-group
+// rescue. Imported, not copied, for the same reason as everything above: it is what
+// stands between an empty first pass and never being reseeded at all.
+include { firstPassEmpty } from '../../subworkflows/local/mitogenome_assembly/getorganelle/main.nf'
+
+workflow FIRST_PASS_EMPTY {
+    take:
+    assemblies   // channel of [ label, fasta ]
+
+    main:
+    verdict = assemblies.map { label, fasta -> tuple(label, firstPassEmpty(fasta)) }
+
+    emit:
+    verdict
+}
+
 workflow MITOHIFI_PARTIAL_FAILURE {
     take:
     cases   // [ label, command_log ]
@@ -75,6 +98,19 @@ workflow OATK_FALLBACK_ROUTING {
     main:
     results = cases.map { label, gb, evidence, relevance ->
         [ label, oatkFallbackReason(gb, evidence, relevance, 13, 1.15) ]
+    }
+
+    emit:
+    results
+}
+
+workflow PREFER_RESEED {
+    take:
+    cases   // [ label, rs_fasta, rs_log, fp_fasta, fp_log, tolerance ]
+
+    main:
+    results = cases.map { label, rs_fasta, rs_log, fp_fasta, fp_log, tolerance ->
+        [ label, preferReseed(rs_fasta, rs_log, fp_fasta, fp_log, tolerance as double).toString() ]
     }
 
     emit:

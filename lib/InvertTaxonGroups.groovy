@@ -178,6 +178,152 @@ class InvertTaxonGroups {
         return 'reduced_trna'
     }
 
+    // ---- Published origin anchors (assets/taxonomy/mito_origin_anchors.json) ----
+    //
+    // Which gene the PUBLISHED mitogenome is re-origined to, passed to MITOS2 and
+    // CORAL_ANNOTATION_FIX as --origin-gene. Distinct from cox1PanelGroup() above:
+    // that picks the panel for the PRE-annotation rotation, whose only job is to move
+    // the linearisation point off an intron-split gene so MITOS can annotate cleanly,
+    // and cox1 is a fine universal choice for that. This is the POST-annotation
+    // rotation that decides where the deposited sequence starts, and it is measured
+    // per taxon rather than guessed.
+    //
+    // Generated, not curated -- the one difference from mito_genetic_codes.json.
+    // bin/build_origin_anchor_table.py tallies which gene sits at position 1 across
+    // every record in assets/refdb/ and writes the table wholesale.
+    //
+    // Keyed on ORDER first, then class, then group, because the class level is not
+    // fine enough for Anthozoa: as a class it has no majority (rrnL 33.9%, cox1 28.5%,
+    // trnM 17.6%), which hides four orders that each have a clear and DIFFERENT
+    // convention -- Scleractinia trnM 63.8%, Malacalcyonacea rrnL 69.3%, Zoantharia
+    // cox1 58.6%, Scleralcyonacea cox1 51.6%. Resolving stony corals from the class
+    // aggregate would rotate every already-submitted one off tRNA-Met and change its
+    // ENA sequence checksum for no reason.
+
+    private static Map<String, String> originAnchorOrders = null
+    private static Map<String, String> originAnchorClasses = null
+    private static Map<String, String> originAnchorGroups = null
+    private static String originAnchorDefault = null
+
+    /**
+     * Parse assets/taxonomy/mito_origin_anchors.json once per session. Idempotent, so a
+     * per-sample closure can call it without a guard, exactly like loadGeneticCodes().
+     * A duplicated key, or an anchor outside the MITOS feature vocabulary, stops the run
+     * here rather than silently resolving to whichever entry parsed last.
+     */
+    static synchronized void loadOriginAnchors(anchorFile) {
+        if (originAnchorOrders != null) return
+        def handle = anchorFile instanceof File ? anchorFile : new File(anchorFile.toString())
+        def payload = new JsonSlurper().parse(handle)
+
+        def readLevel = { section, label ->
+            def out = [:]
+            (payload[section] ?: [:]).each { key, entry ->
+                def k = norm(key)
+                if (out.containsKey(k)) {
+                    throw new IllegalStateException("${handle}: ${label} '${k}' listed twice")
+                }
+                def anchor = entry?.anchor?.toString()
+                if (!isValidAnchor(anchor)) {
+                    throw new IllegalStateException(
+                        "${handle}: ${label} '${k}' anchor '${anchor}' is not a MITOS feature key")
+                }
+                out[k] = anchor
+            }
+            out
+        }
+
+        def orders  = readLevel('orders',  'order')
+        def classes = readLevel('classes', 'class')
+        def groups  = readLevel('groups',  'group')
+
+        def fallback = payload.policy?.default_anchor?.toString()
+        if (!isValidAnchor(fallback)) {
+            throw new IllegalStateException(
+                "${handle}: policy.default_anchor '${fallback}' is not a MITOS feature key")
+        }
+
+        // A table generated without --taxdump-dir has no order level, which would
+        // resolve Scleractinia from the Anthozoa class aggregate and silently rotate
+        // stony corals off trnM. That must not reach a run.
+        def levels = (payload.policy?.levels ?: []).collect { it.toString() }
+        if (!levels || levels[0] != 'order') {
+            throw new IllegalStateException(
+                "${handle}: policy.levels is ${levels} -- the ORDER level is missing, so " +
+                "Scleractinia would resolve from the Anthozoa class aggregate (no majority) " +
+                "and stony corals would be rotated off tRNA-Met. Regenerate the table with " +
+                "bin/build_origin_anchor_table.py --taxdump-dir <taxdump>.")
+        }
+
+        originAnchorOrders = orders
+        originAnchorClasses = classes
+        originAnchorGroups = groups
+        originAnchorDefault = fallback
+    }
+
+    /** Whether loadOriginAnchors() has run. */
+    static boolean originAnchorsLoaded() {
+        originAnchorOrders != null
+    }
+
+    // MITOS/EMMA feature keys an anchor is allowed to be. TL and TS are deliberately
+    // absent: the reference databases record tRNA-Leu/tRNA-Ser without saying which
+    // copy, so those tallies exist but are not addressable in a MITOS annotation.
+    private static final Set<String> ANCHOR_VOCABULARY = [
+        'CO1', 'CO2', 'CO3', 'CYTB', 'ATP6', 'ATP8',
+        'ND1', 'ND2', 'ND3', 'ND4', 'ND4L', 'ND5', 'ND6',
+        'RNR1', 'RNR2',
+        'TA', 'TC', 'TD', 'TE', 'TF', 'TG', 'TH', 'TI', 'TK', 'TL1', 'TL2',
+        'TM', 'TN', 'TP', 'TQ', 'TR', 'TS1', 'TS2', 'TT', 'TV', 'TW', 'TY',
+    ] as Set
+
+    static boolean isValidAnchor(anchor) {
+        anchor ? (anchor.toString().trim() in ANCHOR_VOCABULARY) : false
+    }
+
+    /**
+     * The gene this sample's published mitogenome is re-origined to, as a MITOS feature
+     * key (CO1, RNR2, TM, TF, ...). Resolved order -> class -> group -> default.
+     *
+     * NEVER null: an unmapped taxon takes the table's default_anchor. This is
+     * deliberately the cox1PanelGroup() trade-off rather than the seedDbGroup() one.
+     * A wrong anchor rotates a circle, which is cosmetic, reversible, and softened
+     * further by mitos_to_emma falling back when the gene is not annotated; no anchor
+     * at all would be a hard failure. The cost of guessing here is nothing, the cost
+     * of guessing a seed is a wasted reseed.
+     *
+     * The group step matters for a class the reference database does not cover: Calcarea
+     * has no records at all, so it has no `classes` row, and without the group step a
+     * calcarean sponge would take the cox1 default instead of the poriferan rrnL its
+     * phylum uses 90% of the time.
+     */
+    static String originAnchor(taxOrder, taxClass) {
+        if (!originAnchorsLoaded()) {
+            throw new IllegalStateException(
+                "InvertTaxonGroups.originAnchor() called before " +
+                "assets/taxonomy/mito_origin_anchors.json was parsed -- call " +
+                "loadOriginAnchors(file(\"\${projectDir}/assets/taxonomy/mito_origin_anchors.json\")) first")
+        }
+        def o = norm(taxOrder)
+        def c = norm(taxClass)
+        if (o && !(o in UNRESOLVED_TAXON) && originAnchorOrders.containsKey(o)) {
+            return originAnchorOrders[o]
+        }
+        if (c && !(c in UNRESOLVED_TAXON) && originAnchorClasses.containsKey(c)) {
+            return originAnchorClasses[c]
+        }
+        def group = seedDbGroup(c)
+        if (group && originAnchorGroups.containsKey(group)) {
+            return originAnchorGroups[group]
+        }
+        return originAnchorDefault
+    }
+
+    // Values that mean "the taxonomy did not resolve". Mirrors _UNRESOLVED in
+    // bin/mito_gene_order.py and isUnresolvedTaxon in prepare_samplesheet, so the
+    // Groovy and Python rank lookups behave identically on messy taxonomy.
+    static final Set<String> UNRESOLVED_TAXON = ['', 'unknown', 'na', 'none', 'dropped'] as Set
+
     // Which curated seed database (assets/refdb/<group>/) GETORGANELLE_RESEED should
     // seed a failed invertebrate first pass from. The group name IS the directory and
     // file prefix, and must match a key of GROUPS in bin/build_invert_reference_db.py.

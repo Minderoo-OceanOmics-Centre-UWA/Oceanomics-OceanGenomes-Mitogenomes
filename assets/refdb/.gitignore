@@ -1,16 +1,21 @@
 # Only the files the pipeline actually reads are tracked, because these are
 # plain git blobs (no LFS) and every rebuild rewrites them into history.
 #
-#   <group>_mito_refdb.fasta        GetOrganelle reseed seed (-s)          -> tracked
-#   <group>_mito_refdb.label.fasta  GetOrganelle label database (--genes)  -> tracked
-#   <group>_mito_refdb.manifest.tsv provenance for the above               -> tracked
-#   <group>_mito_refdb.gb           canonical GenBank, 85 MB across the
-#                                   groups and read only for anthozoa by
-#                                   SELECT_CORAL_REFERENCE                 -> anthozoa only
-#   <group>_mito_refdb.nucl.*       BLAST db, rebuilt on demand            -> never tracked
+#   <group>_mito_refdb.fasta        GetOrganelle reseed seed (-s), and the
+#                                   BLAST subject for reference selection  -> tracked
+#   <group>_mito_refdb.label.fasta  GetOrganelle label database (--genes)   -> tracked
+#   <group>_mito_refdb.manifest.tsv organism, family, taxonomy lineage      -> tracked
+#   <group>_mito_refdb.features.tsv feature types and exon coordinates      -> tracked
+#   <group>_mito_refdb.gb           build intermediate only, 84 MB across
+#                                   the groups; bin/refdb_record.py rebuilds
+#                                   an equivalent record from the four
+#                                   tracked files above                     -> never tracked
+#   <group>_mito_refdb.nucl.*       BLAST db, rebuilt on demand             -> never tracked
 #
-# Regenerate any untracked file with
+# Regenerate the .gb (and with it any group's derived files) with
 #   bin/build_invert_reference_db.py --group <group> --email <you>
+# or, to refresh the derived files from an existing .gb without re-querying
+# NCBI and thereby changing which records the database holds,
+#   bin/build_invert_reference_db.py --group <group> --refresh-derived
 *_mito_refdb.gb
-!anthozoa/anthozoa_mito_refdb.gb
 *_mito_refdb.nucl.*

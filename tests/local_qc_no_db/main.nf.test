@@ -1,0 +1,33 @@
+nextflow_pipeline {
+    name "Local QC reaches a verdict with no database"
+    script "../../tests/local_qc_no_db/main.nf"
+
+    test("the QC chain runs and emits annotation statistics without sql_config") {
+        when {
+            options "-stub"
+            params {
+                outdir     = "$outputDir"
+                sql_config = null
+                skip_upload_results = true
+            }
+        }
+
+        then {
+            def ran = { name -> workflow.trace.tasks().any { it.name.contains(name) } }
+            assertAll(
+                { assert workflow.success },
+                // The four QC processes, none of which may need a database.
+                { assert ran('SPECIES_VALIDATION') },
+                { assert ran('ANNOTATION_STATS') },
+                { assert ran('EVALUATE_QC_CONDITIONS') },
+                { assert ran('QC_SUMMARY') },
+                // Not a pusher in sight: with no sql_config there is nothing to push to,
+                // and a QC step that needs one has been reintroduced if this trips.
+                { assert !ran('PUSH_') },
+                // The channel whose emptiness was the reported symptom.
+                { assert workflow.stdout.any { it.contains('ASSEMBLY_SUMMARY_FILE:') } },
+                { assert workflow.stdout.any { it.contains('QC_READY:') } }
+            )
+        }
+    }
+}

@@ -8,7 +8,11 @@ process PREPARE_ENA_METADATA {
         'tylerpeirce/psycopg2:0.1' }"
 
     input:
-    val meta
+    // meta and its depth TSV travel as one tuple rather than two channels: a
+    // positional pairing of separate channels is the silent-mispairing failure
+    // this pipeline has been bitten by before, and here it would attach one
+    // assembly's coverage to another's ENA manifest.
+    tuple val(meta), path(depth_tsv)
     path db_config
 
     output:
@@ -34,6 +38,7 @@ process PREPARE_ENA_METADATA {
         --code '${meta.mt_assembly_prefix.tokenize(".")[3]}' \
         --study '${ena_study}' \
         --scientific-name '${meta.scientific_name}' \
+        --depth-tsv '${depth_tsv}' \
         --output '${meta.full_seqid}.ena_input_metadata.json'
     printf '"%s":\n    python: "%s"\n    prepare_ena_metadata: "1.0.0"\n' \
         "${task.process}" "\$(python --version 2>&1 | sed 's/Python //')" > versions.yml
@@ -41,7 +46,7 @@ process PREPARE_ENA_METADATA {
 
     stub:
     """
-    printf '{"schema_version":2,"og_id":"${meta.id}","assembly_prefix":"${meta.mt_assembly_prefix}","annotation_version":"${meta.annotation_version}","full_seqid":"${meta.full_seqid}","validation_study":"${meta.ena_study}","mean_depth":100,"program":"stub 1.0","platform":"${meta.sequencing_type == "hifi" ? "PACBIO_SMRT" : "ILLUMINA"}","scientific_name":"${meta.scientific_name}"}\n' > '${meta.full_seqid}.ena_input_metadata.json'
+    printf '{"schema_version":3,"og_id":"${meta.id}","assembly_prefix":"${meta.mt_assembly_prefix}","annotation_version":"${meta.annotation_version}","full_seqid":"${meta.full_seqid}","validation_study":"${meta.ena_study}","mean_depth":100,"mean_depth_source":"pipeline","program":"stub 1.0","platform":"${meta.sequencing_type == "hifi" ? "PACBIO_SMRT" : "ILLUMINA"}","scientific_name":"${meta.scientific_name}"}\n' > '${meta.full_seqid}.ena_input_metadata.json'
     printf '"%s":\n    python: "stub"\n    prepare_ena_metadata: "stub"\n' "${task.process}" > versions.yml
     """
 }

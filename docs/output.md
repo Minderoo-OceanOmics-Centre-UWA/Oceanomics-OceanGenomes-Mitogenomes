@@ -269,11 +269,21 @@ per sample: curated DB for default/vertebrate samples, and `--nt_blast_db` when
 
 </details>
 
-The `SPECIES_VALIDATION` process checks marker concordance against the nominal species ID stored in SQL. The
-`EVALUATE_QC_CONDITIONS` module determines whether the sample can proceed to GenBank packaging, and its decision is
-reported in the QC summary table. All upload modules emit human-readable logs so that database connectivity or data
-issues can be audited after a run. If `--sql_config` is omitted (or `--skip_upload_results` is set),
-this entire stage is skipped.
+The `SPECIES_VALIDATION` process checks marker concordance against the sample's `nominal_species_id` from the
+samplesheet. The `EVALUATE_QC_CONDITIONS` module determines whether the sample can proceed to GenBank packaging, and
+its decision is reported in the QC summary table. All upload modules emit human-readable logs so that database
+connectivity or data issues can be audited after a run.
+
+If `--skip_upload_results` is set, only the `PUSH_*` modules are skipped. `ENA_SUBMISSION_PREP` still runs,
+because it reads from the database without writing to it; its ENA manifest takes `COVERAGE` from the run's own
+depth measurement rather than from the `mitogenome_data` row, and records which source it used as
+`mean_depth_source` in the package metadata. Use `--skip_ena_submission_prep` to turn submission prep off
+independently.
+
+If `--sql_config` is omitted entirely, the `PUSH_*` modules and `ENA_SUBMISSION_PREP` are both skipped.
+Either way `ANNOTATION_STATS`, `SPECIES_VALIDATION`, `EVALUATE_QC_CONDITIONS`, `QC_SUMMARY`,
+`COMPILE_HELD_SAMPLES` and the assembly summary all still run, so a run without a database still reports gene
+counts, missing genes and a completeness verdict.
 
 ### Submission-ready packaging
 
@@ -381,7 +391,7 @@ this pipeline no longer populates. They are not run automatically by the pipelin
 ### Standalone QC-only workflow (`qc_only_from_annotations.nf`)
 
 When you run `qc_only_from_annotations.nf`, the pipeline skips assembly, annotation, BLAST/LCA, and
-SQL upload modules, and executes only `MITOGENOME_QC` on existing annotation files.
+SQL upload modules, and executes only `ENA_SUBMISSION_PREP` on existing annotation files.
 
 <details markdown="1">
 <summary>Output files</summary>

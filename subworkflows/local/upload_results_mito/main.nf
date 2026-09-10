@@ -1,97 +1,30 @@
 /*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     IMPORT MODULES / SUBWORKFLOWS / FUNCTIONS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+        Every process in this file is a PUSHER: it writes to the OceanOmics
+        PostgreSQL database and does nothing else. Anything that computes a verdict
+        or a report now lives in subworkflows/local/mitogenome_qc, which runs
+        unconditionally. See the note at the top of that file for why the two were
+        separated.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
 // Data upload modules
 include { PUSH_MTDNA_ASSM_RESULTS       } from '../../../modules/local/upload_results/mtdna'
-include { SPECIES_VALIDATION            } from '../../../modules/local/species_validation'
+include { PUSH_SPECIES_VALIDATION       } from '../../../modules/local/upload_results/species_validation'
 include { PUSH_MTDNA_ANNOTATION_RESULTS } from '../../../modules/local/upload_results/emma'
 include { PUSH_LCA_BLAST_RESULTS        } from '../../../modules/local/upload_results/lca'
 include { PUSH_LCA_RAW_RESULTS          } from '../../../modules/local/upload_results/lca_raw'
 include { PUSH_ENA_VALIDATION_RESULTS   } from '../../../modules/local/upload_results/ena_validation'
 include { PUSH_QC_VALIDATOR             } from '../../../modules/local/upload_results/qc_validator'
 include { UPLOAD_RESULTS_SUMMARY        } from '../../../modules/local/upload_results/summary'
-include { EVALUATE_QC_CONDITIONS        } from '../../../modules/local/evaluate_qc_conditions'
-include { QC_SUMMARY                    } from '../../../modules/local/multiqc/qc_summary'
 
 // Helper functions
 include { softwareVersionsToYAML        } from '../../nf-core/utils_nfcore_pipeline'
-
-// Group a per-region result channel ([meta, file], up to one item per annotated
-// region) into one [meta, [files]] item per sample, WITHOUT waiting for the
-// upstream channel to close.
-//
-// INVARIANT for this pipeline: a groupTuple whose source is task-derived MUST carry a
-// groupKey (or an explicit size:). A bare one is a whole-run barrier by definition -- it
-// cannot emit anything until its source channel is complete, which for the LCA/BLAST
-// results means every such task in the whole run has finished. That is what stopped a
-// finished sample from reaching species validation and QC until the slowest sample in the
-// run caught up. groupKey attaches the expected item count to each key, so groupTuple can
-// close each sample's group as soon as that sample's own regions are in.
-//
-// The same operator has since bitten twice more, both times as "one queued task and nothing
-// downstream runs at all": the assembly-upload selection in workflows/oceangenomesmitogenomes.nf
-// (fixed by disambiguating upstream so no grouping is needed) and ch_ena_validation_inputs in
-// subworkflows/local/mitogenome_qc (left in place deliberately -- see the note there for why a
-// constant size would be wrong). Where a correct count is not available, remove the need to
-// group rather than guessing a size.
-//
-// The count comes from region_counts ([meta, 0..3]), emitted once per sample by
-// MITOGENOME_ANNOTATION. It is exact for both channels because BLAST_BLASTN emits
-// one filtered result per region unconditionally, and LCA now emits one lca and
-// one lca_raw per region unconditionally too (header-only when a region had no
-// valid hits) -- see modules/local/LCA.
-//
-// combine(by: 0) rather than join(by: 0): join consumes one item per key, so it
-// would match only the first of a sample's up to three regions.
-// Attach each sample's circularity-check evidence to its QC-gate input, keyed on
-// mt_assembly_prefix, WITHOUT waiting for the evidence channel to close.
-//
-// qc_pairs is [ meta, blast_filtered, annotation_stats ]; circularity_evidence is
-// [ mt_assembly_prefix, circularity_check.tsv ], one row per canonical assembly.
-//
-// A plain join emits each key the moment both sides hold it, so a sample crosses the gate as
-// soon as its OWN work is done. The two alternatives both reintroduce a whole-run wait:
-// collecting the evidence (toList/collect) yields a value channel that emits only when its
-// source CLOSES, and join(..., remainder: true) can only classify an unmatched row at close
-// too. Either way one unfinished assembly anywhere in the run pins every finished sample.
-//
-// The key is mt_assembly_prefix, not the whole meta map: meta gains `circular` between the
-// assembly stage and here (and gains it again on the collapse path), and on a -resume the two
-// sides carry meta restored from different cache entries, so whole-map equality is not a
-// reliable join key -- the same failure documented for the oatk reference join.
-//
-// Both sides now key on the assembly's IDENTITY, the curated FASTA basename. They did not
-// always: the evidence side was keyed by the sample-level assembly prefix while this side had
-// been re-stamped to the basename, so for every curated assembly (reseed / _rgj / _collapsed)
-// the join simply never matched. A plain join has no way to report that -- it emits nothing
-// and says nothing -- so 23 of 168 finished assemblies vanished between species validation and
-// the QC gate with no error, no warning and no empty output to notice. Hence the tee below.
-def attachCircularityEvidence(qc_pairs, circularity_evidence) {
-    def keyed = qc_pairs.map { meta, blast, stats -> [ meta.mt_assembly_prefix, meta, blast, stats ] }
-
-    // Diagnostic tee ONLY. The main path keeps its plain join, because emitting each sample the
-    // moment its own work lands is load-bearing here (see above). This branch is allowed the
-    // remainder join's whole-run wait precisely because nothing depends on it: it exists to
-    // name, at end of run, any assembly that reached the gate and found no evidence to pair
-    // with. A silent key miss is what made the original defect invisible; this makes the next
-    // one say so.
-    keyed
-        .map { prefix, _meta, _blast, _stats -> [ prefix, true ] }
-        .join(circularity_evidence.map { prefix, _ev -> [ prefix, true ] }, by: 0, remainder: true)
-        .filter { items -> items[1] != null && (items.size() < 3 || items[2] == null) }
-        .view { items ->
-            "WARNING: assembly '${items[0]}' reached the QC gate with no circularity evidence " +
-            "under that name and was dropped. Its evidence is keyed by a different name, which " +
-            "means an assembly identity was not stamped from its FASTA basename."
-        }
-
-    return keyed
-        .join(circularity_evidence, by: 0)
-        .map { _prefix, meta, blast, stats, evidence -> [ meta, blast, stats, evidence ] }
-}
+// Grouping helper shared with the QC subworkflow that owns it. The dependency runs
+// this way round on purpose: uploads depend on QC, never the reverse.
+include { groupResultsByRegionCount     } from '../mitogenome_qc/main'
 
 // Gate a channel on each sample's committed assembly upload receipt, keyed on
 // mt_assembly_prefix. Returns the rows unchanged, but only once their mitogenome_data row
@@ -99,16 +32,23 @@ def attachCircularityEvidence(qc_pairs, circularity_evidence) {
 //
 // upload_rows is the raw PUSH_MTDNA_ASSM_RESULTS.out.upload, i.e. [ meta, receipt ].
 //
-// THREE call sites, and they are not all about depth. mitogenome_data carries three inbound
-// foreign keys (sql/018_mitogenome_data_og_num_first.sql:215-223): fk_mitogenome_lca on lca,
-// fk_mitogenome_lca_raw_results on lca_raw_results, and fk_mitogenome_lca_validation on
-// lca_validation. Each is (og_id, tech, seq_date, code) -- exactly mt_assembly_prefix, which
-// is why the 4-part prefix is not a compromise key here but the constraint itself. None of
-// SPECIES_VALIDATION, PUSH_LCA_RAW_RESULTS or PUSH_LCA_BLAST_RESULTS had a data dependency on
-// the parent push, so Nextflow was free to schedule them first, and did: the child insert
-// then failed on the foreign key while the run reported success. PUSH_LCA_BLAST_RESULTS is
-// covered transitively because it consumes SPECIES_VALIDATION.out.full, so gating
-// grouped_blast_lca gates it too -- no fourth call site.
+// ONE CALL SITE PER PUSHER, and they are not all about depth. mitogenome_data carries three
+// inbound foreign keys (sql/018_mitogenome_data_og_num_first.sql:215-223): fk_mitogenome_lca
+// on lca, fk_mitogenome_lca_raw_results on lca_raw_results, and fk_mitogenome_lca_validation
+// on lca_validation. Each is (og_id, tech, seq_date, code) -- exactly mt_assembly_prefix,
+// which is why the 4-part prefix is not a compromise key here but the constraint itself. None
+// of these pushers has a data dependency on the parent push, so Nextflow is free to schedule
+// them first, and did: the child insert then failed on the foreign key while the run reported
+// success.
+//
+// Every pusher is now gated EXPLICITLY at its own call site. Two of them used to inherit the
+// gate transitively instead, through a SPECIES_VALIDATION whose input was gated:
+// PUSH_LCA_BLAST_RESULTS consumed SPECIES_VALIDATION.out.full, and the annotation push
+// consumed a channel joined against it. That worked only while SPECIES_VALIDATION was itself
+// a writer sitting inside this subworkflow. It is now DB-free QC that runs unconditionally
+// upstream (subworkflows/local/mitogenome_qc), so nothing it emits is ordered against the
+// parent row any more, and an inherited gate would silently be no gate at all. If you add a
+// pusher, gate it here; do not assume its inputs were gated for you.
 //
 // The `annotation` component of the 5-part lca_validation identity is deliberately NOT part
 // of this key: it is not in meta at this stage (species_validation.py derives it inside the
@@ -123,7 +63,7 @@ def attachCircularityEvidence(qc_pairs, circularity_evidence) {
 // every sample SILENTLY instead of failing -- which is what it did the moment the
 // assembly-upload barrier upstream was removed and this became the binding constraint:
 // 123 samples cleared the gate, all 123 had a matching upload row by prefix, and
-// MITOGENOME_QC still ran zero times. The prefix is 1:1 on both sides, so no fan-out.
+// ENA_SUBMISSION_PREP still ran zero times. The prefix is 1:1 on both sides, so no fan-out.
 //
 // Both sides key on the assembly's IDENTITY, and the upload side is now built from the
 // SANITISED assembly, so the receipt exists under the same curated name the QC row carries.
@@ -161,48 +101,36 @@ def gateOnAssemblyReceipt(rows, upload_rows, label) {
         .map { items -> items[1..-2] }
 }
 
-def groupResultsByRegionCount(results, region_counts) {
-    return results
-        .combine(region_counts, by: 0)
-        .map { meta, result_file, n_regions -> [ groupKey(meta, n_regions), result_file ] }
-        .groupTuple()
-        // Unwrap the GroupKey back to the plain meta map so key equality still
-        // holds for the joins downstream.
-        .map { key, files -> [ key.getGroupTarget(), files.flatten() ] }
-}
-
 
 /*
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN DATE UPLOAD AND SPECIES CHECK WORKFLOW
 
         - Specific OceanOmics code using the PostgreSQL database.
-        - Check the LCA results against nominal species ID and push results to SQL db
-        - Determines species that have validated species ID to proceed with QC to prepare
-          the sample for submittion to Genbank.
-
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
 workflow UPLOAD_RESULTS {
 
     take:
-    assembly_results // tuple val(meta), path(fasta), path(assembly_log), path(mito_depth.tsv)
-    annotation_results
-    blast_filtered_results
-    lca_results
+    assembly_results        // tuple val(meta), path(fasta), path(assembly_log), path(mito_depth.tsv)
+    annotation_stats        // tuple val(meta), path(annotation_stats.csv) — from MITOGENOME_QC
+    validation_records      // tuple val(meta), path(validation_record.json) — from MITOGENOME_QC
+    species_validation_full // tuple val(meta), path(lca_combined), path(blast_combined) — from MITOGENOME_QC
     lca_raw_results
-    circularity_evidence // tuple val(mt_assembly_prefix), path(circularity_check.tsv) — one row per canonical assembly, both assemblers
-    region_counts // tuple val(meta), val(0..3) — CO1/12s/16s regions this sample annotated
-    sql_config // params.sql_config
+    region_counts           // tuple val(meta), val(0..3) — CO1/12s/16s regions this sample annotated
+    sql_config              // params.sql_config
 
     main:
 
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
- 
+
     //
     // MODULE: Pulling out the statistics from the assembly files and updating the SQL database
+    //
+    // This is the FK parent for everything below, so it is first and everything else
+    // is gated on its receipt.
     //
 
     PUSH_MTDNA_ASSM_RESULTS (
@@ -211,108 +139,53 @@ workflow UPLOAD_RESULTS {
     )
 
     //
-    // Re grouping the CO1, 12s and 16s BLAST and LCA results per sample
+    // MODULE: Writing the lca_validation row from the record MITOGENOME_QC produced.
+    //         lca_validation carries fk_mitogenome_lca_validation, so it is gated.
     //
 
-    grouped_lca   = groupResultsByRegionCount(lca_results, region_counts)
-    grouped_blast = groupResultsByRegionCount(blast_filtered_results, region_counts)
-
-    // A sample whose annotation yielded none of CO1/12s/16s never enters BLAST or
-    // LCA, so it appears in neither grouped channel. Without this it would be
-    // dropped by the join below and never reach SPECIES_VALIDATION at all -- no
-    // QC verdict, no lca_results row, silently absent from the run's output.
-    // Feed it through on empty stand-ins instead: species_validation.py combines
-    // them to a header-only lca_combined and an empty blast_combined, finds no
-    // nominal-species hit, and records the sample as not validated. That is the
-    // correct outcome for a sample with nothing to validate against, and it is
-    // reached immediately rather than at the end of the run.
-    def empty_lca_file   = file("${projectDir}/assets/placeholders/empty_lca.tsv", checkIfExists: true)
-    def empty_blast_file = file("${projectDir}/assets/placeholders/empty_blast_filtered.tsv", checkIfExists: true)
-
-    ch_zero_region_blast_lca = region_counts
-        .filter { _meta, n_regions -> n_regions == 0 }
-        .map { meta, _n_regions -> [ meta, [ empty_blast_file ], [ empty_lca_file ] ] }
-
-    grouped_blast_lca = grouped_blast
-        .join(grouped_lca, by: 0)
-        .mix(ch_zero_region_blast_lca)
-
-    // Gate on the committed mitogenome_data row before species validation writes
-    // lca_validation (and, transitively, before PUSH_LCA_BLAST_RESULTS writes lca):
-    // both carry a foreign key to it. Note the zero-region stand-ins are mixed in ABOVE
-    // this line on purpose -- they arrive from region_counts rather than from the grouped
-    // channels, and they still get an lca_validation row, so they need gating too.
-    grouped_blast_lca_gated = gateOnAssemblyReceipt(
-        grouped_blast_lca,
-        PUSH_MTDNA_ASSM_RESULTS.out.upload,
-        'species validation'
+    PUSH_SPECIES_VALIDATION (
+        gateOnAssemblyReceipt(
+            validation_records,
+            PUSH_MTDNA_ASSM_RESULTS.out.upload,
+            'species validation upload'
+        ),
+        sql_config
     )
 
     //
-    // MODULE: Checking the LCA results against the nominal species ID in the SQL database
+    // MODULE: Updating the SQL database with the annotation statistics
     //
-
-    SPECIES_VALIDATION (
-        grouped_blast_lca_gated, // tuple val(meta), path(blast_filtered), path(lca_filtered)
-        sql_config // params.sql_config
-    )
-
+    // Gated explicitly. It upserts into mitogenome_data itself rather than a child
+    // table, so this is an ordering constraint rather than a foreign key: without it
+    // the annotation columns can be written first and the assembly push can then
+    // overwrite the row it finds. It used to inherit the ordering by consuming a
+    // channel joined against the gated SPECIES_VALIDATION output; that inheritance is
+    // gone now that species validation is DB-free QC upstream.
     //
-    // MODULE: Calculating the statistics of the annotations and updating the SQL database
-    //
-
-    // Attach each assembly's lca_combined so annotation_stats.py can record whether
-    // the BLAST-derived lineage agreed with the rank a gene-order variant rule
-    // matched on. Advisory only -- it holds nothing.
-    //
-    // A PLAIN join, deliberately. remainder: true is a whole-run barrier here (see
-    // the note further down in this file) and has already broken a run. A plain
-    // join is only safe because SPECIES_VALIDATION is now TOTAL over
-    // annotation_results on both paths: the main path derives region_counts
-    // directly from the annotation results, the zero-region stand-in above catches
-    // the rest, and the precomputed path was made total by construction in
-    // workflows/oceangenomesmitogenomes.nf. Before that fix a precomputed assembly
-    // with annotation files but no BLAST files reached neither, and this join would
-    // have silently dropped it -- it gets its annotation stats pushed today, so
-    // that would have been a regression.
-    //
-    // The tee below is the standing insurance: it names, at end of run, any
-    // assembly that reached here with no lca_combined to pair with, because a plain
-    // join that misses emits nothing and says nothing.
-    ch_annotation_lca = SPECIES_VALIDATION.out.full
-        .map { meta, lca_combined, _blast_combined ->
-            [ meta.mt_assembly_prefix, lca_combined ]
-        }
-
-    annotation_results
-        .map { meta, _files -> [ meta.mt_assembly_prefix, true ] }
-        .join(ch_annotation_lca.map { prefix, _f -> [ prefix, true ] }, by: 0, remainder: true)
-        .filter { items -> items[1] != null && (items.size() < 3 || items[2] == null) }
-        .view { items ->
-            "WARNING: assembly '${items[0]}' reached the annotation upload with no " +
-            "lca_combined under that name and was dropped. SPECIES_VALIDATION is not " +
-            "total over annotation_results, which is a totality bug upstream, not a " +
-            "reason to loosen this join."
-        }
-
-    // tuple val(meta), path("annotation/*"), path(lca_combined)
-    ch_annotation_with_lca = annotation_results
-        .map { meta, files -> [ meta.mt_assembly_prefix, meta, files ] }
-        .join(ch_annotation_lca, by: 0)
-        .map { _prefix, meta, files, lca_combined -> [ meta, files, lca_combined ] }
 
     PUSH_MTDNA_ANNOTATION_RESULTS (
-        ch_annotation_with_lca,
-        sql_config // params.sql_config
+        gateOnAssemblyReceipt(
+            annotation_stats,
+            PUSH_MTDNA_ASSM_RESULTS.out.upload,
+            'annotation upload'
+        ),
+        sql_config
     )
 
     //
     // MODULE: Updating the SQL database with the LCA and filtered BLAST results
     //
+    // lca carries fk_mitogenome_lca. Gated explicitly for the same reason as the
+    // annotation push: it used to be covered transitively through SPECIES_VALIDATION.
+    //
 
     PUSH_LCA_BLAST_RESULTS (
-        SPECIES_VALIDATION.out.full, // tuple path ("lca_combined.${mt_assembly_prefix}.tsv"), path ("blast_combined.${mt_assembly_prefix}.tsv"),
-        sql_config // params.sql_config
+        gateOnAssemblyReceipt(
+            species_validation_full, // tuple val(meta), path(lca_combined), path(blast_combined)
+            PUSH_MTDNA_ASSM_RESULTS.out.upload,
+            'LCA/BLAST upload'
+        ),
+        sql_config
     )
 
     //
@@ -326,7 +199,7 @@ workflow UPLOAD_RESULTS {
 
     // lca_raw_results carries fk_mitogenome_lca_raw_results, so the same receipt gate
     // applies. This is the LARGER of the two failure populations, not the smaller: gating
-    // only SPECIES_VALIDATION would close one FK child and leave this one open.
+    // only the validation upload would close one FK child and leave this one open.
     grouped_lca_raw_gated = gateOnAssemblyReceipt(
         grouped_lca_raw,
         PUSH_MTDNA_ASSM_RESULTS.out.upload,
@@ -335,127 +208,9 @@ workflow UPLOAD_RESULTS {
 
     PUSH_LCA_RAW_RESULTS (
         grouped_lca_raw_gated, // tuple val(meta), path(lca_raw.*.tsv)
-        sql_config // params.sql_config
+        sql_config
     )
 
-    //
-    // SUBWORKFLOW: Evaluate the mitogenome and if it can continue on to final QC
-    //
-    /*  This solution provides a conditional QC subworkflow that evaluates two conditions and only proceeds with QC processes when **both** are satisfied:
-        1. ✅ **LCA results**: Any row has the nominal species ID in the filtered blast
-            results: `Found_in_blast_YN = "Yes"`
-        2. ✅ **Annotation CSV**: The `passed` column value is `"yes"` when there are no
-            missing genes and the genes are in the right order.
-    */
-    
-    // Attach the per-sample circularity-check evidence so the gate can block length/repeat
-    // anomalies (concatemers, control-region VNTRs, unresolved over-length assemblies) from
-    // progressing to QC. Assemblies that never reached a check (failed / no-contig /
-    // precomputed with no *_check.tsv on disk) carry the empty-check stand-in from the
-    // assembly stage, so they are never dropped and never blocked on this condition.
-    //
-    // The evidence arrives as one row per canonical assembly, keyed by mt_assembly_prefix,
-    // so it can be attached with a plain join: each sample crosses the gate as soon as its
-    // OWN evidence, species validation and annotation stats are in.
-    //
-    // This previously collected the whole evidence channel into a lookup map
-    // (circularity_evidence.toList()) to avoid a remainder join's whole-run wait. That traded
-    // one barrier for another: toList() is a value channel that emits only when its source
-    // CLOSES, and the source runs back to the assembly subworkflows, so a single assembly
-    // still queued held every finished sample at this gate. Run
-    // mitogenomes-missing-audit-5 hit exactly that -- 135 samples validated and uploaded,
-    // EVALUATE_QC_CONDITIONS never ran once, because one sample's REFERENCE_RANK was stuck
-    // behind a maintenance reservation.
-    //
-    // The fix is upstream totality rather than a cleverer operator here: every emitted
-    // assembly carries an evidence row (assets/placeholders/empty_circularity_check.tsv where no check
-    // ran), so there is no "missing evidence" case left for a lookup fallback or a remainder
-    // path to cover, and no reason to wait for the channel to close. Deliberately no
-    // placeholder fallback at this point: if the contract upstream ever breaks, the sample
-    // should visibly fail to reach QC rather than be silently gated on a stand-in that says
-    // "no anomaly".
-    ch_qc_conditions = attachCircularityEvidence(
-        SPECIES_VALIDATION.out.summary.join(PUSH_MTDNA_ANNOTATION_RESULTS.out.stats, by: 0),
-        circularity_evidence
-    )
-
-    //
-    // MODULE: evaluating the results to determine if to process the sample through QC
-    //
-
-    EVALUATE_QC_CONDITIONS (
-        ch_qc_conditions // tuple val(meta), path(blast_filtered), path(annotation_stats.csv), path(circularity_check.tsv)
-    )
-
-    // Filter for samples that meet both conditions, then gate each on its own committed
-    // assembly upload row. See gateOnAssemblyReceipt for why the key is the prefix:
-    // when this was a whole-meta join it matched NOTHING once the assembly-upload barrier was
-    // removed -- 123 samples cleared the gate, all 123 had a matching upload row by prefix,
-    // and MITOGENOME_QC still received zero.
-    ch_qc_ready = gateOnAssemblyReceipt(
-        EVALUATE_QC_CONDITIONS.out.evaluation
-            .map { meta, species_file, proceed_file, circular_file ->
-                def species_name = species_file.text.trim()
-                def proceed_qc = proceed_file.text.trim()
-                def circular = circular_file.text.trim()
-                return [ meta, species_name, proceed_qc, circular ]
-            }
-            .filter { meta, species_name, proceed_qc, circular ->
-                proceed_qc == "true"
-            },
-        PUSH_MTDNA_ASSM_RESULTS.out.upload,
-        'the QC gate'
-    )
-
-    // Log samples that will proceed to QC
-    ch_qc_ready.view { meta, species_name, proceed_qc, circular ->
-        "Sample ${meta.id} will proceed to QC with species: ${species_name} (circular: ${circular})"
-    }
-
-    // Filter for samples that dont meet the conditions
-    ch_not_qc_ready = EVALUATE_QC_CONDITIONS.out.evaluation
-        .join(EVALUATE_QC_CONDITIONS.out.reason, by: 0)
-        .map { meta, species_file, proceed_file, circular_file, reason_file ->
-            def species_name = species_file.text.trim()
-            def proceed_qc = proceed_file.text.trim()
-            def circular = circular_file.text.trim()
-            def held_reason = reason_file.text.trim()
-            return [ meta, species_name, proceed_qc, circular, held_reason ]
-        }
-        .filter { meta, species_name, proceed_qc, circular, held_reason ->
-            proceed_qc == "false"
-        }
-        .view { meta, species_name, proceed_qc, circular, held_reason ->
-            "Sample ${meta.id} will NOT proceed to QC - ${held_reason ?: 'conditions not met'}"
-        }
-
-    // Headerless per-sample fragments for the run-level held_samples.tsv. These
-    // samples are filtered out before MITOGENOME_QC, so this subworkflow is the
-    // only place their hold is recorded.
-    //
-    // The filename carries the STAGE as well as the prefix. It did not always, and every
-    // held source used the same "<prefix>.held.tsv" name: the fragments are collectFile
-    // outputs from different subworkflows that are then mixed and staged flat into
-    // fragments/, so two genuine holds on one assembly at two stages collided under one
-    // name, and COMPILE_HELD_SAMPLES' sort -u then collapsed whatever survived. An
-    // assembly can legitimately be held more than once.
-    ch_held_fragments = ch_not_qc_ready
-        .collectFile { meta, _species, _proceed, _circular, held_reason ->
-            [ "${meta.mt_assembly_prefix}.PRE_QC.held.tsv",
-              "${meta.id}\t${meta.mt_assembly_prefix}\tPRE_QC\tproceed_qc=false: ${held_reason ?: 'conditions not met'}\n" ]
-        }
-
-
-    //
-    // Build a per-sample QC summary TSV for MultiQC
-    qc_summary_input = EVALUATE_QC_CONDITIONS.out.evaluation
-        .join(PUSH_MTDNA_ANNOTATION_RESULTS.out.stats, by: 0)
-        .map { meta, species_file, proceed_file, circular_file, annotation_csv -> [ meta, species_file, proceed_file, annotation_csv ] }
-    QC_SUMMARY (
-        qc_summary_input // tuple val(meta), path(species_name.txt), path(proceed_qc.txt), path(annotation_stats.csv)
-    )
-
-    
     //
     // MODULE: Consolidate the per-step SQL upload status files into a single
     //         summary TSV + detailed appendix so all upload outcomes can be
@@ -465,7 +220,7 @@ workflow UPLOAD_RESULTS {
     ch_upload_status_files = Channel.empty()
         .mix(PUSH_MTDNA_ASSM_RESULTS.out.upload.map { _meta, file -> file })
         .mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.upload.map { _meta, f -> f })
-        .mix(SPECIES_VALIDATION.out.upload.map { _meta, f -> f })
+        .mix(PUSH_SPECIES_VALIDATION.out.upload.map { _meta, f -> f })
         .mix(PUSH_LCA_BLAST_RESULTS.out.upload)
         .mix(PUSH_LCA_RAW_RESULTS.out.upload)
 
@@ -473,42 +228,34 @@ workflow UPLOAD_RESULTS {
     // Subworkflow finishing steps.
     //
 
-    // Collect MultiQC files
-    //  - Species validation outputs (per-sample TSVs)
-    //  - Annotation statistics CSVs
-    //  - QC evaluation flags (for quick visibility in report) and summary table
-    ch_multiqc_files = ch_multiqc_files.mix(SPECIES_VALIDATION.out.summary.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.stats.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(EVALUATE_QC_CONDITIONS.out.evaluation.map { meta, species_file, proceed_file, circular_file -> proceed_file })
-    ch_multiqc_files = ch_multiqc_files.mix(QC_SUMMARY.out.table.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_MTDNA_ASSM_RESULTS.out.tool_params.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(SPECIES_VALIDATION.out.tool_params.collect { it[1] })
+    ch_multiqc_files = ch_multiqc_files.mix(PUSH_SPECIES_VALIDATION.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_LCA_BLAST_RESULTS.out.tool_params.collect { it[1] })
     ch_multiqc_files = ch_multiqc_files.mix(PUSH_LCA_RAW_RESULTS.out.tool_params.collect { it[1] })
-    ch_multiqc_files = ch_multiqc_files.mix(EVALUATE_QC_CONDITIONS.out.tool_params.collect { it[1] })
     ch_versions = ch_versions.mix(PUSH_MTDNA_ASSM_RESULTS.out.versions.first())
-    ch_versions = ch_versions.mix(SPECIES_VALIDATION.out.versions.first())
+    ch_versions = ch_versions.mix(PUSH_SPECIES_VALIDATION.out.versions.first())
     ch_versions = ch_versions.mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(PUSH_LCA_BLAST_RESULTS.out.versions.first())
     ch_versions = ch_versions.mix(PUSH_LCA_RAW_RESULTS.out.versions.first())
-    ch_versions = ch_versions.mix(EVALUATE_QC_CONDITIONS.out.versions)
-
-
 
     //
     // Emit outputs
     //
 
     emit:
-    qc_ready    = ch_qc_ready                   // channel: [ val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false) ]
-    held_fragments = ch_held_fragments         // channel: path(<prefix>.held.tsv) — one row per pre-QC hold
-    assembly_summary_files = PUSH_MTDNA_ANNOTATION_RESULTS.out.stats.map { meta, stats -> stats }
+    // The committed mitogenome_data receipts, the FK parent for every other write in
+    // here. No consumer OUTSIDE this subworkflow uses them any more: they were exposed
+    // to order ENA_SUBMISSION_PREP behind the committed row, back when ENA metadata read
+    // mean_depth out of it. Submission prep now gets that number from the run's own depth
+    // TSV and needs no ordering at all. Kept exported because the receipt stream is what
+    // tests/upload_receipt_join exercises, and because a future pusher outside this
+    // subworkflow would need exactly this to gate on.
+    assembly_receipts   = PUSH_MTDNA_ASSM_RESULTS.out.upload
     upload_status_files = ch_upload_status_files
-    multiqc_files = ch_multiqc_files            // channel: [ path(multiqc_files) ]
-    versions = ch_versions             // channel: [ path(versions.yml) ]
+    multiqc_files       = ch_multiqc_files // channel: [ path(multiqc_files) ]
+    versions            = ch_versions      // channel: [ path(versions.yml) ]
 }
-
 /*
  * Upload the post-QC ENA validation records and compile the final SQL upload
  * report only after all biological and submission-readiness gates have run.

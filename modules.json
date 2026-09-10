@@ -263,7 +263,7 @@
                             "local"
                         ]
                     },
-                    "mitogenome_qc": {
+                    "ena_submission_prep": {
                         "branch": "master",
                         "git_sha": "",
                         "installed_by": [
