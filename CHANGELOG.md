@@ -258,6 +258,35 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- `DOWNLOAD_BLAST_DB` uses the shared taxdb cache again, instead of re-downloading
+  62 MB over unguarded FTP on every single run.
+
+  Three faults had stacked up. The `storeDir` cache at `--blast_db_dir` was
+  permanently unsatisfiable: `taxonomy4blast.sqlite3` was added as a required output
+  without seeding the existing cache, so Nextflow logged `unable to find ...
+  taxonomy4blast.sqlite3` and re-submitted the task every run. Nothing consumes that
+  output, and blastn only ever receives `taxdb.btd`/`taxdb.bti`, so it is now
+  `optional: true` and a two-file cache is a hit.
+
+  The in-script guard that was meant to short-circuit the download had been dead since
+  the cache base moved from `${launchDir}/blast_dbs` to `params.blast_db_dir`: the
+  literal `/blast_dbs` suffix stayed behind, so it tested
+  `<blast_db_dir>/blast_dbs/taxdb.btd`, a path that never existed. The suffix is gone,
+  and on a hit the guard now *copies* the cached files into the work dir rather than
+  echoing "skipping" -- a bare skip would leave the declared `taxdb*` outputs
+  unresolvable, because `storeDir` runs the task in a clean work dir.
+
+  Finally the download itself was unverified. A dropped FTP control connection resumed
+  via `REST`, reported all 65,261,809 bytes saved, and produced a corrupt archive;
+  `tar` exited 2, which is deliberately outside the transient set in `base.config`, so
+  the whole cohort terminated. The fetch is now https (no control/data channel to
+  drop), retries, and checks NCBI's `taxdb.tar.gz.md5` before unpacking, deleting the
+  partial file on mismatch so a retry cannot resume onto known-bad bytes.
+
+  `MITOGENOME_ANNOTATION` now also errors up front when `--blast_db_dir` is unset,
+  mirroring the existing `--taxonkit_db_dir` assert, rather than silently disabling the
+  cache via `storeDir null`.
+
 - BLAST summaries reach MultiQC again, instead of 48 copies of a directory name.
 
   `BLAST_BLASTN` emits `summary` as a plain path and `tool_params` as a `[meta, path]`
@@ -279,6 +308,34 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   Every real `filtered_summary.*.txt` was dropped in the process, and the run reported only
   a warning. Now mixed directly. `tests/multiqc_inputs/` runs both idioms over one channel,
   so the fix is pinned by what it produces rather than by the shape of the source line.
+
+- `-profile test` runs. It had never run since the repository was scaffolded.
+
+  `conf/test.config` still carried the nf-core template placeholders, `// TODO nf-core:
+  Specify the paths to your test data` included: `input` pointed at an nf-core *viralrecon*
+  amplicon samplesheet and `genome` at the yeast assembly `R64-1-1`. That samplesheet has no
+  `sequencing_type` column, which `assets/schema_input.json` marks required, so every
+  invocation died in parameter validation before a single task was scheduled:
+
+  ```
+  * --input (.../viralrecon/samplesheet/samplesheet_test_illumina_amplicon.csv):
+      Entry 1: Missing required field(s): sequencing_type
+  ```
+
+  The profile now uses `tests/test_data/samplesheet_test.csv`, two invertebrate HiFi rows
+  carrying the full taxonomy columns, and sets `organelle_type = 'animal_mt'` (null by
+  default, and `GETORGANELLE_CONFIG` takes it as a plain `val`, so the run aborted at
+  channel construction once the samplesheet was fixed). The annotation, ENA prep and upload
+  stages are skipped: each hard-requires an external resource this repository cannot ship
+  (`--taxonkit_db_dir`, `--nt_blast_db`, `--template_sbt`, Postgres credentials). What
+  remains is a stub smoke test of samplesheet parsing and the assembly wiring.
+
+  The reads are bundled, but nf-schema resolves a relative `fastq_1` cell against
+  `launchDir`, not against the samplesheet, so a committed relative path would only work
+  when launched from the clone root. The tracked sheet keeps the `__PROJECT_DIR__`
+  placeholder that the nf-tests under `tests/samplesheet_meta/` already substitute, and the
+  profile absolutises it into a run-local temp copy. Verified from both the clone root and
+  an unrelated working directory.
 
 - `reseed_seed_top_n` and `reseed_length_tolerance` are declared in `nextflow_schema.json`.
 

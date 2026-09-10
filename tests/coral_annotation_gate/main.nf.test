@@ -21,6 +21,7 @@ nextflow_workflow {
                 nt_blast_db      = "/stub/nt"
                 mitos_refdb      = "${projectDir}/assets"
                 taxonkit_db_dir  = "$outputDir/taxonkit"
+                blast_db_dir     = "$outputDir/blast_dbs"
             }
             workflow {
                 """

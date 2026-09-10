@@ -125,8 +125,15 @@ workflow MITOGENOME_ANNOTATION {
     // MODULE: Download taxonomy database
     //
 
+    // storeDir is the shared central taxdb cache, so a null path would silently
+    // disable caching and re-download 62 MB per run. Mirrors the --taxonkit_db_dir
+    // assert later in this subworkflow.
+    if (!params.blast_db_dir) {
+        error "--blast_db_dir is required for the shared BLAST taxdb cache"
+    }
+
     DOWNLOAD_BLAST_DB(Channel.value("taxdb"))
-    
+
     ch_blast_db = DOWNLOAD_BLAST_DB.out.db_files
 
     // 

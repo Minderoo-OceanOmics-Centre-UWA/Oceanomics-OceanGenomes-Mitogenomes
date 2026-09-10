@@ -8,10 +8,20 @@ tools:
   - name: tar
     homepage: https://www.gnu.org/software/tar/
     licence: GPL-3.0
+  - name: md5sum
+    homepage: https://www.gnu.org/software/coreutils/
+    licence: GPL-3.0
 input:
   - db_name: { type: string, description: Database identifier (e.g., 'taxdb') }
 output:
   - db_files: { type: files, description: Downloaded BLAST taxonomy files, pattern: "taxdb.*" }
+  - taxdb_file:
+      type: file
+      description: |
+        taxonomy4blast.sqlite3 from taxdb.tar.gz. Optional: blastn only needs
+        taxdb.btd/taxdb.bti, and marking it optional lets a cache holding just
+        those two satisfy storeDir instead of forcing a re-download every run.
+      pattern: "taxonomy4blast.sqlite3"
 authors: ["Tyler Peirce"]
 maintainers: ["Tyler Peirce"]
 

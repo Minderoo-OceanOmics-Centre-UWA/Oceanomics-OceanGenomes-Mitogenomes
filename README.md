@@ -74,6 +74,18 @@ nextflow run nf-core/oceangenomesmitogenomes \
   --template_sbt ~/templates/oceanomics_submission.sbt
 ```
 
+### Smoke test (`-profile test`)
+
+```bash
+nextflow run . -profile test,singularity -stub --outdir results_test
+```
+
+Runs two bundled invertebrate HiFi rows through samplesheet parsing and the assembly
+wiring, in stub mode, with no external inputs. Annotation, ENA prep and the SQL
+upload/QC modules are skipped, because each needs a resource this repository cannot
+ship (`--taxonkit_db_dir`, `--nt_blast_db`, `--template_sbt`, Postgres credentials).
+Use it to check that a clone and its container engine work, not to produce data.
+
 ### Directory mode (`--input_dir`)
 
 ```bash

@@ -27,6 +27,18 @@ nextflow run nf-core/oceangenomesmitogenomes \
 The command above runs the full assembly + annotation + validation + QC pipeline. If you already
 have annotation files and only need QC packaging, use the standalone workflow below.
 
+## Smoke test (`-profile test`)
+
+```bash
+nextflow run . -profile test,singularity -stub --outdir results_test
+```
+
+Runs two bundled invertebrate HiFi rows through samplesheet parsing and the assembly
+wiring, in stub mode, with no external inputs. Annotation, ENA prep and the SQL
+upload/QC modules are skipped, because each needs a resource this repository cannot
+ship (`--taxonkit_db_dir`, `--nt_blast_db`, `--template_sbt`, Postgres credentials).
+Use it to check that a clone and its container engine work, not to produce data.
+
 ## Standalone QC-only workflow (`qc_only_from_annotations.nf`)
 
 ```bash
