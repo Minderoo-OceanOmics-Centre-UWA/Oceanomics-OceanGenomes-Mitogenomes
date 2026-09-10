@@ -6,15 +6,29 @@ tunicata	NC_034372.1	Ciona robusta	Cionidae	14790	13	2	refseq	Eukaryota;Metazoa;
 tunicata	NC_004570.1	Ciona savignyi	Cionidae	14737	12	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Phlebobranchia;Cionidae;Ciona
 tunicata	NC_012887.1	Clavelina lepadiformis	Clavelinidae	14484	12	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Aplousobranchia;Clavelinidae;Clavelina
 tunicata	NC_024105.1	Clavelina oblonga	Clavelinidae	14603	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Aplousobranchia;Clavelinidae;Clavelina
+tunicata	PZ416573.1	Rhopalaea crassa	Diazonidae	15572	13	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Aplousobranchia;Diazonidae;Rhopalaea
 tunicata	NC_026107.1	Didemnum vexillum	Didemnidae	13424	12	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Aplousobranchia;Didemnidae;Didemnum
+tunicata	AB176541.1	Doliolum nationalis	Doliolidae	16351	13	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Thaliacea;Doliolida;Doliolidae;Doliolum
 tunicata	NC_013584.1	Aplidium conicum	Polyclinidae	15183	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Aplousobranchia;Polyclinidae;Aplidium
+tunicata	LC068804.1	Pyrosoma atlanticum	Pyrosomatidae	14223	13	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Thaliacea;Pyrosomata;Pyrosomatidae;Pyrosoma
 tunicata	NC_053533.1	Halocynthia aurantium	Pyuridae	14979	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Pyuridae;Halocynthia
+tunicata	MT811760.1	Halocynthia hilgendorfi ssp. n. KRK-2020	Pyuridae	15181	13	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Pyuridae;Halocynthia;Halocynthia hilgendorfi
 tunicata	NC_002177.1	Halocynthia roretzi	Pyuridae	14771	12	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Pyuridae;Halocynthia
 tunicata	NC_013561.1	Herdmania momus	Pyuridae	15816	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Pyuridae;Herdmania
+tunicata	PQ766567.1	Heterostigma monniotae	Pyuridae	13448	13	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Pyuridae;Heterostigma
+tunicata	PP067884.1	Microcosmus sp. z YZ-2024	Pyuridae	14520	13	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Pyuridae;Microcosmus
 tunicata	NC_013752.1	Microcosmus sulcatus	Pyuridae	15028	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Pyuridae;Microcosmus
 tunicata	NC_079570.1	Pyura mirabilis	Pyuridae	15778	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Pyuridae;Pyura
+tunicata	LC590029.1	Ihlea magalhanica	Salpidae	14750	12	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Thaliacea;Salpida;Salpidae;Ihlea
+tunicata	LC590032.1	Pegea confoederata	Salpidae	13415	12	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Thaliacea;Salpida;Salpidae;Pegea
+tunicata	LC333181.1	Salpa fusiformis	Salpidae	13739	12	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Thaliacea;Salpida;Salpidae;Salpa
+tunicata	LC333180.1	Salpa thompsoni	Salpidae	17651	12	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Thaliacea;Salpida;Salpidae;Salpa
+tunicata	LC590037.1	Salpa younti	Salpidae	13900	12	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Thaliacea;Salpida;Salpidae;Salpa
+tunicata	LC590040.1	Thetys vagina	Salpidae	14719	12	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Thaliacea;Salpida;Salpidae;Thetys
 tunicata	NC_024104.1	Botrylloides giganteus	Styelidae	14323	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Styelidae;Botrylloides
 tunicata	NC_024103.1	Botrylloides leachii	Styelidae	14408	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Styelidae;Botrylloides
 tunicata	NC_021467.1	Botrylloides nigrum	Styelidae	14427	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Styelidae;Botrylloides
+tunicata	HG931923.1	Botryllus schlosseri	Styelidae	14934	13	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Styelidae;Botryllus
 tunicata	NC_037072.1	Styela clava	Styelidae	14616	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Styelidae;Styela
 tunicata	NC_013565.1	Styela plicata	Styelidae	14414	13	2	refseq	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Styelidae;Styela
+tunicata	PZ393773.1	Symplegma reptans	Styelidae	13903	13	2	genbank	Eukaryota;Metazoa;Chordata;Tunicata;Ascidiacea;Stolidobranchia;Styelidae;Symplegma

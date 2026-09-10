@@ -1,5 +1,9 @@
 group	accession	organism	family	length_bp	n_cds	n_rrna	source	lineage
+porifera	PP971517.1	Demospongiae sp.		20349	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae
+porifera	PP971518.1	Porifera sp.		22712	15	2	genbank	Eukaryota;Metazoa;Porifera
 porifera	NC_065020.1	Terpios hoshinota		20504	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Suberitida;Suberitida incertae sedis;Terpios
+porifera	BK068138.1	Iophon methanophila	Acarnidae	18718	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Poecilosclerida;Acarnidae;Iophon
+porifera	OQ363829.1	Agelas nakamurai	Agelasidae	20885	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Agelasida;Agelasidae;Agelas
 porifera	NC_010213.1	Agelas schmidtii	Agelasidae	20360	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Agelasida;Agelasidae;Agelas
 porifera	NC_010769.1	Aphrocallistes vastus	Aphrocallistidae	17427	13	2	refseq	Eukaryota;Metazoa;Porifera;Hexactinellida;Hexasterophora;Sceptrulophora;Aphrocallistidae;Aphrocallistes
 porifera	NC_016949.1	Aplysina cauliformis	Aplysinidae	19620	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Verongimorpha;Verongiida;Aplysinidae;Aplysina
@@ -8,18 +12,31 @@ porifera	NC_053937.1	Aplysina gerardogreeni	Aplysinidae	19620	14	2	refseq	Eukary
 porifera	NC_006894.1	Axinella corrugata	Axinellidae	25610	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Axinellida;Axinellidae;Axinella
 porifera	NC_010209.1	Ptilocaulis walpersi	Axinellidae	18865	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Axinellida;Axinellidae;Ptilocaulis
 porifera	NC_010206.1	Callyspongia plicifera	Callyspongiidae	18846	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Callyspongiidae;Callyspongia
+porifera	PP464272.1	Haliclona caerulea	Chalinidae	19262	13	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Chalinidae;Haliclona
+porifera	PP464276.1	Haliclona pahua	Chalinidae	18595	13	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Chalinidae;Haliclona
+porifera	PP464279.1	Haliclona simulans	Chalinidae	21745	13	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Chalinidae;Haliclona
+porifera	PP464274.1	Haliclona sp. BKON-2560	Chalinidae	19797	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Chalinidae;Haliclona
+porifera	PP464275.1	Haliclona sp. BKON-2565	Chalinidae	18584	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Chalinidae;Haliclona
+porifera	PP464280.1	Haliclona sp. TLT723	Chalinidae	18590	13	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Chalinidae;Haliclona
 porifera	NC_010208.1	Chondrilla aff. nucula CHOND	Chondrillidae	19282	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Verongimorpha;Chondrillida;Chondrillidae;Chondrilla
 porifera	NC_069646.1	Cliona patera	Clionaidae	19133	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Clionaida;Clionaidae;Cliona
 porifera	NC_027520.1	Crella elegans	Crellidae	18543	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Poecilosclerida;Crellidae;Crella
 porifera	NC_010216.1	Igernella notabilis	Dictyodendrillidae	20310	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Keratosa;Dendroceratida;Dictyodendrillidae;Igernella
+porifera	OM729606.2	Acanthella acuta	Dictyonellidae	37239	18	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Bubarida;Dictyonellidae;Acanthella
 porifera	NC_006990.1	Geodia neptuni	Geodiidae	18020	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Tetractinellida;Astrophorina;Geodiidae;Geodia
 porifera	NC_037391.1	Halichondria okadai	Halichondriidae	20722	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Suberitida;Halichondriidae;Halichondria;Halichondria
 porifera	NC_040168.1	Halichondria panicea	Halichondriidae	19571	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Suberitida;Halichondriidae;Halichondria;Halichondria
+porifera	MK105765.1	Halichondria sp. HK-2019	Halichondriidae	19687	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Suberitida;Halichondriidae;Halichondria
+porifera	KX244759.1	Halichondria sp. XMU02_001_078	Halichondriidae	20746	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Suberitida;Halichondriidae;Halichondria
 porifera	NC_022450.1	Hymeniacidon sinapium	Halichondriidae	23435	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Suberitida;Halichondriidae;Hymeniacidon
 porifera	NC_010204.1	Topsentia ophiraphidites	Halichondriidae	19763	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Suberitida;Halichondriidae;Topsentia
 porifera	NC_010212.1	Halisarca dujardinii	Halisarcidae	19277	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Verongimorpha;Chondrillida;Halisarcidae;Halisarca
 porifera	NC_014876.1	Halisarca harmelini	Halisarcidae	20591	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Verongimorpha;Chondrillida;Halisarcidae;Halisarca
+porifera	KM035411.1	Lophophysema eversa	Hyalonematidae	20591	13	3	genbank	Eukaryota;Metazoa;Porifera;Hexactinellida;Amphidiscophora;Amphidiscosida;Hyalonematidae;Lophophysema
+porifera	BK068137.1	Hymedesmia methanophila	Hymedesmiidae	18656	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Poecilosclerida;Hymedesmiidae;Hymedesmia
 porifera	NC_010207.1	Iotrochota birotulata	Iotrochotidae	19112	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Poecilosclerida;Iotrochotidae;Iotrochota
+porifera	KC510273.1	Ircinia sp. LCJ01	Irciniidae	16037	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Keratosa;Dictyoceratida;Irciniidae;Ircinia
+porifera	KC510274.1	Ircinia sp. LCJ03	Irciniidae	16431	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Keratosa;Dictyoceratida;Irciniidae;Ircinia
 porifera	NC_013662.1	Ircinia strobilina	Irciniidae	16414	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Keratosa;Dictyoceratida;Irciniidae;Ircinia
 porifera	NC_010171.1	Negombata magnifica	Latrunculiidae	20088	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Poecilosclerida;Latrunculiidae;Negombata
 porifera	NC_027419.1	Oopsacas minuta	Leucopsacidae	19042	14	2	refseq	Eukaryota;Metazoa;Porifera;Hexactinellida;Hexasterophora;Lyssacinosida;Leucopsacidae;Oopsacas
@@ -27,14 +44,20 @@ porifera	NC_018343.1	Baikalospongia intermedia profundalis	Lubomirskiidae	28227	
 porifera	NC_013760.1	Lubomirskia baikalensis	Lubomirskiidae	28958	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Spongillida;Lubomirskiidae;Lubomirskia
 porifera	NC_018360.1	Rezinkovia echinata	Lubomirskiidae	28614	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Spongillida;Lubomirskiidae;Rezinkovia
 porifera	NC_085825.1	Corvomeyenia everetti	Metaniidae	23941	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Spongillida;Metaniidae;Corvomeyenia
+porifera	PZ856312.1	Clathria lendenfeldi	Microcionidae	18938	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Poecilosclerida;Microcionidae;Clathria
 porifera	NC_010201.1	Amphimedon compressa	Niphatidae	18564	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Niphatidae;Amphimedon
 porifera	NC_008944.1	Amphimedon queenslandica	Niphatidae	19960	13	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Niphatidae;Amphimedon
+porifera	PP464273.1	Gelliodes conulosa	Niphatidae	18679	13	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Niphatidae;Gelliodes
+porifera	EF081250.1	Oscarella carmela	Oscarellidae	20327	15	2	genbank	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Oscarellidae;Oscarella
 porifera	NC_014863.1	Oscarella lobularis	Oscarellidae	20260	15	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Oscarellidae;Oscarella
 porifera	NC_014886.1	Oscarella malakhovi	Oscarellidae	20332	14	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Oscarellidae;Oscarella
 porifera	NC_014850.1	Oscarella microlobata	Oscarellidae	20368	15	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Oscarellidae;Oscarella
 porifera	NC_035983.1	Oscarella pearsei	Oscarellidae	20320	15	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Oscarellidae;Oscarella
+porifera	JX963639.1	Oscarella sp. violet	Oscarellidae	20264	15	2	genbank	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Oscarellidae;Oscarella
 porifera	NC_014888.1	Oscarella tuberculata	Oscarellidae	20262	15	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Oscarellidae;Oscarella
 porifera	NC_014856.1	Oscarella viridis	Oscarellidae	20440	15	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Oscarellidae;Oscarella
+porifera	HQ269357.1	Pseudocorticium jarrei	Oscarellidae	20472	15	2	genbank	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Oscarellidae;Pseudocorticium
+porifera	KR911863.1	Petrosia ficiformis	Petrosiidae	18887	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Petrosiidae;Petrosia
 porifera	NC_010211.1	Xestospongia muta	Petrosiidae	18990	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Haplosclerida;Petrosiidae;Xestospongia
 porifera	NC_014872.1	Corticium candelabrum	Plakinidae	18402	14	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Plakinidae;Corticium
 porifera	NC_014885.1	Plakina crypta	Plakinidae	20069	14	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Plakinidae;Plakina
@@ -42,6 +65,7 @@ porifera	NC_014860.1	Plakina jani	Plakinidae	18907	14	2	refseq	Eukaryota;Metazoa
 porifera	NC_014884.1	Plakina monolopha	Plakinidae	19371	14	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Plakinidae;Plakina
 porifera	NC_014892.1	Plakina sp. DVL-2010	Plakinidae	18997	14	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Plakinidae;Plakina
 porifera	NC_010217.1	Plakinastrella cf. onkodes DVL-2011	Plakinidae	19790	15	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Plakinidae;Plakinastrella
+porifera	HQ269359.1	Plakortis halichondrioides	Plakinidae	18385	14	2	genbank	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Plakinidae;Plakortis
 porifera	NC_014868.1	Plakortis simplex	Plakinidae	18551	14	2	refseq	Eukaryota;Metazoa;Porifera;Homoscleromorpha;Homosclerophorida;Plakinidae;Plakortis
 porifera	NC_023834.1	Polymastia littoralis	Polymastiidae	21719	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Polymastiida;Polymastiidae;Polymastia
 porifera	NC_010210.1	Ectyoplasia ferox	Raspailiidae	18312	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Axinellida;Raspailiidae;Raspailiinae;Ectyoplasia
@@ -49,11 +73,16 @@ porifera	NC_072601.1	Caulophacus iocasicus	Rossellidae	19930	14	2	refseq	Eukaryo
 porifera	NC_028054.1	Vazella pourtalesii	Rossellidae	20312	13	2	refseq	Eukaryota;Metazoa;Porifera;Hexactinellida;Hexasterophora;Lyssacinosida;Rossellidae;Vazella
 porifera	NC_010215.1	Hippospongia lachne	Spongiidae	16755	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Keratosa;Dictyoceratida;Spongiidae;Hippospongia
 porifera	NC_021422.1	Hyattella sinuosa	Spongiidae	16422	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Keratosa;Dictyoceratida;Spongiidae;Hyattella
+porifera	PZ033110.1	Dosilia plumosa	Spongillidae	23996	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Spongillida;Spongillidae;Dosilia
 porifera	NC_010202.1	Ephydatia muelleri	Spongillidae	23929	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Spongillida;Spongillidae;Ephydatia
 porifera	NC_016431.1	Eunapius subterraneus	Spongillidae	24850	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Spongillida;Spongillidae;Eunapius
+porifera	MF947452.1	Plenaster craigi	Stelligeridae	20819	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Axinellida;Stelligeridae;Plenaster
+porifera	MN547324.1	Pseudosuberites sp. CY-2021	Suberitidae	23502	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Suberitida;Suberitidae;Pseudosuberites
 porifera	NC_010496.1	Suberites domuncula	Suberitidae	26300	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Suberitida;Suberitidae;Suberites
 porifera	NC_006991.1	Tethya actinia	Tethyidae	19565	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Tethyida;Tethyidae;Tethya
+porifera	KU748128.1	Tethya sp. XMU02001079	Tethyidae	20582	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Tethyida;Tethyidae;Tethya
 porifera	NC_010198.1	Cinachyrella kuekenthali	Tetillidae	18089	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Tetractinellida;Spirophorina;Tetillidae;Cinachyrella
+porifera	MN587873.1	Thoosa mismalolli	Thoosidae	19019	14	2	genbank	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Tetractinellida;Astrophorina;Thoosidae;Thoosa
 porifera	NC_031192.1	Cacospongia mycofijiensis	Thorectidae	16227	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Keratosa;Dictyoceratida;Thorectidae;Thorectinae;Cacospongia
 porifera	NC_010218.1	Vaceletia sp. GW948	Verticillitidae	20658	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Keratosa;Dictyoceratida;Verticillitidae;Vaceletia
 porifera	NC_025335.1	Poecillastra laminaris	Vulcanellidae	18413	14	2	refseq	Eukaryota;Metazoa;Porifera;Demospongiae;Heteroscleromorpha;Tetractinellida;Astrophorina;Vulcanellidae;Poecillastra

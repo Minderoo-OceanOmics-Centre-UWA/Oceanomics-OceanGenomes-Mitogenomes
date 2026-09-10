@@ -187,11 +187,10 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   is untouched at 10 — the platyctenids clear it, and the two 9-CDS *Pleurobrachia* records
   are still correctly dropped.
 
-  It is per group and not global on purpose. Lifting it everywhere widens the other seven
-  2.5–4.7× (mollusca 855 → 3169, anthozoa 295 → 1280), which re-picks the
-  `SELECT_REFERENCE_DB` reference for samples that are already submitted — the same risk
-  that keeps the anthozoa build deliberately frozen. Two dedup stages exist only because of
-  this and are no-ops while the filter is on: `drop_insdc_twins()` removes the INSDC
+  It was lifted for ctenophora alone at first, on the belief that widening the other seven
+  would re-pick the `SELECT_REFERENCE_DB` reference for samples already submitted. That
+  belief was wrong and the remaining seven were lifted immediately after — see the next
+  entry. Two dedup stages exist only because of this and are no-ops while the filter is on: `drop_insdc_twins()` removes the INSDC
   submission a RefSeq record was derived from (`NC_038065` + `MG655622`), and
   `--max-per-organism` (default 2) stops one heavily-resequenced species filling the panel —
   the widened ctenophore search returns **nine** *Vallicula multiformis* isolates, all in one
@@ -201,6 +200,61 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   move and every one stays below `min_records=20`, so no anchor is gained or lost and no
   submitted sequence is re-origined. The staleness warning now fires for a single-group
   rebuild too, not only `--all`, which is how this was nearly missed.
+
+- Every remaining group now searches all of INSDC as well, at one record per organism.
+  **2,101 records → 3,926 across the eight, 617 families → 815, and 1,308 genera → 2,105.**
+
+  | group | records | families | genera |
+  |---|---|---|---|
+  | anthozoa | 221 → 638 | 87 → 124 | 148 → 308 |
+  | mollusca | 850 → 1391 | 208 → 258 | 525 → 767 |
+  | arthropoda | 647 → 1078 | 169 → 231 | 358 → 561 |
+  | annelida | 167 → 420 | 50 → 63 | 108 → 208 |
+  | echinodermata | 135 → 263 | 56 → 80 | 104 → 171 |
+  | porifera | 58 → 87 | 33 → 41 | 45 → 60 |
+  | tunicata | 19 → 33 | 7 → 11 | 11 → 21 |
+
+  The reason the other seven were held back does not exist. `git ls-tree v2.0.0` has no
+  `assets/refdb/`, no `select_reference_db.py` and no `mito_origin_anchors.json`: the
+  corals already in ENA were assembled by the v2 path, which resolved a reference from the
+  species *label* through `findMitoReference`. No deposited mitogenome was ever built from
+  these databases, and every sample that has been through them is a test run.
+
+  Measured rather than assumed, with the new `bin/audit_reference_selection_diff.py` over
+  50 published assemblies from the invert panel, batch-20 and NOVA_260724_JP: **3 samples
+  moved to a closer reference and 0 moved further**, 13 changed record inside the same
+  taxonomic tier and 34 kept the same record.
+
+  | sample | before | after |
+  |---|---|---|
+  | INV02_UMBELLULA | NC_044086.1 *Anthoptilum grandiflorum* (same order) | MK919668.1 *Umbellula huxleyi* (**congeneric**) |
+  | INV04_BOLOCERA | NC_066448.1 *Heteractis doreensis* (same order) | NC_022470.1 *Bolocera tuediae* (**congeneric**) |
+  | INV14_AMPHIOPHIURA | NC_085502.1 *Stegophiura sladeni* (same family) | LC698982.1 *Amphiophiura penichra* (**congeneric**) |
+
+  Every rebuild is a **strict superset**, checked by accession: no record that shipped in
+  the RefSeq-only build is absent from the new one, anthozoa's deliberately frozen 221
+  included. Anthozoa's 638 also absorbs the plain RefSeq refresh that was being deferred
+  (221 → 278 on RefSeq alone), so the freeze is retired rather than merely overtaken.
+
+  `max_per_organism` joins `refseq_only` in `GROUPS` and is 1 for the seven, so a rebuild
+  is reproducible from `--group X` with no flag to remember. That and `drop_insdc_twins()`
+  are what keep the cost down: mollusca matches 3,169 records unfiltered but ships 1,391
+  (795 INSDC twins and 904 over-cap records removed), and the tracked databases grow
+  72 MiB → 133 MiB rather than the ~260 MiB the raw counts imply. Ctenophora keeps its cap
+  of 2 and its 16 records are untouched. `--retmax` had to rise from 2000 to 6000, since
+  `fetch_records()` aborts rather than silently shipping an arbitrary slice of a group.
+
+  `assets/taxonomy/mito_origin_anchors.json` is regenerated with the rebuild and **no order
+  moved off its anchor**. The coral orders that carry the deposited population only gain
+  evidence: Scleractinia stays on `TM` at n=58 → 181 (63.8% → 65.2%), Malacalcyonacea on
+  `RNR2`, Zoantharia and Scleralcyonacea on `CO1`. Two resolutions do change, both toward the
+  measured answer: Actiniaria now clears the bar in its own right (`ND5`, n=54, 79.6%)
+  instead of taking `CO1` from the Anthozoa class aggregate, and Sabellida falls below it
+  and resolves to its class (Polychaeta, `CO1`) rather than its old order-level `TH`.
+
+  Timing was checked before assuming a cost: `SELECT_REFERENCE_DB` runs `blastn -subject`
+  with no formatted database, and a mollusc selection takes 3 s against both the 13 MiB and
+  the 22 MiB subject, so no `makeblastdb` step or resource-label change is warranted.
 
 ### `Fixed`
 

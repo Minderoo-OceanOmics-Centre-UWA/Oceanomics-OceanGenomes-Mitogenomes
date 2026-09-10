@@ -89,34 +89,57 @@ class GroupSpec(NamedTuple):
     require_rrna: bool
     require_nad5: bool
     # RefSeq is a curated subset, not a completeness bar -- the records it omits are
-    # ordinary INSDC submissions that pass the same record_is_complete() check. For
-    # well-populated groups the restriction is a useful de-duplicator and is left on.
-    # For a group where it is the binding constraint it hides most of the phylum: it
-    # is what held ctenophora to 4 records out of 35, excluding every Platyctenida
-    # genome -- including two Tjalfiella mitogenomes, the genus of a panel sample
-    # that was written off as having no reference at all. Turning it off widens the
-    # other groups 2.5-4.7x as well, which would re-pick the reference for samples
-    # already submitted, so flip it per group and deliberately.
+    # ordinary INSDC submissions that pass the same record_is_complete() check, and
+    # restricting to it hides most of a phylum wherever it is the binding constraint.
+    # It is what held ctenophora to 4 records out of 35, excluding every Platyctenida
+    # genome -- including two Tjalfiella mitogenomes, the genus of a panel sample that
+    # was written off as having no reference at all. It stays per group rather than
+    # becoming a global constant because a group can legitimately want the curated
+    # subset (one record per genome, no dedup needed), and because flipping one is
+    # then a reviewable one-line change with its own rebuild.
     refseq_only: bool = True
+    # Records to keep per organism (see cap_per_organism). Only bites once refseq_only
+    # is off, which is when a heavily-resequenced species can otherwise supply most of
+    # a seed panel. Kept per group rather than left to the CLI so a rebuild is
+    # reproducible from --group alone, with no flag to remember: getting this wrong
+    # silently changes what the database holds. 1 for the widened groups, because a
+    # second isolate of the same species adds no taxonomic coverage, only bulk --
+    # and at INSDC scale the tracked assets are plain git blobs rewritten wholesale on
+    # every rebuild. 2 for ctenophora, which is what its shipped build used.
+    max_per_organism: int = 2
 
 
+# Every group searches all of INSDC (refseq_only=False) and keeps one record per
+# organism. RefSeq-only was the original setting and was lifted group by group once
+# it was established that no submitted mitogenome was ever built from these
+# databases: assets/refdb/, select_reference_db.py and the origin anchor table all
+# postdate v2.0.0, which is what produced the corals now in ENA. See
+# assets/refdb/README.md for the per-group before/after counts.
 GROUPS = {
     # group:          organism expression                    min_cds  rrna   nad5
-    "anthozoa":       GroupSpec("txid6101[Organism:exp]",    13,      True,  True),
-    "porifera":       GroupSpec("txid6040[Organism:exp]",    13,      True,  True),
-    "mollusca":       GroupSpec("txid6447[Organism:exp]",    12,      True,  False),
+    "anthozoa":       GroupSpec("txid6101[Organism:exp]",    13,      True,  True,
+                                refseq_only=False, max_per_organism=1),
+    "porifera":       GroupSpec("txid6040[Organism:exp]",    13,      True,  True,
+                                refseq_only=False, max_per_organism=1),
+    "mollusca":       GroupSpec("txid6447[Organism:exp]",    12,      True,  False,
+                                refseq_only=False, max_per_organism=1),
     "arthropoda":     GroupSpec("txid6657[Organism:exp] "
                                 "NOT txid6960[Organism:exp] "   # Hexapoda (insects, springtails)
                                 "NOT txid6854[Organism:exp] "   # Arachnida
                                 "NOT txid61985[Organism:exp]",  # Myriapoda
-                                                          13,      True,  False),
-    "echinodermata":  GroupSpec("txid7586[Organism:exp]",    13,      True,  False),
-    # refseq_only=False -- see GroupSpec.refseq_only. Takes the group from 4 candidate
-    # records to 35, and is the only source of any Platyctenida reference at all.
+                                                          13,      True,  False,
+                                refseq_only=False, max_per_organism=1),
+    "echinodermata":  GroupSpec("txid7586[Organism:exp]",    13,      True,  False,
+                                refseq_only=False, max_per_organism=1),
+    # The group the restriction was lifted for first, and the only one that keeps a
+    # cap of 2: at 16 records it is small enough that a second isolate of a species
+    # is worth more than the bulk it costs, and 2 is what its shipped build used.
     "ctenophora":     GroupSpec("txid10197[Organism:exp]",   10,      False, False,
                                 refseq_only=False),
-    "tunicata":       GroupSpec("txid7712[Organism:exp]",    12,      True,  False),
-    "annelida":       GroupSpec("txid6340[Organism:exp]",    12,      True,  False),
+    "tunicata":       GroupSpec("txid7712[Organism:exp]",    12,      True,  False,
+                                refseq_only=False, max_per_organism=1),
+    "annelida":       GroupSpec("txid6340[Organism:exp]",    12,      True,  False,
+                                refseq_only=False, max_per_organism=1),
 }
 
 # rRNA product/gene synonyms across invertebrate annotation conventions. The
@@ -415,11 +438,14 @@ def build_group(group, args):
     organism = args.taxon or spec.organism
     min_cds = args.min_cds if args.min_cds is not None else spec.min_cds
     refseq_only = spec.refseq_only if args.refseq_only is None else args.refseq_only
+    max_per_organism = (spec.max_per_organism if args.max_per_organism is None
+                        else args.max_per_organism)
     out_dir = args.out_dir or default_out_dir(group)
 
     print(f"[build_db] === {group}: {organism}, min_cds={min_cds}, "
           f"require_rrna={spec.require_rrna}, require_nad5={spec.require_nad5}, "
-          f"refseq_only={refseq_only} ===", file=sys.stderr)
+          f"refseq_only={refseq_only}, max_per_organism={max_per_organism} ===",
+          file=sys.stderr)
 
     candidates = []  # (rec, source)
     if not args.no_download:
@@ -448,7 +474,7 @@ def build_group(group, args):
     # rarely more than one isolate per organism) and only bite once the filter is
     # lifted, which is when a single organism can otherwise supply most of the panel.
     entries, n_twin = drop_insdc_twins(entries)
-    entries, n_dup = cap_per_organism(entries, args.max_per_organism)
+    entries, n_dup = cap_per_organism(entries, max_per_organism)
 
     kept = [e[0] for e in entries]
     manifest = [(group, rec.id, rec.annotations.get("organism", ""), family_of(rec),
@@ -484,7 +510,7 @@ def build_group(group, args):
     fams = sorted({m[3] for m in manifest if m[3]})
     print(f"[build_db] {group}: kept {len(kept)} records, dropped {n_drop} (incomplete), "
           f"{n_twin} (INSDC twin of a RefSeq record), "
-          f"{n_dup} (over the {args.max_per_organism}-per-organism cap).")
+          f"{n_dup} (over the {max_per_organism}-per-organism cap).")
     print(f"[build_db] {group}: families ({len(fams)}): {', '.join(fams)}")
     print(f"[build_db] {group}: label db: {n_label} gene sequences")
     print(f"[build_db] {group}: features: {n_feat} rows")
@@ -527,10 +553,14 @@ def main():
                     help="Search all of INSDC, not just RefSeq. Widens every group "
                          "2.5-8.8x and changes which reference is picked for existing "
                          "samples, so prefer setting refseq_only per group.")
-    ap.add_argument("--max-per-organism", type=int, default=2, metavar="N",
-                    help="Keep at most N records per organism (0 = no cap). Stops one "
-                         "heavily-resequenced species filling the seed panel. Default 2.")
-    ap.add_argument("--retmax", type=int, default=2000)
+    ap.add_argument("--max-per-organism", type=int, default=None, metavar="N",
+                    help="Keep at most N records per organism (0 = no cap), overriding "
+                         "the group's max_per_organism. Stops one heavily-resequenced "
+                         "species filling the seed panel.")
+    # An unfiltered group can exceed the old 2000: mollusca matches ~3169 and
+    # arthropoda ~2391. fetch_records hard-exits rather than shipping the first
+    # retmax hits, so too low a value aborts the build instead of corrupting it.
+    ap.add_argument("--retmax", type=int, default=6000)
     ap.add_argument("--batch", type=int, default=200)
     args = ap.parse_args()
 
@@ -538,9 +568,10 @@ def main():
         ap.error("--email is required for NCBI download (or pass --no-download)")
     if args.all and args.out_dir:
         ap.error("--out-dir cannot be combined with --all")
-    if args.all and (args.taxon or args.min_cds is not None or args.refseq_only is not None):
-        ap.error("--taxon/--min-cds/--refseq-only are per-group overrides; "
-                 "use them with --group")
+    if args.all and (args.taxon or args.min_cds is not None or args.refseq_only is not None
+                     or args.max_per_organism is not None):
+        ap.error("--taxon/--min-cds/--refseq-only/--max-per-organism are per-group "
+                 "overrides; use them with --group")
 
     groups = sorted(GROUPS) if args.all else [args.group]
     if args.refresh_derived:

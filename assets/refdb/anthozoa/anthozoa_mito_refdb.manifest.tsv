@@ -1,73 +1,265 @@
 group	accession	organism	family	length_bp	n_cds	n_rrna	source	lineage
+anthozoa	PX980026.1	Abyssoanthidae sp. T77066-1	Abyssoanthidae	18570	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Abyssoanthidae
 anthozoa	NC_061988.1	Acanthoaxis wirtzi	Acanthoaxiidae	19648	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Acanthoaxiidae;Acanthoaxis
+anthozoa	PP712103.1	Acanthogorgia armata	Acanthogorgiidae	19095	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Acanthogorgiidae;Acanthogorgia
 anthozoa	NC_061989.1	Acanthogorgia breviflora	Acanthogorgiidae	18714	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Acanthogorgiidae;Acanthogorgia
+anthozoa	PP760175.1	Calcigorgia spiculifera	Acanthogorgiidae	18722	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Acanthogorgiidae;Calcigorgia
+anthozoa	NC_023345.1	Calicogorgia granulosa	Acanthogorgiidae	20246	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Acanthogorgiidae;Calicogorgia
 anthozoa	NC_061990.1	Acrophytum claviger	Acrophytidae	19010	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Acrophytidae;Acrophytum
+anthozoa	KT001202.1	Acropora aculeus	Acroporidae	18528	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022827.1	Acropora aspera	Acroporidae	18479	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
 anthozoa	NC_083272.1	Acropora cervicornis	Acroporidae	18259	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022830.1	Acropora digitifera	Acroporidae	18479	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022832.1	Acropora divaricata	Acroporidae	18481	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022828.1	Acropora florida	Acroporidae	18365	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022825.1	Acropora horrida	Acroporidae	18480	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022823.1	Acropora humilis	Acroporidae	18479	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022826.1	Acropora hyacinthus	Acroporidae	18566	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
 anthozoa	NC_072224.1	Acropora intermedia	Acroporidae	18482	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	PQ845999.1	Acropora lutkeni	Acroporidae	18480	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	PX130728.1	Acropora microclados	Acroporidae	18567	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
 anthozoa	NC_072225.1	Acropora microphthalma	Acroporidae	18480	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022824.1	Acropora muricata	Acroporidae	18481	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022831.1	Acropora nasuta	Acroporidae	18481	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	MW246544.1	Acropora palmata	Acroporidae	18259	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	MW246535.1	Acropora prolifera	Acroporidae	18259	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022833.1	Acropora robusta	Acroporidae	18480	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	MW773216.1	Acropora sp. A aff. tenuis AC-2021	Acroporidae	18334	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	MW773217.1	Acropora sp. B aff. cytherea AC-2021	Acroporidae	18353	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	MW773218.1	Acropora sp. C aff. orbicularis AC-2021	Acroporidae	18584	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	MW773219.1	Acropora sp. D AC-2021	Acroporidae	18471	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	LC792538.1	Acropora tenella	Acroporidae	18252	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_003522.1	Acropora tenuis	Acroporidae	18338	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
 anthozoa	NC_042742.1	Acropora valida	Acroporidae	18385	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_022829.1	Acropora yongei	Acroporidae	18342	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+anthozoa	NC_006898.1	Anacropora matthai	Acroporidae	17888	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Anacropora
 anthozoa	NC_024090.1	Astreopora explanata	Acroporidae	18106	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Astreopora
 anthozoa	NC_024092.1	Astreopora myriophthalma	Acroporidae	18106	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Astreopora
 anthozoa	NC_077265.1	Isopora brueggemanni	Acroporidae	18734	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Isopora
 anthozoa	NC_024091.1	Isopora palifera	Acroporidae	18725	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Isopora
 anthozoa	NC_024089.1	Isopora togianensis	Acroporidae	18637	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Isopora
 anthozoa	NC_037359.1	Montipora aequituberculata	Acroporidae	17886	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Montipora
+anthozoa	NC_006902.1	Montipora cactus	Acroporidae	17887	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Montipora
 anthozoa	NC_040137.1	Montipora efflorescens	Acroporidae	17886	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Montipora
+anthozoa	PZ785798.1	Montipora mollis	Acroporidae	17884	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Montipora
 anthozoa	NC_072168.1	Montipora vietnamensis	Acroporidae	17885	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Montipora
 anthozoa	NC_061991.1	Acrossota amboinensis	Acrossotidae	19565	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Acrossotidae;Acrossota
+anthozoa	BK069892.1	Actinernus sp. WN-2022	Actinernidae	15969	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Endocoelantheae;Actinernidae;Actinernus
 anthozoa	NC_039929.1	Actinia equina	Actiniidae	20690	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Actinia
+anthozoa	BK069890.1	Actinia mediterranea	Actiniidae	20691	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Actinia
 anthozoa	NC_044902.1	Actinia tenebrosa	Actiniidae	20691	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Actinia
+anthozoa	PV232310.1	Actinostella flosculifera	Actiniidae	19504	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Actinostella
 anthozoa	NC_037178.1	Anemonia manjano	Actiniidae	19545	15	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Anemonia
 anthozoa	NC_037177.1	Anemonia viridis	Actiniidae	20108	15	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Anemonia
 anthozoa	NC_030274.1	Anthopleura anjunae	Actiniidae	20039	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Anthopleura
+anthozoa	BK069895.1	Anthopleura artemisia	Actiniidae	20039	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Anthopleura
+anthozoa	BK068675.1	Anthopleura sola	Actiniidae	20144	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Anthopleura
 anthozoa	NC_066051.1	Anthopleura xanthogrammica	Actiniidae	18511	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Anthopleura
+anthozoa	KU507297.1	Bolocera sp. BZ-2016	Actiniidae	19463	16	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Bolocera
+anthozoa	NC_022470.1	Bolocera tuediae	Actiniidae	19143	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Bolocera
+anthozoa	BK069896.1	Bunodosoma granuliferum	Actiniidae	20909	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Bunodosoma
+anthozoa	BK071242.1	Condylactis gigantea	Actiniidae	20487	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Condylactis
+anthozoa	OP055895.1	Entacmaea quadricolor	Actiniidae	20459	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Entacmaea
+anthozoa	KR051006.1	Isosicyonis striata	Actiniidae	19001	16	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Isosicyonis
+anthozoa	PQ726619.1	Paracondylactis hertwigi	Actiniidae	19880	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Paracondylactis
 anthozoa	NC_071915.1	Paracondylactis sinensis	Actiniidae	20786	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Paracondylactis
+anthozoa	BK068676.1	Urticina crassicornis	Actiniidae	20586	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actiniidae;Urticina
+anthozoa	BK069891.1	Actinodendron alcyonoideum	Actinodendridae	18757	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Actinodendridae;Actinodendron
+anthozoa	BK069893.1	Actinodendron arboreum	Actinodendridae	18757	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Actinodendridae;Actinodendron
+anthozoa	ON149890.1	Actinoscyphia sp. l JL-2024	Actinoscyphiidae	17459	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actinoscyphiidae;Actinoscyphia
+anthozoa	BK071241.1	Actinoscyphia sp. m1220	Actinoscyphiidae	17459	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Actinoscyphiidae;Actinoscyphia
 anthozoa	NC_027611.1	Antholoba achates	Actinostolidae	17816	15	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Actinostolidae;Antholoba
+anthozoa	BK068680.1	Stomphia didemon	Actinostolidae	18755	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Actinostolidae;Stomphia
+anthozoa	NC_008160.1	Agaricia humilis	Agariciidae	18735	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Agariciidae;Agaricia
+anthozoa	LC792539.1	Leptoseris papyracea	Agariciidae	18345	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Agariciidae;Leptoseris
+anthozoa	NC_008165.1	Pavona clavus	Agariciidae	18315	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Agariciidae;Pavona
 anthozoa	NC_026527.1	Pavona decussata	Agariciidae	18378	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Agariciidae;Pavona
+anthozoa	PV815621.1	Pseudomadrepora carolina	Agariciidae	18066	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Agariciidae;Pseudomadrepora
 anthozoa	NC_056771.1	Exaiptasia diaphana	Aiptasiidae	19790	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Aiptasiidae;Exaiptasia
+anthozoa	BK069894.1	Ragactis hyalina	Aiptasiidae	18128	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Aiptasiidae;Ragactis
 anthozoa	NC_061273.1	Alcyonium acaule	Alcyoniidae	18726	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Alcyonium
 anthozoa	NC_061274.1	Alcyonium digitatum	Alcyoniidae	19133	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Alcyonium
 anthozoa	NC_061993.1	Alcyonium haddoni	Alcyoniidae	18752	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Alcyonium
+anthozoa	MW166875.1	Alcyonium sp. AP-2020	Alcyoniidae	18674	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Alcyonium
 anthozoa	NC_061994.1	Alertigorgia orientalis	Alcyoniidae	18700	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Alertigorgia
+anthozoa	OL616208.1	Anthomastinae sp. n. ANT85	Alcyoniidae	19045	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae
 anthozoa	NC_061997.1	Anthothela grandiflora	Alcyoniidae	18694	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Anthothela
 anthozoa	NC_071215.1	Eleutherobia rubra	Alcyoniidae	18724	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Eleutherobia
 anthozoa	NC_061277.1	Erythropodium caribaeorum	Alcyoniidae	19424	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Erythropodium
+anthozoa	PX070533.1	Lateothela grandiflora	Alcyoniidae	18726	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lateothela
+anthozoa	LC831272.1	Lobophytum sp. Sf15	Alcyoniidae	18753	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831275.1	Lobophytum sp. Sf18	Alcyoniidae	18560	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831276.1	Lobophytum sp. Sf19	Alcyoniidae	18559	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831261.1	Lobophytum sp. Sf2	Alcyoniidae	18753	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831285.1	Lobophytum sp. Sf31	Alcyoniidae	18560	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831296.1	Lobophytum sp. Sf43	Alcyoniidae	18559	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831301.1	Lobophytum sp. Sf49	Alcyoniidae	18753	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831304.1	Lobophytum sp. Sf52	Alcyoniidae	18558	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831310.1	Lobophytum sp. Sf62	Alcyoniidae	18506	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831312.1	Lobophytum sp. Sf64	Alcyoniidae	18558	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831321.1	Lobophytum sp. Sf73	Alcyoniidae	18560	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831266.1	Lobophytum sp. Sf8	Alcyoniidae	18753	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831332.1	Lobophytum sp. Sf86	Alcyoniidae	18560	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831333.1	Lobophytum sp. Sf87	Alcyoniidae	18559	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831336.1	Lobophytum sp. Sf90	Alcyoniidae	18559	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831340.1	Lobophytum sp. Sf94	Alcyoniidae	18753	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
+anthozoa	LC831341.1	Lobophytum sp. Sf95	Alcyoniidae	18605	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Lobophytum
 anthozoa	NC_062025.1	Protodendron repens	Alcyoniidae	18853	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Protodendron
 anthozoa	NC_081603.1	Sarcophyton minusculum	Alcyoniidae	18511	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831260.1	Sarcophyton sp. Sf1	Alcyoniidae	18454	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831271.1	Sarcophyton sp. Sf14	Alcyoniidae	18508	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831273.1	Sarcophyton sp. Sf16	Alcyoniidae	18454	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831274.1	Sarcophyton sp. Sf17	Alcyoniidae	18454	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831280.1	Sarcophyton sp. Sf25	Alcyoniidae	18453	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831283.1	Sarcophyton sp. Sf29	Alcyoniidae	18508	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831286.1	Sarcophyton sp. Sf32	Alcyoniidae	18455	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831289.1	Sarcophyton sp. Sf35	Alcyoniidae	18455	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831293.1	Sarcophyton sp. Sf39	Alcyoniidae	18508	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831294.1	Sarcophyton sp. Sf40	Alcyoniidae	18453	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831299.1	Sarcophyton sp. Sf47	Alcyoniidae	18453	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831264.1	Sarcophyton sp. Sf5	Alcyoniidae	18454	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831305.1	Sarcophyton sp. Sf54	Alcyoniidae	18456	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831308.1	Sarcophyton sp. Sf59	Alcyoniidae	18454	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831311.1	Sarcophyton sp. Sf63	Alcyoniidae	18508	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831315.1	Sarcophyton sp. Sf67	Alcyoniidae	18547	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831317.1	Sarcophyton sp. Sf69	Alcyoniidae	18453	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831319.1	Sarcophyton sp. Sf71	Alcyoniidae	18508	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831328.1	Sarcophyton sp. Sf80	Alcyoniidae	19109	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831267.1	Sarcophyton sp. Sf9	Alcyoniidae	18508	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831338.1	Sarcophyton sp. Sf92	Alcyoniidae	18506	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	LC831302.1	Sarcophyton sp. sf50	Alcyoniidae	18508	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
 anthozoa	NC_061281.1	Sarcophyton trocheliophorum	Alcyoniidae	18508	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Sarcophyton
+anthozoa	OL616279.1	Solenocaulon sp. ANT68	Alcyoniidae	18822	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Solenocaulon
 anthozoa	NC_062033.1	Thrombophyton coronatum	Alcyoniidae	18717	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Alcyoniidae;Thrombophyton
 anthozoa	NC_027610.1	Alicia sansibarensis	Aliciidae	19575	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Aliciidae;Alicia
+anthozoa	PV780760.1	Synandwakia multitentaculata	Andvakiidae	18350	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Andvakiidae;Synandwakia
+anthozoa	OL616247.1	Muricella sp. ANT77	Anthogorgiidae	19271	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Anthogorgiidae;Muricella
 anthozoa	NC_044086.1	Anthoptilum grandiflorum	Anthoptilidae	18853	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Anthoptilidae;Anthoptilum
+anthozoa	MK919656.1	Anthoptilum sp. 1 RH-2019	Anthoptilidae	18850	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Anthoptilidae;Anthoptilum
+anthozoa	OR789638.1	Anthoptilum sp. g YK-2023	Anthoptilidae	18922	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Anthoptilidae;Anthoptilum
+anthozoa	PP960129.1	Lithoptilum sp.	Anthoptilidae	18922	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Anthoptilidae;Lithoptilum
+anthozoa	MT318841.1	Antipathes cf. dichotoma NB-2020	Antipathidae	19969	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Antipathes
 anthozoa	NC_088052.1	Antipathes grandis	Antipathidae	20484	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Antipathes
+anthozoa	PV200280.1	Cirrhipathes anguina	Antipathidae	20391	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Cirrhipathes
+anthozoa	ON653414.1	Cirrhipathes cf. anguina LS-2022	Antipathidae	20452	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Cirrhipathes
+anthozoa	PV200278.1	Cirrhipathes spiralis	Antipathidae	20277	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Cirrhipathes
+anthozoa	MT318846.1	Leiopathes cf. glaberrima NB-2020	Antipathidae	21669	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Leiopathes
+anthozoa	MT318847.1	Leiopathes expansa	Antipathidae	21653	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Leiopathes
+anthozoa	OR906317.1	Leiopathes sp.	Antipathidae	21653	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Leiopathes
 anthozoa	NC_027667.1	Myriopathes japonica	Antipathidae	17733	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Myriopathes
 anthozoa	NC_071821.1	Myriopathes ulex	Antipathidae	17711	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Myriopathes
+anthozoa	MT318856.1	Stichopathes abyssicola	Antipathidae	19968	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Stichopathes
 anthozoa	NC_018377.1	Stichopathes luetkeni	Antipathidae	20448	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Stichopathes
+anthozoa	MZ157400.1	Stichopathes sp. SCBUCN-8849	Antipathidae	20389	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Stichopathes
+anthozoa	MZ157399.1	Stichopathes sp. SCBUCN-8850	Antipathidae	20463	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Stichopathes
+anthozoa	MT318857.1	Stichopathes sp. n. NB-2020	Antipathidae	19839	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Stichopathes
+anthozoa	PV200279.1	Stichopathes variabilis	Antipathidae	20358	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Stichopathes
+anthozoa	MT318859.1	Tylopathes sp. n. NB-2020	Antipathidae	17679	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Antipathidae;Tylopathes
+anthozoa	PV200277.1	Aphanipathes verticillata	Aphanipathidae	20099	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Aphanipathidae;Aphanipathes
+anthozoa	PX574365.1	Aphanostichopathes dissimilis	Aphanipathidae	19982	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Aphanipathidae;Aphanostichopathes
+anthozoa	MT318852.1	Phanopathes sp. NB-2020	Aphanipathidae	20304	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Aphanipathidae;Phanopathes
 anthozoa	NC_062038.1	Aquaumbra klapferi	Aquaumbridae	19066	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Aquaumbridae;Aquaumbra
 anthozoa	NC_061998.1	Arula petunia	Arulidae	18753	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Arulidae;Arula
+anthozoa	LC849181.1	Palauastrea ramosa	Astrocoeniidae	18463	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Astrocoeniidae;Palauastrea
+anthozoa	PV423450.1	Stephanocoenia intersepta	Astrocoeniidae	19461	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Astrocoeniidae;Stephanocoenia
+anthozoa	OL616212.1	Astrogorgia sp. ANT66	Astrogorgiidae	18733	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Astrogorgiidae;Astrogorgia
+anthozoa	OL616235.1	Balticina finmarchica	Balticinidae	18512	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Balticinidae;Balticina
+anthozoa	NC_008073.1	Briareum asbestinum	Briareidae	18632	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Briareidae;Briareum
 anthozoa	NC_062000.1	Briareum hamrum	Briareidae	18993	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Briareidae;Briareum
 anthozoa	NC_062010.1	Eunephthya thyrsoidea	Capnellidae	18900	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Capnellidae;Eunephthya
 anthozoa	NC_048963.1	Carijoa riisei	Carijoidae	18714	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Carijoidae;Carijoa
 anthozoa	NC_065776.1	Caryophyllia scobinosa	Caryophylliidae	16105	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Caryophyllia
 anthozoa	NC_068220.1	Crispatotrochus rubescens	Caryophylliidae	16536	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Crispatotrochus
 anthozoa	NC_068221.1	Crispatotrochus rugosus	Caryophylliidae	16536	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Crispatotrochus
+anthozoa	OR625182.1	Deltocyathus cameratus	Caryophylliidae	16301	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Deltocyathus
+anthozoa	OR625183.1	Deltocyathus heteroclitus	Caryophylliidae	16298	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Deltocyathus
+anthozoa	OR625184.1	Deltocyathus rotulus	Caryophylliidae	16294	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Deltocyathus
+anthozoa	OR625185.1	Deltocyathus suluensis	Caryophylliidae	16267	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Deltocyathus
+anthozoa	PZ269950.1	Desmophyllum pertusum	Caryophylliidae	16150	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Desmophyllum
+anthozoa	PZ269952.1	Desmophyllum sp.	Caryophylliidae	16149	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Desmophyllum
+anthozoa	PP526285.1	Euphyllia cristata	Caryophylliidae	19167	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Euphyllia
+anthozoa	PP526284.1	Euphyllia paraglabrescens	Caryophylliidae	19167	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Euphyllia
 anthozoa	NC_015641.1	Fimbriaphyllia ancora	Caryophylliidae	18875	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Fimbriaphyllia
+anthozoa	PP526282.1	Fimbriaphyllia divisa	Caryophylliidae	18896	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Fimbriaphyllia
+anthozoa	PP444461.1	Fimbriaphyllia paraancora	Caryophylliidae	18896	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Fimbriaphyllia
+anthozoa	PP526283.1	Fimbriaphyllia paradivisa	Caryophylliidae	18896	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Fimbriaphyllia
 anthozoa	NC_056290.1	Gardineria hawaiiensis	Caryophylliidae	19430	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Gardineria
+anthozoa	LC851788.1	Heterocyathus aequicostatus	Caryophylliidae	15408	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Heterocyathus
 anthozoa	NC_065774.1	Heterocyathus sulcatus	Caryophylliidae	18218	14	3	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Heterocyathus
 anthozoa	NC_056275.1	Paraconotrochus antarcticus	Caryophylliidae	17562	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Paraconotrochus
+anthozoa	MW936598.1	Plerogyra sinuosa	Caryophylliidae	17586	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Plerogyra
+anthozoa	NC_015642.1	Polycyathus sp. MFL-2011	Caryophylliidae	15357	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Polycyathus
+anthozoa	OL584331.1	Premocyathus sp. IS-2022	Caryophylliidae	15816	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Premocyathus
 anthozoa	NC_025472.1	Solenosmilia variabilis	Caryophylliidae	15968	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Solenosmilia
+anthozoa	PP180009.1	Stephanocyathus coronatus	Caryophylliidae	15713	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Stephanocyathus
+anthozoa	PP180011.1	Stephanocyathus platypus	Caryophylliidae	15713	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Stephanocyathus
+anthozoa	PP180010.1	Stephanocyathus weberianus	Caryophylliidae	15713	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Stephanocyathus
+anthozoa	PV815622.1	Thalamophyllia gasti	Caryophylliidae	18459	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Thalamophyllia
+anthozoa	PV815617.1	Thalamophyllia riisei	Caryophylliidae	18182	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Thalamophyllia
 anthozoa	NC_065775.1	Trochocyathus caryophylloides	Caryophylliidae	16127	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Trochocyathus
+anthozoa	PP180012.1	Vaughanella hexagona	Caryophylliidae	15713	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Caryophylliidae;Vaughanella
 anthozoa	NC_061999.1	Azoriella bayeri	Cerveridae	18712	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Cerveridae;Azoriella
+anthozoa	PV138954.1	Cervera atlantica	Cerveridae	18714	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Cerveridae;Cervera
+anthozoa	OL616220.1	Chelidonisis aurantiaca mexicana	Chelidonisididae	18977	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Chelidonisididae;Chelidonisis
+anthozoa	PZ717423.1	Chrysogorgia sp.	Chrysogorgiidae	19109	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Chrysogorgiidae;Chrysogorgia
 anthozoa	NC_062004.1	Chrysogorgia tricaulis	Chrysogorgiidae	18969	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Chrysogorgiidae;Chrysogorgia
 anthozoa	NC_082284.1	Metallogorgia melanotrichos	Chrysogorgiidae	18969	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Chrysogorgiidae;Metallogorgia
+anthozoa	OL616266.1	Radicipes sp. ANT176	Chrysogorgiidae	18724	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Chrysogorgiidae;Radicipes
 anthozoa	NC_062005.1	Cladiella pachyclados	Cladiellidae	19066	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Cladiellidae;Cladiella
+anthozoa	LC831295.1	Cladiella sp. Sf41	Cladiellidae	19057	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Cladiellidae;Cladiella
+anthozoa	LC831335.1	Cladiella sp. Sf89	Cladiellidae	19050	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Cladiellidae;Cladiella
+anthozoa	LC831287.1	Klyxum sp. Sf33	Cladiellidae	19467	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Cladiellidae;Klyxum
+anthozoa	LC831316.1	Klyxum sp. Sf68	Cladiellidae	19466	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Cladiellidae;Klyxum
+anthozoa	LC831339.1	Klyxum sp. Sf93	Cladiellidae	19466	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Cladiellidae;Klyxum
+anthozoa	NC_008411.1	Chrysopathes formosa	Cladopathidae	18398	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Cladopathidae;Chrysopathes
+anthozoa	MT318853.1	Sibopathes cf. macrospina NB-2020	Cladopathidae	17734	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Cladopathidae;Sibopathes
+anthozoa	MT318840.1	Trissopathes cf. tetracrada NB-2020	Cladopathidae	18469	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Cladopathidae;Trissopathes
+anthozoa	OR906318.1	Trissopathes sp.	Cladopathidae	18360	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Cladopathidae;Trissopathes
 anthozoa	NC_069554.1	Clavularia crassa	Clavulariidae	18674	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Clavularia
 anthozoa	NC_062006.1	Clavularia inflata	Clavulariidae	18693	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Clavularia
+anthozoa	MW166878.1	Clavularia sp. AP-2020	Clavulariidae	18728	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Clavularia
+anthozoa	LC831342.1	Clavularia sp. Sf96	Clavulariidae	18693	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Clavularia
+anthozoa	LC893425.1	Hanabira yukibana	Clavulariidae	18690	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Hanabira
+anthozoa	OL616258.1	Paratelesto sp. ANT50	Clavulariidae	19745	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Paratelesto
+anthozoa	PP330783.1	Phenganax marumi	Clavulariidae	18744	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Phenganax
+anthozoa	PP330784.1	Phenganax stokvisi	Clavulariidae	18950	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Phenganax
+anthozoa	PP330785.1	Phenganax subtilis	Clavulariidae	20059	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Phenganax
+anthozoa	MW238423.1	Trachythela sp. YZ-2021	Clavulariidae	18715	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Clavulariidae;Trachythela
 anthozoa	NC_061275.1	Coelogorgia palmosa	Coelogorgiidae	18869	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Coelogorgiidae;Coelogorgia
 anthozoa	NC_062039.1	Anthomastus grandiflorus	Coralliidae	18835	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Anthomastus
+anthozoa	PV175348.1	Anthomastus nanhaiensis	Coralliidae	18993	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Anthomastus
+anthozoa	PV795869.1	Anthomastus sp.	Coralliidae	20435	17	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Anthomastus
+anthozoa	OL616209.1	Anthomastus sp. ANT22	Coralliidae	19102	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Anthomastus
+anthozoa	KM015353.1	Anthomastus sp. USNM 1081145	Coralliidae	19124	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Anthomastus
+anthozoa	KM015352.1	Anthomastus sp. USNM 1171062	Coralliidae	18715	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Anthomastus
+anthozoa	PV153461.1	Anthomastus sphaericus	Coralliidae	18795	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Anthomastus
+anthozoa	PV173764.1	Anthomastus tongi	Coralliidae	16155	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Anthomastus
+anthozoa	PV175347.1	Bathyalcyon robustum	Coralliidae	19129	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Bathyalcyon
+anthozoa	AB595189.1	Corallium japonicum	Coralliidae	18913	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Corallium
+anthozoa	NC_022864.1	Corallium rubrum	Coralliidae	18915	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Corallium
+anthozoa	PV153465.1	Heteropolypus sp.	Coralliidae	19109	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Heteropolypus
+anthozoa	PV175375.1	Neoanthomastus elongatus	Coralliidae	19100	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Neoanthomastus
+anthozoa	PV795866.1	Neoanthomastus longistylus	Coralliidae	19102	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Neoanthomastus
+anthozoa	PV175376.1	Neoanthomastus stellatus	Coralliidae	19102	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Neoanthomastus
+anthozoa	PP498686.1	Paragorgia papillata	Coralliidae	19018	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Paragorgia
+anthozoa	PZ447395.1	Paragorgia sp. T81003-1	Coralliidae	18881	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Paragorgia
+anthozoa	NC_018790.1	Paraminabea aldersladei	Coralliidae	19886	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Paraminabea
+anthozoa	NC_022804.1	Pleurocorallium elatius	Coralliidae	18969	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pleurocorallium
+anthozoa	LC848439.1	Pleurocorallium inutile	Coralliidae	18822	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pleurocorallium
 anthozoa	NC_015406.1	Pleurocorallium konojoi	Coralliidae	18969	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pleurocorallium
+anthozoa	LC921274.1	Pleurocorallium sp. 2026-TK_1	Coralliidae	19027	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pleurocorallium
+anthozoa	LC921276.1	Pleurocorallium sp. 2026-TK_2	Coralliidae	19043	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pleurocorallium
+anthozoa	PV175377.1	Pseudoanthomastus applanatus	Coralliidae	18814	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pseudoanthomastus
+anthozoa	PV175378.1	Pseudoanthomastus ornatus	Coralliidae	18811	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pseudoanthomastus
+anthozoa	OL616265.1	Pseudoanthomastus sp. ANT287	Coralliidae	18811	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pseudoanthomastus
+anthozoa	OL616264.1	Pseudoanthomastus sp. ANT288	Coralliidae	16024	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pseudoanthomastus
+anthozoa	PV158192.1	Pseudoanthomastus sp. l XL-2025	Coralliidae	19102	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Pseudoanthomastus
 anthozoa	NC_026193.1	Sibogagorgia cauliflora	Coralliidae	19030	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Coralliidae;Sibogagorgia
+anthozoa	KP938440.1	Corallimorphus profundus	Corallimorphidae	20488	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Corallimorphidae;Corallimorphus
 anthozoa	NC_027102.1	Corynactis californica	Corallimorphidae	20715	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Corallimorphidae;Corynactis
+anthozoa	KP938437.1	Pseudocorynactis sp. SIO	Corallimorphidae	21239	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Corallimorphidae;Pseudocorynactis
 anthozoa	NC_062007.1	Cornularia pabloi	Cornulariidae	18052	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Cornulariidae;Cornularia
+anthozoa	LC851786.1	Coscinaraea sp.	Coscinaraeidae	16689	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Coscinaraeidae;Coscinaraea
 anthozoa	NC_027590.1	Dendrophyllia arbuscula	Dendrophylliidae	19069	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Dendrophylliidae;Dendrophyllia
 anthozoa	NC_026026.1	Dendrophyllia cribrosa	Dendrophylliidae	19072	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Dendrophylliidae;Dendrophyllia
 anthozoa	NC_060606.1	Dendrophyllia minuscula	Dendrophylliidae	19054	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Dendrophylliidae;Dendrophyllia
@@ -77,16 +269,28 @@ anthozoa	NC_056884.1	Tubastraea diaphana	Dendrophylliidae	19093	13	2	refseq	Euka
 anthozoa	NC_056883.1	Tubastraea micranthus	Dendrophylliidae	19085	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Dendrophylliidae;Tubastraea
 anthozoa	NC_030352.1	Tubastraea tagusensis	Dendrophylliidae	19094	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Dendrophylliidae;Tubastraea
 anthozoa	NC_070437.1	Turbinaria bifrons	Dendrophylliidae	18880	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Dendrophylliidae;Turbinaria
+anthozoa	BK069897.1	Diadumene cincta	Diadumenidae	18023	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Diadumenidae;Diadumene
+anthozoa	BK069898.1	Diadumene leucolena	Diadumenidae	17716	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Diadumenidae;Diadumene
 anthozoa	NC_045515.1	Diadumene lineata	Diadumenidae	17552	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Diadumenidae;Diadumene
 anthozoa	NC_060802.1	Diploastrea heliopora	Diploastraeidae	18363	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Diploastraeidae;Diploastrea
 anthozoa	NC_061276.1	Discophyton rudyi	Discophytidae	18723	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Discophytidae;Discophyton
 anthozoa	NC_027101.1	Amplexidiscus fenestrafer	Discosomidae	20188	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Discosomidae;Amplexidiscus
 anthozoa	NC_027100.1	Discosoma nummiforme	Discosomidae	20925	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Discosomidae;Discosoma
+anthozoa	MH308003.1	Discosoma sp.	Discosomidae	20288	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Discosomidae;Discosoma
+anthozoa	NC_008071.1	Discosoma sp. CASIZ 168915	Discosomidae	20908	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Discosomidae;Discosoma
+anthozoa	NC_008072.1	Discosoma sp. CASIZ 168916	Discosomidae	20912	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Discosomidae;Discosoma
 anthozoa	NC_027104.1	Platyzoanthus mussoides	Discosomidae	20826	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Discosomidae;Platyzoanthus
 anthozoa	NC_027103.1	Rhodactis indosinensis	Discosomidae	20100	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Discosomidae;Rhodactis
+anthozoa	NC_008158.1	Rhodactis sp. CASIZ 171755	Discosomidae	20093	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Discosomidae;Rhodactis
 anthozoa	NC_061992.1	Actinoptilum molle	Echinoptilidae	18755	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Echinoptilidae;Actinoptilum
+anthozoa	BK071243.1	Edwardsia elegans	Edwardsiidae	17215	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Edwardsiidae;Edwardsia
+anthozoa	NC_008164.1	Nematostella sp. JVK-2006	Edwardsiidae	16389	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Edwardsiidae;Nematostella
+anthozoa	BK068674.1	Scolanthus callimorphus	Edwardsiidae	16551	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Edwardsiidae;Scolanthus
 anthozoa	NC_062009.1	Dichotella gemmacea	Ellisellidae	18769	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Ellisellidae;Dichotella
 anthozoa	NC_059855.1	Ellisella ceratophyta	Ellisellidae	18814	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Ellisellidae;Ellisella
+anthozoa	OL616230.1	Ellisella sp. ANT83	Ellisellidae	18805	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Ellisellidae;Ellisella
+anthozoa	NC_024181.1	Junceella fragilis	Ellisellidae	18724	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Ellisellidae;Junceella
+anthozoa	PX070531.1	Nicella sp.	Ellisellidae	18811	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Ellisellidae;Nicella
 anthozoa	NC_046474.1	Epizoanthus illoricatus	Epizoanthidae	20447	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Epizoanthidae;Epizoanthus
 anthozoa	NC_079938.1	Epizoanthus ramosus	Epizoanthidae	19672	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Epizoanthidae;Epizoanthus
 anthozoa	NC_079939.1	Epizoanthus rinbou	Epizoanthidae	19386	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Epizoanthidae;Epizoanthus
@@ -95,84 +299,211 @@ anthozoa	NC_035666.1	Eunicella albicans	Eunicellidae	19175	14	2	refseq	Eukaryota
 anthozoa	NC_035667.1	Eunicella cavolini	Eunicellidae	19316	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Eunicellidae;Eunicella
 anthozoa	NC_062012.1	Eunicella tricoronata	Eunicellidae	19184	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Eunicellidae;Eunicella
 anthozoa	NC_073494.1	Eunicella verrucosa	Eunicellidae	19267	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Eunicellidae;Eunicella
+anthozoa	MW970409.1	Physogyra lichtensteini	Euphyllidae	17286	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Euphyllidae;Physogyra
+anthozoa	PP444458.1	Galaxea acrhelia	Euphylliidae	18751	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Euphylliidae;Galaxea
 anthozoa	NC_082917.1	Galaxea astreata	Euphylliidae	18481	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Euphylliidae;Galaxea
 anthozoa	NC_029696.1	Galaxea fascicularis	Euphylliidae	18751	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Euphylliidae;Galaxea
+anthozoa	PP526286.1	Galaxea horrescens	Euphylliidae	18751	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Euphylliidae;Galaxea
 anthozoa	NC_082918.1	Galaxea paucisepta	Euphylliidae	18481	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Euphylliidae;Galaxea
 anthozoa	NC_020458.1	Euplexaura crassa	Euplexauridae	18674	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Euplexauridae;Euplexaura
+anthozoa	NC_008162.1	Colpophyllia natans	Faviidae	16906	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Faviidae;Colpophyllia
+anthozoa	PV487495.1	Diploria labyrinthiformis	Faviidae	16905	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Faviidae;Diploria
+anthozoa	NC_008163.1	Mussa angulosa	Faviidae	17245	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Faviidae;Mussinae;Mussa
+anthozoa	LC916300.1	Polymyces sp. M5039	Flabellidae	19865	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Flabellidae;Polymyces
 anthozoa	NC_082103.1	Polymyces wellsi	Flabellidae	19924	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Flabellidae;Polymyces
+anthozoa	NC_015640.1	Fungiacyathus stephanus	Fungiacyathidae	19381	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Fungiacyathidae;Fungiacyathus
+anthozoa	PQ875194.1	Ctenactis crassa	Fungiidae	16292	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Ctenactis
+anthozoa	PQ571311.1	Ctenactis echinata	Fungiidae	16663	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Ctenactis
+anthozoa	PQ571312.1	Cycloseris costulata	Fungiidae	16451	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Cycloseris
+anthozoa	LC851787.1	Cycloseris distorta	Fungiidae	16720	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Cycloseris
+anthozoa	PQ875196.1	Cycloseris fragilis	Fungiidae	16522	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Cycloseris
+anthozoa	PQ875198.1	Danafungia danai	Fungiidae	16771	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Danafungia
+anthozoa	PQ571313.1	Danafungia horrida	Fungiidae	17332	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Danafungia
+anthozoa	PQ875199.1	Danafungia scruposa	Fungiidae	17061	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Danafungia
+anthozoa	PQ571315.1	Fungia fungites	Fungiidae	16342	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Fungia
+anthozoa	PQ571314.1	Fungiidae sp. Clade B	Fungiidae	16455	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae
+anthozoa	PQ571316.1	Halomitra pileus	Fungiidae	16551	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Halomitra
+anthozoa	PQ571317.1	Heliofungia actiniformis	Fungiidae	16913	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Heliofungia
+anthozoa	PQ571318.1	Herpolitha limax	Fungiidae	16619	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Herpolitha
+anthozoa	PQ571319.1	Lithophyllon concinna	Fungiidae	16459	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Lithophyllon
+anthozoa	PQ571321.1	Lithophyllon scabra	Fungiidae	17014	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Lithophyllon
+anthozoa	PQ571320.1	Lithophyllon undulatum	Fungiidae	17026	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Lithophyllon
+anthozoa	PQ571322.1	Lobactis scutaria	Fungiidae	16811	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Lobactis
+anthozoa	PQ571323.1	Pleuractis gravis	Fungiidae	16497	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Pleuractis
+anthozoa	PQ875200.1	Pleuractis moluccensis	Fungiidae	16854	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Pleuractis
+anthozoa	LC818212.1	Pleuractis paumotensis	Fungiidae	16497	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Pleuractis
+anthozoa	LC818213.1	Podabacia crustacea	Fungiidae	17135	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Podabacia
+anthozoa	PQ571324.1	Polyphyllia talpina	Fungiidae	17108	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Polyphyllia
+anthozoa	PQ571325.1	Sandalolitha robusta	Fungiidae	17399	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Sandalolitha
+anthozoa	LC851790.1	Sinuorota hexagonalis	Fungiidae	16488	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Fungiidae;Sinuorota
 anthozoa	NC_044078.1	Funiculina quadrangularis	Funiculinidae	18906	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Funiculinidae;Funiculina
+anthozoa	OL912950.1	Galatheanthemum sp. MT-2020	Galatheanthemidae	16633	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Galatheanthemidae;Galatheanthemum
+anthozoa	NC_008157.1	Antillogorgia bipinnata	Gorgoniidae	18733	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Antillogorgia
 anthozoa	NC_035669.1	Leptogorgia alba	Gorgoniidae	18848	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Leptogorgia
 anthozoa	NC_035663.1	Leptogorgia capverdensis	Gorgoniidae	18722	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Leptogorgia
+anthozoa	KY559406.1	Leptogorgia cf. palma AP-2017	Gorgoniidae	18731	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Leptogorgia
+anthozoa	KY559404.1	Leptogorgia gaini	Gorgoniidae	19682	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Leptogorgia
+anthozoa	MN052677.1	Leptogorgia hebes	Gorgoniidae	19247	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Leptogorgia
 anthozoa	NC_035665.1	Leptogorgia mutabilis	Gorgoniidae	19157	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Leptogorgia
 anthozoa	NC_035670.1	Leptogorgia sarmentosa	Gorgoniidae	18722	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Leptogorgia
+anthozoa	KY559412.1	Leptogorgia sp. USNM 1437444	Gorgoniidae	18849	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Leptogorgia
+anthozoa	MK301592.1	Leptogorgia virgulata	Gorgoniidae	18845	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Leptogorgia
 anthozoa	NC_035668.1	Pacifigorgia cairnsi	Gorgoniidae	19156	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Gorgoniidae;Pacifigorgia
 anthozoa	NC_027612.1	Halcampoides purpureus	Halcampoididae	18038	15	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Halcampoididae;Halcampoides
+anthozoa	MK919659.1	Halipteris cf. finmarchica RH-2019	Halipteridae	18513	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Halipteridae;Halipteris
+anthozoa	NC_020375.1	Heliopora coerulea	Helioporidae	18957	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Helioporidae;Heliopora
+anthozoa	OL616249.1	Nanipora cf. kamurai ANT79	Helioporidae	18892	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Helioporidae;Nanipora
+anthozoa	MT997141.1	Paraphelliactis xishaensis	Hormathiidae	18592	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Hormathiidae;Paraphelliactis
 anthozoa	NC_079941.1	Hydrozoanthus antumbrosus	Hydrozoanthidae	20763	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Hydrozoanthidae;Hydrozoanthus
 anthozoa	NC_046400.1	Hydrozoanthus gracilis	Hydrozoanthidae	20689	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Hydrozoanthidae;Hydrozoanthus
 anthozoa	NC_079942.1	Hydrozoanthus sils	Hydrozoanthidae	20651	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Hydrozoanthidae;Hydrozoanthus
 anthozoa	NC_079943.1	Hydrozoanthus tunicans	Hydrozoanthidae	20763	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Hydrozoanthidae;Hydrozoanthus
 anthozoa	NC_062014.1	Ideogorgia capensis	Ideogorgiidae	19004	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Ideogorgiidae;Ideogorgia
 anthozoa	NC_073492.1	Incrustatus comauensis	Incrustatidae	18977	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Incrustatidae;Incrustatus
+anthozoa	MW166876.1	Incrustatus sp. AP-2020	Incrustatidae	18989	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Incrustatidae;Incrustatus
 anthozoa	NC_062016.1	Isis hippuris	Isididae	18715	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Isididae;Isis
+anthozoa	OL616268.1	Rumphella sp. ANT116	Isididae	18736	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Isididae;Rumphella
+anthozoa	LC831327.1	Rumphella sp. Sf79	Isididae	18736	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Isididae;Rumphella
 anthozoa	NC_062015.1	Isidoides armata	Isidoidae	18874	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Isidoidae;Isidoides
+anthozoa	NC_011016.2	Acanella arbuscula	Keratoisididae	18616	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae;Acanella
+anthozoa	OL616196.1	Acanella sp. ANT177	Keratoisididae	18618	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae;Acanella
+anthozoa	PQ420801.1	Adinisis oblonga	Keratoisididae	19384	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae;Adinisis
+anthozoa	PP761328.1	Explorisis katharina	Keratoisididae	19398	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae;Explorisis
+anthozoa	PV847669.1	Jasonisis sp. r XH-2025	Keratoisididae	19350	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae;Jasonisis
+anthozoa	OR326698.1	Keratoisididae sp.	Keratoisididae	19418	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae
 anthozoa	NC_062017.1	Keratoisidinae sp. ANT-29	Keratoisididae	19260	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae
+anthozoa	PV847670.1	Keratoisis sp.	Keratoisididae	19350	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae;Keratoisis
+anthozoa	OR326691.1	Keratoisis wrighti	Keratoisididae	18978	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae;Keratoisis
+anthozoa	NC_010764.1	Tridentisis candelabrum	Keratoisididae	18923	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Keratoisididae;Tridentisis
+anthozoa	OL616243.1	Keroeides sp. ANT112	Keroeididae	19001	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Keroeididae;Keroeides
+anthozoa	MK919660.1	Kophobelemnon sp. 1 RH-2019	Kophobelemnidae	18883	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Kophobelemnidae;Kophobelemnon
+anthozoa	MK919661.1	Kophobelemnon sp. 3 RH-2019	Kophobelemnidae	19109	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Kophobelemnidae;Kophobelemnon
+anthozoa	MK919662.1	Kophobelemnon sp. 4 RH-2019	Kophobelemnidae	19130	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Kophobelemnidae;Kophobelemnon
+anthozoa	OL616244.1	Kophobelemnon sp. ANT59	Kophobelemnidae	19129	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Kophobelemnidae;Kophobelemnon
 anthozoa	NC_062037.1	Leptophyton benayahui	Leptophytidae	19491	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Leptophytidae;Leptophyton
 anthozoa	NC_062036.1	Tenerodus fallax	Leptophytidae	21513	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Leptophytidae;Tenerodus
 anthozoa	NC_040169.1	Echinophyllia aspera	Lobophylliidae	17697	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Lobophylliidae;Echinophyllia
 anthozoa	NC_077518.1	Homophyllia bowerbanki	Lobophylliidae	18154	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Lobophylliidae;Homophyllia
 anthozoa	NC_062018.1	Malacacanthus capensis	Malacacanthidae	18727	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Malacacanthidae;Malacacanthus
+anthozoa	PV487494.1	Dichocoenia stokesii	Meandrinidae	17171	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Meandrinidae;Dichocoenia
 anthozoa	NC_062019.1	Melithaea erythraea	Melithaeidae	18975	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Melithaeidae;Melithaea
+anthozoa	LC851061.1	Astrea annuligera	Merulinidae	17550	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Astrea
+anthozoa	LC818210.1	Coelastrea aspera	Merulinidae	16692	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Coelastrea
 anthozoa	NC_046690.1	Dipsastraea favus	Merulinidae	17054	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Dipsastraea
 anthozoa	NC_044074.1	Dipsastraea rotumana	Merulinidae	16466	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Dipsastraea
 anthozoa	NC_035879.1	Favites abdita	Merulinidae	17825	13	3	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Favites
 anthozoa	NC_034916.1	Favites pentagona	Merulinidae	18006	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Favites
 anthozoa	NC_042795.1	Hydnophora exesa	Merulinidae	17790	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Hydnophora
+anthozoa	LC851062.1	Leptoria irregularis	Merulinidae	16412	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Leptoria
 anthozoa	NC_007224.1	Orbicella annularis	Merulinidae	16138	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Orbicella
+anthozoa	NC_007226.1	Orbicella faveolata	Merulinidae	16138	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Orbicella
 anthozoa	NC_007225.1	Orbicella franksi	Merulinidae	16137	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Orbicella
+anthozoa	LC851063.1	Paragoniastrea australensis	Merulinidae	16658	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Paragoniastrea
 anthozoa	NC_020049.1	Platygyra carnosa	Merulinidae	16463	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Platygyra
+anthozoa	PP856480.1	Platygyra daedalea	Merulinidae	16462	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Platygyra
+anthozoa	LC851064.1	Trachyphyllia geoffroyi	Merulinidae	16789	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Merulinidae;Trachyphyllia
+anthozoa	BK068682.1	Metridium farcimen	Metridiidae	17549	15	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Metridiidae;Metridium
+anthozoa	NC_000933.1	Metridium senile	Metridiidae	17443	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Metridiidae;Metridium
 anthozoa	NC_046401.1	Microzoanthus occultus	Microzoanthidae	21656	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Microzoanthidae;Microzoanthus
 anthozoa	NC_046843.1	Tanacetipathes thamnea	Myriopathidae	17712	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Myriopathidae;Tanacetipathes
 anthozoa	NC_046402.1	Nanozoanthus harenaceus	Nanozoanthidae	18577	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Nanozoanthidae;Nanozoanthus
+anthozoa	MN873592.1	Neozoanthus aff. uchina AP-2020	Neozoanthidae	21804	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Neozoanthidae;Neozoanthus
+anthozoa	MW423625.1	Dendronephthya alba	Nephtheidae	18841	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Dendronephthya
+anthozoa	NC_023343.1	Dendronephthya castanea	Nephtheidae	18907	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Dendronephthya
 anthozoa	NC_013573.1	Dendronephthya gigantea	Nephtheidae	18842	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Dendronephthya
 anthozoa	NC_020456.1	Dendronephthya mollis	Nephtheidae	18844	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Dendronephthya
 anthozoa	NC_036022.1	Dendronephthya putteri	Nephtheidae	18853	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Dendronephthya
 anthozoa	NC_062008.1	Dendronephthya sinaiensis	Nephtheidae	20076	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Dendronephthya
+anthozoa	NC_022809.1	Dendronephthya suensoni	Nephtheidae	18851	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Dendronephthya
+anthozoa	LC896078.1	Litophyton sp. Sf98	Nephtheidae	19130	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Litophyton
 anthozoa	NC_062022.1	Paralemnalia thyrsoides	Nephtheidae	19279	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Paralemnalia
+anthozoa	NC_023344.1	Scleronephthya gracillimum	Nephtheidae	18950	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Scleronephthya
+anthozoa	LC896077.1	Stereonephthya sp. Sf106	Nephtheidae	18912	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephtheidae;Stereonephthya
+anthozoa	OL616250.1	Nephthyigorgia sp. ANT97	Nephthyigorgiidae	19402	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nephthyigorgiidae;Nephthyigorgia
+anthozoa	PX070532.1	Chironephthya sp.	Nidaliidae	18739	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nidaliidae;Chironephthya
 anthozoa	NC_062020.1	Nidalia simpsoni	Nidaliidae	19296	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nidaliidae;Nidalia
 anthozoa	NC_062032.1	Siphonogorgia godeffroyi	Nidaliidae	18739	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Nidaliidae;Siphonogorgia
+anthozoa	PV815620.1	Madrepora minutiseptum	Oculinidae	15821	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Oculinidae;Madrepora
+anthozoa	NC_018364.1	Madrepora oculata	Oculinidae	15841	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Oculinidae;Madrepora
 anthozoa	NC_088089.1	Madrepora piresae	Oculinidae	15841	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Oculinidae;Madrepora
+anthozoa	OR019699.1	Madrepora porcellana	Oculinidae	15926	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Oculinidae;Madrepora
+anthozoa	PV487496.1	Oculina patagonica	Oculinidae	14856	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Oculinidae;Oculina
 anthozoa	NC_062003.1	Ceeceenus quadrus	Paralcyoniidae	18973	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Paralcyoniidae;Ceeceenus
+anthozoa	PQ009933.1	Parasphaerasclera mcfaddenae	Parasphaerascleridae	18721	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Parasphaerascleridae;Parasphaerasclera
 anthozoa	NC_062023.1	Parasphaerasclera valdiviae	Parasphaerascleridae	18646	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Parasphaerascleridae;Parasphaerasclera
 anthozoa	NC_080208.1	Antipathozoanthus obscurus	Parazoanthidae	21105	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Antipathozoanthus
 anthozoa	NC_080207.1	Antipathozoanthus remengesaui	Parazoanthidae	20753	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Antipathozoanthus
 anthozoa	NC_079937.1	Bergia puertoricense	Parazoanthidae	21577	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Bergia
+anthozoa	OQ740722.1	Bergia sp. 'catenularis'	Parazoanthidae	21565	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Bergia
+anthozoa	PQ554682.1	Churabana kuroshioae	Parazoanthidae	22738	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Churabana
+anthozoa	PV987613.1	Corallizoanthus sp. a HK-2025	Parazoanthidae	23098	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Corallizoanthus
 anthozoa	NC_086801.1	Parazoanthus axinellae	Parazoanthidae	20979	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Parazoanthus
+anthozoa	OQ469832.1	Parazoanthus axinellae brevitentacularis	Parazoanthidae	21184	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Parazoanthus
 anthozoa	NC_046405.1	Parazoanthus elongatus	Parazoanthidae	21148	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Parazoanthus
+anthozoa	OQ469831.1	Parazoanthus sp. f RH-2022	Parazoanthidae	21135	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Parazoanthus
 anthozoa	NC_046475.1	Parazoanthus swiftii	Parazoanthidae	21499	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Parazoanthus
+anthozoa	DQ825686.1	Savalia savaglia	Parazoanthidae	20764	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Savalia
 anthozoa	NC_080209.1	Umimayanthus nakama	Parazoanthidae	22654	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Umimayanthus
 anthozoa	NC_080259.1	Umimayanthus parasiticus	Parazoanthidae	23133	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Umimayanthus
+anthozoa	PQ554681.1	Vitrumanthus sp. f HK-2024	Parazoanthidae	20556	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Vitrumanthus
+anthozoa	OL616259.1	Parisis sp. ANT113	Parisididae	19010	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Parisididae;Parisis
 anthozoa	NC_044087.1	Pennatula aculeata	Pennatulidae	18715	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Pennatulidae;Pennatula
+anthozoa	MK919664.1	Pennatula cf. aculeata RH-2019	Pennatulidae	18715	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Pennatulidae;Pennatula
+anthozoa	MK919666.1	Ptilella cf. inflata RH-2019	Pennatulidae	19127	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Pennatulidae;Ptilella
 anthozoa	NC_044088.1	Ptilella grandis	Pennatulidae	18973	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Pennatulidae;Ptilella
+anthozoa	BK069900.1	Heteranthus verruculatus	Phymanthidae	20548	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Phymanthidae;Heteranthus
 anthozoa	NC_027614.1	Phymanthus crucifer	Phymanthidae	19727	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Phymanthidae;Phymanthus
+anthozoa	BK069901.1	Phymanthus loligo	Phymanthidae	19494	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Phymanthidae;Phymanthus
+anthozoa	MT849368.1	Plesiastrea peroni	Plesiastreidae	14949	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Plesiastreidae;Plesiastrea
 anthozoa	NC_042481.1	Plesiastrea versipora	Plesiastreidae	15320	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Plesiastreidae;Plesiastrea
+anthozoa	OL616214.1	Bebryce sp. ANT54	Plexauridae	18729	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Bebryce
 anthozoa	NC_020457.1	Echinogorgia complexa	Plexauridae	19445	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Echinogorgia
 anthozoa	NC_059856.1	Echinogorgia reticulata	Plexauridae	19445	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Echinogorgia
+anthozoa	PX780295.1	Eunicea aspera	Plexauridae	18731	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Eunicea
 anthozoa	NC_062011.1	Eunicea flexuosa	Plexauridae	18731	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Eunicea
+anthozoa	PX780297.1	Eunicea fusca	Plexauridae	18729	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Eunicea
+anthozoa	PX780298.1	Eunicea stromyeri	Plexauridae	18733	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Eunicea
 anthozoa	NC_029697.1	Muricea crassa	Plexauridae	19586	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Muricea
+anthozoa	PX780299.1	Muricea pendula	Plexauridae	19583	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Muricea
+anthozoa	OL616253.1	Paracis sp. ANT76D	Plexauridae	18727	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Paracis
 anthozoa	NC_034749.1	Paramuricea clavata	Plexauridae	18669	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Paramuricea
 anthozoa	NC_066899.1	Paramuricea grayi	Plexauridae	18668	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Paramuricea
+anthozoa	OL616256.1	Paramuricea sp. ANT49	Plexauridae	18985	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Paramuricea
+anthozoa	PX780301.1	Placogorgia coronata	Plexauridae	18985	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Placogorgia
 anthozoa	NC_061279.1	Plexaura kuna	Plexauridae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Plexaura
 anthozoa	NC_061280.1	Plexaurella nutans	Plexauridae	18681	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Plexaurella
+anthozoa	PX780300.1	Thesea hebes	Plexauridae	18707	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Thesea
 anthozoa	NC_062034.1	Trichogorgia capensis	Plexauridae	18612	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Plexauridae;Trichogorgia
+anthozoa	PX780304.1	Madracis auretenra	Pocilloporidae	16948	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Pocilloporidae;Madracis
+anthozoa	NC_011160.1	Madracis myriaster	Pocilloporidae	16951	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Pocilloporidae;Madracis
+anthozoa	NC_009797.1	Pocillopora damicornis	Pocilloporidae	17415	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Pocilloporidae;Pocillopora
+anthozoa	NC_009798.1	Pocillopora grandis	Pocilloporidae	17422	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Pocilloporidae;Pocillopora
+anthozoa	PQ359434.1	Pocillopora meandrina	Pocilloporidae	17422	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Pocilloporidae;Pocillopora
+anthozoa	NC_010245.2	Seriatopora caliendrum	Pocilloporidae	17010	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Pocilloporidae;Seriatopora
+anthozoa	NC_010244.2	Seriatopora hystrix	Pocilloporidae	17059	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Pocilloporidae;Seriatopora
+anthozoa	NC_011162.1	Stylophora pistillata	Pocilloporidae	17177	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Pocilloporidae;Stylophora
+anthozoa	LC792540.1	Alveopora catalai	Poritidae	18145	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Alveopora
 anthozoa	NC_040136.1	Alveopora japonica	Poritidae	18144	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Alveopora
+anthozoa	KJ634271.1	Alveopora sp. MFL-2014	Poritidae	18146	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Alveopora
 anthozoa	NC_015643.1	Goniopora columna	Poritidae	18766	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Goniopora
 anthozoa	NC_045931.1	Goniopora djiboutiensis	Poritidae	18765	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Goniopora
+anthozoa	MN795054.1	Goniopora lobata	Poritidae	18770	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Goniopora
+anthozoa	OL372279.1	Goniopora planulata	Poritidae	18766	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Goniopora
+anthozoa	LC605627.1	Porites australiensis	Poritidae	18647	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
+anthozoa	PQ666634.1	Porites cylindrica	Poritidae	18648	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
 anthozoa	NC_037434.1	Porites fontanesii	Poritidae	18658	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
 anthozoa	NC_037435.1	Porites harrisoni	Poritidae	18630	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
 anthozoa	NC_030186.1	Porites lobata	Poritidae	18647	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
 anthozoa	NC_029695.1	Porites lutea	Poritidae	18646	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
+anthozoa	NC_015644.1	Porites okinawensis	Poritidae	18647	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
+anthozoa	NC_024182.1	Porites panamensis	Poritidae	18628	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
+anthozoa	NC_008166.1	Porites porites	Poritidae	18648	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
 anthozoa	NC_027526.1	Porites rus	Poritidae	18647	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
+anthozoa	KU956960.1	Porites sverdrupi	Poritidae	18628	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Porites
+anthozoa	LC851791.1	Stylaraea punctata	Poritidae	18738	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Poritidae;Stylaraea
+anthozoa	PV138953.1	Primaflorus maxwelli	Primafloridae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Primafloridae;Primaflorus
 anthozoa	NC_082114.1	Abyssoprimnoa gemina	Primnoidae	18825	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Primnoidae;Abyssoprimnoa
+anthozoa	MH719202.1	Callogorgia cf. gracilis EE-2018	Primnoidae	18937	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Primnoidae;Callogorgia
 anthozoa	NC_062002.1	Candidella imbricata	Primnoidae	18871	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Primnoidae;Candidella
 anthozoa	NC_026192.1	Narella hawaiiensis	Primnoidae	18838	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Primnoidae;Narella
 anthozoa	NC_046480.1	Plumarella adhaerans	Primnoidae	19036	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Primnoidae;Plumarella
@@ -181,42 +512,128 @@ anthozoa	NC_062024.1	Primnoella chilensis	Primnoidae	18947	14	2	refseq	Eukaryota
 anthozoa	NC_044077.1	Distichoptilum gracile	Protoptilidae	19171	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Protoptilidae;Distichoptilum
 anthozoa	NC_044089.1	Protoptilum carpenterii	Protoptilidae	18729	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Protoptilidae;Protoptilum
 anthozoa	NC_061278.1	Muriceopsis flavida	Pterogorgiidae	18733	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Pterogorgiidae;Muriceopsis
+anthozoa	MK947129.1	Relicanthus daphneae	Relicanthidae	17727	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Anthozoa incertae sedis;Relicanthidae;Relicanthus
+anthozoa	NC_018378.1	Renilla muelleri	Renillidae	18643	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Renillidae;Renilla
+anthozoa	NC_008161.1	Astrangia sp. JVK-2006	Rhizangiidae	14853	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Rhizangiidae;Astrangia
+anthozoa	MT576637.1	Psammocora nierstraszi	Rhizangiidae	16274	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Rhizangiidae;Psammocora
 anthozoa	NC_026530.1	Pseudosiderastrea formosa	Rhizangiidae	19475	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Rhizangiidae;Pseudosiderastrea
 anthozoa	NC_026531.1	Pseudosiderastrea tayamai	Rhizangiidae	19475	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Rhizangiidae;Pseudosiderastrea
+anthozoa	NC_008167.1	Siderastrea radians	Rhizangiidae	19387	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Rhizangiidae;Siderastrea
+anthozoa	NC_008159.1	Ricordea florida	Ricordeidae	21376	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Ricordeidae;Ricordea
 anthozoa	NC_027106.1	Ricordea yuma	Ricordeidae	22015	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Corallimorpharia;Ricordeidae;Ricordea
 anthozoa	NC_027615.1	Cylista ornata	Sagartiidae	17446	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Sagartiidae;Cylista
+anthozoa	MT254530.1	Telestula cf. batoni AP-2020	Sarcodictyonidae	18763	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Sarcodictyonidae;Telestula
 anthozoa	NC_073491.1	Telestula humilis	Sarcodictyonidae	18740	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Sarcodictyonidae;Telestula
 anthozoa	NC_073493.1	Telestula septentrionalis	Sarcodictyonidae	18751	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Sarcodictyonidae;Telestula
 anthozoa	NC_062026.1	Sclerophytum acutum	Sarcophytidae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
 anthozoa	NC_044122.1	Sclerophytum ceramense	Sarcophytidae	18740	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
 anthozoa	NC_061282.1	Sclerophytum flexibile	Sarcophytidae	18743	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	PX856750.1	Sclerophytum grandilobatum	Sarcophytidae	18752	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	OK641586.1	Sclerophytum humile	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
 anthozoa	NC_062028.1	Sclerophytum lochmodes	Sarcophytidae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	NC_062029.1	Sclerophytum maximum	Sarcophytidae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	NC_018379.1	Sclerophytum peculiare	Sarcophytidae	18742	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
 anthozoa	NC_057590.1	Sclerophytum penghuense	Sarcophytidae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	PZ377454.1	Sclerophytum querciforme	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
 anthozoa	NC_062030.1	Sclerophytum slieringsi	Sarcophytidae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831268.1	Sclerophytum sp. Sf10	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831269.1	Sclerophytum sp. Sf11	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831270.1	Sclerophytum sp. Sf13	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831278.1	Sclerophytum sp. Sf23	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831279.1	Sclerophytum sp. Sf24	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831281.1	Sclerophytum sp. Sf26	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831282.1	Sclerophytum sp. Sf28	Sarcophytidae	18752	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831262.1	Sclerophytum sp. Sf3	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831284.1	Sclerophytum sp. Sf30	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831290.1	Sclerophytum sp. Sf36	Sarcophytidae	18734	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831291.1	Sclerophytum sp. Sf37	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831263.1	Sclerophytum sp. Sf4	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831297.1	Sclerophytum sp. Sf44	Sarcophytidae	18742	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831298.1	Sclerophytum sp. Sf45	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831300.1	Sclerophytum sp. Sf48	Sarcophytidae	18732	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831303.1	Sclerophytum sp. Sf51	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831306.1	Sclerophytum sp. Sf56	Sarcophytidae	18742	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831307.1	Sclerophytum sp. Sf57	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831265.1	Sclerophytum sp. Sf6	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831313.1	Sclerophytum sp. Sf65	Sarcophytidae	18742	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831314.1	Sclerophytum sp. Sf66	Sarcophytidae	18752	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831320.1	Sclerophytum sp. Sf72	Sarcophytidae	18742	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831322.1	Sclerophytum sp. Sf74	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831323.1	Sclerophytum sp. Sf75	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831324.1	Sclerophytum sp. Sf76	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831325.1	Sclerophytum sp. Sf77	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831326.1	Sclerophytum sp. Sf78	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831329.1	Sclerophytum sp. Sf81	Sarcophytidae	18743	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831330.1	Sclerophytum sp. Sf83	Sarcophytidae	18742	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831331.1	Sclerophytum sp. Sf85	Sarcophytidae	18742	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831334.1	Sclerophytum sp. Sf88	Sarcophytidae	18730	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831337.1	Sclerophytum sp. Sf91	Sarcophytidae	18742	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831309.1	Sclerophytum sp. sf60	Sarcophytidae	18742	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	LC831318.1	Sclerophytum sp. sf70	Sarcophytidae	18742	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
 anthozoa	NC_062031.1	Sclerophytum wanannense	Sarcophytidae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sarcophytidae;Sclerophytum
+anthozoa	PX574367.1	Alternatipathes sp.	Schizopathidae	17725	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Alternatipathes
+anthozoa	PX574366.1	Bathypathes pseudoalternata	Schizopathidae	17681	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Bathypathes
+anthozoa	MT318844.1	Bathypathes sp. 1 NB-2020	Schizopathidae	17700	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Bathypathes
+anthozoa	OR992050.1	Bathypathes sp. 1 YY-2024	Schizopathidae	17700	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Bathypathes
+anthozoa	OR992051.1	Bathypathes sp. 2 YY-2024	Schizopathidae	17681	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Bathypathes
+anthozoa	MT318842.1	Bathypathes sp. n. 2 NB-2020	Schizopathidae	17700	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Bathypathes
+anthozoa	MT318843.1	Bathypathes sp. n. 3 NB-2020	Schizopathidae	17700	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Bathypathes
 anthozoa	NC_069594.1	Dendrobathypathes boutillieri	Schizopathidae	17687	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Dendrobathypathes
+anthozoa	MT318845.1	Dendrobathypathes sp. n. NB-2020	Schizopathidae	17687	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Dendrobathypathes
+anthozoa	MZ520328.1	Lillipathes sp. USNM 1457355	Schizopathidae	17687	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Lillipathes
+anthozoa	MT318849.1	Parantipathes cf. hirondelle NB-2020	Schizopathidae	17734	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Parantipathes
+anthozoa	MT318850.1	Parantipathes hirondelle	Schizopathidae	17734	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Parantipathes
+anthozoa	MT318851.1	Parantipathes sp. NB-2020	Schizopathidae	17734	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Parantipathes
+anthozoa	MZ520327.1	Parantipathes sp. USNM 1404491	Schizopathidae	17687	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Parantipathes
+anthozoa	OR992049.1	Schizopathidae sp.	Schizopathidae	17699	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae
+anthozoa	MT318854.1	Stauropathes arctica	Schizopathidae	17700	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Stauropathes
+anthozoa	MT318855.1	Stauropathes cf. punctata NB-2020	Schizopathidae	17690	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Stauropathes
+anthozoa	PX574368.1	Stauropathes sp.	Schizopathidae	17690	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Stauropathes
+anthozoa	MT318858.1	Telopathes sp. NB-2020	Schizopathidae	17681	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Antipatharia;Schizopathidae;Telopathes
 anthozoa	NC_062027.1	Sinularia brassica	Sinulariidae	18950	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sinulariidae;Sinularia
 anthozoa	NC_034318.1	Sinularia cf. cruciata GS-2016	Sinulariidae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sinulariidae;Sinularia
-anthozoa	NC_062029.1	Sinularia maxima	Sinulariidae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Sinulariidae;Sinularia
 anthozoa	NC_080260.1	Palythoa caribaeorum	Sphenopidae	23035	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Sphenopidae;Palythoa
 anthozoa	NC_080261.1	Palythoa grandiflora	Sphenopidae	21242	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Sphenopidae;Palythoa
 anthozoa	NC_035579.1	Palythoa heliodiscus	Sphenopidae	20841	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Sphenopidae;Palythoa
 anthozoa	NC_046403.1	Palythoa mizigama	Sphenopidae	21104	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Sphenopidae;Palythoa
 anthozoa	NC_046404.1	Palythoa mutuki	Sphenopidae	21278	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Sphenopidae;Palythoa
+anthozoa	LC891142.1	Palythoa tuberculosa	Sphenopidae	23044	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Sphenopidae;Palythoa
+anthozoa	AP031565.1	Palythoa umbrosa	Sphenopidae	21145	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Sphenopidae;Palythoa
 anthozoa	NC_046406.1	Sphenopus marsupialis	Sphenopidae	21199	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Sphenopidae;Sphenopus
 anthozoa	NC_062013.1	Homophyton verrucosum	Spongiodermidae	19263	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Spongiodermidae;Homophyton
+anthozoa	BK069899.1	Heteractis aurora	Stichodactylidae	19800	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Stichodactylidae;Heteractis
 anthozoa	NC_066448.1	Heteractis doreensis	Stichodactylidae	20720	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Stichodactylidae;Heteractis
+anthozoa	BK068677.1	Heteractis magnifica	Stichodactylidae	19025	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Stichodactylidae;Heteractis
+anthozoa	BK068678.1	Radianthus crispa	Stichodactylidae	19859	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Stichodactylidae;Radianthus
+anthozoa	MW760873.1	Stichodactyla haddoni	Stichodactylidae	18999	15	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Stichodactylidae;Stichodactyla
+anthozoa	BK068679.1	Stichodactyla helianthus	Stichodactylidae	19455	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Stichodactylidae;Stichodactyla
+anthozoa	BK068681.1	Stichodactyla mertensii	Stichodactylidae	18849	15	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Stichodactylidae;Stichodactyla
+anthozoa	BK069903.1	Stichodactyla tapetum	Stichodactylidae	18806	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Stichodactylidae;Stichodactyla
 anthozoa	NC_061995.1	Annella mollis	Subergorgiidae	18730	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Subergorgiidae;Annella
 anthozoa	NC_061283.1	Taiaroa tauhou	Taiaroidae	19434	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Taiaroidae;Taiaroa
+anthozoa	BK069902.1	Thalassianthus aster	Thalassianthidae	18872	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Actiniaria;Nynantheae;Thalassianthidae;Thalassianthus
 anthozoa	NC_061284.1	Tubipora musica	Tubiporidae	18940	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Tubiporidae;Tubipora
+anthozoa	OR625186.1	Cyathotrochus pileus	Turbinoliidae	20581	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Turbinoliidae;Cyathotrochus
+anthozoa	OR625187.1	Dennantotrochus magnificus	Turbinoliidae	19736	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Turbinoliidae;Dennantotrochus
+anthozoa	OR625188.1	Tropidocyathus labidus	Turbinoliidae	20240	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Turbinoliidae;Tropidocyathus
+anthozoa	MK919668.1	Umbellula huxleyi	Umbellulidae	18927	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Umbellulidae;Umbellula
+anthozoa	MK919669.1	Umbellula sp. 1 RH-2019	Umbellulidae	18714	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Umbellulidae;Umbellula
+anthozoa	MK919670.1	Umbellula sp. 2 RH-2019	Umbellulidae	18766	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Umbellulidae;Umbellula
 anthozoa	NC_067077.1	Cavernularia habereri	Veretillidae	18641	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Veretillidae;Cavernularia
+anthozoa	OK149222.1	Cavernularia obesa	Veretillidae	18641	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Veretillidae;Cavernularia
+anthozoa	OL616284.1	Veretillum cf. cynomorium ANT74	Veretillidae	18723	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Veretillidae;Veretillum
+anthozoa	PP002585.1	Victorgorgia sp.	Victorgorgiidae	18715	14	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Victorgorgiidae;Victorgorgia
+anthozoa	NC_018380.1	Stylatula elongata	Virgulariidae	18733	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Virgulariidae;Stylatula
 anthozoa	NC_044091.1	Virgularia mirabilis	Virgulariidae	18770	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Virgulariidae;Virgularia
 anthozoa	NC_062035.1	Virgularia schultzei	Virgulariidae	18741	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Scleralcyonacea;Pennatuloidea;Virgulariidae;Virgularia
 anthozoa	NC_061996.1	Anthelia glauca	Xeniidae	18880	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Xeniidae;Anthelia
 anthozoa	NC_062001.1	Caementabunda simplex	Xeniidae	18895	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Xeniidae;Caementabunda
 anthozoa	NC_062021.1	Ovabunda macrospiculata	Xeniidae	18764	14	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Octocorallia;Malacalcyonacea;Xeniidae;Ovabunda
+anthozoa	MN873599.1	Zoanthus cf. pulchellus AP-2020	Zoanthidae	21139	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Zoanthidae;Zoanthus
+anthozoa	MN873600.1	Zoanthus cf. sociatus AP-2020	Zoanthidae	21140	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Zoanthidae;Zoanthus
 anthozoa	NC_080258.1	Zoanthus gigantus	Zoanthidae	21399	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Zoanthidae;Zoanthus
 anthozoa	NC_080205.1	Zoanthus pulchellus	Zoanthidae	21114	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Zoanthidae;Zoanthus
 anthozoa	NC_035578.1	Zoanthus sansibaricus	Zoanthidae	20972	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Zoanthidae;Zoanthus
 anthozoa	NC_046476.1	Zoanthus sociatus	Zoanthidae	21202	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Zoanthidae;Zoanthus
 anthozoa	NC_080206.1	Zoanthus solanderi	Zoanthidae	21399	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Zoanthidae;Zoanthus
+anthozoa	MN873602.1	Zoanthus sp. AP-2020	Zoanthidae	21140	13	2	genbank	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Zoanthidae;Zoanthus

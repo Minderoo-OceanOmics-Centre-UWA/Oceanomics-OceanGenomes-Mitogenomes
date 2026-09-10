@@ -2,7 +2,7 @@
 
 One curated database per taxon group, built by
 [`bin/build_invert_reference_db.py`](../../bin/build_invert_reference_db.py) from NCBI
-RefSeq complete mitogenomes.
+complete mitogenomes — all of INSDC, not only the RefSeq subset.
 
 Resolving what a sample is seeded from, or referenced against, is **two narrowing
 stages**. Both consumers below share stage 2:
@@ -35,29 +35,49 @@ The two consumers:
 
 ## Contents
 
-| group | Entrez organism expression | min CDS | needs both rRNAs | needs nad5 | RefSeq only | records | families |
+| group | Entrez organism expression | min CDS | needs both rRNAs | needs nad5 | records | families | genera |
 |---|---|---|---|---|---|---|---|
-| anthozoa | `txid6101` | 13 | yes | yes | yes | 221 | 87 |
-| porifera | `txid6040` | 13 | yes | yes | yes | 58 | 33 |
-| mollusca | `txid6447` | 12 | yes | no | yes | 850 | 208 |
-| arthropoda | `txid6657` NOT Hexapoda/Arachnida/Myriapoda | 13 | yes | no | yes | 647 | 169 |
-| echinodermata | `txid7586` | 13 | yes | no | yes | 135 | 56 |
-| ctenophora | `txid10197` | 10 | no | no | **no** | **16** | **7** |
-| tunicata | `txid7712` | 12 | yes | no | yes | 19 | 7 |
-| annelida | `txid6340` | 12 | yes | no | yes | 167 | 50 |
+| anthozoa | `txid6101` | 13 | yes | yes | 638 | 124 | 308 |
+| porifera | `txid6040` | 13 | yes | yes | 87 | 41 | 60 |
+| mollusca | `txid6447` | 12 | yes | no | 1391 | 258 | 767 |
+| arthropoda | `txid6657` NOT Hexapoda/Arachnida/Myriapoda | 13 | yes | no | 1078 | 231 | 561 |
+| echinodermata | `txid7586` | 13 | yes | no | 263 | 80 | 171 |
+| ctenophora | `txid10197` | 10 | no | no | 16 | 7 | 9 |
+| tunicata | `txid7712` | 12 | yes | no | 33 | 11 | 21 |
+| annelida | `txid6340` | 12 | yes | no | 420 | 63 | 208 |
 
-Built 2026-09-02, except **anthozoa**, which is the original 2026-08 build kept unchanged:
-rebuilding it today yields 278 records (a strict superset of the 221 — no record is lost,
-57 are added by new RefSeq entries and the widened rRNA-synonym matcher), but those extra
-records also change which reference `SELECT_REFERENCE_DB` picks for every coral, so
-that refresh belongs in its own change with its own coral annotation check.
+Every group searches all of INSDC and keeps at most one record per organism
+(ctenophora keeps two — see below). Rebuilt 2026-09-10 from the RefSeq-only builds
+below, which is where the `refseq[filter]` restriction was lifted for the remaining
+seven groups:
 
-The `.features.tsv` and `lineage` column were added later, with
-`--refresh-derived` (below) rather than a rebuild, precisely so that schema change could
-not smuggle in the content change above. `.fasta` and `.label.fasta` came back
-byte-identical for all eight groups, and all 2,101 records round-trip through
-`refdb_record.py` to identical `coral_fix_bed.ref_features()` and
-`reference_divergence_check.parse_reference()` output.
+| group | records | families | genera |
+|---|---|---|---|
+| anthozoa | 221 → 638 | 87 → 124 | 148 → 308 |
+| porifera | 58 → 87 | 33 → 41 | 45 → 60 |
+| mollusca | 850 → 1391 | 208 → 258 | 525 → 767 |
+| arthropoda | 647 → 1078 | 169 → 231 | 358 → 561 |
+| echinodermata | 135 → 263 | 56 → 80 | 104 → 171 |
+| tunicata | 19 → 33 | 7 → 11 | 11 → 21 |
+| annelida | 167 → 420 | 50 → 63 | 108 → 208 |
+
+**Every rebuild is a strict superset**: checked by accession, no record that shipped in
+the RefSeq-only build is missing from the new one, anthozoa's frozen 221 included. The
+genus column is the one that matters — the point of lifting the filter is lineages that
+had no representative at all, not more isolates of lineages that already did.
+
+Anthozoa's 638 also absorbs the plain RefSeq refresh that used to be deferred here
+(221 → 278 on RefSeq alone, from new entries and the widened rRNA-synonym matcher);
+the new build holds all 278 of those plus 360 INSDC-only records.
+
+
+The `.features.tsv` and `lineage` column were added to the then-current RefSeq-only
+builds with `--refresh-derived` (below) rather than a rebuild, so that schema change
+could not also change which records the databases held. `.fasta` and `.label.fasta` came
+back byte-identical for all eight groups, and all 2,101 records of that generation
+round-tripped through `refdb_record.py` to identical `coral_fix_bed.ref_features()` and
+`reference_divergence_check.parse_reference()` output. That separation is why the record
+counts above can be attributed to the widened search alone.
 
 The completeness bar is per group and not negotiable upward for its own sake: coral
 references must carry the features `CORAL_ANNOTATION_FIX` transfers (both rRNAs, a nad5
@@ -65,39 +85,71 @@ CDS) plus the 13-PCG cnidarian set, while ctenophore mitogenomes are genuinely r
 (no atp6, no tRNAs, ~10 PCGs, rRNAs often unannotated), so the coral bar would reject
 every valid ctenophore record.
 
-## The RefSeq restriction, and why ctenophora is exempt
+## Why the RefSeq restriction was lifted
 
-Every group but ctenophora searches `AND refseq[filter]`. RefSeq is a curated
-subset, not a completeness bar — the records it omits are ordinary INSDC
-submissions that pass exactly the same `record_is_complete()` check. For a
-well-populated group the restriction is a useful de-duplicator and stays on.
+RefSeq is a curated subset, not a completeness bar — the records it omits are ordinary
+INSDC submissions that pass exactly the same `record_is_complete()` check. Every group
+was originally built with `AND refseq[filter]`, and for ctenophora that was the binding
+constraint: 4 records out of 35 matching, with **no Platyctenida at all**. That is what
+made `INV08_TJALFIELLA` look like an unfixable reference gap in the 20-sample invert
+panel — it was seeded from three families in two other orders while **two *Tjalfiella*
+mitogenomes**, its own genus, sat in GenBank behind the filter (PP327218, 11,397 bp,
+11 CDS; PP331237, 11,020 bp, 11 CDS — both clear the group's own min-CDS bar of 10).
 
-For ctenophora it was the binding constraint, and it hid most of the phylum:
-4 records out of 35 matching, with **no Platyctenida at all**. That is what made
-`INV08_TJALFIELLA` look like an unfixable reference gap in the 20-sample invert
-panel — it was seeded from three families in two other orders while **two
-*Tjalfiella* mitogenomes**, its own genus, sat in GenBank behind the filter
-(PP327218, 11,397 bp, 11 CDS; PP331237, 11,020 bp, 11 CDS — both clear the
-group's own min-CDS bar of 10). Lifting it takes the group 4 → 16 records and
-3 → 7 families, adding Tjalfiellidae, Lyroctenidae, Benthoplanidae and
-Euplokamidae.
+Ctenophora was lifted first, alone, because widening a group changes which record
+`SELECT_REFERENCE_DB` picks and that was believed to re-pick the reference for corals
+already submitted to ENA. **It does not.** `git ls-tree v2.0.0` has no `assets/refdb/`,
+no `select_reference_db.py` and no `mito_origin_anchors.json`: the submitted corals were
+assembled by the v2 path, which resolved a reference from the species *label* via
+`findMitoReference`. No deposited mitogenome was ever built from these databases, and
+every sample that has been through them is a test run. With the premise gone, the
+remaining seven were lifted too.
 
-It is deliberately per group, not global. Lifting it everywhere widens the other
-seven 2.5–4.7× (mollusca 855 → 3169, anthozoa 295 → 1280), which re-picks the
-`SELECT_REFERENCE_DB` reference for samples that are already submitted — the same
-risk that keeps the anthozoa build frozen above. Flip one with `refseq_only` in
-`GROUPS`, and only with its own before/after reference-selection diff.
+What that bought, measured rather than assumed
+([`bin/audit_reference_selection_diff.py`](../../bin/audit_reference_selection_diff.py),
+50 assemblies from the invert panel, batch-20 and NOVA_260724_JP): **3 samples moved to
+a closer reference, 0 moved further**, 13 changed record within the same taxonomic tier
+and 34 kept the same record.
 
-Two build-time dedup stages exist only because of this, and are no-ops while the
-filter is on:
+| sample | before | after |
+|---|---|---|
+| INV02_UMBELLULA | NC_044086.1 *Anthoptilum grandiflorum* (same order) | MK919668.1 *Umbellula huxleyi* (**congeneric**) |
+| INV04_BOLOCERA | NC_066448.1 *Heteractis doreensis* (same order) | NC_022470.1 *Bolocera tuediae* (**congeneric**) |
+| INV14_AMPHIOPHIURA | NC_085502.1 *Stegophiura sladeni* (same family) | LC698982.1 *Amphiophiura penichra* (**congeneric**) |
+
+Two build-time dedup stages exist because of this, and are no-ops while the filter is on:
 
 - **INSDC twins.** Without the filter a RefSeq record arrives alongside the
   submission it was derived from (`NC_038065` + `MG655622`). `drop_insdc_twins()`
   reads the `reference sequence is identical to X` comment and keeps the RefSeq copy.
-- **Per-organism cap** (`--max-per-organism`, default 2). The widened ctenophore
-  search returns nine *Vallicula multiformis* isolates. All nine sit in one family,
-  so neither a top-n seed panel nor `select_fallback_seed`'s family balancing can
-  dilute them. Ranked RefSeq first, then longest, then most CDS, so it is reproducible.
+  At scale this is load-bearing, not theoretical: 795 twins dropped in mollusca, 593 in
+  arthropoda, 244 in anthozoa.
+- **Per-organism cap** (`max_per_organism` in `GROUPS`, `--max-per-organism` to
+  override). Set to 1 for the seven widened groups: a second isolate of a species adds
+  no lineage the database did not already cover, and the tracked artifacts are plain git
+  blobs rewritten wholesale on every rebuild. Ctenophora keeps 2, which is what its
+  shipped 16-record build used — at that size a second isolate is worth its bulk. The
+  cap removed 904 records in mollusca and 649 in arthropoda. Ranked RefSeq first, then
+  longest, then most CDS, so a rebuild is reproducible.
+
+Together those two stages are why lifting the filter costs far less than the raw search
+counts suggest. Mollusca matches 3,169 records unfiltered but ships 1,391, and the eight
+tracked databases went from 72 MiB to 133 MiB rather than the ~260 MiB a naive
+record-count projection gives.
+
+### Effect on the deposited-origin anchors
+
+[`assets/taxonomy/mito_origin_anchors.json`](../taxonomy/mito_origin_anchors.json) is
+derived from these databases, so a rebuild re-tallies it. Widening moved **no order off
+its existing anchor**, and strengthened the evidence for the coral orders that carry the
+already-deposited population — Scleractinia stays on trnM at n=58 → 181 (63.8% → 65.2%),
+Malacalcyonacea on rrnL, Zoantharia and Scleralcyonacea on cox1. Two resolutions did
+change, both for the better:
+
+- **Actiniaria** now clears the bar in its own right (ND5, n=54, 79.6%) instead of
+  falling back to the Anthozoa class aggregate and taking cox1.
+- **Sabellida** drops below the bar and now resolves to its class (Polychaeta, cox1)
+  rather than its old order-level trnH.
 
 Arthropoda subtracts Hexapoda (`txid6960`), Arachnida (`txid6854`) and Myriapoda
 (`txid61985`). Those are >95% of arthropod RefSeq mitogenomes, none of them is anything

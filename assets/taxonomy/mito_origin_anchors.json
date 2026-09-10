@@ -43,50 +43,86 @@
     "basis": "min_fraction 0.5 = a plurality that is also a majority, so the anchor is what more than half of published records for the lineage actually use. min_records 20 stops a tiny tally deciding: Remipedia is n=1 at TM=100%, Monoplacophora n=2, Nuda n=2, Ostracoda n=4. Below either bar the taxon inherits the next level up, which is what keeps Homoscleromorpha (n=13) and Hexactinellida (n=4) on the poriferan rrnL instead of dropping to cox1. tRNA-Leu and tRNA-Ser can win a tally but are rejected as anchors: the reference DBs record them as bare 'tRNA-Leu'/'tRNA-Ser' while MITOS emits TL1/TL2/TS1/TS2, so the winning key would not be addressable."
   },
   "orders": {
+    "actiniaria": {
+      "anchor": "ND5",
+      "level": "order",
+      "n": 54,
+      "fraction": 0.796,
+      "group": "anthozoa",
+      "counts": {
+        "ND5": 43,
+        "RNR2": 6,
+        "CO1": 4
+      }
+    },
     "amphilepidida": {
       "anchor": "CO1",
       "level": "order",
-      "n": 24,
-      "fraction": 0.708,
+      "n": 69,
+      "fraction": 0.609,
       "group": "echinodermata",
       "counts": {
-        "CO1": 17,
-        "TF": 1,
-        "TW": 1
+        "CO1": 42,
+        "ND6": 7,
+        "TM": 3
       }
     },
     "amphipoda": {
       "anchor": "CO1",
       "level": "order",
-      "n": 44,
-      "fraction": 0.5,
+      "n": 78,
+      "fraction": 0.564,
       "group": "arthropoda",
       "counts": {
-        "CO1": 22,
+        "CO1": 44,
         "TS": 8,
-        "TI": 3
+        "TI": 5
+      }
+    },
+    "antipatharia": {
+      "anchor": "CO1",
+      "level": "order",
+      "n": 44,
+      "fraction": 0.523,
+      "group": "anthozoa",
+      "counts": {
+        "CO1": 23,
+        "TM": 10,
+        "RNR2": 4
       }
     },
     "architaenioglossa": {
       "anchor": "CO1",
       "level": "order",
-      "n": 22,
-      "fraction": 0.682,
+      "n": 28,
+      "fraction": 0.643,
       "group": "mollusca",
       "counts": {
-        "CO1": 15,
-        "CO2": 6,
-        "ND2": 1
+        "CO1": 18,
+        "CO2": 7,
+        "TM": 1
+      }
+    },
+    "aspidochirotida": {
+      "anchor": "CO1",
+      "level": "order",
+      "n": 31,
+      "fraction": 0.806,
+      "group": "echinodermata",
+      "counts": {
+        "CO1": 25,
+        "TP": 2,
+        "ND5": 2
       }
     },
     "balanomorpha": {
       "anchor": "CO1",
       "level": "order",
-      "n": 31,
-      "fraction": 0.742,
+      "n": 42,
+      "fraction": 0.762,
       "group": "arthropoda",
       "counts": {
-        "CO1": 23,
+        "CO1": 32,
         "TI": 3,
         "ND1": 2
       }
@@ -94,291 +130,325 @@
     "cardiida": {
       "anchor": "CO1",
       "level": "order",
-      "n": 23,
-      "fraction": 0.783,
+      "n": 42,
+      "fraction": 0.619,
       "group": "mollusca",
       "counts": {
-        "CO1": 18,
+        "CO1": 26,
+        "TM": 8,
         "CO2": 5
+      }
+    },
+    "chitonida": {
+      "anchor": "CO1",
+      "level": "order",
+      "n": 24,
+      "fraction": 0.667,
+      "group": "mollusca",
+      "counts": {
+        "CO1": 16,
+        "CO3": 3,
+        "TM": 2
       }
     },
     "crassiclitellata": {
       "anchor": "CO1",
       "level": "order",
-      "n": 31,
-      "fraction": 1.0,
+      "n": 100,
+      "fraction": 0.53,
       "group": "annelida",
       "counts": {
-        "CO1": 31
+        "CO1": 53,
+        "TH": 47
       }
     },
     "decapoda": {
       "anchor": "CO1",
       "level": "order",
-      "n": 441,
-      "fraction": 0.796,
+      "n": 705,
+      "fraction": 0.721,
       "group": "arthropoda",
       "counts": {
-        "CO1": 351,
-        "TI": 32,
-        "TY": 16
+        "CO1": 508,
+        "TI": 94,
+        "TY": 23
+      }
+    },
+    "hirudinida": {
+      "anchor": "CO1",
+      "level": "order",
+      "n": 26,
+      "fraction": 0.731,
+      "group": "annelida",
+      "counts": {
+        "CO1": 19,
+        "TH": 6,
+        "TW": 1
       }
     },
     "littorinimorpha": {
       "anchor": "CO1",
       "level": "order",
-      "n": 75,
-      "fraction": 0.733,
+      "n": 154,
+      "fraction": 0.565,
       "group": "mollusca",
       "counts": {
-        "CO1": 55,
-        "CO3": 20
+        "CO1": 87,
+        "CO3": 60,
+        "TM": 4
       }
     },
     "malacalcyonacea": {
       "anchor": "RNR2",
       "level": "order",
-      "n": 75,
-      "fraction": 0.693,
+      "n": 203,
+      "fraction": 0.719,
       "group": "anthozoa",
       "counts": {
-        "RNR2": 52,
-        "CO1": 23
+        "RNR2": 146,
+        "CO1": 55,
+        "ND3": 1
+      }
+    },
+    "myida": {
+      "anchor": "CO1",
+      "level": "order",
+      "n": 32,
+      "fraction": 0.906,
+      "group": "mollusca",
+      "counts": {
+        "CO1": 29,
+        "TS": 1,
+        "ND2": 1
       }
     },
     "mytilida": {
       "anchor": "CO1",
       "level": "order",
-      "n": 37,
-      "fraction": 0.514,
+      "n": 63,
+      "fraction": 0.587,
       "group": "mollusca",
       "counts": {
-        "CO1": 19,
-        "TY": 4,
-        "ATP6": 3
+        "CO1": 37,
+        "TY": 6,
+        "ATP6": 4
       }
     },
     "neogastropoda": {
       "anchor": "CO1",
       "level": "order",
-      "n": 103,
-      "fraction": 0.709,
+      "n": 129,
+      "fraction": 0.729,
       "group": "mollusca",
       "counts": {
-        "CO1": 73,
-        "CO3": 23,
+        "CO1": 94,
+        "CO3": 28,
         "TF": 7
       }
     },
     "nudibranchia": {
       "anchor": "CO1",
       "level": "order",
-      "n": 49,
-      "fraction": 0.755,
+      "n": 63,
+      "fraction": 0.746,
       "group": "mollusca",
       "counts": {
-        "CO1": 37,
-        "TQ": 5,
-        "TK": 4
-      }
-    },
-    "octopoda": {
-      "anchor": "CO3",
-      "level": "order",
-      "n": 40,
-      "fraction": 0.5,
-      "group": "mollusca",
-      "counts": {
-        "CO3": 20,
-        "CO1": 17,
-        "TM": 2
+        "CO1": 47,
+        "TK": 6,
+        "TQ": 6
       }
     },
     "oegopsida": {
       "anchor": "CO3",
       "level": "order",
-      "n": 21,
-      "fraction": 0.905,
+      "n": 25,
+      "fraction": 0.92,
       "group": "mollusca",
       "counts": {
-        "CO3": 19,
+        "CO3": 23,
         "CO1": 2
       }
     },
     "ostreida": {
       "anchor": "CO1",
       "level": "order",
-      "n": 23,
-      "fraction": 0.913,
+      "n": 35,
+      "fraction": 0.886,
       "group": "mollusca",
       "counts": {
-        "CO1": 21,
-        "TG": 1,
-        "TI": 1
-      }
-    },
-    "phyllodocida": {
-      "anchor": "CO1",
-      "level": "order",
-      "n": 48,
-      "fraction": 0.521,
-      "group": "annelida",
-      "counts": {
-        "CO1": 25,
-        "TL": 5,
-        "ND1": 3
-      }
-    },
-    "sabellida": {
-      "anchor": "TH",
-      "level": "order",
-      "n": 25,
-      "fraction": 0.68,
-      "group": "annelida",
-      "counts": {
-        "TH": 17,
-        "CO1": 5,
-        "TW": 2
+        "CO1": 31,
+        "TI": 1,
+        "TG": 1
       }
     },
     "scleractinia": {
       "anchor": "TM",
       "level": "order",
-      "n": 58,
-      "fraction": 0.638,
+      "n": 181,
+      "fraction": 0.652,
       "group": "anthozoa",
       "counts": {
-        "TM": 37,
-        "ND5": 15,
-        "CO1": 3
+        "TM": 118,
+        "ND5": 45,
+        "RNR2": 10
       }
     },
     "scleralcyonacea": {
       "anchor": "CO1",
       "level": "order",
-      "n": 31,
-      "fraction": 0.516,
+      "n": 97,
+      "fraction": 0.649,
       "group": "anthozoa",
       "counts": {
-        "CO1": 16,
-        "RNR2": 13,
-        "ND5": 1
+        "CO1": 63,
+        "RNR2": 29,
+        "ND2": 1
       }
     },
     "sepiida": {
       "anchor": "CO3",
       "level": "order",
-      "n": 31,
-      "fraction": 0.935,
+      "n": 42,
+      "fraction": 0.952,
       "group": "mollusca",
       "counts": {
-        "CO3": 29,
+        "CO3": 40,
         "CO1": 2
+      }
+    },
+    "stomatopoda": {
+      "anchor": "CO1",
+      "level": "order",
+      "n": 51,
+      "fraction": 0.51,
+      "group": "arthropoda",
+      "counts": {
+        "CO1": 26,
+        "TI": 13,
+        "TY": 4
       }
     },
     "stylommatophora": {
       "anchor": "CO1",
       "level": "order",
-      "n": 45,
-      "fraction": 0.711,
+      "n": 121,
+      "fraction": 0.719,
       "group": "mollusca",
       "counts": {
-        "CO1": 32,
-        "TK": 5,
-        "RNR2": 2
+        "CO1": 87,
+        "TI": 12,
+        "TK": 7
+      }
+    },
+    "terebellida": {
+      "anchor": "CO1",
+      "level": "order",
+      "n": 25,
+      "fraction": 0.72,
+      "group": "annelida",
+      "counts": {
+        "CO1": 18,
+        "TH": 4,
+        "TK": 1
       }
     },
     "trochida": {
       "anchor": "CO1",
       "level": "order",
-      "n": 20,
-      "fraction": 0.75,
+      "n": 29,
+      "fraction": 0.759,
       "group": "mollusca",
       "counts": {
-        "CO1": 15,
+        "CO1": 22,
         "CO3": 4,
-        "TE": 1
+        "TY": 2
       }
     },
     "unionida": {
       "anchor": "CO1",
       "level": "order",
-      "n": 101,
-      "fraction": 0.851,
+      "n": 142,
+      "fraction": 0.873,
       "group": "mollusca",
       "counts": {
-        "CO1": 86,
-        "CO3": 4,
-        "TQ": 4
+        "CO1": 124,
+        "TQ": 5,
+        "CO3": 4
       }
     },
     "venerida": {
       "anchor": "CO1",
       "level": "order",
-      "n": 45,
-      "fraction": 0.756,
+      "n": 75,
+      "fraction": 0.68,
       "group": "mollusca",
       "counts": {
-        "CO1": 34,
-        "TR": 2,
-        "TW": 1
+        "CO1": 51,
+        "ND6": 10,
+        "TF": 2
       }
     },
     "zoantharia": {
       "anchor": "CO1",
       "level": "order",
-      "n": 29,
-      "fraction": 0.586,
+      "n": 43,
+      "fraction": 0.651,
       "group": "anthozoa",
       "counts": {
-        "CO1": 17,
+        "CO1": 28,
         "ND5": 4,
-        "ND1": 3
+        "ND1": 4
       }
     }
   },
   "classes": {
+    "annelida": {
+      "anchor": "CO1",
+      "level": "group",
+      "n": 1,
+      "fraction": 1.0,
+      "group": "annelida",
+      "reason": "n=1 below min_records=20; inherits the annelida group anchor"
+    },
     "anthozoa": {
       "anchor": "CO1",
       "level": "default",
-      "n": 221,
-      "fraction": 0.339,
+      "n": 638,
+      "fraction": 0.309,
       "group": "anthozoa",
       "top": "RNR2",
-      "reason": "plurality RNR2 33.9% below min_fraction=50%"
+      "reason": "plurality RNR2 30.9% below min_fraction=50%"
     },
     "ascidiacea": {
       "anchor": "CO1",
       "level": "default",
-      "n": 19,
-      "fraction": 0.421,
+      "n": 25,
+      "fraction": 0.4,
       "group": "tunicata",
-      "top": "CO2",
-      "reason": "n=19 below min_records=20"
+      "reason": "plurality CO1 40.0% below min_fraction=50%"
     },
     "asteroidea": {
       "anchor": "CO1",
-      "level": "default",
-      "n": 25,
-      "fraction": 0.4,
-      "group": "echinodermata",
-      "reason": "plurality CO1 40.0% below min_fraction=50%"
+      "level": "class",
+      "n": 45,
+      "fraction": 0.511,
+      "group": "echinodermata"
     },
     "bivalvia": {
       "anchor": "CO1",
       "level": "class",
-      "n": 287,
-      "fraction": 0.774,
+      "n": 459,
+      "fraction": 0.743,
       "group": "mollusca"
     },
     "branchiopoda": {
       "anchor": "CO1",
       "level": "group",
-      "n": 35,
-      "fraction": 0.457,
+      "n": 63,
+      "fraction": 0.381,
       "group": "arthropoda",
       "top": "TI",
-      "reason": "plurality TI 45.7% below min_fraction=50%; inherits the arthropoda group anchor"
+      "reason": "plurality TI 38.1% below min_fraction=50%; inherits the arthropoda group anchor"
     },
     "caudofoveata": {
       "anchor": "CO1",
@@ -388,96 +458,104 @@
       "group": "mollusca",
       "reason": "n=5 below min_records=20; inherits the mollusca group anchor"
     },
+    "cephalocarida": {
+      "anchor": "CO1",
+      "level": "group",
+      "n": 1,
+      "fraction": 1.0,
+      "group": "arthropoda",
+      "top": "TS",
+      "reason": "n=1 below min_records=20; 'TS' is not an addressable MITOS feature key (the reference DBs do not disambiguate tRNA-Leu/tRNA-Ser copies); inherits the arthropoda group anchor"
+    },
     "cephalopoda": {
       "anchor": "CO3",
       "level": "class",
-      "n": 107,
-      "fraction": 0.738,
+      "n": 132,
+      "fraction": 0.742,
       "group": "mollusca"
     },
     "clitellata": {
       "anchor": "CO1",
       "level": "class",
-      "n": 66,
-      "fraction": 0.758,
+      "n": 164,
+      "fraction": 0.573,
       "group": "annelida"
     },
     "copepoda": {
       "anchor": "CO1",
       "level": "group",
-      "n": 15,
-      "fraction": 0.2,
+      "n": 28,
+      "fraction": 0.429,
       "group": "arthropoda",
-      "reason": "n=15 below min_records=20; inherits the arthropoda group anchor"
+      "reason": "plurality CO1 42.9% below min_fraction=50%; inherits the arthropoda group anchor"
     },
     "crinoidea": {
       "anchor": "CO1",
-      "level": "default",
-      "n": 15,
-      "fraction": 0.333,
+      "level": "group",
+      "n": 25,
+      "fraction": 0.36,
       "group": "echinodermata",
-      "top": "CYTB",
-      "reason": "n=15 below min_records=20"
+      "reason": "plurality CO1 36.0% below min_fraction=50%; inherits the echinodermata group anchor"
     },
     "demospongiae": {
       "anchor": "RNR2",
       "level": "class",
-      "n": 41,
-      "fraction": 0.927,
+      "n": 64,
+      "fraction": 0.812,
       "group": "porifera"
     },
     "echinoidea": {
       "anchor": "TF",
       "level": "class",
-      "n": 41,
-      "fraction": 0.756,
+      "n": 50,
+      "fraction": 0.76,
       "group": "echinodermata"
     },
     "gastropoda": {
       "anchor": "CO1",
       "level": "class",
-      "n": 427,
-      "fraction": 0.639,
+      "n": 763,
+      "fraction": 0.607,
       "group": "mollusca"
     },
     "hexactinellida": {
       "anchor": "RNR2",
       "level": "group",
-      "n": 4,
-      "fraction": 0.5,
+      "n": 5,
+      "fraction": 0.4,
       "group": "porifera",
       "top": "TE",
-      "reason": "n=4 below min_records=20; inherits the porifera group anchor"
+      "reason": "n=5 below min_records=20; inherits the porifera group anchor"
     },
     "holothuroidea": {
       "anchor": "CO1",
       "level": "class",
-      "n": 27,
-      "fraction": 0.815,
+      "n": 63,
+      "fraction": 0.762,
       "group": "echinodermata"
     },
     "homoscleromorpha": {
       "anchor": "RNR2",
       "level": "group",
-      "n": 13,
+      "n": 17,
       "fraction": 1.0,
       "group": "porifera",
-      "reason": "n=13 below min_records=20; inherits the porifera group anchor"
+      "reason": "n=17 below min_records=20; inherits the porifera group anchor"
     },
     "ichthyostraca": {
       "anchor": "CO1",
       "level": "group",
-      "n": 6,
+      "n": 9,
       "fraction": 0.667,
       "group": "arthropoda",
       "top": "TS",
-      "reason": "n=6 below min_records=20; 'TS' is not an addressable MITOS feature key (the reference DBs do not disambiguate tRNA-Leu/tRNA-Ser copies); inherits the arthropoda group anchor"
+      "reason": "n=9 below min_records=20; 'TS' is not an addressable MITOS feature key (the reference DBs do not disambiguate tRNA-Leu/tRNA-Ser copies); inherits the arthropoda group anchor"
     },
     "malacostraca": {
       "anchor": "CO1",
       "level": "class",
-      "n": 529,
-      "fraction": 0.73,
+      "n": 886,
+      "fraction": 0.67,
       "group": "arthropoda"
     },
     "monoplacophora": {
@@ -486,7 +564,7 @@
       "n": 2,
       "fraction": 0.5,
       "group": "mollusca",
-      "top": "TC",
+      "top": "TT",
       "reason": "n=2 below min_records=20; inherits the mollusca group anchor"
     },
     "nuda": {
@@ -500,32 +578,41 @@
     "ophiuroidea": {
       "anchor": "CO1",
       "level": "class",
-      "n": 27,
-      "fraction": 0.667,
+      "n": 80,
+      "fraction": 0.625,
       "group": "echinodermata"
     },
     "ostracoda": {
       "anchor": "CO1",
       "level": "group",
-      "n": 4,
+      "n": 14,
       "fraction": 0.5,
       "group": "arthropoda",
-      "top": "ND2",
-      "reason": "n=4 below min_records=20; inherits the arthropoda group anchor"
+      "reason": "n=14 below min_records=20; inherits the arthropoda group anchor"
     },
     "polychaeta": {
       "anchor": "CO1",
-      "level": "class",
-      "n": 96,
-      "fraction": 0.51,
-      "group": "annelida"
+      "level": "group",
+      "n": 247,
+      "fraction": 0.453,
+      "group": "annelida",
+      "reason": "plurality CO1 45.3% below min_fraction=50%; inherits the annelida group anchor"
     },
     "polyplacophora": {
       "anchor": "CO1",
       "level": "class",
-      "n": 20,
-      "fraction": 0.65,
+      "n": 27,
+      "fraction": 0.704,
       "group": "mollusca"
+    },
+    "porifera": {
+      "anchor": "RNR2",
+      "level": "group",
+      "n": 1,
+      "fraction": 1.0,
+      "group": "porifera",
+      "top": "CO1",
+      "reason": "n=1 below min_records=20; inherits the porifera group anchor"
     },
     "remipedia": {
       "anchor": "CO1",
@@ -547,10 +634,19 @@
     "sipuncula": {
       "anchor": "CO1",
       "level": "group",
-      "n": 5,
+      "n": 8,
       "fraction": 1.0,
       "group": "annelida",
-      "reason": "n=5 below min_records=20; inherits the annelida group anchor"
+      "reason": "n=8 below min_records=20; inherits the annelida group anchor"
+    },
+    "solenogastres": {
+      "anchor": "CO1",
+      "level": "group",
+      "n": 1,
+      "fraction": 1.0,
+      "group": "mollusca",
+      "top": "TK",
+      "reason": "n=1 below min_records=20; inherits the mollusca group anchor"
     },
     "tentaculata": {
       "anchor": "CO1",
@@ -560,11 +656,20 @@
       "group": "ctenophora",
       "reason": "n=12 below min_records=20"
     },
+    "thaliacea": {
+      "anchor": "CO1",
+      "level": "default",
+      "n": 8,
+      "fraction": 0.5,
+      "group": "tunicata",
+      "top": "ND5",
+      "reason": "n=8 below min_records=20"
+    },
     "thecostraca": {
       "anchor": "CO1",
       "level": "class",
-      "n": 57,
-      "fraction": 0.579,
+      "n": 76,
+      "fraction": 0.592,
       "group": "arthropoda"
     }
   },
@@ -572,36 +677,36 @@
     "annelida": {
       "anchor": "CO1",
       "level": "group",
-      "n": 167,
-      "fraction": 0.623,
+      "n": 420,
+      "fraction": 0.512,
       "counts": {
-        "CO1": 104,
-        "TH": 34,
-        "TL": 5
+        "CO1": 215,
+        "TH": 101,
+        "ND2": 16
       }
     },
     "anthozoa": {
       "anchor": "CO1",
       "level": "default",
-      "n": 221,
-      "fraction": 0.339,
+      "n": 638,
+      "fraction": 0.309,
       "top": "RNR2",
       "counts": {
-        "RNR2": 75,
-        "CO1": 63,
-        "TM": 39
+        "RNR2": 197,
+        "CO1": 181,
+        "TM": 133
       },
-      "reason": "plurality RNR2 33.9% below min_fraction=50%"
+      "reason": "plurality RNR2 30.9% below min_fraction=50%"
     },
     "arthropoda": {
       "anchor": "CO1",
       "level": "group",
-      "n": 647,
-      "fraction": 0.665,
+      "n": 1078,
+      "fraction": 0.628,
       "counts": {
-        "CO1": 430,
-        "TI": 69,
-        "TY": 20
+        "CO1": 677,
+        "TI": 154,
+        "TY": 31
       }
     },
     "ctenophora": {
@@ -617,50 +722,48 @@
     },
     "echinodermata": {
       "anchor": "CO1",
-      "level": "default",
-      "n": 135,
-      "fraction": 0.437,
+      "level": "group",
+      "n": 263,
+      "fraction": 0.517,
       "counts": {
-        "CO1": 59,
-        "TF": 33,
-        "CYTB": 5
-      },
-      "reason": "plurality CO1 43.7% below min_fraction=50%"
+        "CO1": 136,
+        "TF": 44,
+        "ND6": 12
+      }
     },
     "mollusca": {
       "anchor": "CO1",
       "level": "group",
-      "n": 850,
-      "fraction": 0.635,
+      "n": 1391,
+      "fraction": 0.618,
       "counts": {
-        "CO1": 540,
-        "CO3": 158,
-        "TK": 25
+        "CO1": 859,
+        "CO3": 230,
+        "TK": 39
       }
     },
     "porifera": {
       "anchor": "RNR2",
       "level": "group",
-      "n": 58,
-      "fraction": 0.897,
+      "n": 87,
+      "fraction": 0.805,
       "counts": {
-        "RNR2": 52,
-        "TY": 2,
-        "TE": 2
+        "RNR2": 70,
+        "CO1": 5,
+        "TF": 2
       }
     },
     "tunicata": {
       "anchor": "CO1",
       "level": "default",
-      "n": 19,
-      "fraction": 0.421,
-      "top": "CO2",
+      "n": 33,
+      "fraction": 0.333,
       "counts": {
-        "CO2": 8,
-        "CO1": 7,
-        "RNR1": 2
+        "CO1": 11,
+        "CO2": 10,
+        "ND5": 4
       },
-      "reason": "n=19 below min_records=20"
+      "reason": "plurality CO1 33.3% below min_fraction=50%"
     }
   }
 }

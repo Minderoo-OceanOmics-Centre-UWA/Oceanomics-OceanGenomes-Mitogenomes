@@ -110,11 +110,43 @@ class CapPerOrganism(unittest.TestCase):
 
 @unittest.skipUnless(HAVE_BIO, "Biopython not installed")
 class GroupSpecDefaults(unittest.TestCase):
-    def test_only_ctenophora_lifts_the_refseq_restriction(self):
-        """Guards the blast radius: lifting it elsewhere re-picks references for
-        samples that are already submitted."""
+    def test_every_group_searches_all_of_insdc(self):
+        """Held as an explicit set rather than a blanket assertion, so a group that
+        loses the flag -- or a group added with the RefSeq default still on -- fails
+        here instead of quietly shipping a curated subset of its phylum.
+
+        The restriction was originally kept on everywhere but ctenophora out of a
+        concern that widening a group would re-pick the reference for mitogenomes
+        already in ENA. It could not: assets/refdb/, select_reference_db.py and the
+        origin anchor table all postdate v2.0.0, which is the pipeline that produced
+        the submitted corals, so no deposited genome was ever built from these
+        databases.
+        """
         lifted = {g for g, s in builder.GROUPS.items() if not s.refseq_only}
-        self.assertEqual(lifted, {"ctenophora"})
+        self.assertEqual(lifted, {"anthozoa", "porifera", "mollusca", "arthropoda",
+                                  "echinodermata", "ctenophora", "tunicata",
+                                  "annelida"})
+        self.assertEqual(lifted, set(builder.GROUPS))
+
+    def test_a_widened_group_caps_at_one_record_per_organism(self):
+        """The cap is what keeps a widened group tracking taxonomic coverage rather
+        than resequencing depth. A second isolate of the same species adds no new
+        lineage, only bulk, and the tracked artifacts are plain git blobs rewritten
+        wholesale on every rebuild. Ctenophora is the exception at 2, which is what
+        its shipped 16-record build used and what its artifacts encode."""
+        for group, spec in sorted(builder.GROUPS.items()):
+            if spec.refseq_only:
+                continue
+            expected = 2 if group == "ctenophora" else 1
+            with self.subTest(group=group):
+                self.assertEqual(spec.max_per_organism, expected)
+
+    def test_the_cap_is_reproducible_from_the_group_alone(self):
+        """No group may rely on the CLI default for its cap: --max-per-organism is an
+        override, and a rebuild invoked as --group X must hold what shipped."""
+        for group, spec in sorted(builder.GROUPS.items()):
+            with self.subTest(group=group):
+                self.assertGreaterEqual(spec.max_per_organism, 1)
 
     def test_the_search_term_follows_the_flag(self):
         on = builder.SEARCH_TEMPLATE.format(organism="txid1", refseq=builder.REFSEQ_TERM)
