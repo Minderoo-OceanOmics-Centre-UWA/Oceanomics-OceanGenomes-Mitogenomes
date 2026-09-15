@@ -176,7 +176,9 @@ For general nf-core best practices (custom configs, resource tuning, module over
   codes are derived per-sample from taxonomic class (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4),
   so this no longer forces a single code across all samples.
 - `--curated_blast_db` – absolute path to the OceanGenomes-curated BLAST database.
-- `--nt_blast_db` – absolute path to the NCBI nt BLAST database (used for invertebrate samples).
+- `--nt_blast_db` – absolute path to the NCBI nt BLAST database PREFIX, e.g. `.../db/core_nt`
+  (used for invertebrate samples, searched with `-taxids 33208`). Must be nt-scale: the
+  RefSeq-only `mito` database returns almost no invertebrate hits, and does so silently.
 - `--sql_config` – PostgreSQL config required for `--input_dir` (enriched samplesheet creation). If omitted with
   `--input`, upload + QC stages are skipped with a warning.
 - `--blast_db_dir`, `--taxonkit_db_dir` – scratch/persistent directories for caching taxonomy resources.

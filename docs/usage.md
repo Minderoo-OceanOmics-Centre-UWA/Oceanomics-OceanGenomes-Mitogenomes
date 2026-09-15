@@ -84,7 +84,7 @@ that matches your container/conda environment.
 | `--outdir` | ✔ | Destination for all published results. |
 | `--organelle_type` | ✔ | Organelle label passed to GetOrganelle (e.g. `animal_mt`). |
 | `--curated_blast_db` | ✔ | NCBI-format BLAST database used for species validation. Provide an absolute path. |
-| `--nt_blast_db` | Conditional | NCBI nt BLAST database used when samples are marked `invertebrates=true`. |
+| `--nt_blast_db` | Conditional | NCBI nt BLAST database PREFIX (e.g. `.../db/core_nt`) used when samples are marked `invertebrates=true`; searched with `-taxids 33208`. Must be nt-scale — the RefSeq-only `mito` database yields almost no invertebrate hits. |
 | `--mitos_refdb` | Conditional | MITOS2 RefSeq reference data directory (parent of the version dir), downloaded from Zenodo. Required whenever invertebrate samples (annotated with MITOS2) are present. |
 | `--mitos_refseq_ver` | Optional | MITOS2 reference version subdir name passed to `runmitos.py -r` (default `refseq89m`). |
 | `--sql_config` | Conditional | INI file with `[postgres] dbname,user,password,host,port`. Required for `--input_dir`; optional for `--input` if upload/QC is skipped. |
@@ -550,7 +550,16 @@ The pipeline orchestrates several helper modules that all require absolute file 
   prefix) curated for OceanGenomes validations. Ensure `blastn` can resolve the files.
 - **NCBI nt BLAST database (`--nt_blast_db`)** – Provide the `core_nt` (or equivalent) database
   prefix used for invertebrate samples. The pipeline selects this automatically when
-  `invertebrates=true` in the samplesheet.
+  `invertebrates=true` in the samplesheet, and restricts the search to Metazoa
+  (`-taxids 33208`) to keep a 1.09 Tbase database affordable.
+
+  It must be a genuinely nt-scale database. Do **not** point this at the NCBI `mito`
+  database: that is the RefSeq mitochondrion release (18,058 sequences), it holds almost
+  none of the partial COI/16S submissions where invertebrate barcode evidence actually
+  lives, and it produces empty BLAST output rather than an error. NOVA_260909_LA ran its
+  whole invertebrate cohort that way — 4 of 23 samples reached the LCA, against 12 of 23
+  on `core_nt`. Pass the database PREFIX (`.../db/core_nt`), not a file: the run fails
+  fast if no `.nal` or `.nin` index is found beside it.
 - **MITOS2 reference data (`--mitos_refdb`)** – RefSeq reference directory (parent of the version
   subdir named by `--mitos_refseq_ver`, default `refseq89m`) downloaded from Zenodo. Required to
   annotate invertebrate samples with MITOS2.

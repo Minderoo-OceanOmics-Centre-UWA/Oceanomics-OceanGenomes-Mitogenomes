@@ -249,7 +249,9 @@ the full annotation directory allows for manual inspection or re-annotation if r
 Both the BLAST and LCA modules consume cached taxonomy databases (`taxdb` and `taxdump`). The filtered tables serve as
 inputs for species validation and the downstream SQL upload modules. BLAST database choice is made
 per sample: curated DB for default/vertebrate samples, and `--nt_blast_db` when
-`invertebrates=true`.
+`invertebrates=true`. The invertebrate search is restricted to Metazoa (`-taxids 33208`)
+so that a Tbase-scale `core_nt` stays affordable, but is not restricted to the sample's
+own phylum — a contaminated or mislabelled sample must still be able to hit outside it.
 
 ### Species validation and SQL uploads
 

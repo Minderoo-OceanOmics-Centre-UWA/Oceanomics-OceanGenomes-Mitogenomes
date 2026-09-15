@@ -549,13 +549,31 @@ workflow MITOGENOME_ANNOTATION {
     // Select the BLAST database per sample (curated for vertebrates, nt for invertebrates)
     //
 
+    // --nt_blast_db is a BLAST database PREFIX, not a file: a multi-volume database
+    // such as core_nt has core_nt.nal + core_nt.00.nin..., a single-volume one such as
+    // mito has mito.nin, and NEITHER has a file at the bare prefix. So this cannot be a
+    // schema "exists": true check the way curated_blast_db (a real fasta) is -- it has
+    // to look for the index that actually exists.
+    //
+    // Worth the check: NOVA_260909_LA ran its entire invertebrate cohort against
+    // .../db/mito (RefSeq mitochondrion, 18,058 seqs) while every comment and doc in
+    // this repo said core_nt. A wrong-but-readable database produces empty BLAST output
+    // and no error at all, so nothing downstream noticed.
     combined_sequences_with_db = combined_sequences
-        .map { meta, file, gene_type, annotation_name ->
+        .map { meta, file_, gene_type, annotation_name ->
             if (meta.invertebrates && !nt_blast_db) {
                 error "Sample ${meta.id} is marked invertebrates=true, but --nt_blast_db was not provided"
             }
+            if (meta.invertebrates) {
+                def prefix = nt_blast_db.toString()
+                if (!file("${prefix}.nal").exists() && !file("${prefix}.nin").exists()) {
+                    error "--nt_blast_db '${prefix}' is not a BLAST nucleotide database: expected " +
+                          "<prefix>.nal (multi-volume, e.g. core_nt) or <prefix>.nin (single-volume) " +
+                          "beside it. Pass the database PREFIX, e.g. /path/to/db/core_nt"
+                }
+            }
             def blast_db = (meta.invertebrates ? nt_blast_db : curated_blast_db)
-            [meta, file, gene_type, annotation_name, blast_db]
+            [meta, file_, gene_type, annotation_name, blast_db]
         }
     
     //

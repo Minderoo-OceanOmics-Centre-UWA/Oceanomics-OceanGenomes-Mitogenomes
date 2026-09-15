@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The invertebrate generalisation, on top of v2.0.0. Not released.
 
+### `Fixed`
+
+- Invertebrate BLAST/LCA searched the RefSeq mitochondrion database, not nt.
+
+  `--nt_blast_db` was pointed at `/scratch/references/blastdb_update/blast-*/db/mito` in
+  every launch script since the flag was introduced in `ad9fd35`. That is the NCBI
+  "Genomic Mitochondrial Reference Sequences" database: 18,058 sequences, 595 Mbase. The
+  invertebrate barcode space (partial COI/16S GenBank and BOLD submissions) is
+  essentially absent from it.
+
+  Nothing caught this because every comment and document in the repo said the opposite.
+  `conf/modules.config` read "invertebrates -> full 256 GB core_nt (slow)", and the
+  megablast + `-perc_identity 98` tuning in `cbf8427` was justified by core_nt's cost --
+  so the pipeline paid that sensitivity penalty for a database it was not searching. A
+  wrong-but-readable BLAST database produces empty output and no error.
+
+  Measured on NOVA_260909_LA: 26 of 41 completed BLAST tasks produced a zero-byte raw
+  output, and the whole run published 5 LCA rows. Benchmarking the 74 CO1/12S/16S
+  queries of that run (23 invertebrate samples), counting samples with at least one
+  region passing both the blastn module's awk and `calculateLCA`'s `qcov>=40`:
+
+  | database / task / cutoff | samples reaching the LCA |
+  |---|---|
+  | `mito` / megablast / pident 98 (old) | 4 / 23 |
+  | `core_nt` +Metazoa / megablast / pident 98 (**new**) | 12 / 23 |
+  | `core_nt` +Metazoa / dc-megablast / pident 98 | 12 / 23 |
+  | `core_nt` +Metazoa / dc-megablast / no cutoff | 13 / 23 |
+
+  `--nt_blast_db` now points at `blast-2026-08-01/db/core_nt` (the old path was also a
+  symlink to a February snapshot), and the invertebrate arm gains `-taxids 33208` to
+  keep a 1.09 Tbase search affordable. Metazoa rather than the sample's own phylum, so a
+  contaminated or mislabelled sample can still hit outside its nominal group.
+
+  `dc-megablast` was evaluated and deliberately **not** adopted: under the `pident > 98`
+  gate it returns strictly fewer hits than megablast (895 vs 1851), because the hits that
+  survive that gate are the near-identical ones megablast's exact 28-mer seeds find best.
+
+  The annotation subworkflow now asserts the database exists before running. This cannot
+  be a schema `"exists": true` check the way `curated_blast_db` is, because
+  `--nt_blast_db` is a database PREFIX with no file at the bare path -- multi-volume
+  `core_nt` has `.nal` + `.00.nin`, single-volume `mito` has `.nin` -- so it looks for
+  the index instead.
+
+  `BLAST_BLASTN` goes from 4 to 12 cpus and 2 h to 4 h. The cpus are free (Setonix bills
+  `max(cpus, memory/230*256)`, already 13 at the 12 GB first rung); the time is because a
+  single 1.5 kb query against core_nt took ~56 min on a cold Lustre page cache, versus
+  37-66 s once warm.
+
+  Not addressed here, and still limiting invertebrate results: the three independent
+  98%-identity gates (`-perc_identity 98`, the blastn module's `awk ... $7 > 98`, and
+  `calculateLCA.py`'s `DEFAULT_PIDENT_CUTOFF`), and `parse_nominal()`'s lack of a class
+  or order rank, which makes `Hexactinellida`, `Asteroidea sp.` and `Tetractinellida`
+  unmatchable by construction (~37 of the 69 invertebrates in this samplesheet). Every
+  one of the ~11 samples still missing an LCA has core_nt evidence at 81-97%.
+
 ### `Added`
 
 - The published origin of an invertebrate mitogenome is now measured per taxon instead
