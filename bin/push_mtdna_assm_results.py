@@ -227,6 +227,48 @@ def parse_depth_tsv(path):
     }
 
 
+# Skip reasons emitted when an existing mitogenome_data row is preserved. Their
+# exact text is parsed by compile_upload_report.py, so do not reword them without
+# updating classify_status() there.
+SKIP_ALREADY_FAILED = "row already records 'failed to assemble' (no change needed)"
+SKIP_WOULD_DOWNGRADE = (
+    "existing successful row found — refusing to overwrite with "
+    "'failed to assemble'"
+)
+SKIP_ROW_EXISTS = "row already exists; pass --force to overwrite"
+
+
+def decide_write(existing_stats, failed_to_assemble, force_overwrite):
+    """Decide whether this run may write over an existing mitogenome_data row.
+
+    Returns ``(should_write, skip_reason)``, with ``skip_reason`` None when the
+    write goes ahead. ``existing_stats`` is the stored `stats` value, or None
+    both for "no row at all" (handled by the caller) and for an incomplete row.
+
+    Two of the three refusals hold regardless of ``force_overwrite``: replacing a
+    successful assembly with 'failed to assemble' is data loss rather than a
+    policy choice, and re-writing an already-failed row changes nothing. Only the
+    plain "a real result is already here" case is what ``--force`` unlocks.
+    """
+    existing_is_failed = (
+        existing_stats is not None
+        and str(existing_stats).strip().lower() == "failed to assemble"
+    )
+    if existing_stats is None:
+        # Incomplete prior row; overwriting is strictly an improvement.
+        return True, None
+    if existing_is_failed and not failed_to_assemble:
+        # New run upgrades a prior failure to a success — always allow.
+        return True, None
+    if existing_is_failed:
+        return False, SKIP_ALREADY_FAILED
+    if failed_to_assemble:
+        return False, SKIP_WOULD_DOWNGRADE
+    if not force_overwrite:
+        return False, SKIP_ROW_EXISTS
+    return True, None
+
+
 def parse_log_for_stats_and_cov(log_text: str):
     """Parse GetOrganelle-style log for stats, avg_coverage, avg_base_coverage."""
     match_stats = re.findall(r"Result status of animal_mt:\s*(.+)", log_text)
@@ -256,9 +298,10 @@ if __name__ == "__main__":
         action="store_true",
         help=(
             "Overwrite an existing mitogenome_data row even when it already "
-            "holds a real result. Off by default: existing successful rows "
-            "are preserved and only NULL / 'failed to assemble' rows get "
-            "updated automatically."
+            "holds a successful result. Without it, such a row is preserved and "
+            "only NULL / 'failed to assemble' rows get updated automatically. "
+            "Never overrides the refusal to replace a successful row with "
+            "'failed to assemble'."
         ),
     )
     parser.add_argument(
@@ -433,11 +476,17 @@ if __name__ == "__main__":
         params.update(depth_values)
 
         # Look up the current row (if any) and decide whether to write.
-        # Default policy is insert-only: existing rows are preserved unless
-        #   - the new run is a successful assembly and the prior row holds
-        #     NULL or 'failed to assemble' (a strict upgrade — never
-        #     destructive), or
-        #   - --force was passed.
+        # Default policy is overwrite: an existing row is replaced by this run's
+        # result. Two refusals hold regardless of --force, because neither is a
+        # policy choice, they are the cases where writing would destroy data:
+        #   - the prior row is a successful assembly and this run failed to
+        #     assemble (never downgrade a result to 'failed to assemble');
+        #   - the prior row already records 'failed to assemble' and so does this
+        #     run (nothing to change).
+        # Without --force one further case is preserved: a prior successful row
+        # is kept when this run also succeeded, which is the insert-only
+        # behaviour. A prior row with NULL stats is always overwritten, since
+        # completing it is strictly an improvement.
         cursor.execute(
             """
             SELECT stats, length, avg_coverage, avg_base_coverage
@@ -453,30 +502,10 @@ if __name__ == "__main__":
 
         should_write = True
         skip_reason = None
-        if existing is not None and not force_overwrite:
-            existing_stats = existing[0]
-            existing_is_failed = (
-                existing_stats is not None
-                and str(existing_stats).strip().lower() == "failed to assemble"
+        if existing is not None:
+            should_write, skip_reason = decide_write(
+                existing[0], failed_to_assemble, force_overwrite
             )
-            if existing_stats is None:
-                # Incomplete prior row; overwriting is strictly an improvement.
-                pass
-            elif existing_is_failed and not failed_to_assemble:
-                # New run upgrades a prior failure to a success — always allow.
-                pass
-            elif existing_is_failed and failed_to_assemble:
-                should_write = False
-                skip_reason = "row already records 'failed to assemble' (no change needed)"
-            else:
-                should_write = False
-                if failed_to_assemble:
-                    skip_reason = (
-                        "existing successful row found — refusing to overwrite with "
-                        "'failed to assemble'"
-                    )
-                else:
-                    skip_reason = "row already exists; pass --force to overwrite"
 
         if not should_write:
             existing_dict = dict(zip(field_names, existing))

@@ -1,14 +1,37 @@
 module load nextflow/25.04.6
 module load singularity/4.1.0-nompi
 
-# Get the absolute path to the current directory
-RUN_DIR="$(pwd -P)"
+# Per-run overrides. All optional; the defaults below reproduce a plain manual
+# run of this script from the repo, so `bash nextflow_run.sh` is unchanged.
+#   RUN_DIR        path to this repo            (default: this script's directory)
+#   OG_OUT_DIR     run output directory
+#   OG_WORK_DIR    nextflow work dir, relative to OG_OUT_DIR
+#   OG_LOG_NAME    nextflow log filename, inside OG_OUT_DIR
+#   OG_INPUT_DIR   fastp read glob passed to --input_dir
+#   OG_BS_CONFIG   basespace config
+#   OG_SQL_CONFIG  postgres config
+# The Draft-Genomes pipeline's TRIGGER_MITOGENOME module generates
+# run_<RUN>_mitogenomes_<timestamp>.sh by prepending those exports to a verbatim
+# copy of this file. This is therefore the only place launcher changes need to be
+# made: triggered runs pick them up automatically.
+
+# Get the absolute path to this repo
+RUN_DIR="${RUN_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)}"
 BASE="/scratch/pawsey1348/$USER"
-OUT_DIR="$BASE/mitogenomes-missing-audit-3"
+OUT_DIR="${OG_OUT_DIR:-$BASE/mitogenomes-missing-audit-3}"
 
 mkdir -p "$OUT_DIR"
 
 OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
+
+# Record what actually launched this run: a byte-exact copy of this script (for a
+# triggered run that is the generated run_*.sh, overrides included), the repo
+# commit, and the OG_* values in effect. This is the run's launcher provenance.
+mkdir -p "$OUT_DIR/pipeline_info/launcher"
+command cp "${BASH_SOURCE[0]}" "$OUT_DIR/pipeline_info/launcher/launcher.snapshot.sh"
+git -C "$RUN_DIR" rev-parse HEAD > "$OUT_DIR/pipeline_info/launcher/mito_repo_commit.txt" 2>/dev/null \
+    || echo "not a git checkout" > "$OUT_DIR/pipeline_info/launcher/mito_repo_commit.txt"
+env | grep '^OG_' | sort > "$OUT_DIR/pipeline_info/launcher/og_overrides.env" || true
 
 # Stage the backup scripts alongside the results and bake this run's outdir into
 # them, so the backup is a no-argument `sbatch $OUT_DIR/backup_scripts/backup.sh`
@@ -25,14 +48,14 @@ fi
 # Change to output directory to run Nextflow there
 cd $OUT_DIR
 
-nextflow -log $OUT_DIR/nextflow.log \
+nextflow -log "$OUT_DIR/${OG_LOG_NAME:-nextflow.log}" \
     run $RUN_DIR/main.nf \
-    -work-dir ./work \
+    -work-dir "./${OG_WORK_DIR:-work}" \
     -c $RUN_DIR/pawsey_profile.config \
     -resume \
     -profile singularity \
     -with-report \
-    --input_dir "/scratch/pawsey1348/$USER/path/to/fastp/*.fastq.gz" \
+    --input_dir "${OG_INPUT_DIR:-/scratch/pawsey1348/$USER/path/to/fastp/*.fastq.gz}" \
     --outdir "$OUT_DIR" \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \
@@ -42,8 +65,8 @@ nextflow -log $OUT_DIR/nextflow.log \
     --mitos_refseq_ver refseq89m  \
     --organelle_type "animal_mt" \
     --kvalue "21" \
-    --bs_config ~/.basespace/default.cfg \
-    --sql_config ~/postgresql_details/oceanomics.cfg \
+    --bs_config "${OG_BS_CONFIG:-$HOME/.basespace/default.cfg}" \
+    --sql_config "${OG_SQL_CONFIG:-$HOME/postgresql_details/oceanomics.cfg}" \
     --enable_oatk_fallback true \
     --oatk_mito_db /software/projects/pawsey0964/oatk_db/actinopterygii_mito.fam \
     --binddir /scratch \
@@ -54,8 +77,8 @@ nextflow -log $OUT_DIR/nextflow.log \
     --skip_mitogenome_annotation false \
     --skip_upload_results false \
     --samplesheet_prefix "samplesheet" \
-    --template_sbt "bin/template.sbt" \
-    --force_db_overwrite false \
+    --template_sbt "$RUN_DIR/bin/template.sbt" \
+    --force_db_overwrite true \
     --translation_table "2" \
     --ena_webin_validate true \
     --ena_study "PRJEB110568" \

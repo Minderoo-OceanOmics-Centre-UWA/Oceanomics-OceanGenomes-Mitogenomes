@@ -214,7 +214,7 @@ Apply the ENA migrations after the existing depth and validation migrations:
 
 ```bash
 singularity exec \
-  "$MYSOFTWARE/.nextflow_singularity/tylerpeirce-psycopg2-0.1.img" \
+  "/software/projects/pawsey1348/singularity/nextflow_cache/tylerpeirce-psycopg2-0.1.img" \
   python bin/apply_ena_migrations.py \
   --config /home/tpeirce/postgresql_details/oceanomics.cfg
 ```

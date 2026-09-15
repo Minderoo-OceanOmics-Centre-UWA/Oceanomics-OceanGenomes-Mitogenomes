@@ -164,7 +164,7 @@ lca_column_headers = [
     "dna_sequence", "identificationRemarks"
 ]
 
-# The group --force prunes: everything this sample/region has ever recorded.
+# The group --prune-history prunes: everything this sample/region has ever recorded.
 LCA_HISTORY_KEY = ["og_id", "tech", "seq_date", "code", "annotation", "region"]
 
 
@@ -187,7 +187,7 @@ def prune_superseded_lca(cursor, written):
     return deleted
 
 
-def process_lca(lca_file, sample, db_params, force=False):
+def process_lca(lca_file, sample, db_params, prune_history=False):
     """Upload one sample's LCA assignments. Returns the number of failed rows."""
     print(f"📂 Reading LCA file: {lca_file}")
     # df = pd.read_csv(lca_file, sep='\t', header=True, names=lca_column_headers).replace({np.nan: None})
@@ -211,7 +211,7 @@ def process_lca(lca_file, sample, db_params, force=False):
 
     df[['og_id', 'tech', 'seq_date', 'code', 'annotation']] = df['seq_id'].str.split('.', expand=True)
     success, failure = 0, 0
-    # HISTORY_KEY tuple -> set of lca_run_date values written for it, used by --force.
+    # HISTORY_KEY tuple -> set of lca_run_date values written for it, used by --prune-history.
     written = {}
 
     with psycopg2.connect(**db_params) as conn:
@@ -346,11 +346,11 @@ def process_lca(lca_file, sample, db_params, force=False):
 
         # Prune only after every row landed: deleting around a failure could drop
         # the older result without its replacement having been written.
-        if force and failure == 0:
+        if prune_history and failure == 0:
             pruned = prune_superseded_lca(cursor, written)
-            print(f"🧹 --force: deleted {pruned} superseded lca rows")
-        elif force:
-            print("⚠️ Skipping --force prune: upload had failures.")
+            print(f"🧹 --prune-history: deleted {pruned} superseded lca rows")
+        elif prune_history:
+            print("⚠️ Skipping --prune-history prune: upload had failures.")
 
     if failure:
         print(f"⚠️ LCA upload finished with errors: {success} rows succeeded, {failure} failed")
@@ -363,14 +363,17 @@ if __name__ == "__main__":
         description="Upload filtered BLAST hits and LCA assignments for one sample."
     )
     parser.add_argument(
+        "--prune-history",
         "--force",
         action="store_true",
+        dest="prune_history",
         help=(
             "After uploading, delete lca rows for the same sample/region that this "
             "run did not produce, so only the current result is kept. Off by "
-            "default: superseded results are preserved alongside the new ones. "
+            "default: superseded results are preserved alongside the new ones, and "
+            "the content-keyed upsert already makes a re-run correct without it. "
             "Does not affect blast_filtered_lca, which overwrites in place and "
-            "keeps no history."
+            "keeps no history. '--force' is a deprecated alias."
         ),
     )
     parser.add_argument("config_file")
@@ -385,7 +388,9 @@ if __name__ == "__main__":
     failed = process_blast(args.blast_results, args.sample, db_config)
 
     print("\n🔄 Starting LCA processing...")
-    failed += process_lca(args.lca_results, args.sample, db_config, force=args.force)
+    failed += process_lca(
+        args.lca_results, args.sample, db_config, prune_history=args.prune_history
+    )
 
     # Exit non-zero so Nextflow surfaces a partial upload instead of publishing a
     # green task whose log quietly reports missing rows.

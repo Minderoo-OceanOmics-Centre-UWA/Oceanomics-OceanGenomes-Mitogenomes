@@ -13,13 +13,16 @@ that reproduces a hit exactly just refreshes that row's ``lca_run_date``, while 
 re-run that produces a different result for the same hit is inserted as a new row
 and the earlier one is kept.
 
-``--force`` additionally discards that history: after uploading, rows for the
-same sample/region that this run did not produce are deleted, leaving only the
-current result. The ``og_num`` and ``content_hash`` columns are maintained by the
-DB and are intentionally not written here.
+``--prune-history`` additionally discards that history: after uploading, rows for
+the same sample/region that this run did not produce are deleted, leaving only
+the current result. It is off by default and is deliberately separate from the
+pipeline's ``--force_db_overwrite``, because the upserts above already make a
+re-run correct without deleting anything. ``--force`` is accepted as a deprecated
+alias. The ``og_num`` and ``content_hash`` columns are maintained by the DB and
+are intentionally not written here.
 
 Usage:
-    push_lca_raw_results.py [--force] <config.cfg> <sample> <lca_raw.tsv> [<lca_raw.tsv> ...]
+    push_lca_raw_results.py [--prune-history] <config.cfg> <sample> <lca_raw.tsv> [<lca_raw.tsv> ...]
 """
 
 import argparse
@@ -92,7 +95,7 @@ UNIQUE_KEY = [
     "sequence_region", "accession_id",
 ]
 
-# The group --force prunes: everything this sample/region has ever recorded.
+# The group --prune-history prunes: everything this sample/region has ever recorded.
 HISTORY_KEY = [
     "og_id", "tech", "seq_date", "code", "annotation", "sequence_region",
 ]
@@ -239,12 +242,15 @@ def process_file(cur, path, written):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--prune-history",
         "--force",
         action="store_true",
+        dest="prune_history",
         help=(
             "After uploading, delete rows for the same sample/region that this "
             "run did not produce, so only the current result is kept. Off by "
-            "default: superseded results are preserved alongside the new ones."
+            "default: superseded results are preserved alongside the new ones. "
+            "'--force' is a deprecated alias."
         ),
     )
     parser.add_argument("config_file")
@@ -271,10 +277,10 @@ def main():
             # Only prune once every file has been uploaded, and only if the
             # upload was clean: pruning around a failed row could delete the
             # older result without a replacement having landed.
-            if args.force and total_failed == 0:
+            if args.prune_history and total_failed == 0:
                 total_pruned = prune_superseded(cur, written)
-            elif args.force:
-                print("⚠️ Skipping --force prune: upload had failures.")
+            elif args.prune_history:
+                print("⚠️ Skipping --prune-history prune: upload had failures.")
         conn.commit()
     except Exception as e:
         if conn is not None:
@@ -285,9 +291,9 @@ def main():
         if conn is not None:
             conn.close()
 
-    mode = "replace-history" if args.force else "keep-history"
+    mode = "replace-history" if args.prune_history else "keep-history"
     tally = f"{total_inserted} inserted, {total_refreshed} refreshed"
-    if args.force:
+    if args.prune_history:
         tally += f", {total_pruned} superseded rows deleted"
 
     if total_failed == 0:

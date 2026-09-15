@@ -345,6 +345,36 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Changed`
 
+- SQL uploads overwrite by default: `params.force_db_overwrite` is now `true`.
+
+  Insert-only was the safer-sounding default and the worse one in practice. A re-run
+  finished green while every `PUSH_*` module quietly preserved the stale row, and the
+  only trace was a `preserved` line buried in the upload report. Re-running a sample
+  to correct its record is the normal reason to re-run it, so that is now what
+  happens.
+
+  Flipping the flag was only safe after two things that were riding on `--force` were
+  taken off it:
+
+  1. `push_mtdna_assm_results.py` gated its whole decision block on
+     `not force_overwrite`, and that block held the refusal to replace a successful
+     `mitogenome_data` row with `failed to assemble`. Under the new default, any
+     re-run where a sample happened to fail would have clobbered a good production
+     result. That refusal is now evaluated unconditionally, along with the
+     already-failed no-op case; only the plain "row already exists" skip still
+     depends on `--force`. The skip strings are unchanged, so
+     `compile_upload_report.py` still classifies them as before.
+  2. In the two LCA pushers `--force` never meant overwrite at all. Those tables are
+     content-keyed upserts that a re-run refreshes correctly on their own; `--force`
+     meant *delete the superseded history* for the sample/region. That is now its own
+     flag, `--prune-history` on the scripts and `params.lca_prune_history` (default
+     `false`) in the pipeline, so turning on overwrite does not silently start
+     deleting history. `--force` remains a deprecated argparse alias for manual runs.
+
+  `PUSH_QC_VALIDATOR` and `PUSH_ENA_VALIDATION_RESULTS` are unaffected: neither takes
+  `--force`. `nextflow_run.sh` passed `--force_db_overwrite false` explicitly, which
+  overrode the config default, and now passes `true`.
+
 - `GETORGANELLE_FROMREADS`/`GETORGANELLE_RESEED`/`OATK` request 64 GB on their first
   attempt instead of 100 GB (`params.hinted_memory_base_gb`).
 

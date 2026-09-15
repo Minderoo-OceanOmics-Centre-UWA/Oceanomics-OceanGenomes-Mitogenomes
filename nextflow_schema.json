@@ -482,7 +482,12 @@
                 },
                 "force_db_overwrite": {
                     "type": "boolean",
-                    "description": "Overwrite existing mitogenome_data rows on SQL upload. By default the PUSH_* modules are insert-only and preserve existing rows."
+                    "default": true,
+                    "description": "Overwrite existing mitogenome_data rows on SQL upload. Set false for insert-only uploads, where a row already holding a real result is preserved. Neither mode ever replaces a successful assembly row with 'failed to assemble'."
+                },
+                "lca_prune_history": {
+                    "type": "boolean",
+                    "description": "After an LCA upload, delete the rows for the same sample/region that this run did not reproduce, leaving only the current result. Off by default: the lca tables are content-keyed upserts, so a re-run is correct without pruning and the superseded results are kept as history."
                 },
                 "mitohifi_container": {
                     "type": "string",
