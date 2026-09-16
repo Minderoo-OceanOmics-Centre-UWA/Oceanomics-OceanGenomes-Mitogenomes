@@ -45,7 +45,13 @@ START_CODONS_BY_CODE = {
     2: ("ATT", "ATC", "ATA", "ATG", "GTG"),
     4: ("TTA", "TTG", "CTG", "ATT", "ATC", "ATA", "ATG", "GTG"),
     5: ("TTG", "ATT", "ATC", "ATA", "ATG", "GTG"),
-    9: ("ATG", "GTG"),
+    # Code 9 (echinoderm/flatworm mt) previously listed only ATG/GTG. That is
+    # contradicted by the data: across NOVA_260909_LA's asteroids the observed
+    # initiators are ND3 ATT x7, ND4L ATC x5 / ATT x3, ND1 GTG x6 / TTG x1 --
+    # i.e. ATT/ATC/TTG are the MAJORITY of real starts and were all being
+    # rejected, failing 8 otherwise-complete assemblies. Codes 5 and 9 are both
+    # invertebrate mitochondrial tables and take the same initiator set.
+    9: ("TTG", "ATT", "ATC", "ATA", "ATG", "GTG"),
     13: ("TTG", "ATA", "ATG", "GTG"),
     14: ("ATG",),
     21: ("ATG", "GTG"),
@@ -54,6 +60,76 @@ START_CODONS_BY_CODE = {
 }
 
 SUPPORTED_CODES = frozenset(START_CODONS_BY_CODE) & frozenset(STOP_CODONS_BY_CODE)
+
+# Union of the initiation codons across every mitochondrial translation table,
+# read out of the EMBOSS EGC.* data files (tables 2, 3, 4, 5, 9, 13, 14, 21; the
+# later 24 and 33 add TTG/CTG/ATG/GTG, all already here). A CDS starting on one of
+# these is initiating on a codon that is a documented start *somewhere* in
+# mitochondrial biology, so an alternative-initiation transl_except (aa:Met) is a
+# fair reading even when the sample's own table does not list it. A start outside
+# this set is far more likely a mis-called CDS boundary or a base-calling error
+# than a real alternative start.
+#
+# This lived in bin/process_files.py, which meant the QC layer (START_CODONS_BY_CODE)
+# and the submission layer (this set) could disagree about what a valid start is --
+# and they did: QC rejected code-9 ATT/ATC starts that process_files.py was already
+# handling correctly with a transl_except. One definition, imported by both.
+#
+# The three-way contract:
+#   START_CODONS_BY_CODE[code]  what this table documents as an initiator
+#   PLAUSIBLE_MITO_STARTS       earns a transl_except (pos:..,aa:Met)
+#   LINEAGE_ALT_STARTS          documented lineage exceptions, likewise aa:Met
+#   anything else               a defect: a mis-called boundary, not a start
+PLAUSIBLE_MITO_STARTS = ("TTA", "TTG", "CTG", "ATT", "ATC", "ATA", "ATG", "GTG")
+
+# Documented lineage-specific initiation codons that no mitochondrial table lists.
+# Keyed on (lowercased taxonomic class or phylum, bare gene name).
+#
+# ADDING TO THIS TABLE REQUIRES PUBLISHED EVIDENCE, named in a comment on the
+# entry. It is not a place to silence an inconvenient QC failure: every codon
+# here is declared to ENA as a real alternative initiation via transl_except
+# aa:Met, so a wrong entry ships a wrong annotation.
+LINEAGE_ALT_STARTS = {
+    # Decapod / crustacean COI has no canonical initiator: CGA is the codon used
+    # in the great majority of published decapod mitogenome annotations, with ACG
+    # and TCG also recorded. Observed in NOVA_260909_LA as CGA x6, ACG x2, TCG x1
+    # against ATG x6 / ATT x4 / TTG x2 -- roughly half of all decapod CO1 starts.
+    ("malacostraca", "CO1"): ("CGA", "ACG", "TCG"),
+    ("thecostraca", "CO1"): ("CGA", "ACG", "TCG"),
+    ("pycnogonida", "CO1"): ("CGA", "ACG", "TCG"),
+    ("insecta", "CO1"): ("CGA", "ACG", "TCG"),
+    ("arthropoda", "CO1"): ("CGA", "ACG", "TCG"),
+}
+
+
+# MITOS spells several genes differently from the EMMA contract. Callers reach
+# lineage_alt_starts() from both sides (annotation_stats via EMMA names, the ORF
+# snap via raw MITOS BED names), so normalise rather than make every caller care.
+_GENE_ALIASES = {
+    "COX1": "CO1", "COX2": "CO2", "COX3": "CO3", "COB": "CYTB",
+    "NAD1": "ND1", "NAD2": "ND2", "NAD3": "ND3", "NAD4": "ND4",
+    "NAD4L": "ND4L", "NAD5": "ND5", "NAD6": "ND6",
+    "RRNS": "RNR1", "RRNL": "RNR2", "MSH1": "MTMUTS", "MUTS": "MTMUTS",
+}
+
+
+def canonical_gene(gene):
+    """EMMA-contract gene name for a MITOS or EMMA spelling."""
+    g = str(gene or "").strip().upper()
+    return _GENE_ALIASES.get(g, g)
+
+
+def lineage_alt_starts(lineage, gene):
+    """Documented alternative initiators for this lineage/gene, or ().
+
+    The lineage is matched at whatever rank the caller happens to hold (class for
+    most samples, phylum where class is blank), so both ('malacostraca','CO1') and
+    ('arthropoda','CO1') resolve.
+    """
+    if not lineage or not gene:
+        return ()
+    return LINEAGE_ALT_STARTS.get(
+        (str(lineage).strip().lower(), canonical_gene(gene)), ())
 
 
 # There is deliberately NO fallback for an unknown table. Every caller now resolves
@@ -149,11 +225,22 @@ def revcomp(s):
 # CDS classification (used by annotation_qc_gate.py).
 # --------------------------------------------------------------------------- #
 
-def classify_cds(nt, code):
+def classify_cds(nt, code, lineage=None, gene=None):
     """Inspect a spliced CDS nucleotide string under `code`.
 
+    `lineage` (taxonomic class or phylum) and `gene` (bare EMMA name) are optional
+    and only widen the accepted initiators via LINEAGE_ALT_STARTS; omitting them
+    can only make the verdict stricter, never looser.
+
     Returns dict:
-        start_ok        first codon is a documented initiator for this table
+        start_class     'canonical'             in this table's own start set
+                        'alternative_documented' a plausible mitochondrial start,
+                                                or a documented lineage exception:
+                                                submittable with transl_except aa:Met
+                        'implausible'           an initiator in no table: the CDS
+                                                boundary is wrong, not the codon
+        start_ok        start_class != 'implausible' (kept for compatibility;
+                        callers wanting the old strict test read start_class)
         stop_ok         last full codon is a stop, OR the sequence length is not
                         a multiple of 3 (a poly-A-completed truncated stop, which
                         table2asn accepts via aa:TERM -- see process_files.py)
@@ -166,7 +253,21 @@ def classify_cds(nt, code):
     stops = stop_codons(code)
     n = len(nt)
 
-    start_ok = n >= 3 and nt[:3] in starts
+    # Grade the initiator rather than accepting/rejecting it. A start this table
+    # does not list is not automatically a defect: process_files.py already
+    # declares plausible and documented-lineage initiators to ENA with a
+    # transl_except (pos:..,aa:Met), which is the INSDC way to record a genuine
+    # alternative initiation. Only a codon that initiates nothing anywhere in
+    # mitochondrial biology means the boundary itself is wrong.
+    first = nt[:3] if n >= 3 else ""
+    if first and first in starts:
+        start_class = "canonical"
+    elif first and (first in PLAUSIBLE_MITO_STARTS
+                    or first in lineage_alt_starts(lineage, gene)):
+        start_class = "alternative_documented"
+    else:
+        start_class = "implausible"
+    start_ok = start_class != "implausible"
 
     full_codons = n // 3
     last_codon = nt[(full_codons - 1) * 3: full_codons * 3] if full_codons else ""
@@ -185,6 +286,8 @@ def classify_cds(nt, code):
     internal_stops = body.count("*")
 
     return {
+        "start_class": start_class,
+        "start_codon": first,
         "start_ok": bool(start_ok),
         "stop_ok": bool(stop_ok),
         "internal_stops": internal_stops,

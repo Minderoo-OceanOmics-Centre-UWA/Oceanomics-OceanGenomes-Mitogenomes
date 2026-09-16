@@ -31,7 +31,12 @@ process FORMAT_FILES {
     def args = task.ext.args ?: ''
     def species = species_name ?: 'Unknown species'
     def genetic_code = task.ext.code ?: meta.genetic_code
-    def effective_args = [args, "--og-id ${meta.id}", "--species '${species}'", "--input-dir .", "--outdir processed", "--genetic-code ${genetic_code}"].findAll { it?.trim() }.join(' ')
+    // Taxonomic class only widens the accepted initiation codons (orf_utils.
+    // LINEAGE_ALT_STARTS): decapod CO1 initiates on CGA, which no translation
+    // table lists, so without this half this batch's crustaceans fail table2asn
+    // on a start codon that is genuinely theirs.
+    def lineage_arg = meta.class ? "--lineage '${meta.class}'" : ''
+    def effective_args = [args, "--og-id ${meta.id}", "--species '${species}'", "--input-dir .", "--outdir processed", "--genetic-code ${genetic_code}", lineage_arg].findAll { it?.trim() }.join(' ')
 
     """
     mkdir -p processed
@@ -46,7 +51,8 @@ process FORMAT_FILES {
         --species "${species}" \\
         --input-dir . \\
         --outdir processed \\
-        --genetic-code ${genetic_code}
+        --genetic-code ${genetic_code} \\
+        ${lineage_arg}
 
     cat <<-END_TOOL_PARAMS > 15_format_files.tool_params_mqcrow.html
     <tr><td>Format Files</td><td><samp>${effective_args}</samp></td><td>Formats EMMA outputs for GenBank preparation for ${meta.id}.</td></tr>

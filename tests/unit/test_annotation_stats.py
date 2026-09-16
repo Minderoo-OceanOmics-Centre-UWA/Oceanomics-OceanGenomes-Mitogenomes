@@ -124,13 +124,60 @@ class ProcessGffTests(unittest.TestCase):
         s = self._run(genes, trna_tolerance=3)
         self.assertEqual(s["passed"], "no")
 
-    def test_trna_missing_but_order_broken_not_tolerated(self):
+    def test_single_trna_displacement_is_named_but_still_fails(self):
+        """A lone displaced tRNA is NAMED rather than merged into "out of order",
+        and still fails.
+
+        order_correct was one boolean over all 37 genes, so "one tRNA sits 200 bp
+        out of place" and "the ND6/CYTB block genuinely moved" were
+        indistinguishable; NOVA_260909_LA held three complete fish on that alone,
+        OG2647 being exactly this case (TM/TV). order_status separates them so the
+        next curated ORDER_VARIANTS rule can be written from evidence.
+
+        It does NOT make the sample pass, and that is deliberate. The curated
+        variant rules are themselves tRNA transpositions, so accepting every tRNA
+        displacement would accept all of them for every taxon and neuter the rule
+        system. The route to passing one stays what it was: add the rule, with its
+        accession, for the clade it is documented in.
+        """
         genes = [g for g in REF if g != "TP"]
-        genes[5], genes[6] = genes[6], genes[5]   # scramble two genes
+        genes[5], genes[6] = genes[6], genes[5]   # ND1 <-> TI
         s = self._run(genes, trna_tolerance=2)
+        self.assertEqual(s["order_status"], "trna_displacement")
+        self.assertIn("TI", s["order_deviation_detail"])
         self.assertEqual(s["order_correct"], "no")
         self.assertEqual(s["passed"], "no")
-        self.assertEqual(s["trna_advisory"], "no")
+
+    def test_grading_does_not_let_a_variant_rule_leak_to_another_taxon(self):
+        """The scarine IMQ order passes for Hipposcarus and fails elsewhere, and
+        grading it as a tRNA displacement must not change that."""
+        imq = order_with_swap("TQ", "TM")
+        keyed = self._run(imq, taxon={"genus": "Hipposcarus"})
+        self.assertEqual(keyed["order_correct"], "variant")
+        self.assertEqual(keyed["passed"], "yes")
+        unkeyed = self._run(imq, taxon={"genus": "Scarus"})
+        self.assertEqual(unkeyed["order_status"], "trna_displacement")
+        self.assertEqual(unkeyed["passed"], "no")
+
+    def test_pcg_block_rearrangement_still_blocks(self):
+        """A displaced PCG/rRNA block is a real rearrangement and stays fatal.
+
+        The OG2965 case: the ND6/CYTB block sits after ND5 instead of before it.
+        Grading must not let the tRNA tolerance absorb this.
+        """
+        genes = [g for g in REF if g != "TP"]
+        i, j = genes.index("ND6"), genes.index("CYTB")
+        genes[i], genes[j] = genes[j], genes[i]
+        s = self._run(genes, trna_tolerance=2)
+        self.assertIn(s["order_status"], ("rearranged_block", "rearranged_major"))
+        self.assertEqual(s["order_correct"], "no")
+        self.assertEqual(s["passed"], "no")
+
+    def test_reference_order_grades_as_reference(self):
+        s = self._run(list(REF), trna_tolerance=0)
+        self.assertEqual(s["order_status"], "reference")
+        self.assertEqual(s["order_deviation_detail"], "none")
+        self.assertEqual(s["passed"], "yes")
 
     def test_tolerance_zero_requires_complete(self):
         genes = [g for g in REF if g != "TP"]

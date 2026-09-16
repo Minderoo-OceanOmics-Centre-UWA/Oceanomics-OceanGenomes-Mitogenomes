@@ -16,6 +16,7 @@ include { TRNA_RESCUE            } from '../../../modules/local/trna_rescue'
 include { ROTATE_ORIGIN          } from '../../../modules/local/rotate_origin'
 include { MITOS2                 } from '../../../modules/local/mitos2'
 include { ANNOTATION_QC_GATE     } from '../../../modules/local/annotation_qc_gate'
+include { INVERT_ANNOTATION_FIX  } from '../../../modules/local/invert_annotation_fix'
 include { CORAL_ANNOTATION_FIX   } from '../../../modules/local/coral_annotation_fix'
 include { REFERENCE_RELEVANCE    } from '../../../modules/local/reference_relevance'
 include { SELECT_REFERENCE_DB } from '../../../modules/local/select_reference_db'
@@ -411,13 +412,19 @@ workflow MITOGENOME_ANNOTATION {
     // (deficient) or PASS, so only broken corals are re-annotated; correctly
     // annotated batch-mates pass through MITOS2 untouched.
     //
-    // This gate is Cnidaria-only: it encodes a failure mode discovered from real
-    // coral MITOS2 output, and guessing an equivalent for other invert phyla
-    // (including Porifera, despite sharing genetic code/rotation handling with
-    // Cnidaria -- see InvertTaxonGroups in lib/) would be exactly that, a guess.
-    // Other invert phyla's MITOS2 output merges straight through below
-    // (ch_mitos_*_passthrough); a phylum-specific fix gets designed later from
-    // real evidence once this batch has run.
+    // The gate now covers EVERY invertebrate, not only Cnidaria. It was restricted
+    // while there was no evidence of a non-coral failure mode and no reference-free
+    // repair to route one to; NOVA_260909_LA supplied both. 17 assemblies carried a
+    // genuinely broken CDS and not one was a coral: 13 Porifera, of which five
+    // Demospongiae share the identical signature ND4L:no_start(TTT);no_stop(AGA,rem0),
+    // which is one systematic MITOS boundary miscall rather than five assembly
+    // problems. Those samples passed straight through untouched.
+    //
+    // Widening the gate is safe because what it now routes to is reference-free:
+    // the gate's per-PCG ORF loop is already genetic-code-generic, and stage 1
+    // below reads only the assembly, so it cannot import a gene the sample does
+    // not carry. Only stage 2 is coral-specific, and that stays gated on a
+    // sequence-matched reference.
     //
     ANNOTATION_QC_GATE (
         // [meta, gff, proteins/, cds/] -- this destructuring must track BOTH
@@ -426,30 +433,24 @@ workflow MITOGENOME_ANNOTATION {
         // four-element list into it: every invertebrate run aborted the whole session (not
         // just the task -- an operator failure ignores errorStrategy) the moment the first
         // MITOS2 task emitted.
-        MITOS2.out.gff_proteins.filter { meta, _gff, _proteins, _cds ->
-            InvertTaxonGroups.isCoralFixEligible(meta.class)
-        }
+        MITOS2.out.gff_proteins
     )
 
     ch_gate = ANNOTATION_QC_GATE.out.decision
         .map { meta, dfile -> [meta, dfile.text.split('\t')[0].trim()] }   // [meta, FIX|PASS]
 
-    // Non-Cnidarian invert phyla never enter the gate above, so joining any
-    // MITOS2 output channel against ch_gate below only ever matches Cnidaria
-    // samples (join() is an inner join on meta) -- these are their untouched
-    // MITOS2 outputs, merged directly into the final annotation channels.
-    ch_mitos_co1_passthrough     = MITOS2.out.co1_sequences.filter { meta, _f -> !InvertTaxonGroups.isCoralFixEligible(meta.class) }
-    ch_mitos_s12_passthrough     = MITOS2.out.s12_sequences.filter { meta, _f -> !InvertTaxonGroups.isCoralFixEligible(meta.class) }
-    ch_mitos_s16_passthrough     = MITOS2.out.s16_sequences.filter { meta, _f -> !InvertTaxonGroups.isCoralFixEligible(meta.class) }
-    ch_mitos_results_passthrough = MITOS2.out.results.filter { meta, _f -> !InvertTaxonGroups.isCoralFixEligible(meta.class) }
+    // Every invertebrate reaches the gate now, so the PASS arm below covers the
+    // non-Cnidarian phyla that used to need a separate passthrough. There is no
+    // sample whose MITOS2 output bypasses the gate entirely.
 
-    // PASS corals: keep MITOS2 output unchanged.
+    // PASS samples: keep MITOS2 output unchanged.
     ch_mitos_co1_pass     = MITOS2.out.co1_sequences.join(ch_gate).filter { it[-1] == 'PASS' }.map { meta, f, _d -> [meta, f] }
     ch_mitos_s12_pass     = MITOS2.out.s12_sequences.join(ch_gate).filter { it[-1] == 'PASS' }.map { meta, f, _d -> [meta, f] }
     ch_mitos_s16_pass     = MITOS2.out.s16_sequences.join(ch_gate).filter { it[-1] == 'PASS' }.map { meta, f, _d -> [meta, f] }
     ch_mitos_results_pass = MITOS2.out.results.join(ch_gate).filter { it[-1] == 'PASS' }.map { meta, f, _d -> [meta, f] }
 
-    // FIX corals: fixer base = the cox1-rotated genome MITOS2 annotated + the raw BED.
+    // FIX samples (any invertebrate): fixer base = the rotated genome MITOS2
+    // annotated + the raw BED.
     ch_fix_base = ROTATE_ORIGIN.out.fasta
         .join(MITOS2.out.bed)
         .join(ch_gate)
@@ -467,49 +468,87 @@ workflow MITOGENOME_ANNOTATION {
     // rewritten into history on every rebuild.
     ch_coral_db = Channel.fromPath("${projectDir}/assets/refdb/anthozoa", checkIfExists: true).first()
 
+    // Offer the curated Anthozoa DB only to FIX samples whose class could plausibly
+    // be anthozoan. Selection itself stays label-free and by sequence; this
+    // prefilter only ever REDUCES what reaches a coral-specific step, so it cannot
+    // introduce a wrong-family reference, and it keeps a sponge from being aligned
+    // against a coral database for nothing now that the gate is phylum-wide.
+    ch_coral_eligible_fix = ch_fix_base.filter { meta, _genome, _bed ->
+        InvertTaxonGroups.isCoralFixEligible(meta.class)
+    }
+
     SELECT_REFERENCE_DB (
-        ch_fix_base.map { meta, genome, _bed -> [meta, genome] }
+        ch_coral_eligible_fix.map { meta, genome, _bed -> [meta, genome] }
             .combine(ch_coral_db)
             .map { meta, genome, refdb -> [meta, genome, refdb, 'anthozoa'] },
         'reference'
     )
     ch_selected_ref = SELECT_REFERENCE_DB.out.reference   // [meta, reference.gb]
 
-    ch_fix_selected = ch_fix_base.join(ch_selected_ref)
-        .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }
+    // Stage 1 -- reference-free, every FIX invertebrate. Snaps each PCG's
+    // boundaries to the nearest clean ORF under the sample's own genetic code.
+    // This used to be locked inside the coral fixer, so the 17 NOVA_260909_LA
+    // assemblies with a genuinely broken CDS (13 Porifera, none of them corals)
+    // had no repair path at all.
+    // The anchor is the same one MITOS2 was given for this sample: a repaired
+    // assembly must be published on the same origin as an unrepaired batch-mate of
+    // the same taxon, and mitos_to_emma.py makes --origin-gene required so a
+    // divergence fails loudly rather than silently splitting the two paths.
+    INVERT_ANNOTATION_FIX (
+        ch_fix_base.map { meta, genome, bed -> [meta, genome, bed, originAnchorFor(meta)] }
+    )
 
-    // Fallback: a FIX sample for which the selector emitted no reference (status NONE:
-    // no DB record aligned) gets the bundled curated anthozoan reference. The unselected
-    // set is read from SELECT_REFERENCE_DB.out.status, which is emitted for EVERY FIX
-    // sample, so this is a plain per-sample join (the sample falls back the moment its own
-    // status arrives) rather than a remainder join that waits for the whole run to close.
-    ch_coral_ref_unselected = SELECT_REFERENCE_DB.out.status
-        .filter { _meta, status_file -> !coralReferenceSelected(status_file) }
-        .map { meta, _status_file -> [meta, true] }
-    ch_curated_ref = Channel.fromPath("${projectDir}/assets/refdb/anthozoa/anthozoa_reference.gb", checkIfExists: true).first()
-    ch_fix_fallback = ch_fix_base.join(ch_coral_ref_unselected, by: 0)
-        .map { meta, genome, bed, _flag -> [meta, genome, bed] }
-        .combine(ch_curated_ref)
-        .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }
-
-    // The anchor is appended here, once, for both the selected and fallback arms, so a
-    // FIX anthozoan is published on exactly the same origin as a PASS one of the same
-    // taxon. mitos_to_emma.py makes --origin-gene required, so if this map were ever
-    // dropped the run would fail loudly rather than quietly splitting the two paths.
-    ch_coral_fix_input = ch_fix_selected.mix(ch_fix_fallback)
+    // Stage 2 -- coral-only, and gated on SEQUENCE, not on a label. A sample
+    // reaches the coral fixer only when SELECT_REFERENCE_DB actually matched it to
+    // a record in the curated Anthozoa DB.
+    //
+    // The bundled-anthozoan fallback is deliberately gone. It fired whenever the
+    // selector matched nothing, which is precisely the case where there is NO
+    // sequence evidence the sample is an anthozoan, so it handed an Anthozoa
+    // reference to whatever happened to be flagged FIX. Now that the gate is
+    // phylum-wide that would be a standing cross-phylum transfer risk. An
+    // unselected sample stops at stage 1, which cannot import a gene the assembly
+    // does not carry.
+    //
+    // The coral fixer works from the stage-1 BED, not the raw one, so the two
+    // repairs compose instead of the second discarding the first.
+    ch_coral_fix_input = ch_coral_eligible_fix
+        .map { meta, genome, _bed -> [meta, genome] }
+        .join(INVERT_ANNOTATION_FIX.out.bed)
+        .join(ch_selected_ref)
         .map { meta, genome, bed, ref -> [meta, genome, bed, ref, originAnchorFor(meta)] }
 
     CORAL_ANNOTATION_FIX ( ch_coral_fix_input )
 
-    // Merge annotators: verts (EMMA, ND4L/ATP8- then tRNA-rescued) + PASS corals
-    // (MITOS2) + FIX corals (fixer) + untouched non-Cnidarian invert phyla
-    // (MITOS2, no gate applied). co1/12S/16S come straight from EMMA for every
+    // FIX samples that are not sequence-confirmed corals keep the stage-1 output.
+    // Two disjoint ways to land here, and both are per-sample (no remainder join,
+    // so no whole-run barrier): a class that is not coral-eligible never reached
+    // the selector at all, and a coral-eligible sample the selector matched
+    // nothing for emits a status saying so.
+    ch_not_coral = ch_fix_base
+        .filter { meta, _genome, _bed -> !InvertTaxonGroups.isCoralFixEligible(meta.class) }
+        .map { meta, _genome, _bed -> [meta, true] }
+        .mix(
+            SELECT_REFERENCE_DB.out.status
+                .filter { _meta, status_file -> !coralReferenceSelected(status_file) }
+                .map { meta, _status_file -> [meta, true] }
+        )
+    ch_invert_co1     = INVERT_ANNOTATION_FIX.out.co1_sequences.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
+    ch_invert_s12     = INVERT_ANNOTATION_FIX.out.s12_sequences.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
+    ch_invert_s16     = INVERT_ANNOTATION_FIX.out.s16_sequences.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
+    ch_invert_results = INVERT_ANNOTATION_FIX.out.results.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
+
+    // Merge annotators: verts (EMMA, ND4L/ATP8- then tRNA-rescued) + PASS
+    // invertebrates (MITOS2 untouched) + FIX non-corals (stage 1) + FIX
+    // sequence-confirmed corals (stage 1 then stage 2). Every invertebrate now
+    // arrives through the gate, so there is no ungated arm left.
+    // co1/12S/16S come straight from EMMA for every
     // vertebrate sample -- neither rescue touches those, so BLAST/LCA is
     // unaffected by the rescue outcomes.
-    ch_annot_co1     = EMMA.out.co1_sequences.mix(ch_mitos_co1_pass, CORAL_ANNOTATION_FIX.out.co1_sequences, ch_mitos_co1_passthrough)
-    ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, CORAL_ANNOTATION_FIX.out.s12_sequences, ch_mitos_s12_passthrough)
-    ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, CORAL_ANNOTATION_FIX.out.s16_sequences, ch_mitos_s16_passthrough)
-    ch_annot_results = ch_emma_results_trna.mix(ch_mitos_results_pass, CORAL_ANNOTATION_FIX.out.results, ch_mitos_results_passthrough)
+    ch_annot_co1     = EMMA.out.co1_sequences.mix(ch_mitos_co1_pass, ch_invert_co1, CORAL_ANNOTATION_FIX.out.co1_sequences)
+    ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, ch_invert_s12, CORAL_ANNOTATION_FIX.out.s12_sequences)
+    ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, ch_invert_s16, CORAL_ANNOTATION_FIX.out.s16_sequences)
+    ch_annot_results = ch_emma_results_trna.mix(ch_mitos_results_pass, ch_invert_results, CORAL_ANNOTATION_FIX.out.results)
 
     // Per-sample region count, emitted once per annotated sample (including the
     // 0-region case). Downstream this both sizes the result groups and identifies
@@ -518,11 +557,13 @@ workflow MITOGENOME_ANNOTATION {
         .map { meta, files -> [ meta, countAnnotatedRegions(files) ] }
     ch_annot_params  = EMMA.out.tool_params.mix(EMMA_GENE_RESCUE.out.tool_params, TRNA_RESCUE.out.tool_params,
                                                 ROTATE_ORIGIN.out.tool_params,
-                                                MITOS2.out.tool_params, CORAL_ANNOTATION_FIX.out.tool_params)
+                                                MITOS2.out.tool_params, INVERT_ANNOTATION_FIX.out.tool_params,
+                                                CORAL_ANNOTATION_FIX.out.tool_params)
     ch_annot_versions = EMMA.out.versions.mix(EMMA_GENE_RESCUE_GATE.out.versions, EMMA_GENE_RESCUE.out.versions,
                                               TRNA_RESCUE_GATE.out.versions, TRNA_SCAN.out.versions, TRNA_RESCUE.out.versions,
                                               ROTATE_ORIGIN.out.versions, MITOS2.out.versions,
-                                              ANNOTATION_QC_GATE.out.versions, CORAL_ANNOTATION_FIX.out.versions,
+                                              ANNOTATION_QC_GATE.out.versions, INVERT_ANNOTATION_FIX.out.versions,
+                                              CORAL_ANNOTATION_FIX.out.versions,
                                               SELECT_REFERENCE_DB.out.versions)
 
     //

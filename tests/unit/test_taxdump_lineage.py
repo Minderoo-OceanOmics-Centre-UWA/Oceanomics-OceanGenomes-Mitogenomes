@@ -276,6 +276,38 @@ class ResolveSpeciesInfoTests(unittest.TestCase):
         self.assertEqual(result[5], "taxdump-phylum")
         self.assertEqual(cs.is_invertebrate(result[1], result[6]), "true")
 
+class SuggestNearMissesTests(unittest.TestCase):
+    """A one-character typo in a specimen label is silently catastrophic: an
+    unresolved class reads as invertebrates=false, i.e. as a vertebrate. The
+    abort already names the sample; this offers the correction."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.taxdump = str(write_taxdump(Path(cls._tmp.name) / "taxonkit_dbs"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_one_character_typo_is_offered(self):
+        resolver = TaxdumpLineage(self.taxdump)
+        self.assertIn("acropora", resolver.suggest_near_misses("Acropoa sp."))
+
+    def test_an_exact_name_is_not_offered_as_its_own_near_miss(self):
+        resolver = TaxdumpLineage(self.taxdump)
+        self.assertNotIn("acropora", resolver.suggest_near_misses("Acropora"))
+
+    def test_a_non_taxonomic_placeholder_yields_nothing(self):
+        resolver = TaxdumpLineage(self.taxdump)
+        self.assertEqual(resolver.suggest_near_misses("Larval fish"), [])
+
+    def test_a_missing_taxdump_returns_empty_rather_than_raising(self):
+        resolver = TaxdumpLineage(str(Path(self._tmp.name) / "absent"))
+        self.assertEqual(resolver.suggest_near_misses("Acropoa"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

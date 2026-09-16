@@ -564,7 +564,7 @@ def write_resolution_report(path, rows):
             writer.writerow([row.get(column, '') for column in RESOLUTION_COLUMNS])
 
 
-def report_unresolved(rows):
+def report_unresolved(rows, resolver=None):
     """Print the samples whose class never resolved. The run is aborted on these
     by prepare_samplesheet; the sheet is still written so the rows can be fixed."""
     unresolved = []
@@ -578,8 +578,19 @@ def report_unresolved(rows):
     print(f"\nWARNING: taxonomic class could not be resolved for "
           f"{len(unresolved)} sample(s):", file=sys.stderr)
     for row in unresolved:
-        print(f"  {row['sample']}\tnominal_species_id='{row['nominal_species_id']}'",
-              file=sys.stderr)
+        line = f"  {row['sample']}\tnominal_species_id='{row['nominal_species_id']}'"
+        # A one-character typo in a specimen label is silently catastrophic
+        # downstream (an unknown class reads as invertebrates=false, i.e. as a
+        # vertebrate), so offer the near miss rather than leaving the operator to
+        # find it by eye. 'Actinaria' -> 'Actiniaria' is the real example.
+        if resolver is not None:
+            try:
+                near = resolver.suggest_near_misses(row['nominal_species_id'])
+            except Exception:
+                near = []
+            if near:
+                line += "  -- did you mean: " + ", ".join(near) + "?"
+        print(line, file=sys.stderr)
     print("These rows are written to the samplesheet as 'unknown'. Fix the nominal "
           "species name (or the species table), or edit the class/family/order "
           "columns by hand and re-run with --input.\n", file=sys.stderr)
@@ -952,7 +963,7 @@ def main():
         conn.close()
 
     write_resolution_report(args.resolution_report, resolution_rows)
-    report_unresolved(resolution_rows)
+    report_unresolved(resolution_rows, resolver)
     report_unresolved_genetic_code(resolution_rows, ambiguous_codes)
     report_phylum_only(resolution_rows)
 

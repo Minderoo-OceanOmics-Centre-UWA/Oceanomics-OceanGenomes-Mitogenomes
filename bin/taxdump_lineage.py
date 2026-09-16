@@ -265,6 +265,54 @@ class TaxdumpLineage:
             return lineage
         return {}
 
+    def suggest_near_misses(self, name, limit=3, max_distance=2):
+        """Indexed names within a small edit distance of `name`.
+
+        A one-character typo in a specimen label is silently catastrophic: in
+        NOVA_260909_LA, 'Actinaria sp.' (for Actiniaria, the sea anemone order)
+        failed to resolve, which left invertebrates=false and an empty genetic
+        code -- indistinguishable downstream from a resolved vertebrate, so a sea
+        anemone was seeded with the animal_mt database, annotated with EMMA and
+        judged against the vertebrate 37-gene profile.
+
+        The abort message already names the sample and tells the operator to fix
+        the label. Offering the candidate turns a hunt through NCBI into a one
+        character edit.
+
+        Returns [] when the taxdump is unavailable, so callers need no guard.
+        """
+        if not self.available:
+            return []
+        try:
+            self.load()
+        except Exception:
+            return []
+
+        target = (name or "").strip().split()
+        if not target:
+            return []
+        target = target[0].lower()
+        if not target:
+            return []
+
+        # Cheap prefilter before the O(n*m) distance: a name within edit distance
+        # 2 must share a length band, and in practice the first two characters.
+        near = []
+        for candidate in self._name_to_taxid:
+            cand = candidate          # keys are already lowercased
+            if abs(len(cand) - len(target)) > max_distance:
+                continue
+            if cand[:2] != target[:2]:
+                continue
+            if cand == target:
+                continue
+            if _edit_distance_within(cand, target, max_distance):
+                near.append(candidate)
+                if len(near) >= limit * 4:
+                    break
+        near.sort(key=lambda c: (_edit_distance_within(c.lower(), target, max_distance) or 99, c))
+        return near[:limit]
+
     @staticmethod
     def _candidates(name):
         """Name forms to try, most specific first: binomial, then genus."""
@@ -280,3 +328,30 @@ class TaxdumpLineage:
         if tokens[0] not in out:
             out.append(tokens[0])
         return out
+
+
+def _edit_distance_within(a, b, limit):
+    """Levenshtein distance between a and b if it is <= limit, else None.
+
+    Banded: only the diagonal +/- limit is computed, so a long name pair costs
+    O(len * limit) rather than O(len^2).
+    """
+    la, lb = len(a), len(b)
+    if abs(la - lb) > limit:
+        return None
+    prev = list(range(lb + 1))
+    for i in range(1, la + 1):
+        cur = [i] + [0] * lb
+        lo = max(1, i - limit)
+        hi = min(lb, i + limit)
+        if lo > 1:
+            cur[lo - 1] = limit + 1
+        for j in range(lo, hi + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        for j in range(hi + 1, lb + 1):
+            cur[j] = limit + 1
+        if min(cur[lo:hi + 1] or [limit + 1]) > limit:
+            return None
+        prev = cur
+    return prev[lb] if prev[lb] <= limit else None

@@ -39,7 +39,8 @@ process ANNOTATION_STATS {
     // no invertebrate follows the vertebrate order) is judged on the conserved
     // PCG+rRNA core. The class is still passed as the fallback selector for a
     // meta with no resolved code.
-    def class_arg = meta.class ? "--class '${meta.class}'" : ''
+    def class_name = (meta.class ?: '').toString().trim()
+    def class_arg = class_name ? "--class '${class_name}'" : ''
     def gcode_arg = meta.genetic_code ? "--genetic-code ${meta.genetic_code}" : ''
     // Taxonomy for the curated gene-order variant lookup ONLY. It never affects
     // completeness, only which non-canonical orders are accepted for this clade.
@@ -57,15 +58,38 @@ process ANNOTATION_STATS {
     // Optional: an assembly with no lca_combined (the file is staged as a
     // placeholder) simply records 'no'.
     def lca_arg     = lca_combined ? "--lca-combined ${lca_combined}" : ''
-    def effective_args = "annotation_stats.py ${args} ${class_arg} ${gcode_arg} ${family_arg} ${order_arg} ${genus_arg} ${lca_arg} *.gff proteins"
+    // Phylum keys the lineage gene expectations
+    // (assets/lineage_gene_expectations.json): ATP9 is advisory for Porifera,
+    // mtMutS blocking for the octocoral orders. There is no separate phylum field
+    // on meta, and there does not need to be: create_samplesheet.py puts the
+    // phylum in the class slot for a sample that resolved no further than its
+    // phylum (source 'taxdump-phylum'), which is exactly the Porifera case. The
+    // rules match an exact taxon name per rank, so a genuine class name passed
+    // here matches no phylum rule and the duplication cannot cross-talk.
+    def phylum_arg  = class_name ? "--phylum '${class_name}'" : ''
+    // The cds/ directory drives the final annotation-integrity check, which
+    // classifies EVERY exported CDS under this sample's own genetic code. Without
+    // it the check reports not_evaluated rather than silently passing. Staged as
+    // part of annotation/* by the caller.
+    def cds_arg = 'cds'
+    def effective_args = "annotation_stats.py ${args} ${class_arg} ${gcode_arg} ${family_arg} ${order_arg} ${genus_arg} ${phylum_arg} --cds-dir ${cds_arg} ${lca_arg} *.gff proteins"
     """
     # Compile the statistics.
     #
-    # imports mito_gene_order.py and orf_utils.py -- named here on purpose. Nextflow
-    # hashes only those bin/ scripts whose filenames appear as tokens in a task's
-    # command script, and neither of these is ever invoked directly: they reach the
-    # task as a Python import. Without this line, editing the shared gene-order table
-    # alone and resuming would re-run NOTHING and silently return stale results.
+    # imports mito_gene_order.py, orf_utils.py and lineage_expectations.py -- named
+    # here on purpose. Nextflow hashes only those bin/ scripts whose filenames appear
+    # as tokens in a task's command script, and none of these is ever invoked
+    # directly: they reach the task as a Python import. Without this line, editing
+    # the shared gene-order table or the lineage expectations alone and resuming
+    # would re-run NOTHING and silently return stale results.
+    # --conversion-audit is only passed when mitos_to_emma.py actually produced one
+    # (MITOS-annotated samples); an EMMA sample has no audit and the column reports
+    # 'none'.
+    audit_arg=""
+    if [ -f mitos_conversion_audit.tsv ]; then
+        audit_arg="--conversion-audit mitos_conversion_audit.tsv"
+    fi
+
     annotation_stats.py \\
         $args \\
         ${class_arg} \\
@@ -73,6 +97,9 @@ process ANNOTATION_STATS {
         ${family_arg} \\
         ${order_arg} \\
         ${genus_arg} \\
+        ${phylum_arg} \\
+        --cds-dir ${cds_arg} \\
+        \$audit_arg \\
         ${lca_arg} \\
         *.gff \\
         proteins

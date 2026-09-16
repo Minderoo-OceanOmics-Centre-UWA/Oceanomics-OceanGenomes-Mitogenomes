@@ -93,6 +93,122 @@ def isUnresolvedTaxon(value) {
 // A blank family/order with a known class only degrades the reference-divergence
 // tiering (everything collapses to NON_CONGENERIC, so the CROSS_ORDER route to
 // reference-free assembly cannot fire), which warns rather than fails.
+// The route a sample takes through the pipeline is decided entirely by these five
+// values. Recorded beside the published assembly so a LATER run can tell that the
+// output it is about to reuse was produced under different assumptions.
+//
+// NOVA_260909_LA needed this. The taxonomy guard below fired correctly on the
+// first pass for OG2618 ('Actinaria sp.', a typo for Actiniaria); the samplesheet
+// was hand-corrected to Anthozoa two days later and the run resumed. But the
+// Sep-12 output -- EMMA rather than MITOS, the animal_mt seed database rather
+// than anthozoa_mito_refdb, genetic code 2, the vertebrate completeness profile
+// -- was never invalidated, so a sea anemone stayed published as a defective
+// vertebrate underneath a samplesheet that said Anthozoa. Nothing in the run
+// reported the contradiction.
+def routeKey(meta) {
+    return [
+        taxonomic_class: (meta.class ?: '').toString(),
+        invertebrates  : (meta.invertebrates ?: false).toString(),
+        genetic_code   : (meta.genetic_code ?: '').toString(),
+        annotator      : (meta.invertebrates ? 'MITOS2' : 'EMMA'),
+        seed_db        : (meta.invertebrates ? 'lineage_refdb' : 'animal_mt'),
+    ]
+}
+
+// Quarantine, never delete: moving the directory aside preserves it for
+// inspection while guaranteeing -resume cannot reuse it. Deleting published
+// results on the strength of a metadata comparison is not a decision this should
+// make on its own.
+def invalidateStaleRoutes(sample_list) {
+    if (!params.outdir) return
+
+    def moved = []
+    sample_list.each { sample_record ->
+        def meta = sample_record[0]
+        if (!(meta instanceof Map) || !meta.mt_assembly_prefix) return
+
+        def assembly_dir = file("${params.outdir}/mitogenomes/${meta.id}/${meta.mt_assembly_prefix}")
+        if (!assembly_dir.exists()) return
+
+        def route_file = file("${assembly_dir}/route.json")
+        def current = routeKey(meta)
+        def previous = null
+        if (route_file.exists()) {
+            try {
+                previous = new groovy.json.JsonSlurper().parseText(route_file.text)
+            } catch (Exception e) {
+                previous = null
+            }
+        }
+
+        // No route.json means the output predates this check. Leave it alone
+        // rather than quarantining every existing result on first upgrade; the
+        // file is written below, so the NEXT change is caught.
+        if (previous == null) {
+            route_file.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(current))
+            return
+        }
+
+        if (previous != current) {
+            def stamp = new Date().format('yyyyMMdd-HHmmss')
+            def quarantine = file("${params.outdir}/quarantine_stale_route/${meta.mt_assembly_prefix}.${stamp}")
+            quarantine.getParent().mkdirs()
+            assembly_dir.moveTo(quarantine)
+            moved << "${meta.mt_assembly_prefix}: ${previous} -> ${current}".toString()
+
+            def fresh = file("${params.outdir}/mitogenomes/${meta.id}/${meta.mt_assembly_prefix}")
+            fresh.mkdirs()
+            file("${fresh}/route.json").text =
+                groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(current))
+        }
+    }
+
+    if (moved) {
+        log.warn """${moved.size()} published assembly result(s) were produced under a DIFFERENT pipeline route than this run resolves, and have been quarantined under ${params.outdir}/quarantine_stale_route/ so they are re-run rather than reused:
+  ${moved.join('\n  ')}
+This happens when a samplesheet is corrected after a partial run: the class, genetic code, annotator or seed database changed, so the existing output answers a different question."""
+    }
+}
+
+// Rewrite taxonomy_resolution.tsv from the samplesheet ACTUALLY in use.
+//
+// It is otherwise written only by create_samplesheet.py, so the moment a
+// samplesheet is hand-corrected and the run resumed with --input, the two files
+// disagree and nothing says which is authoritative. In NOVA_260909_LA the
+// samplesheet said OG2618 was Anthozoa/invertebrate while
+// taxonomy_resolution.tsv still said class=unknown, source=unresolved -- two
+// files in the same run directory contradicting each other about the same
+// specimen, one of them silently stale.
+//
+// Rows whose values came from the samplesheet rather than from a fresh lookup
+// are marked source=manual, which is the honest label for a hand edit.
+def writeTaxonomyResolution(metas) {
+    if (!params.outdir || !metas) return
+
+    def out = file("${params.outdir}/samplesheet/taxonomy_resolution.tsv")
+    out.getParent().mkdirs()
+
+    def header = ['sample', 'nominal_species_id', 'class', 'family', 'order',
+                  'reference_species_id', 'source', 'invertebrates', 'genetic_code']
+    def seen = [] as Set
+    def lines = [header.join('\t')]
+    metas.each { meta ->
+        if (!(meta instanceof Map) || !meta.id || !seen.add(meta.id)) return
+        lines << [
+            meta.id,
+            meta.nominal_species_id ?: '',
+            meta.class ?: '',
+            meta.family ?: '',
+            meta.order ?: '',
+            meta.reference_species_id ?: '',
+            params.input ? 'manual' : 'resolved',
+            (meta.invertebrates ?: false).toString(),
+            meta.genetic_code ?: '',
+        ].join('\t')
+    }
+    out.text = lines.join('\n') + '\n'
+}
+
 def validateTaxonomy(sample_list) {
     def unresolved = []
     def partial = []
@@ -211,7 +327,7 @@ workflow PREPARE_SAMPLESHEET {
 
                 // Convert each sample record to the expected format
                 // (findResults drops any record returned as null, e.g. unassigned reads)
-                sample_list.findResults { sample_record ->
+                def resolved = sample_list.findResults { sample_record ->
                     // sample_record[0] is a meta map like [id:OG1341] so we want to destructure the map.
                     def raw_meta  = sample_record[0]
                     def sample_id = (raw_meta instanceof Map) ? raw_meta.id : raw_meta
@@ -301,6 +417,14 @@ workflow PREPARE_SAMPLESHEET {
 
                     return [ group_key, meta, [ fastq_1, fastq_2 ] ]
                 }
+                // Route invalidation runs on the RESOLVED metas (genetic_code and
+                // invertebrates are only decided above, inside this closure), and
+                // before any task is submitted, so a quarantined directory cannot
+                // be picked up by -resume.
+                def resolved_metas = resolved.findAll { it != null }.collect { it[1] }
+                invalidateStaleRoutes(resolved_metas.collect { [ it ] })
+                writeTaxonomyResolution(resolved_metas)
+                resolved
             }
             .groupTuple()
             .map { samplesheet ->

@@ -53,27 +53,36 @@ from pathlib import Path
 from Bio import SeqIO
 from Bio.Seq import Seq
 
+# The reference-free ORF snap, the BED helpers and the PCG name set now live in
+# bin/orf_snap.py so the non-coral invertebrate fixer can reach them too. What
+# stays in this file is only what is genuinely coral: BLAST transfer of rrnL,
+# nad5, cox1 and mtMutS from an Anthozoa reference.
+from orf_snap import (CANONICAL_OVERLAP, DEFAULT_LEN_TOL_FLOOR, LEN_TOL_FLOOR,
+                      PCG_BARE, TRNA_RE, _linear_span, bare_name, cds_from_row,
+                      parse_bed, snap_pcg_rows)
 from orf_utils import (classify_cds, refine_orf, revcomp, start_codons,
                        stop_codons)
-
-# EMMA-contract PCG bare names in the MITOS BED (nad5 is owned by the
-# reference-transfer pass above, so it is excluded from the ORF-snap pass).
-PCG_BARE = {
-    "cox1", "cox2", "cox3", "cob", "atp6", "atp8",
-    "nad1", "nad2", "nad3", "nad4", "nad4l", "nad6",
-}
 
 
 # ---- reference parsing -----------------------------------------------------
 
 def ref_features(gb_path):
-    """Return (rrnl_seq, nad5_exon_seqs, cox1_seq) from the reference GenBank.
+    """Return (rrnl_seq, nad5_exon_seqs, cox1_seq, mtmuts_seq) from the reference.
 
     nad5_exon_seqs is a list of exon nucleotide strings in transcript order.
     cox1_seq is the reference cox1 CDS as one string -- references are normally
     single-exon there, and that is precisely what makes it a usable probe for an
-    intron-split cox1 in the sample (see cox1_intron_join). Any of the three may
-    be None/empty if the reference lacks that (well-)annotated feature.
+    intron-split cox1 in the sample (see cox1_intron_join).
+
+    mtmuts_seq is the mismatch-repair gene octocorals carry and hexacorals do not
+    (300/302 Octocorallia vs 0/335 Hexacorallia in the local reference DB; 210 of
+    the 221 curated records here annotate it). Its presence in the SEQUENCE-matched
+    reference is what makes the transfer defensible without ever consulting a
+    taxonomic label -- a hexacoral's best match is a hexacoral, whose reference
+    carries no mtMutS, so no transfer is attempted for it.
+
+    Any of the four may be None/empty if the reference lacks that (well-)annotated
+    feature.
     """
     rec = next(SeqIO.parse(str(gb_path), "genbank"))
     full = str(rec.seq).upper()
@@ -85,6 +94,7 @@ def ref_features(gb_path):
     rrnl = None
     nad5_exons = None
     cox1 = None
+    mtmuts = None
     for feat in rec.features:
         lab = label(feat)
         if feat.type == "rRNA" and ("16S" in lab or "RRNL" in lab or "LARGE" in lab):
@@ -102,7 +112,13 @@ def ref_features(gb_path):
         if feat.type == "CDS" and ("COX1" in lab or "CO1" in lab
                                    or re.search(r"SUBUNIT I(?![IV])", lab)):
             cox1 = str(feat.extract(rec.seq)).upper()
-    return rrnl, nad5_exons, cox1
+        # MITOS calls it msh1; the curated DB records spell it mutS/MutS/MUTS/muts
+        # and NCBI octocoral records use mtMutS. Match on MUTS / MSH1 after
+        # upper-casing, which covers every spelling seen in assets/coral_mito_refdb.gb.
+        if feat.type == "CDS" and ("MUTS" in lab or "MSH1" in lab
+                                   or "MISMATCH REPAIR" in lab):
+            mtmuts = str(feat.extract(rec.seq)).upper()
+    return rrnl, nad5_exons, cox1, mtmuts
 
 
 # ---- BLAST -----------------------------------------------------------------
@@ -274,192 +290,6 @@ def clean_orf(genome_seq, exons_1based, code):
     return (internal == 0 and ends_stop), len(nt), aa, internal
 
 
-# ---- BED helpers -----------------------------------------------------------
-
-TRNA_RE = re.compile(r"^trn", re.I)
-
-def parse_bed(path):
-    rows = []
-    for line in open(path):
-        line = line.rstrip("\n")
-        if not line.strip() or line.startswith(("#", "track", "browser")):
-            continue
-        cols = line.split("\t")
-        if len(cols) < 6:
-            cols = line.split()
-        if len(cols) < 6:
-            continue
-        rows.append(cols[:6])  # chrom,start0,end,name,score,strand
-    return rows
-
-def bare_name(name):
-    return re.sub(r"[-_](?:\d+|[a-z])$", "", re.sub(r"\(.*?\)$", "", name.strip()))
-
-
-def cds_from_row(gseq, start0, end, strand):
-    """Spliced CDS nucleotides for one BED row, handling the circular origin.
-
-    MITOS writes an origin-spanning feature with start > end (e.g. `17684 19` on
-    a 17.7 kb coral): the CDS is the tail of the sequence followed by the head.
-    """
-    n = len(gseq)
-    seg = gseq[start0:end] if start0 < end else gseq[start0:] + gseq[:end]
-    return revcomp(seg) if strand == "-" else seg.upper()
-
-
-def _linear_span(start0, end, n):
-    """A BED (start0, end) mapped into a doubled-genome coordinate space, where
-    an origin-spanning feature becomes a plain interval (start0, end + n)."""
-    return (start0, end) if start0 < end else (start0, end + n)
-
-
-# A PCG that shares a canonical overlap with its neighbour (ATP8 into ATP6,
-# ND4L into ND4) must be allowed to snap into that neighbour rather than being
-# clipped at its first base, so the neighbour bound is relaxed by this many nt
-# for those pairs. Anything more would let a boundary error walk into the
-# neighbouring gene.
-CANONICAL_OVERLAP = {"atp8": 12, "nad4l": 12}
-
-# Per-gene absolute floor (nt) on how far a snap may move the CDS length. A flat
-# floor of 60 nt is over a third of atp8 (~200 nt) and a fifth of nad3/nad4l, so
-# short PCGs get a proportionate one instead.
-LEN_TOL_FLOOR = {"atp8": 18, "nad4l": 18, "nad3": 24}
-DEFAULT_LEN_TOL_FLOOR = 60
-
-
-def snap_pcg_rows(rows, gseq, code, window=36, len_tol=0.15, skip=()):
-    """Per-PCG ORF-boundary snap, assembly-only (no reference).
-
-    For every single-exon PCG row whose reconstructed CDS is not a clean ORF
-    under `code`, build a small window bounded by the neighbouring rows and call
-    orf_utils.refine_orf. When it yields a clean ORF within `len_tol` of the
-    original length, return the rewritten (start0, end) for that row.
-
-    All coordinate work happens in a doubled-genome space so a feature spanning
-    the circular origin (MITOS writes those with start > end) is an ordinary
-    interval; results are mapped back, restoring the start > end form if the
-    snapped CDS still wraps. Before this, every origin-spanning PCG was reported
-    `no window` and silently went unchecked -- which in practice meant atp8 was
-    never checked on any coral, because ROTATE_ORIGIN puts cox1 at position 1 and
-    leaves atp8 straddling the join.
-
-    Bare names in `skip` are left alone: a gene rebuilt by a reference-transfer
-    join owns its own coordinates, and snapping the stale single-exon row it
-    replaces would only produce a contradictory second opinion.
-
-    Returns (fixes, actions, unrepaired):
-        fixes      = {row_index: (new_start0, new_end)}
-        actions    = human-readable strings for the status file
-        unrepaired = bare names of PCGs found broken that could NOT be repaired,
-                     so the caller does not report the sample as FIXED
-    """
-    fixes = {}
-    actions = []
-    unrepaired = []
-
-    n = len(gseq)
-    gseq2 = (gseq + gseq).upper()
-
-    # Row spans in doubled coordinates, for neighbour clipping. Each row is also
-    # considered one genome-length later, so a neighbour on the far side of the
-    # origin still bounds a wrapped feature.
-    spans = []
-    for r in rows:
-        try:
-            lo, hi = _linear_span(int(r[1]), int(r[2]), n)
-        except (ValueError, IndexError):
-            continue
-        spans.append((lo, hi))
-        spans.append((lo + n, hi + n))
-
-    by_bare = {}
-    for i, r in enumerate(rows):
-        by_bare.setdefault(bare_name(r[3]), []).append(i)
-
-    for bare, idxs in by_bare.items():
-        if bare not in PCG_BARE or len(idxs) != 1:
-            continue  # only single-exon PCGs
-        if bare in skip:
-            continue  # owned by a reference-transfer pass (nad5-style join)
-        i = idxs[0]
-        r = rows[i]
-        try:
-            raw_s0, raw_e1 = int(r[1]), int(r[2])
-        except (ValueError, IndexError):
-            continue
-        strand = r[5] if len(r) > 5 else "+"
-        s0, e1 = _linear_span(raw_s0, raw_e1, n)
-
-        nt = cds_from_row(gseq, raw_s0, raw_e1, strand)
-        info = classify_cds(nt, code)
-        if info["start_ok"] and info["stop_ok"] and not info["internal_stops"]:
-            continue  # already a clean ORF
-
-        def broken(reason):
-            actions.append(f"PCG-skip {bare} ({reason})")
-            unrepaired.append(bare)
-
-        # Neighbour bounds in doubled coordinates, relaxed by the canonical
-        # overlap this gene is allowed to share with its neighbour.
-        slack = CANONICAL_OVERLAP.get(bare, 0)
-        left_bound = max([sp[1] - slack for sp in spans if sp[1] <= s0] + [0])
-        right_bound = min([sp[0] + slack for sp in spans if sp[0] >= e1] + [len(gseq2)])
-        win_lo = max(left_bound, s0 - window)
-        win_hi = min(right_bound, e1 + window)
-        if win_lo >= win_hi:
-            broken("no window")
-            continue
-
-        win = gseq2[win_lo:win_hi]
-        if strand == "-":
-            win = revcomp(win)
-            s_from = (win_hi - e1) + 1
-        else:
-            s_from = (s0 - win_lo) + 1
-
-        orf = refine_orf(win, s_from, len(win), code)
-        if orf is None:
-            broken("no clean ORF in window")
-            continue
-        cds_lo, cds_hi, aa, start_codon, _poly_a = orf
-        old_len = e1 - s0
-        new_len = cds_hi - cds_lo + 1
-        if start_codon == "partial":
-            broken(f"ORF not clean: start={start_codon}")
-            continue
-        floor = LEN_TOL_FLOOR.get(bare, DEFAULT_LEN_TOL_FLOOR)
-        if abs(new_len - old_len) > max(floor, int(len_tol * old_len)):
-            broken(f"len {old_len}->{new_len} outside tol")
-            continue
-
-        # Map window coords back to doubled-genome 0-based half-open, then onto
-        # the real genome, restoring the start > end form for a wrapped CDS.
-        if strand == "-":
-            new_s0 = win_hi - cds_hi
-            new_e1 = win_hi - cds_lo + 1
-        else:
-            new_s0 = win_lo + cds_lo - 1
-            new_e1 = win_lo + cds_hi
-
-        if new_s0 >= n:
-            new_s0 -= n
-            new_e1 -= n
-        if new_e1 > n:
-            new_e1 -= n          # wraps the origin: BED start > end, as MITOS writes it
-
-        if (new_s0, new_e1) == (raw_s0, raw_e1):
-            # The boundaries are already where refine_orf would put them, yet the
-            # CDS did not classify clean -- an internal defect the snap can't fix.
-            unrepaired.append(bare)
-            actions.append(f"PCG-skip {bare} (no better boundary)")
-            continue
-        fixes[i] = (new_s0, new_e1)
-        actions.append(
-            f"PCG-fix {bare} {raw_s0}-{raw_e1}->{new_s0}-{new_e1} "
-            f"({new_len}nt {len(aa)}aa)")
-
-    return fixes, actions, unrepaired
-
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
@@ -506,7 +336,7 @@ def main():
     gseq = str(genome_rec.seq).upper()
 
     try:
-        rrnl_seq, nad5_exons, cox1_seq = ref_features(args.ref_gb)
+        rrnl_seq, nad5_exons, cox1_seq, mtmuts_seq = ref_features(args.ref_gb)
     except Exception as exc:  # malformed reference -> leave MITOS output as-is
         finish("FAILED", f"could not parse reference {args.ref_gb.name}: {exc}", rows)
 
@@ -516,8 +346,10 @@ def main():
     if nad5_exons:
         for i, ex in enumerate(nad5_exons):
             probes[f"nad5_{i}"] = ex
+    if mtmuts_seq:
+        probes["msh1"] = mtmuts_seq
     if not probes:
-        finish("FAILED", "reference lacks usable 16S and nad5 annotation", rows)
+        finish("FAILED", "reference lacks usable 16S, nad5 and mtMutS annotation", rows)
 
     hits = blast_probes(probes, args.genome)
 
@@ -550,6 +382,45 @@ def main():
         # 16S is missing and the reference probe did not even land.
         rejected.append("16S")
         actions.append("16S-skip no reference hit")
+
+    # ---- mtMutS ----
+    #
+    # Octocorals carry a mitochondrial mismatch-repair gene; hexacorals do not.
+    # The trigger is entirely sequence-derived: this runs only for a sample the
+    # reference selector matched by BLAST, and only when THAT reference actually
+    # annotates mtMutS. No order label is consulted, which matters because
+    # NOVA_260909_LA has family-level mislabels and a blank order on most
+    # invertebrates -- an order-keyed rule would be both wrong and inert.
+    have_mtmuts = any(bare_name(r[3]) in ("msh1", "mutS", "mtMutS") for r in rows)
+    add_mtmuts = None
+    if not have_mtmuts and mtmuts_seq:
+        if "msh1" in hits:
+            pid, ss, se, cov = hits["msh1"]
+            if cov >= args.min_cov and pid >= args.min_pid:
+                lo, hi = min(ss, se), max(ss, se)
+                strand = "+" if ss < se else "-"
+                # Only transfer a boundary that yields a clean ORF under this
+                # sample's own genetic code. A mismatch-repair gene imported as a
+                # broken reading frame is worse than the absence it replaces.
+                nt = cds_from_row(gseq, lo - 1, hi, strand)
+                info = classify_cds(nt, args.code)
+                if info["start_ok"] and info["stop_ok"] and not info["internal_stops"]:
+                    add_mtmuts = [chrom, lo - 1, hi, "msh1", f"{pid:.1f}", strand]
+                    actions.append(
+                        f"+mtMutS {lo}-{hi}({strand}) cov={cov:.2f} pid={pid:.1f} "
+                        f"{len(nt)}nt")
+                else:
+                    rejected.append("mtMutS")
+                    actions.append(
+                        f"mtMutS-skip transferred span is not a clean ORF "
+                        f"(start={info['start_class']}, stop_ok={info['stop_ok']}, "
+                        f"internal_stops={info['internal_stops']})")
+            else:
+                rejected.append("mtMutS")
+                actions.append(f"mtMutS-skip cov={cov:.2f} pid={pid:.1f}")
+        else:
+            rejected.append("mtMutS")
+            actions.append("mtMutS-skip no reference hit")
 
     # ---- nad5 ----
     add_nad5 = None
@@ -633,11 +504,16 @@ def main():
     # cox1 is excluded once the join owns it, exactly as nad5 always is.
     pcg_fixes, pcg_actions, pcg_unrepaired = snap_pcg_rows(
         rows, gseq, args.code, window=args.pcg_window, len_tol=args.pcg_len_tol,
-        skip={"cox1"} if add_cox1 is not None else ())
+        # nad5 and cox1 are rebuilt by the reference-transfer passes above when
+        # those fire; a snap on the stale single-exon row they replace would only
+        # produce a contradictory second opinion. nad5 is always skipped here
+        # because ref_features owns it on the coral path.
+        skip=({"nad5", "cox1"} if add_cox1 is not None else {"nad5"}))
     actions.extend(pcg_actions)
     rejected.extend(pcg_unrepaired)
 
-    if add_rrnl is None and add_nad5 is None and add_cox1 is None and not pcg_fixes:
+    if (add_rrnl is None and add_nad5 is None and add_cox1 is None
+            and add_mtmuts is None and not pcg_fixes):
         # Nothing was applied. Still record what was found broken and left that
         # way, so SKIPPED is distinguishable from "there was nothing to do".
         if rejected:
@@ -664,6 +540,8 @@ def main():
         out_rows.append(r)
     if add_rrnl is not None:
         out_rows.append(add_rrnl)
+    if add_mtmuts is not None:
+        out_rows.append(add_mtmuts)
     if add_nad5 is not None:
         out_rows.extend(add_nad5)
     if add_cox1 is not None:

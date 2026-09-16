@@ -74,6 +74,49 @@ PCG_MAP = {
 # MITOS2 rRNA name -> EMMA gene name
 RRNA_MAP = {"rrnS": "RNR1", "rrnL": "RNR2"}
 
+# Protein-coding genes that exist outside the vertebrate 13. EMMA has no name for
+# these because vertebrates do not carry them, but MITOS calls them and they are
+# real genes in these lineages -- dropping them silently cost NOVA_260909_LA 22
+# ATP9 and 3 mtMutS annotations across 24 samples.
+#
+# The internal key stays uppercase like every other gene so it can index features,
+# per-gene FASTA filenames and annotation-stats columns. INSDC spells mtMutS in
+# mixed case, and that is restored at the submission boundary by
+# bin/gene_names.py -- NOT here, or the internal contract fragments.
+EXTRA_PCG_MAP = {
+    "atp9": "ATP9",
+    # MITOS emits msh1; mutS / mtMutS appear in other annotators and in
+    # hand-curated BEDs, so accept all three spellings.
+    "msh1": "MTMUTS",
+    "muts": "MTMUTS",
+    "mtmuts": "MTMUTS",
+}
+
+# MITOS features that are real and worth keeping but are NOT genes. Each maps to
+# (internal name, INSDC feature key, /note text). They get no gene wrapper, no
+# /product and no transl_table: a replication origin is not a gene, and writing it
+# as one would be a false annotation. They are excluded from completeness, ORF
+# integrity and gene-order scoring.
+NON_GENE_MAP = {
+    "oh": ("REP_ORIGIN_H", "rep_origin", "heavy strand replication origin"),
+    "ol": ("REP_ORIGIN_L", "rep_origin", "light strand replication origin"),
+    "gpi": ("INTRON_GPI", "intron", "group I intron"),
+    "gpii": ("INTRON_GPII", "intron", "group II intron"),
+    # A LAGLIDADG homing endonuclease ORF, encoded inside a group I intron. It is
+    # a genuine ORF but not a mitochondrial gene in the EMMA contract sense, so it
+    # is exported as a misc_feature and never counted towards completeness.
+    "lagli": ("LAGLI", "misc_feature", "LAGLIDADG homing endonuclease ORF"),
+}
+
+# Feature types that are not genes: no gene line, no product, no CDS extraction.
+NON_GENE_FTYPES = {"rep_origin", "intron", "misc_feature"}
+
+# Largest gap (nt) between two rows of the same gene that still reads as one
+# locus with an intron rather than two separate copies of the gene. Coral nad5
+# group I introns run to a few kb; 10 kb is comfortably above any real
+# mitochondrial intron and far below the distance between duplicate loci.
+DEFAULT_MAX_INTRON = 10000
+
 # Products for nicer GenBank output (downstream falls back to gene name otherwise)
 PRODUCT = {
     "CO1": "cytochrome c oxidase subunit I",
@@ -91,6 +134,8 @@ PRODUCT = {
     "ND6": "NADH dehydrogenase subunit 6",
     "RNR1": "12S ribosomal RNA",
     "RNR2": "16S ribosomal RNA",
+    "ATP9": "ATP synthase F0 subunit 9",
+    "MTMUTS": "mismatch repair protein mtMutS",
 }
 
 # EMMA-style tRNA /product strings ("tRNA-Trp(UCA)"), shared with rescue_trna.py
@@ -129,12 +174,47 @@ def map_gene_name(raw):
 
     if bare in PCG_MAP:
         return PCG_MAP[bare], "CDS", frag, None
+    if bare.lower() in EXTRA_PCG_MAP:
+        return EXTRA_PCG_MAP[bare.lower()], "CDS", frag, None
     if bare in RRNA_MAP:
         return RRNA_MAP[bare], "rRNA", frag, None
+    if bare.lower() in NON_GENE_MAP:
+        name, ftype, _note = NON_GENE_MAP[bare.lower()]
+        return name, ftype, frag, None
     if bare.startswith("trn"):
         # trnF -> TF, trnL2 -> TL2, trnS1 -> TS1
         return "T" + bare[3:].upper(), "tRNA", frag, anticodon
     return None, None, None, None
+
+
+def note_for(emma_name):
+    """The /note text for a non-gene feature, or '' for a gene."""
+    for _raw, (name, _ftype, note) in NON_GENE_MAP.items():
+        if name == emma_name:
+            return note
+    return ""
+
+
+def product_for(emma_name, ftype):
+    """The /product for a gene, raising if we have none.
+
+    PRODUCT.get(name, name) used to fall back to the bare gene name, which meant a
+    newly-mapped gene silently shipped /product=ATP9 -- a gene name, not a product
+    -- to table2asn. A missing product is a bug in this file, not a data problem,
+    so it fails here where it is cheap to fix.
+    """
+    if ftype in NON_GENE_FTYPES:
+        return ""
+    if ftype == "tRNA":
+        return ""          # trna_product() builds these from the anticodon
+    try:
+        return PRODUCT[emma_name]
+    except KeyError:
+        raise KeyError(
+            f"no /product defined for gene {emma_name!r} (feature type {ftype}). "
+            f"Add it to PRODUCT in {__file__}: shipping the bare gene name as a "
+            f"product writes an invalid annotation."
+        ) from None
 
 
 def _frag_key(frag):
@@ -146,7 +226,7 @@ def _frag_key(frag):
     return (ord(frag),)
 
 
-def parse_bed(bed_path):
+def parse_bed(bed_path, max_intron=DEFAULT_MAX_INTRON):
     """Parse MITOS2 result.bed, grouping the exons of split genes by gene name.
 
     Returns dict keyed by emma_name -> list of exon dicts
@@ -156,7 +236,8 @@ def parse_bed(bed_path):
     one exon per BED line instead of being collapsed into a single span, so its
     reconstructed CDS skips the intron rather than swallowing it.
     """
-    features = {}
+    grouped = {}
+    audit = []
     with open(bed_path) as fh:
         for line in fh:
             line = line.strip()
@@ -170,16 +251,101 @@ def parse_bed(bed_path):
             chrom, start, end, raw_name, _score, strand = cols[:6]
             emma_name, ftype, frag, anticodon = map_gene_name(raw_name)
             if emma_name is None:
+                # Never silent again. An unmapped name is recorded so the QC step
+                # can refuse to call the annotation clean, instead of the feature
+                # simply ceasing to exist between the BED and the GFF.
+                audit.append({
+                    "raw_name": raw_name, "internal_name": "", "locus": "",
+                    "feature_type": "", "disposition": "unmapped",
+                    "reason": "no mapping in PCG_MAP / EXTRA_PCG_MAP / RRNA_MAP / "
+                              "NON_GENE_MAP and not a trn* tRNA",
+                })
                 continue
             start1, end = int(start) + 1, int(end)
-            features.setdefault(emma_name, []).append({
+            grouped.setdefault(emma_name, []).append({
                 "chrom": chrom, "start": start1, "end": end,
                 "strand": strand, "ftype": ftype, "frag": frag,
-                "anticodon": anticodon,
+                "anticodon": anticodon, "raw_name": raw_name,
             })
-    for exons in features.values():
-        exons.sort(key=lambda e: _frag_key(e["frag"]))
-    return features
+
+    features = {}
+    for emma_name, rows in grouped.items():
+        for idx, locus in enumerate(cluster_loci(rows, max_intron)):
+            # The first locus keeps the bare gene name, so every existing consumer
+            # (features.get("TM"), cds/<GENE>.fa, the annotation-stats columns)
+            # behaves exactly as before for the overwhelmingly common single-locus
+            # case. Only a genuine second copy gets a suffix.
+            key = emma_name if idx == 0 else f"{emma_name}_{idx + 1}"
+            locus.sort(key=lambda e: _frag_key(e["frag"]))
+            for e in locus:
+                e["gene"] = emma_name
+            features[key] = locus
+            ftype = locus[0]["ftype"]
+            # misc_feature is checked first: it is also in NON_GENE_FTYPES, and
+            # 'known_auxiliary' is the more specific answer for an ORF we keep but
+            # deliberately exclude from completeness scoring.
+            disposition = ("known_auxiliary" if ftype == "misc_feature"
+                           else "retained_non_gene" if ftype in NON_GENE_FTYPES
+                           else "retained")
+            for e in locus:
+                audit.append({
+                    "raw_name": e["raw_name"], "internal_name": key,
+                    "locus": str(idx + 1), "feature_type": ftype,
+                    "disposition": disposition,
+                    "reason": ("second locus of the same gene" if idx else ""),
+                })
+    return features, audit
+
+
+def cluster_loci(rows, max_intron=DEFAULT_MAX_INTRON):
+    """Split one gene's BED rows into separate genomic loci.
+
+    ``features`` used to be keyed purely on gene name, so every row carrying that
+    name was treated as an exon of one gene. Two genuinely separate copies -- a
+    duplicated tRNA, a control-region-flanking duplicate -- silently merged into
+    one impossible gene spanning the gap between them, and its extracted CDS
+    swallowed everything in between.
+
+    Rows belong to the same locus when MITOS itself says so (an explicit part
+    suffix: nad5-a/nad5-b, cox1_0/cox1_1 -- the annotator's own statement that
+    they are exons of one gene), or when they share a strand and sit within
+    ``max_intron`` of each other. Anything else opens a new locus.
+
+    Deliberately conservative: a single row, or any set of rows carrying explicit
+    part suffixes, always yields exactly one locus, so no existing annotation in
+    this batch can change shape as a side effect of this fix.
+    """
+    explicit = [r for r in rows if r["frag"] is not None]
+    implicit = [r for r in rows if r["frag"] is None]
+
+    loci = [explicit] if explicit else []
+    for r in sorted(implicit, key=lambda e: e["start"]):
+        placed = False
+        for locus in loci:
+            if locus and locus[0]["frag"] is not None:
+                continue          # never merge into a MITOS-declared split gene
+            prev = locus[-1]
+            # An origin-spanning row (start > end) has no meaningful linear gap to
+            # either neighbour, so it is never used to justify a split.
+            wraps = prev["start"] > prev["end"] or r["start"] > r["end"]
+            gap = r["start"] - prev["end"]
+            if prev["strand"] == r["strand"] and (wraps or gap <= max_intron):
+                locus.append(r)
+                placed = True
+                break
+        if not placed:
+            loci.append([r])
+    return loci
+
+
+def write_audit(path, audit):
+    """Write mitos_conversion_audit.tsv: one row per raw MITOS feature."""
+    cols = ["raw_name", "internal_name", "locus", "feature_type",
+            "disposition", "reason"]
+    with open(path, "w") as out:
+        out.write("\t".join(cols) + "\n")
+        for row in audit:
+            out.write("\t".join(str(row.get(c, "")) for c in cols) + "\n")
 
 
 def _gff_span(start, end, seq_len):
@@ -211,14 +377,36 @@ def write_gff(gff_path, features, chrom, seq_len, species, is_circular):
             f"Name={chrom};genome=mitochondrion;mol_type=genomic DNA\n"
         )
         for emma_name, exons in ordered:
-            product = PRODUCT.get(emma_name, emma_name)
+            bare = exons[0].get("gene", emma_name)
             strand = exons[0]["strand"]
             ftype = exons[0]["ftype"]
+            gene_start = min(e["start"] for e in exons)
+            gene_end, note = _gff_span(gene_start, max(e["end"] for e in exons), seq_len)
+
+            if ftype in NON_GENE_FTYPES:
+                # No gene wrapper: a replication origin or an intron is not a gene,
+                # and writing a gene line over it would assert something false.
+                #
+                # Nor are its rows exons. MITOS splits some origins across two
+                # rows (OH-a/OH-b, OH_0/OH_1); for a gene that suffix means
+                # "exons of one transcript" and the gene line legitimately spans
+                # the intron, but a replication origin has no splicing, so
+                # spanning min..max would invent a single feature covering a gap
+                # that was never called. Each row is written as its own feature.
+                feat_note = note_for(bare)
+                for i, e in enumerate(exons):
+                    e_end, e_note = _gff_span(e["start"], e["end"], seq_len)
+                    fid = emma_name if len(exons) == 1 else f"{emma_name}.{i + 1}"
+                    attrs = (f"ID={fid};Name={emma_name};"
+                             f"Note={feat_note}{e_note.replace(';Note=', ';')}")
+                    out.write(f"{chrom}\tmitos\t{ftype}\t{e['start']}\t{e_end}"
+                              f"\t.\t{e['strand']}\t.\t{attrs}\n")
+                continue
+
+            product = product_for(bare, ftype)
             # Gene line spans the whole locus; the full (intron-skipping)
             # nucleotide/protein still goes to cds/ and proteins/ below, so
             # downstream BLAST/LCA and protein length stay correct.
-            gene_start = min(e["start"] for e in exons)
-            gene_end, note = _gff_span(gene_start, max(e["end"] for e in exons), seq_len)
             if len(exons) > 1:
                 note = ";Note=multi-exon" + note
             attrs_gene = f"ID=gene-{emma_name};Name=MT-{emma_name};Product={product}{note}"
@@ -270,8 +458,9 @@ def write_tbl(tbl_path, features, chrom, seq_len, prefix, genetic_code):
     with open(tbl_path, "w") as out:
         out.write(f">Feature {prefix}\n")
         for emma_name, exons in ordered:
-            product = PRODUCT.get(emma_name, emma_name)
+            bare = exons[0].get("gene", emma_name)
             ftype = exons[0]["ftype"]
+            product = product_for(bare, ftype)
             intervals = _tbl_intervals(exons, seq_len)
 
             def write_block(key, qual_lines):
@@ -282,12 +471,29 @@ def write_tbl(tbl_path, features, chrom, seq_len, prefix, genetic_code):
                 for q in qual_lines:
                     out.write(f"\t\t\t{q[0]}\t{q[1]}\n")
 
-            write_block("gene", [("gene", f"MT-{emma_name}")])
+            if ftype in NON_GENE_FTYPES:
+                # No gene / mRNA wrapper, no /product, no transl_table -- just the
+                # feature and a note saying what it is. One block per row, not a
+                # join: a split origin is two features, not one spliced one (see
+                # the matching comment in write_gff).
+                for e in exons:
+                    for j, (bs, be) in enumerate(_tbl_intervals([e], seq_len)):
+                        out.write(f"{bs}\t{be}\t{ftype}\n" if j == 0
+                                  else f"{bs}\t{be}\n")
+                    out.write(f"\t\t\tnote\t{note_for(bare)}\n")
+                continue
+
+            # /gene carries the bare gene name; process_files.py strips the MT-
+            # prefix and restores the INSDC spelling (MTMUTS -> mtMutS) via
+            # bin/gene_names.py. A duplicate locus keeps the SAME /gene as its
+            # first copy -- INSDC distinguishes duplicated genes by location, not
+            # by a synthetic _2 suffix -- so the suffix stays in the GFF only.
+            write_block("gene", [("gene", f"MT-{bare}")])
             if ftype == "CDS":
-                write_block("mRNA", [("gene", f"MT-{emma_name}")])
+                write_block("mRNA", [("gene", f"MT-{bare}")])
                 write_block("CDS", [("product", product), ("transl_table", genetic_code)])
             else:
-                prod = trna_product(emma_name, exons[0].get("anticodon")) if ftype == "tRNA" else product
+                prod = trna_product(bare, exons[0].get("anticodon")) if ftype == "tRNA" else product
                 write_block(ftype, [("product", prod)])
 
 
@@ -416,6 +622,10 @@ def main():
                          "to MITOS's own cox1 call is more precise than the tblastn "
                          "back-extrapolation the pre-rotation used.")
     ap.add_argument("--species", default="", help="Species name for ##organism")
+    ap.add_argument("--max-intron", type=int, default=DEFAULT_MAX_INTRON,
+                    help="Largest gap (nt) between two rows of one gene that still "
+                         "reads as a single intron-split locus rather than two "
+                         "separate copies. Default %(default)s.")
     ap.add_argument("--linear", action="store_true",
                     help="Mark the genome as linear (Is_circular=False) in the GFF "
                          "region feature. Default: circular, matching GetOrganelle/MitoHiFi.")
@@ -430,7 +640,7 @@ def main():
     if not genome:
         sys.exit(f"No sequences read from {args.genome}")
 
-    features = parse_bed(args.bed)
+    features, audit = parse_bed(args.bed, max_intron=args.max_intron)
     if not features:
         print(f"WARNING: no recognised features parsed from {args.bed}", file=sys.stderr)
 
@@ -498,7 +708,18 @@ def main():
     write_tbl(args.outdir / f"{args.prefix}.tbl", features, chrom, seq_len,
               args.prefix, args.code)
 
+    write_audit(args.outdir / "mitos_conversion_audit.tsv", audit)
+    unmapped = [a["raw_name"] for a in audit if a["disposition"] == "unmapped"]
+    if unmapped:
+        print(f"[mitos_to_emma] WARNING: {len(unmapped)} unmapped MITOS feature(s) "
+              f"recorded in mitos_conversion_audit.tsv: {', '.join(sorted(set(unmapped)))}",
+              file=sys.stderr)
+
     for emma_name, exons in features.items():
+        # Replication origins, introns and auxiliary ORFs are not genes: they get
+        # no extracted CDS and no translation.
+        if exons[0]["ftype"] in NON_GENE_FTYPES:
+            continue
         # Concatenate exons in MITOS transcript (part) order so an intron-split
         # gene yields its full spliced CDS with the intron removed; a single-exon
         # gene is unchanged.

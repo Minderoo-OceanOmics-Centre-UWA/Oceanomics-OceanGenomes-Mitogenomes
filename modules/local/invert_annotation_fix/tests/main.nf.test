@@ -1,0 +1,88 @@
+nextflow_process {
+
+    name "Test Process INVERT_ANNOTATION_FIX"
+    script "../main.nf"
+    process "INVERT_ANNOTATION_FIX"
+
+    tag "modules"
+    tag "modules_local"
+    tag "invert_annotation_fix"
+
+    // NOTE: run these with a container profile:
+    //     nf-test test modules/local/invert_annotation_fix/tests/ --profile singularity
+    // The module chains mitos_to_emma.py, which needs Biopython. Under the bare
+    // `test` profile there is no container and the second step dies on
+    // `ModuleNotFoundError: No module named 'Bio'` after the fixer itself has
+    // already done its work correctly.
+    //
+    // The reference-free ORF snap used to be reachable only down the coral branch,
+    // so in NOVA_260909_LA every assembly with a genuinely broken CDS -- 13
+    // Porifera, plus Malacostraca and Asteroidea, not one of them a coral -- had
+    // no repair path. These fixtures are the two cases that matter: a defect the
+    // snap CAN fix, and a correct annotation it must not touch.
+
+    def bundle = { name, code, cls -> """
+        def dir = file("\${projectDir}/modules/local/invert_annotation_fix/tests/data")
+        input[0] = Channel.of([
+            [ id:'test', mt_assembly_prefix:'synth.test.1', genetic_code: ${code},
+              class: '${cls}', circular: false ],
+            file("\${dir}/${name}.fa",  checkIfExists: true),
+            file("\${dir}/${name}.bed", checkIfExists: true),
+            // The origin anchor MITOS2 was given for this sample. mitos_to_emma.py
+            // makes --origin-gene required, so the module takes it as input rather
+            // than guessing; trnM is the anchor for these synthetic fixtures.
+            'trnM'
+        ])
+    """ }
+
+    test("repairs a sponge ND4L opening on TTT and ending on a sense codon") {
+        // The signature five Demospongiae shared in NOVA_260909_LA:
+        // implausible_start(TTT) + no_stop(AGA, rem 0).
+        when {
+            process {
+                bundle("sponge_nd4l_broken", 4, "Demospongiae")
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.startsWith("FIXED") },
+                { assert path(process.out.status[0][1]).text.contains("nad4l") },
+                // The repaired annotation must flow on as a normal EMMA bundle.
+                { assert process.out.gff_proteins },
+            )
+        }
+    }
+
+    test("leaves a decapod CO1 opening on CGA alone") {
+        // CGA is the documented crustacean COI initiator. 'Repairing' it would
+        // move a boundary that was already correct, so the fixer must decline.
+        when {
+            process {
+                bundle("decapod_co1_cga", 5, "Malacostraca")
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.startsWith("SKIPPED") },
+                { assert !path(process.out.status[0][1]).text.contains("PCG-fix cox1") },
+            )
+        }
+    }
+
+    test("stub") {
+        options "-stub"
+        when {
+            process {
+                bundle("sponge_nd4l_broken", 4, "Demospongiae")
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.status },
+            )
+        }
+    }
+}

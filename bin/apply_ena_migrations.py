@@ -38,6 +38,7 @@ MIGRATIONS = [
     "023_mitogenome_data_order_variant.sql",
     "024_lca_validation_validated_rank.sql",
     "025_mitogenome_data_order_variant_taxon_check.sql",
+    "026_mitogenome_data_annotation_integrity.sql",
 ]
 
 
