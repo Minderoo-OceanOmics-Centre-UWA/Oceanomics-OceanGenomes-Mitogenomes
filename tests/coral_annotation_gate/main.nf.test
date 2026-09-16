@@ -18,7 +18,12 @@ nextflow_workflow {
         when {
             params {
                 curated_blast_db = "/stub/curated.fasta"
-                nt_blast_db      = "/stub/nt"
+                // A real prefix with a .nin beside it: the invertebrate BLAST arm
+                // validates that --nt_blast_db names a BLAST database (added after a
+                // whole cohort was searched against the wrong one), and "/stub/nt"
+                // does not satisfy it, which aborted this test before any assertion
+                // about routing could run.
+                nt_blast_db      = "${projectDir}/tests/test_data/coral_annotation_gate/stub_nt"
                 mitos_refdb      = "${projectDir}/assets"
                 taxonkit_db_dir  = "$outputDir/taxonkit"
                 blast_db_dir     = "$outputDir/blast_dbs"
@@ -35,8 +40,9 @@ nextflow_workflow {
                     mt_assembly_prefix: 'OGCORAL.ilmn.260101.getorg1770',
                     mt_assembly_run_prefix: 'OGCORAL.ilmn.260101.getorg1770'
                 ]
-                // Gastropoda -> MITOS2, but NOT the gate: it leaves via ch_mitos_*_passthrough,
-                // so this covers the other side of the same filter.
+                // Gastropoda -> MITOS2 -> the gate (which now covers every invertebrate)
+                // -> the reference-free fixer, and NOT the coral fixer: no sequence
+                // matched it to the curated Anthozoa DB.
                 def snail = [
                     id: 'OGSNAIL', class: 'Gastropoda', species: 'Nerita atramentosa',
                     invertebrates: true, genetic_code: 5,
@@ -70,17 +76,23 @@ nextflow_workflow {
                 // Both invertebrates annotate with MITOS2, the vertebrate with EMMA.
                 { assert ran('MITOS2').size() == 2 },
                 { assert ran('EMMA (').size() == 1 },
-                // The gate is Cnidaria-only: exactly one sample enters it, and it is the coral.
-                // Any arity mismatch on its input channel aborts the run before this.
-                { assert ran('ANNOTATION_QC_GATE').size() == 1 },
-                { assert ran('ANNOTATION_QC_GATE')[0].name.contains('OGCORAL') },
-                // ANNOTATION_QC_GATE's stub always decides FIX, so the coral must go on to
-                // reference selection and the fixer -- and only the coral.
+                // The gate covers every invertebrate, so both inverts enter it and the
+                // vertebrate does not. Any arity mismatch on its input channel aborts
+                // the run before this.
+                { assert ran('ANNOTATION_QC_GATE').size() == 2 },
+                { assert ran('ANNOTATION_QC_GATE').every { !it.name.contains('OGFISH') } },
+                // The gate's stub always decides FIX, so both inverts reach stage 1.
+                { assert ran('INVERT_ANNOTATION_FIX').size() == 2 },
+                // Only a coral-eligible class is offered the curated Anthozoa DB, and
+                // only a sequence match reaches the coral fixer. This is the guard that
+                // keeps a widened gate from turning into cross-phylum reference
+                // transfer: the snail must not appear in either.
                 { assert ran('SELECT_REFERENCE_DB').size() == 1 },
+                { assert ran('SELECT_REFERENCE_DB')[0].name.contains('OGCORAL') },
                 { assert ran('CORAL_ANNOTATION_FIX').size() == 1 },
                 { assert ran('CORAL_ANNOTATION_FIX')[0].name.contains('OGCORAL') },
-                // Every sample still leaves with an annotation bundle: the coral via the
-                // fixer, the snail via passthrough, the fish via EMMA.
+                // Every sample still leaves with an annotation bundle: the coral via
+                // both fix stages, the snail via stage 1, the fish via EMMA.
                 { assert workflow.out.annotation_results.size() == 3 }
             )
         }
