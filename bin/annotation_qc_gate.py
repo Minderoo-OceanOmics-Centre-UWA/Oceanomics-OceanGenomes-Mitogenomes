@@ -112,7 +112,7 @@ def cds_seq(cds_dir, gene):
 
 
 def evaluate(gff, proteins, cds, genetic_code, min_nd5_aa, min_co1_aa,
-             is_cnidarian):
+             is_cnidarian, lineage=None):
     """Return (decision, reason). decision is 'FIX' or 'PASS'."""
     reasons = []
     genes = genes_in_gff(gff)
@@ -145,7 +145,11 @@ def evaluate(gff, proteins, cds, genetic_code, min_nd5_aa, min_co1_aa,
         nt = cds_seq(cds, gene)
         if not nt:
             continue
-        info = classify_cds(nt, genetic_code)
+        # lineage + gene widen the accepted initiators via LINEAGE_ALT_STARTS.
+        # Decapod CO1 opens on CGA, which no translation table lists: without this
+        # every crustacean in the batch is flagged no_start and routed to a fixer
+        # that has nothing to fix, on a codon that is genuinely theirs.
+        info = classify_cds(nt, genetic_code, lineage=lineage, gene=gene)
         if not info["start_ok"]:
             reasons.append(f"{gene}_no_start")
         if not info["stop_ok"]:
@@ -176,13 +180,18 @@ def main():
                     help="CO1 translation shorter than this is treated as "
                          "truncated (cnidarian only). Anthozoan cox1 is ~515 aa; "
                          "one exon of an intron-split cox1 is ~290.")
+    ap.add_argument("--lineage", default="",
+                    help="taxonomic class or phylum (e.g. Malacostraca). Only "
+                         "widens the accepted initiation codons; omitting it can "
+                         "make the gate stricter, never looser.")
     args = ap.parse_args()
 
     is_cnidarian = int(args.genetic_code) == CNIDARIAN_CODE
     try:
         decision, reason = evaluate(
             args.gff, args.proteins, args.cds, int(args.genetic_code),
-            args.min_nd5_aa, args.min_co1_aa, is_cnidarian)
+            args.min_nd5_aa, args.min_co1_aa, is_cnidarian,
+            lineage=args.lineage or None)
     except Exception:  # noqa: BLE001 - never drop a sample on a parse error
         traceback.print_exc(file=sys.stderr)
         decision, reason = "PASS", "gate parse error -> PASS"
