@@ -16,6 +16,7 @@ include { TRNA_RESCUE            } from '../../../modules/local/trna_rescue'
 include { ROTATE_ORIGIN          } from '../../../modules/local/rotate_origin'
 include { MITOS2                 } from '../../../modules/local/mitos2'
 include { ANNOTATION_QC_GATE     } from '../../../modules/local/annotation_qc_gate'
+include { INVERT_ANNOTATION_FIX  } from '../../../modules/local/invert_annotation_fix'
 include { CORAL_ANNOTATION_FIX   } from '../../../modules/local/coral_annotation_fix'
 include { REFERENCE_RELEVANCE    } from '../../../modules/local/reference_relevance'
 include { SELECT_CORAL_REFERENCE } from '../../../modules/local/select_coral_reference'
@@ -385,35 +386,54 @@ workflow MITOGENOME_ANNOTATION {
     SELECT_CORAL_REFERENCE ( ch_fix_base.map { meta, genome, _bed -> [meta, genome] }, ch_coral_db )
     ch_selected_ref = SELECT_CORAL_REFERENCE.out.reference   // [meta, reference.gb]
 
-    ch_fix_selected = ch_fix_base.join(ch_selected_ref)
-        .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }
+    // Stage 1 -- reference-free, every FIX invertebrate. Snaps each PCG's
+    // boundaries to the nearest clean ORF under the sample's own genetic code.
+    // This used to be locked inside the coral fixer, so the 17 NOVA_260909_LA
+    // assemblies with a genuinely broken CDS (13 Porifera, none of them corals)
+    // had no repair path at all.
+    INVERT_ANNOTATION_FIX ( ch_fix_base )
 
-    // Fallback: a FIX sample for which the selector emitted no reference (status NONE:
-    // no DB record aligned) gets the bundled curated anthozoan reference. The unselected
-    // set is read from SELECT_CORAL_REFERENCE.out.status, which is emitted for EVERY FIX
-    // sample, so this is a plain per-sample join (the sample falls back the moment its own
-    // status arrives) rather than a remainder join that waits for the whole run to close.
-    ch_coral_ref_unselected = SELECT_CORAL_REFERENCE.out.status
-        .filter { _meta, status_file -> !coralReferenceSelected(status_file) }
-        .map { meta, _status_file -> [meta, true] }
-    ch_curated_ref = Channel.fromPath("${projectDir}/assets/anthozoa_reference.gb", checkIfExists: true).first()
-    ch_fix_fallback = ch_fix_base.join(ch_coral_ref_unselected, by: 0)
-        .map { meta, genome, bed, _flag -> [meta, genome, bed] }
-        .combine(ch_curated_ref)
+    // Stage 2 -- coral-only, and gated on SEQUENCE, not on a label. A sample
+    // reaches the coral fixer only when SELECT_CORAL_REFERENCE actually matched it
+    // to a record in the curated Anthozoa DB.
+    //
+    // The bundled-anthozoan fallback is deliberately gone. It fired whenever the
+    // selector matched nothing, which is precisely the case where there is NO
+    // sequence evidence the sample is an anthozoan -- so it handed an Anthozoa
+    // reference to whatever happened to be flagged FIX. ANNOTATION_QC_GATE is not
+    // lineage-restricted (it runs on the whole meta.invertebrates branch and its
+    // per-PCG ORF loop is code-generic), so a mollusc or echinoderm with one
+    // broken ORF was one selector miss away from cross-phylum reference transfer.
+    // Those samples now stop at stage 1, which cannot import a gene the assembly
+    // does not carry.
+    //
+    // The coral fixer works from the stage-1 BED, not the raw one, so the two
+    // repairs compose instead of the second discarding the first.
+    ch_coral_fix_input = ch_fix_base
+        .map { meta, genome, _bed -> [meta, genome] }
+        .join(INVERT_ANNOTATION_FIX.out.bed)
+        .join(ch_selected_ref)
         .map { meta, genome, bed, ref -> [meta, genome, bed, ref] }
-
-    ch_coral_fix_input = ch_fix_selected.mix(ch_fix_fallback)
 
     CORAL_ANNOTATION_FIX ( ch_coral_fix_input )
+
+    // FIX samples that are not sequence-confirmed corals keep the stage-1 output.
+    ch_not_coral = SELECT_CORAL_REFERENCE.out.status
+        .filter { _meta, status_file -> !coralReferenceSelected(status_file) }
+        .map { meta, _status_file -> [meta, true] }
+    ch_invert_co1     = INVERT_ANNOTATION_FIX.out.co1_sequences.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
+    ch_invert_s12     = INVERT_ANNOTATION_FIX.out.s12_sequences.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
+    ch_invert_s16     = INVERT_ANNOTATION_FIX.out.s16_sequences.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
+    ch_invert_results = INVERT_ANNOTATION_FIX.out.results.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
 
     // Merge annotators: verts (EMMA, ND4L/ATP8- then tRNA-rescued) + PASS corals
     // (MITOS2) + FIX corals (fixer). co1/12S/16S come straight from EMMA for every
     // vertebrate sample -- neither rescue touches those, so BLAST/LCA is
     // unaffected by the rescue outcomes.
-    ch_annot_co1     = EMMA.out.co1_sequences.mix(ch_mitos_co1_pass, CORAL_ANNOTATION_FIX.out.co1_sequences)
-    ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, CORAL_ANNOTATION_FIX.out.s12_sequences)
-    ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, CORAL_ANNOTATION_FIX.out.s16_sequences)
-    ch_annot_results = ch_emma_results_trna.mix(ch_mitos_results_pass, CORAL_ANNOTATION_FIX.out.results)
+    ch_annot_co1     = EMMA.out.co1_sequences.mix(ch_mitos_co1_pass, ch_invert_co1, CORAL_ANNOTATION_FIX.out.co1_sequences)
+    ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, ch_invert_s12, CORAL_ANNOTATION_FIX.out.s12_sequences)
+    ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, ch_invert_s16, CORAL_ANNOTATION_FIX.out.s16_sequences)
+    ch_annot_results = ch_emma_results_trna.mix(ch_mitos_results_pass, ch_invert_results, CORAL_ANNOTATION_FIX.out.results)
 
     // Per-sample region count, emitted once per annotated sample (including the
     // 0-region case). Downstream this both sizes the result groups and identifies
@@ -422,11 +442,13 @@ workflow MITOGENOME_ANNOTATION {
         .map { meta, files -> [ meta, countAnnotatedRegions(files) ] }
     ch_annot_params  = EMMA.out.tool_params.mix(EMMA_GENE_RESCUE.out.tool_params, TRNA_RESCUE.out.tool_params,
                                                 ROTATE_ORIGIN.out.tool_params,
-                                                MITOS2.out.tool_params, CORAL_ANNOTATION_FIX.out.tool_params)
+                                                MITOS2.out.tool_params, INVERT_ANNOTATION_FIX.out.tool_params,
+                                                CORAL_ANNOTATION_FIX.out.tool_params)
     ch_annot_versions = EMMA.out.versions.mix(EMMA_GENE_RESCUE_GATE.out.versions, EMMA_GENE_RESCUE.out.versions,
                                               TRNA_RESCUE_GATE.out.versions, TRNA_SCAN.out.versions, TRNA_RESCUE.out.versions,
                                               ROTATE_ORIGIN.out.versions, MITOS2.out.versions,
-                                              ANNOTATION_QC_GATE.out.versions, CORAL_ANNOTATION_FIX.out.versions,
+                                              ANNOTATION_QC_GATE.out.versions, INVERT_ANNOTATION_FIX.out.versions,
+                                              CORAL_ANNOTATION_FIX.out.versions,
                                               SELECT_CORAL_REFERENCE.out.versions)
 
     //
