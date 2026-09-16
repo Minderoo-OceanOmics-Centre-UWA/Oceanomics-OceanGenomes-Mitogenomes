@@ -216,3 +216,111 @@ class ResolveSpeciesInfoTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# A second miniature dump, rooted properly at Metazoa, for the two flags the
+# draft-genomes samplesheet turns on. They default to off here on purpose: this
+# pipeline routes on the class being a real class name (INVERT_CLASSES,
+# MitoGeneticCode), so a phylum in that slot reads as unknown, i.e. vertebrate.
+#
+#   Metazoa > Arthropoda > Malacostraca > Decapoda > Caridea (infraorder)
+#   Metazoa > Placozoa (phylum with no class rank beneath it) > Trichoplax
+FLAG_NODES = [
+    (1, 1, "no rank"),
+    (33208, 1, "kingdom"),
+    (100, 33208, "phylum"),      # Arthropoda
+    (101, 100, "class"),         # Malacostraca
+    (102, 101, "order"),         # Decapoda
+    (103, 102, "infraorder"),    # Caridea
+    (200, 33208, "phylum"),      # Placozoa
+    (201, 200, "genus"),         # Trichoplax
+    (300, 1, "phylum"),          # Streptophyta, outside Metazoa
+    (301, 300, "genus"),         # Morus, the mulberry
+]
+
+FLAG_NAMES = [
+    (1, "root", "scientific name"),
+    (33208, "Metazoa", "scientific name"),
+    (100, "Arthropoda", "scientific name"),
+    (101, "Malacostraca", "scientific name"),
+    (102, "Decapoda", "scientific name"),
+    (103, "Caridea", "scientific name"),
+    (200, "Placozoa", "scientific name"),
+    (201, "Trichoplax", "scientific name"),
+    (300, "Streptophyta", "scientific name"),
+    (301, "Morus", "scientific name"),
+]
+
+
+def write_flag_taxdump(directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    with open(directory / "nodes.dmp", "w") as handle:
+        for taxid, parent, rank in FLAG_NODES:
+            handle.write(f"{taxid}\t|\t{parent}\t|\t{rank}\t|\t-\t|\n")
+    with open(directory / "names.dmp", "w") as handle:
+        for taxid, name, name_class in FLAG_NAMES:
+            handle.write(f"{taxid}\t|\t{name}\t|\t\t|\t{name_class}\t|\n")
+    return directory
+
+
+class OptionalFlagTests(unittest.TestCase):
+    """The flags are opt-in, and off is this pipeline's behaviour."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.taxdump = str(write_flag_taxdump(Path(cls._tmp.name) / "taxonkit_dbs"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_matched_taxid_is_returned(self):
+        # Needed by the draft-genomes samplesheet, whose taxon_id column feeds
+        # FCS-GX --tax-id. Unconditional: it costs nothing and hides nothing.
+        resolver = TaxdumpLineage(self.taxdump)
+        self.assertEqual(resolver.lineage_for_name("Decapoda")["matched_taxid"], 102)
+
+    def test_by_default_a_rank_outside_INDEXED_RANKS_is_not_found(self):
+        # 'Caridea' is an infraorder. The five-rank index does not hold it.
+        resolver = TaxdumpLineage(self.taxdump)
+        self.assertEqual(resolver.lineage_for_name("Caridea"), {})
+
+    def test_index_all_ranks_finds_it_and_still_reports_the_class(self):
+        resolver = TaxdumpLineage(self.taxdump, index_all_ranks=True)
+        lineage = resolver.lineage_for_name("Caridea")
+        self.assertEqual(lineage["class"], "Malacostraca")
+        self.assertEqual(lineage["order"], "Decapoda")
+        self.assertEqual(lineage["matched_rank"], "infraorder")
+        self.assertEqual(lineage["matched_taxid"], 103)
+
+    def test_index_all_ranks_bounds_the_index_to_the_clade(self):
+        # Morus the mulberry is outside Metazoa, so it is never indexed and can
+        # no longer collide with Morus the gannet.
+        resolver = TaxdumpLineage(self.taxdump, index_all_ranks=True)
+        self.assertEqual(resolver.lineage_for_name("Streptophyta"), {})
+        self.assertEqual(resolver.lineage_for_name("Morus"), {})
+
+    def test_by_default_a_phylum_never_lands_in_the_class_slot(self):
+        # Placozoa has no class rank. Reporting the phylum as the class here
+        # would route the sample as an unknown class, i.e. a vertebrate.
+        resolver = TaxdumpLineage(self.taxdump, index_all_ranks=True)
+        lineage = resolver.lineage_for_name("Trichoplax")
+        self.assertNotIn("class", lineage)
+
+    def test_class_falls_back_to_phylum_when_asked(self):
+        resolver = TaxdumpLineage(self.taxdump, index_all_ranks=True,
+                                  class_falls_back_to_phylum=True)
+        lineage = resolver.lineage_for_name("Trichoplax")
+        self.assertEqual(lineage["class"], "Placozoa")
+        # phylum stays in the dict, so a caller can tell the two apart.
+        self.assertEqual(lineage["phylum"], "Placozoa")
+
+    def test_a_real_class_still_wins_over_the_phylum_fallback(self):
+        resolver = TaxdumpLineage(self.taxdump, index_all_ranks=True,
+                                  class_falls_back_to_phylum=True)
+        lineage = resolver.lineage_for_name("Caridea")
+        self.assertEqual(lineage["class"], "Malacostraca")
+        self.assertEqual(lineage["phylum"], "Arthropoda")
