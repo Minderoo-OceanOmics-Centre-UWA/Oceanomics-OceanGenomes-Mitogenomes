@@ -96,13 +96,44 @@ class ProcessGffTests(unittest.TestCase):
         s = self._run(genes, trna_tolerance=3)
         self.assertEqual(s["passed"], "no")
 
-    def test_trna_missing_but_order_broken_not_tolerated(self):
+    def test_single_trna_displacement_is_advisory_not_fatal(self):
+        """A lone tRNA on the wrong side of its neighbour is an annotation
+        artefact, not a rearrangement.
+
+        This used to fail the whole annotation: order_correct was one boolean over
+        all 37 genes, so "one tRNA sits 200 bp out of place" and "the ND6/CYTB
+        block genuinely moved" were indistinguishable. NOVA_260909_LA failed three
+        complete fish mitogenomes on it, OG2647 being exactly this case (TM/TV).
+        Swapping ND1 and TI is the same shape: the minimal explanation is one tRNA
+        moving one position, so it grades as trna_displacement and passes with the
+        deviation recorded.
+        """
         genes = [g for g in REF if g != "TP"]
-        genes[5], genes[6] = genes[6], genes[5]   # scramble two genes
+        genes[5], genes[6] = genes[6], genes[5]   # ND1 <-> TI
         s = self._run(genes, trna_tolerance=2)
+        self.assertEqual(s["order_status"], "trna_displacement")
+        self.assertIn("TI", s["order_deviations"])
+        self.assertEqual(s["passed"], "yes")
+
+    def test_pcg_block_rearrangement_still_blocks(self):
+        """A displaced PCG/rRNA block is a real rearrangement and stays fatal.
+
+        The OG2965 case: the ND6/CYTB block sits after ND5 instead of before it.
+        Grading must not let the tRNA tolerance absorb this.
+        """
+        genes = [g for g in REF if g != "TP"]
+        i, j = genes.index("ND6"), genes.index("CYTB")
+        genes[i], genes[j] = genes[j], genes[i]
+        s = self._run(genes, trna_tolerance=2)
+        self.assertIn(s["order_status"], ("rearranged_block", "rearranged_major"))
         self.assertEqual(s["order_correct"], "no")
         self.assertEqual(s["passed"], "no")
-        self.assertEqual(s["trna_advisory"], "no")
+
+    def test_reference_order_grades_as_reference(self):
+        s = self._run(list(REF), trna_tolerance=0)
+        self.assertEqual(s["order_status"], "reference")
+        self.assertEqual(s["order_deviations"], "none")
+        self.assertEqual(s["passed"], "yes")
 
     def test_tolerance_zero_requires_complete(self):
         genes = [g for g in REF if g != "TP"]

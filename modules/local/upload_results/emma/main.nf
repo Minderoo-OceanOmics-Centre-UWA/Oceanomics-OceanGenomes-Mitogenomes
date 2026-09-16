@@ -34,13 +34,35 @@ process PUSH_MTDNA_ANNOTATION_RESULTS {
     // meta with no resolved code.
     def class_arg = meta.class ? "--class '${meta.class}'" : ''
     def gcode_arg = meta.genetic_code ? "--genetic-code ${meta.genetic_code}" : ''
-    def effective_args = ["annotation_stats.py ${args} ${class_arg} ${gcode_arg} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.mt_assembly_prefix}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
+    // Order and phylum key the lineage gene expectations
+    // (assets/lineage_gene_expectations.json): mtMutS is required for the
+    // octocoral orders but NOT for Anthozoa as a whole, and ATP9 is advisory for
+    // Porifera. A blank rank simply matches no rule, which is the common case.
+    def order_arg = meta.order ? "--order '${meta.order}'" : ''
+    def phylum_arg = meta.phylum ? "--phylum '${meta.phylum}'" : ''
+    // The cds/ directory drives the final annotation-integrity check, which
+    // classifies EVERY exported CDS under this sample's own genetic code. Without
+    // it the check reports not_evaluated rather than silently passing.
+    def cds_arg = 'cds'
+    def effective_args = ["annotation_stats.py ${args} ${class_arg} ${gcode_arg} ${order_arg} ${phylum_arg} --cds-dir ${cds_arg} *.gff proteins", "push_emma_annotation_results.py ${args2} ${config} ${meta.id} ${meta.mt_assembly_prefix}.annotation_stats.csv"].findAll { it?.trim() }.join('; ')
     """
     # Compile the statistics
+    # --conversion-audit is only passed when mitos_to_emma.py actually produced
+    # one (MITOS-annotated samples); EMMA samples have no audit and the column
+    # reports 'none'.
+    audit_arg=""
+    if [ -f mitos_conversion_audit.tsv ]; then
+        audit_arg="--conversion-audit mitos_conversion_audit.tsv"
+    fi
+
     annotation_stats.py \\
         $args \\
         ${class_arg} \\
         ${gcode_arg} \\
+        ${order_arg} \\
+        ${phylum_arg} \\
+        --cds-dir ${cds_arg} \\
+        \$audit_arg \\
         *.gff \\
         proteins
 
