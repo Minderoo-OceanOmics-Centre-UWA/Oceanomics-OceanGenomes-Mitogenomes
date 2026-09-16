@@ -49,9 +49,14 @@ nextflow_workflow {
                 { assert anchor('S2') == 'RNR2' },
                 { assert anchor('S3') == 'CO1' },
                 { assert anchor('S4') == 'CO1' },
-                // Actiniaria's own tally is n=15, below min_records, so it falls to the
-                // class (no majority) and then to the default rather than pinning ND5.
-                { assert anchor('S5') == 'CO1' },
+                // Actiniaria resolves at its OWN order level: n=54, 79.6% ND5
+                // (43 ND5 / 6 RNR2 / 4 CO1) in the current generated table, which
+                // clears both min_records and min_fraction. It used to fall through
+                // to the class and then the default on an n=15 tally; the anchors
+                // asset is regenerated from assets/refdb/ and that database has
+                // grown since. Anthozoa as a CLASS still has no majority (plurality
+                // RNR2 at 30.9%) and still defaults to CO1, which S1 and S3 cover.
+                { assert anchor('S5') == 'ND5' },
 
                 // Sponges are the other non-cox1 case, and they arrive by two different
                 // routes: Demospongiae clears the class bar on its own (92.7% of 41),
