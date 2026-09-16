@@ -24,6 +24,94 @@ first drafted on 2026-08-18; the second is that original entry, kept intact. Bot
 
 ### Work that landed after 2026-08-18
 
+#### `Added`
+
+- **Invertebrate annotation remediation (NOVA_260909_LA).** The batch produced 72 assemblies from 80 samples
+  and cleared 3. Seven changes, each traced to a measured cause in that run:
+  - `bin/orf_snap.py`: the reference-free ORF boundary snap, lifted out of `bin/coral_fix_bed.py` so it is no
+    longer reachable only down the coral branch. `nad5` joins the snap set; the coral fixer now declares its
+    own exclusion via `snap_pcg_rows(skip=...)` instead of the set being a module constant.
+  - `bin/invert_fix_bed.py` + `modules/local/invert_annotation_fix/`: stage 1 of annotation repair, run for
+    every invertebrate the QC gate flags FIX. 17 assemblies in this batch carried a genuinely broken CDS
+    (13 Porifera, plus Malacostraca and Asteroidea) and not one was a coral, so none could reach the only
+    repair code in the pipeline. Five Demospongiae shared one systematic MITOS boundary miscall.
+  - `bin/gene_names.py`: internal gene key to INSDC `/gene` spelling. `MTMUTS` is uppercase internally so it
+    can index features, filenames and columns, but INSDC requires mixed-case `mtMutS`; the case is restored
+    at the submission boundary, from a map rather than a special case.
+  - `bin/lineage_expectations.py` + `assets/lineage_gene_expectations.json`: rank-keyed expectations for genes
+    outside the vertebrate set. mtMutS is required for the octocoral orders and NOT for Anthozoa as a whole
+    (300/302 Octocorallia reference records carry it, 0/335 Hexacorallia); ATP9 is advisory for Porifera.
+  - `bin/nominal_rank.py` + `bin/taxonomic_evidence.py`: a non-validating evidence view. All 68 validation
+    records in this batch gave the identical reason, "not validated (no Found_in_blast_YN=Yes)", for three
+    situations needing three different actions. 61 of 68 assemblies simply had no species-level claim to test.
+  - `bin/mito_run_snapshot.py`: records a completed run so a later run is comparable mechanically.
+  - `sql/023_mitogenome_data_annotation_integrity.sql`: additive columns for the integrity verdict, lineage
+    expectations, conversion audit, graded gene order, and ATP9/mtMutS.
+
+#### `Fixed`
+
+- **`START_CODONS_BY_CODE[9]` listed only ATG/GTG.** Across this batch's echinoderms the observed initiators
+  are ND3 `ATT` x7, ND4L `ATC` x5, ND1 `GTG` x6: `ATT`/`ATC`/`TTG` are the majority of real starts and were
+  all rejected, failing 8 otherwise-complete assemblies. `PLAUSIBLE_MITO_STARTS` also moved into
+  `bin/orf_utils.py` so the QC layer and the submission layer can no longer disagree about what a valid start
+  is, which is exactly how the code-9 starts came to be rejected by one and handled correctly by the other.
+- **Documented lineage-specific initiators** (`LINEAGE_ALT_STARTS`): decapod CO1 opens on `CGA` in roughly
+  half this batch's crustaceans, which no translation table lists, so 9 samples were destined to fail
+  table2asn by hand. Entries require published evidence named in a comment.
+- **`bin/mitos_to_emma.py` silently dropped every feature it could not map.** 22 `atp9`, 3 `msh1`, 31 `OH`,
+  5 `OL`, 4 `gpI`/`gpII` and 2 `lagli` were destroyed across 24 samples, with the only signal an aggregate
+  warning that fires when zero features survive. Now: `atp9`/`msh1` map to real CDS, origins and introns are
+  exported as INSDC `rep_origin`/`intron` features with no gene wrapper, `lagli` as a `misc_feature`, and
+  every raw feature is accounted for in a new `mitos_conversion_audit.tsv`. `PRODUCT` lookup fails loudly
+  rather than shipping the bare gene name as a product.
+- **Separate loci of one gene merged into one impossible feature.** `features` is now keyed on
+  `(gene, locus_index)` with gap-and-strand clustering; MITOS part suffixes still force one locus. A split
+  origin is written as two `rep_origin` features rather than one span across the gap (the two rows can even
+  sit on opposite strands).
+- **`order_correct` was one boolean over 37 genes,** so a single displaced tRNA and a real block
+  rearrangement were indistinguishable and equally fatal; it failed three complete fish mitogenomes here.
+  Now graded via a tRNA-weighted longest common subsequence, so OG2647 reads as `trna_displacement` and
+  passes while OG2965's ND6/CYTB move stays blocking and is named.
+- **Nothing re-checked the published annotation.** `annotation_qc_gate.py` runs on raw MITOS2 output before
+  any repair, covers only the fixed 13-PCG list, and always exits 0 with exceptions degrading to PASS: it is
+  a router, not a verdict. `bin/annotation_stats.py` now inspects every exported CDS post-merge, detects
+  whether the annotator exports stop codons (EMMA does not; assuming otherwise reports a missing stop on
+  every vertebrate CDS), and emits `annotation_integrity_status`/`annotation_integrity_issues`.
+- **Stale database rows after a rerun.** `push_emma_annotation_results.py` refused to update any row that
+  already held annotation data unless `--force`, so a rerun that fixed an annotation left the old values in
+  place. A complete incoming row now supersedes the whole annotation block atomically, with
+  `annotation_stats_version` and `annotation_updated_at` recorded, and a test asserts the INSERT and
+  `DO UPDATE` column lists agree except for the conflict key.
+- **Stale published output after a route change.** The taxonomy guard fired correctly for OG2618
+  (`Actinaria sp.`, a typo for Actiniaria) but the pre-fix output was never invalidated, so a sea anemone
+  stayed published as an EMMA-annotated vertebrate under a corrected samplesheet. A `route.json` is now
+  recorded beside each assembly and mismatched output is quarantined rather than reused;
+  `taxonomy_resolution.tsv` is refreshed from the samplesheet actually in use, and unresolved labels get
+  edit-distance near-miss suggestions.
+- **Cross-phylum reference transfer guard.** `CORAL_ANNOTATION_FIX` now runs only for samples
+  `SELECT_CORAL_REFERENCE` matched by sequence. The bundled-anthozoan fallback fired precisely when nothing
+  matched, i.e. when there was no evidence the sample was an anthozoan at all.
+
+
+- `bin/taxdump_lineage.py` gained two opt-in constructor flags and one new return field, so
+  the draft-genomes pipeline can share this file verbatim rather than forking it.
+
+  `index_all_ranks` indexes every scientific name below a bounding clade (Metazoa by
+  default) instead of only the five ranks a curated `species` row can carry, which is what
+  it takes to resolve a nominal name sitting at a rank NCBI uses and the species table does
+  not -- `Caridea` is an infraorder, so the default index does not hold it at all.
+  `class_falls_back_to_phylum` reports the phylum in the `class` slot for the lineages where
+  NCBI has no class rank.
+
+  **Both default to off, and this pipeline leaves them off.** `INVERT_CLASSES` and
+  `MitoGeneticCode` route on the class being a real class name, so a phylum there reads as
+  an unknown class, i.e. a vertebrate: wrong genetic code, wrong annotator, wrong BLAST
+  database. Turning them on here would need that routing revisited first.
+
+  `lineage_for_name()` now also returns `matched_taxid`, the taxid of the node that matched
+  at whatever rank it sits. Unconditional, because it costs nothing and the draft-genomes
+  samplesheet needs it for its `taxon_id` column. Nothing in this pipeline reads it.
+
 #### `Fixed`
 
 - Gene and CDS extraction no longer labels every sample with the vertebrate genetic code.
