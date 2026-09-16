@@ -363,6 +363,7 @@ workflow UPLOAD_RESULTS {
     ch_upload_status_files = Channel.empty()
         .mix(PUSH_MTDNA_ASSM_RESULTS.out.upload.map { _meta, file -> file })
         .mix(PUSH_MTDNA_ANNOTATION_RESULTS.out.upload.map { _meta, f -> f })
+        .mix(SPECIES_VALIDATION.out.taxonomic_evidence.map { _meta, f -> f })
         .mix(SPECIES_VALIDATION.out.upload.map { _meta, f -> f })
         .mix(PUSH_LCA_BLAST_RESULTS.out.upload)
         .mix(PUSH_LCA_RAW_RESULTS.out.upload)

@@ -19,6 +19,7 @@ process SPECIES_VALIDATION {
     tuple val(meta), path("lca_results.${meta.mt_assembly_prefix ?: meta.id}.tsv"), emit: summary
     tuple val(meta), path("lca_combined.${meta.mt_assembly_prefix ?: meta.id}.tsv"), path("blast_combined.${meta.mt_assembly_prefix ?: meta.id}.tsv"), emit: full
     tuple val(meta), path("${meta.mt_assembly_prefix ?: meta.id}.species_validation.upload.txt"), emit: upload
+    tuple val(meta), path("taxonomic_evidence.${meta.mt_assembly_prefix ?: meta.id}.tsv"), emit: taxonomic_evidence
     tuple val(meta), path("11_species_validation.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml", emit: versions
 
@@ -41,6 +42,32 @@ process SPECIES_VALIDATION {
         "${blast_files_str}" \\
         > ${mt_assembly_prefix}.species_validation.upload.txt
 
+    # Non-validating evidence view. Derived ONLY from the files species_validation.py
+    # just wrote; it has no database connection and no write path to
+    # lca_validation, Found_in_blast_YN, proceed_qc or submission metadata. It
+    # exists because "not validated (no Found_in_blast_YN=Yes)" was the identical
+    # reason given for 68/68 assemblies in NOVA_260909_LA, covering three quite
+    # different situations that need three different actions.
+    #
+    # --validated is read back OUT of the authoritative result so the report can
+    # agree with it; this step never sets it.
+    validated_flag=""
+    if grep -q \$'\tYes\$' lca_results.${mt_assembly_prefix}.tsv 2>/dev/null; then
+        validated_flag="--validated"
+    fi
+
+    taxonomic_evidence.py \\
+        --assembly "${mt_assembly_prefix}" \\
+        --og-id "${meta.id}" \\
+        --nominal "${meta.nominal_species_id ?: ''}" \\
+        --blast "blast_combined.${mt_assembly_prefix}.tsv" \\
+        --lca "lca_combined.${mt_assembly_prefix}.tsv" \\
+        --class "${meta.class ?: ''}" \\
+        --family "${meta.family ?: ''}" \\
+        --order "${meta.order ?: ''}" \\
+        \$validated_flag \\
+        --out "taxonomic_evidence.${mt_assembly_prefix}.tsv"
+
     cat <<-END_TOOL_PARAMS > 11_species_validation.tool_params_mqcrow.html
     <tr><td>Species Validation</td><td><samp>${effective_args}</samp></td><td>Compares filtered BLAST/LCA calls against the nominal species for ${meta.id}.</td></tr>
     END_TOOL_PARAMS
@@ -49,6 +76,7 @@ process SPECIES_VALIDATION {
     "${task.process}":
         python: \$(python --version | sed 's/Python //')
         species_validation: "1.0.0"
+        taxonomic_evidence: "1.0.0"
     END_VERSIONS
     """
 
@@ -63,6 +91,7 @@ process SPECIES_VALIDATION {
     touch lca_combined.${mt_assembly_prefix}.tsv
     touch blast_combined.${mt_assembly_prefix}.tsv
     touch ${mt_assembly_prefix}.species_validation.upload.txt
+    touch taxonomic_evidence.${mt_assembly_prefix}.tsv
 
     cat <<-END_TOOL_PARAMS > 11_species_validation.tool_params_mqcrow.html
     <tr><td>Species Validation</td><td><samp>${effective_args}</samp></td><td>Compares filtered BLAST/LCA calls against the nominal species for ${meta.id}.</td></tr>
