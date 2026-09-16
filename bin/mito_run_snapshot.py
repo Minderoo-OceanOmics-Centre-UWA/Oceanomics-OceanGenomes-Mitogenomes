@@ -24,6 +24,7 @@ Usage:
 import argparse
 import collections
 import csv
+import json
 import glob
 import os
 import re
@@ -39,12 +40,49 @@ from orf_utils import classify_cds
 LINEAGE_FEATURES = ("atp9", "msh1", "mutS", "mtMutS", "OH", "OL", "gpI", "gpII", "lagli")
 
 
-def read_taxonomy(run):
+def samplesheet_from_params(run):
+    """The --input the run was actually launched with, from pipeline_info.
+
+    A run launched with --input has no <outdir>/samplesheet/ at all, because the
+    sheet lives with whichever run created it. Without this the genetic codes
+    resolve to nothing, every CDS is skipped, and the snapshot reports zero broken
+    CDS -- which reads as "clean" and is indistinguishable from a real pass. That
+    is the wrong direction for a tool whose whole job is to be compared against.
+    """
+    for params in sorted(Path(run).glob("pipeline_info/params_*.json"), reverse=True):
+        try:
+            with open(params) as fh:
+                value = json.load(fh).get("input")
+        except (OSError, ValueError):
+            continue
+        if value and Path(value).is_file():
+            return Path(value)
+    return None
+
+
+def read_taxonomy(run, samplesheet=None):
+    """{og_id: {class, genetic_code, ...}}, from whichever source the run has.
+
+    taxonomy_resolution.tsv first, since it records how each class was resolved;
+    the samplesheet actually in use as the fallback, which is the only source a
+    --input run has. Returns {} when neither is available, and the caller reports
+    the CDS scan as not performed rather than as clean.
+    """
     path = Path(run) / "samplesheet" / "taxonomy_resolution.tsv"
-    if not path.is_file():
+    if path.is_file():
+        with open(path) as fh:
+            return {r["sample"]: r for r in csv.DictReader(fh, delimiter="\t")}
+
+    sheet = Path(samplesheet) if samplesheet else samplesheet_from_params(run)
+    if not sheet or not sheet.is_file():
         return {}
-    with open(path) as fh:
-        return {r["sample"]: r for r in csv.DictReader(fh, delimiter="\t")}
+    with open(sheet) as fh:
+        rows = {}
+        for r in csv.DictReader(fh):
+            key = r.get("og_id") or r.get("sample")
+            if key:
+                rows[key] = r
+        return rows
 
 
 def read_fasta(path):
@@ -64,10 +102,10 @@ def bare(name):
     return re.sub(r"[-_](?:\d+|[a-z])$", "", re.sub(r"\(.*?\)$", "", name.strip()))
 
 
-def snapshot(run, out):
+def snapshot(run, out, samplesheet=None):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    tax = read_taxonomy(run)
+    tax = read_taxonomy(run, samplesheet)
 
     # ---- QC verdicts -----------------------------------------------------
     assemblies = []
@@ -198,8 +236,12 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", required=True, help="pipeline --outdir of a completed run")
     ap.add_argument("--out", required=True, help="snapshot directory to write")
+    ap.add_argument("--samplesheet", default=None,
+                    help="samplesheet to take class/genetic_code from. Only needed "
+                         "when the run has neither samplesheet/taxonomy_resolution.tsv "
+                         "nor a readable --input in pipeline_info/params_*.json.")
     args = ap.parse_args()
-    snapshot(args.run, args.out)
+    snapshot(args.run, args.out, args.samplesheet)
     return 0
 
 
