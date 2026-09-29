@@ -1,0 +1,24 @@
+// Split out of main.nf.test: nf-test executes only the LAST nextflow_workflow
+// block in a file, so keeping both workflows in one file silently skipped every
+// SAMPLE_POLICY test above it.
+nextflow_workflow {
+
+    name "Test shared-prerequisite failure policy"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "SHARED_POLICY"
+
+    test("shared prerequisite failure terminates the workflow") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.value('failure')
+                """
+            }
+        }
+
+        then {
+            assert workflow.failed
+        }
+    }
+}
