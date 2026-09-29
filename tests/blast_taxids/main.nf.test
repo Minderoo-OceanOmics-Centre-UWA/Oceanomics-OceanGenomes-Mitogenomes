@@ -1,0 +1,68 @@
+nextflow_workflow {
+
+    name "Test BLAST taxdb staging and -taxids preflight"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "BLAST_TAXDB_FANOUT"
+
+    test("taxdb reaches every blastn task, not just the first") {
+        options "-stub"
+
+        when {
+            params {
+                blast_ext_args = ''
+            }
+            workflow {
+                """
+                def db = file("\$projectDir/tests/blast_taxids/db")
+                input[0] = Channel.of(
+                    [[id:'S1'], file("\$projectDir/tests/blast_taxids/q.fa"), 'CO1', 'S1.ann', '/tmp/fake_db'],
+                    [[id:'S2'], file("\$projectDir/tests/blast_taxids/q.fa"), '12s', 'S2.ann', '/tmp/fake_db'],
+                    [[id:'S3'], file("\$projectDir/tests/blast_taxids/q.fa"), '16s', 'S3.ann', '/tmp/fake_db']
+                )
+                input[1] = Channel.of([ file("\$db/taxdb.btd"), file("\$db/taxdb.bti") ])
+                input[2] = Channel.of(file("\$db/taxonomy4blast.sqlite3"))
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // The regression this guards: a bare .mix() would run 1 task, not 3.
+                { assert workflow.trace.tasks().findAll { it.name.contains('BLAST_BLASTN') }.size() == 3 },
+                { assert workflow.out.filtered.size() == 3 },
+                // All three taxdb files must be staged into every task.
+                { assert workflow.trace.succeeded().size() == 3 }
+            )
+        }
+    }
+
+    test("-taxids without taxonomy4blast.sqlite3 fails instead of returning nothing") {
+        when {
+            params {
+                blast_ext_args = '-taxids 33208'
+            }
+            workflow {
+                """
+                def db = file("\$projectDir/tests/blast_taxids/db")
+                input[0] = Channel.of(
+                    [[id:'S1'], file("\$projectDir/tests/blast_taxids/q.fa"), 'CO1', 'S1.ann', '/tmp/fake_db']
+                )
+                // Deliberately withhold the sqlite3: this is the exact staging that
+                // silently disabled -taxids for 184 searches.
+                input[1] = Channel.of([ file("\$db/taxdb.btd"), file("\$db/taxdb.bti") ])
+                input[2] = Channel.empty()
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.failed },
+                { assert workflow.stdout.any { it.contains('taxonomy4blast.sqlite3') } ||
+                         workflow.errorReport.contains('taxonomy4blast.sqlite3') }
+            )
+        }
+    }
+}

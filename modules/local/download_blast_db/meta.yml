@@ -1,5 +1,5 @@
 name: download_blast_db
-description: Download and cache the NCBI BLAST taxonomy database (taxdb.btd/bti).
+description: Download and cache the NCBI BLAST taxonomy database (taxdb.btd/bti plus taxonomy4blast.sqlite3).
 keywords: [download, blast, taxonomy, database]
 tools:
   - name: wget
@@ -18,9 +18,14 @@ output:
   - taxdb_file:
       type: file
       description: |
-        taxonomy4blast.sqlite3 from taxdb.tar.gz. Optional: blastn only needs
-        taxdb.btd/taxdb.bti, and marking it optional lets a cache holding just
-        those two satisfy storeDir instead of forcing a re-download every run.
+        taxonomy4blast.sqlite3 from taxdb.tar.gz. Required, and it must be staged
+        into the blastn task alongside taxdb.btd/taxdb.bti: -taxids resolves the
+        taxonomy subtree from this file, and because taxdb.* is staged into the task
+        CWD, BLAST looks there rather than beside the -db path. Omitting it does not
+        degrade gracefully -- blastn prints "The -taxids command line option requires
+        additional data files", writes an empty result table, and still exits 0, which
+        silently disabled the Metazoa filter for 184 of 211 searches in
+        NOVA_260909_LA_mitogenomes-3.
       pattern: "taxonomy4blast.sqlite3"
 authors: ["Tyler Peirce"]
 maintainers: ["Tyler Peirce"]

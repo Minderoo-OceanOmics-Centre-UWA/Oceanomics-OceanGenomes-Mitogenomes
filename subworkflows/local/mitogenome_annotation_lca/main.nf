@@ -135,7 +135,23 @@ workflow MITOGENOME_ANNOTATION {
 
     DOWNLOAD_BLAST_DB(Channel.value("taxdb"))
 
+    // taxdb.btd/bti give blastn its sscinames/scomnames columns; taxonomy4blast.sqlite3
+    // is what `-taxids` needs (see BLAST_BLASTN's invertebrate ext.args branch in
+    // conf/modules.config). db_files globs "taxdb*", which does NOT match the sqlite3,
+    // and staging taxdb.* into the task CWD makes BLAST resolve taxonomy from the CWD
+    // instead of from the -db directory -- so leaving the sqlite3 out silently disabled
+    // -taxids for all 184 core_nt searches of NOVA_260909_LA (empty table, exit 0).
+    //
+    // .collect() is load-bearing, not decoration: db_files is a value channel today
+    // only by the all-value-inputs singleton rule, and a bare .mix() yields a QUEUE
+    // channel of two emissions, which a per-sample process consumes ONCE -- starving
+    // every blastn task but the first and hanging the run. .collect() also flattens
+    // the nested emission, so path(taxdb) receives a flat 3-file list and the module
+    // signature is unchanged. .first() pins it as a value channel explicitly.
     ch_blast_db = DOWNLOAD_BLAST_DB.out.db_files
+        .mix(DOWNLOAD_BLAST_DB.out.taxdb_file)
+        .collect()
+        .first()
 
     // 
     // MODULE: Download taxonkit database

@@ -1,0 +1,41 @@
+// Separate file because nf-test executes only the LAST nextflow_workflow block in a
+// .nf.test file (the same trap that had been silently skipping tests/failure_policy's
+// SAMPLE_POLICY tests).
+nextflow_workflow {
+
+    name "Test BLAST_BLASTN real search path"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "BLAST_REAL_SEARCH"
+
+    test("real blastn search succeeds and produces filtered output") {
+        when {
+            params {
+                blast_ext_args = '-outfmt "6 qseqid sseqid staxids sscinames scomnames sskingdoms pident length qlen slen mismatch gapopen gaps qstart qend sstart send stitle evalue bitscore qcovs qcovhsp"'
+            }
+            workflow {
+                """
+                input[0] = Channel.value(file("\$projectDir/tests/blast_taxids/subject.fa"))
+                input[1] = Channel.of([[id:'S1'], file("\$projectDir/tests/blast_taxids/q.fa"), 'CO1', 'S1.ann'])
+                input[2] = Channel.of(
+                    file("\$projectDir/tests/blast_taxids/db/taxdb.btd"),
+                    file("\$projectDir/tests/blast_taxids/db/taxdb.bti")
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.filtered.size() == 1 },
+                { assert workflow.out.summary.size() == 1 },
+                // Must not pass vacuously on an empty table: the fixture is a real CO1
+                // CDS searched against itself, so there must be at least one hit that
+                // survives the module's awk length/identity filter.
+                { assert path(workflow.out.filtered[0][1]).readLines().size() > 0 },
+                { assert path(workflow.out.summary[0]).text.contains('Hits') }
+            )
+        }
+    }
+}

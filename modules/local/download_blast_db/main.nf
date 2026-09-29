@@ -8,7 +8,14 @@ process DOWNLOAD_BLAST_DB {
 
     output:
     path "${db_name}*"           , emit: db_files
-    path "taxonomy4blast.sqlite3", emit: taxdb_file, optional: true
+    // Required, NOT optional. blastn's -taxids filter resolves taxonomy from this
+    // file, and because taxdb.* is staged into the task CWD, BLAST looks in the CWD
+    // rather than beside the -db path -- so the sqlite3 must be staged with them.
+    // Leaving it optional is what silently disabled -taxids for 184 of 211 searches
+    // in NOVA_260909_LA_mitogenomes-3 (empty result table, exit 0). Making it
+    // optional again would also starve BLAST_BLASTN's taxdb input on an empty
+    // channel and hang the run, which is worse than the bug it hides.
+    path "taxonomy4blast.sqlite3", emit: taxdb_file
 
     script:
     db_path = params.blast_db_dir
@@ -20,12 +27,9 @@ process DOWNLOAD_BLAST_DB {
     # This branch covers a partially-populated cache: reuse what is there rather
     # than re-pulling 62 MB. It must populate the work dir, not merely skip, because
     # the declared taxdb* outputs are resolved from the work dir.
-    if [ -f "${db_path}/taxdb.btd" ] && [ -f "${db_path}/taxdb.bti" ]; then
+    if [ -f "${db_path}/taxdb.btd" ] && [ -f "${db_path}/taxdb.bti" ] && [ -f "${db_path}/taxonomy4blast.sqlite3" ]; then
         echo "Reusing cached taxonomy database from ${db_path}"
-        cp -f "${db_path}"/taxdb.btd "${db_path}"/taxdb.bti .
-        if [ -f "${db_path}/taxonomy4blast.sqlite3" ]; then
-            cp -f "${db_path}/taxonomy4blast.sqlite3" .
-        fi
+        cp -f "${db_path}"/taxdb.btd "${db_path}"/taxdb.bti "${db_path}"/taxonomy4blast.sqlite3 .
     else
         echo "Downloading fresh taxonomy database..."
 
@@ -48,8 +52,20 @@ process DOWNLOAD_BLAST_DB {
         rm -f taxdb.tar.gz taxdb.tar.gz.md5
     fi
 
-    # Verify files
-    ls -la taxdb.*
+    # Verify all three files, not just the two that taxdb.* globs. This process is
+    # upstream of every blastn task, so a cache missing the sqlite3 costs one failed
+    # task here instead of a whole cohort of silently empty -taxids searches.
+    missing=""
+    for f in taxdb.btd taxdb.bti taxonomy4blast.sqlite3; do
+        [ -s "\$f" ] || missing="\$missing \$f"
+    done
+    if [ -n "\$missing" ]; then
+        echo "ERROR: taxonomy database incomplete after staging; missing or empty:\$missing" >&2
+        echo "       Cache dir (--blast_db_dir): ${db_path}" >&2
+        echo "       All three files ship in taxdb.tar.gz; remove the cache dir to force a clean re-download." >&2
+        exit 1
+    fi
+    ls -la taxdb.btd taxdb.bti taxonomy4blast.sqlite3
     """
 
     stub:
