@@ -182,10 +182,11 @@ def control_region(gene_intervals, L):
 def find_tandem_repeat(fasta_path, workdir, min_len, min_pident):
     """Self-align the assembly to locate a forward tandem-repeat array.
 
-    Returns a dict (array_start, array_end, array_len, unit_bp, copies, identity)
-    or None if no qualifying array is found. The fundamental repeat unit is the
-    smallest positive query/subject offset among off-diagonal self-hits; a tandem
-    array of unit U self-aligns at offsets U, 2U, 3U..."""
+    Returns a dict (array_start, array_end, array_len, unit_bp, copies, identity,
+    n_hsps) or None if no qualifying array is found. A tandem array of unit U
+    self-aligns at offsets U, 2U, 3U..., so the off-diagonal self-hits are clustered
+    on the offset they imply and the largest cluster is reported; its representative
+    offset is the fundamental period."""
     db = os.path.join(workdir, "selfdb")
     run(
         ["makeblastdb", "-in", fasta_path, "-dbtype", "nucl", "-out", db],
@@ -215,16 +216,36 @@ def find_tandem_repeat(fasta_path, workdir, min_len, min_pident):
         hits.append((qs, qe, ss, se, ln, pid))
     if not hits:
         return None
-    start = min(min(h[0], h[2]) for h in hits)
-    end = max(max(h[1], h[3]) for h in hits)
-    unit = min(h[2] - h[0] for h in hits)  # smallest offset = fundamental period
+    # Cluster the HSPs on the offset each implies (sstart - qstart). A tandem array of
+    # unit U self-aligns at offsets U, 2U, 3U..., so its HSPs agree on one fundamental
+    # offset; unrelated repeats elsewhere each contribute their own. Reducing over ALL
+    # hits instead (min/max bounds, min offset as the period) let two short repeats near
+    # opposite ends report an array spanning the whole molecule with an arbitrarily small
+    # "period", which made `copies` meaningless. Kept in step with
+    # check_getorganelle.find_tandem_repeat.
+    tol = max(min_len // 10, 20)
+    clusters = {}
+    for h in sorted(hits, key=lambda x: x[2] - x[0]):
+        off = h[2] - h[0]
+        for key in clusters:
+            if abs(off - key) <= tol:
+                clusters[key].append(h)
+                break
+        else:
+            clusters[off] = [h]
+    # The array that explains the excess length is the one covering the most bases.
+    best = max(clusters.values(), key=lambda g: sum(x[4] for x in g))
+    start = min(min(h[0], h[2]) for h in best)
+    end = max(max(h[1], h[3]) for h in best)
+    offsets = sorted(h[2] - h[0] for h in best)
+    unit = offsets[len(offsets) // 2]  # representative offset of the array = period
     array_len = end - start + 1
     # Require a genuine array (at least ~2 units long) to avoid calling a single
     # short incidental self-match a tandem repeat.
     if unit <= 0 or array_len < max(2 * unit, min_len):
         return None
-    total_w = sum(h[4] for h in hits)
-    identity = sum(h[4] * h[5] for h in hits) / total_w if total_w else 0.0
+    total_w = sum(h[4] for h in best)
+    identity = sum(h[4] * h[5] for h in best) / total_w if total_w else 0.0
     return {
         "array_start": start,
         "array_end": end,
@@ -232,6 +253,7 @@ def find_tandem_repeat(fasta_path, workdir, min_len, min_pident):
         "unit_bp": unit,
         "copies": round(array_len / unit, 1),
         "identity": round(identity, 1),
+        "n_hsps": len(best),
     }
 
 
@@ -300,13 +322,29 @@ def assess_length_and_repeats(seq, ref_len, gb_path, workdir, args):
     #     a partial duplication or NUMT.
     in_cr = out["repeat_in_control_region"]
     array_frac = repeat["array_len"] / L if repeat else 0.0
-    if length_anomaly and repeat and array_frac >= 0.8 and ref_len and L / ref_len >= 1.6:
+    # A tandem GENOME duplication has a period at the genome scale: the measured repeat
+    # unit is about the reference length AND about L/round(ratio). Without that test an
+    # over-length assembly carrying any large incidental repeat was called a concatemer
+    # and handed a trim of "everything past ref_len" derived from the reference alone,
+    # which asserts that the monomer is the first ref_len bases. Kept in step with
+    # check_getorganelle.py, so one assembly cannot be a concatemer on one path only.
+    monomer_period = False
+    if repeat and ref_len:
+        expected = L / max(2, round(L / ref_len))
+        monomer_period = (
+            abs(repeat["unit_bp"] - ref_len) <= 0.20 * ref_len
+            and abs(repeat["unit_bp"] - expected) <= 0.20 * expected
+        )
+    if (length_anomaly and repeat and array_frac >= 0.8 and ref_len
+            and L / ref_len >= 1.6 and monomer_period):
         out["anomaly_type"] = "concatemer"
-        out["suggested_trim_region"] = f"{ref_len + 1}-{L}"
+        # Period-derived, not reference-derived: the measured unit is the monomer.
+        out["suggested_trim_region"] = f"{repeat['unit_bp'] + 1}-{L}"
         out["curation_suggestion"] = (
-            f"Assembly is {round(L / ref_len, 2)}x the reference (tandem genome "
-            f"duplication / concatemer). Collapse to a single monomer (~{ref_len} bp), "
-            f"removing positions {out['suggested_trim_region']} (~{excess} bp)."
+            f"Assembly is {round(L / ref_len, 2)}x the reference and self-aligns with a "
+            f"genome-scale period of {repeat['unit_bp']} bp (tandem genome duplication / "
+            f"concatemer). Collapse to a single monomer, removing positions "
+            f"{out['suggested_trim_region']} (~{excess} bp)."
         )
     elif length_anomaly and repeat and in_cr in ("yes", "NA"):
         out["anomaly_type"] = "control_region_repeat"

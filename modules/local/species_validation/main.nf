@@ -46,11 +46,22 @@ process SPECIES_VALIDATION {
     // this is passed only when present rather than defaulted to something.
     def nominal_species = (meta.nominal_species_id ?: '').toString().trim()
     def nominal_arg = nominal_species ? "--nominal-species '${nominal_species}'" : ''
-    def effective_args = [args, nominal_arg, "--assembly-prefix ${mt_assembly_prefix}", meta.id, lca_files_str, blast_files_str].findAll { it?.toString()?.trim() }.join(' ')
+    // Resolved lineage from the samplesheet, so a label above family can be pinned to
+    // the rank it actually claims. No Latin suffix separates class from order
+    // (Asteroidea/Scleralcyonacea are both -acea/-oidea), so without this
+    // 'Asteroidea sp.' reads as a genus that does not exist. Reporting only: it never
+    // changes Found_in_blast_YN. Passed only when present, like nominal_arg.
+    def lineage_pairs = [class: meta.class, order: meta.order, family: meta.family]
+        .findAll { _k, v -> v?.toString()?.trim() }
+        .collect { k, v -> "${k}=${v.toString().trim()}" }
+        .join(',')
+    def lineage_arg = lineage_pairs ? "--lineage '${lineage_pairs}'" : ''
+    def effective_args = [args, nominal_arg, lineage_arg, "--assembly-prefix ${mt_assembly_prefix}", meta.id, lca_files_str, blast_files_str].findAll { it?.toString()?.trim() }.join(' ')
     """
     species_validation.py \\
         $args \\
         ${nominal_arg} \\
+        ${lineage_arg} \\
         --assembly-prefix ${mt_assembly_prefix} \\
         --record-file validation_record.${mt_assembly_prefix}.json \\
         ${meta.id} \\

@@ -146,16 +146,37 @@ def find_tandem_repeat(seq, workdir, min_len, min_pident):
         hits.append((qs, qe, ss, se, ln, pid))
     if not hits:
         return None
-    start = min(min(h[0], h[2]) for h in hits)
-    end = max(max(h[1], h[3]) for h in hits)
-    unit = min(h[2] - h[0] for h in hits)
+    # Cluster the HSPs on the offset each implies (sstart - qstart). A genuine tandem
+    # array repeats ONE unit, so its HSPs all share one offset; unrelated repeats
+    # elsewhere in the molecule each contribute their own. Taking min/max over every
+    # hit instead let two short repeats near opposite ends report an "array" spanning
+    # the whole assembly (NOVA_260909_LA OG3004: 1-30956 of 30972 bp), and
+    # unit_bp = min(offset) was then an arbitrary small number rather than a period,
+    # which made `copies` meaningless and drove a false concatemer call.
+    tol = max(min_len // 10, 20)
+    clusters = {}
+    for h in sorted(hits, key=lambda x: x[2] - x[0]):
+        off = h[2] - h[0]
+        for key in clusters:
+            if abs(off - key) <= tol:
+                clusters[key].append(h)
+                break
+        else:
+            clusters[off] = [h]
+    # The array that explains the excess length is the one covering the most bases.
+    best = max(clusters.values(), key=lambda g: sum(x[4] for x in g))
+    start = min(min(h[0], h[2]) for h in best)
+    end = max(max(h[1], h[3]) for h in best)
+    offsets = sorted(h[2] - h[0] for h in best)
+    unit = offsets[len(offsets) // 2]
     array_len = end - start + 1
     if unit <= 0 or array_len < max(2 * unit, min_len):
         return None
-    tw = sum(h[4] for h in hits)
-    ident = sum(h[4] * h[5] for h in hits) / tw if tw else 0.0
+    tw = sum(h[4] for h in best)
+    ident = sum(h[4] * h[5] for h in best) / tw if tw else 0.0
     return {"array_start": start, "array_end": end, "array_len": array_len,
-            "unit_bp": unit, "copies": round(array_len / unit, 1), "identity": round(ident, 1)}
+            "unit_bp": unit, "copies": round(array_len / unit, 1),
+            "identity": round(ident, 1), "n_hsps": len(best)}
 
 
 def coerce_bool(v):
@@ -255,18 +276,43 @@ def main():
     curation = "none"
     if repeat:
         repeat_region = f"{repeat['array_start']}-{repeat['array_end']}"
-    if length_anomaly and repeat and frac >= 0.8 and ref_len and L / ref_len >= 1.6:
+    # A tandem GENOME duplication has a period at the genome scale: the repeat unit is
+    # about the reference length, and about L/round(ratio). Without that test any
+    # over-length assembly carrying an incidental repeat was called a concatemer and
+    # handed a trim of "everything past ref_len", computed from the reference alone. On
+    # NOVA_260909_LA that mislabelled OG3004, a 2.04x Munidopsis whose 13 CDS are spread
+    # across all 30,972 bp, against a 15,182 bp Shinkaia reference at 75% identity; the
+    # suggested trim would have deleted about half its gene set.
+    ratio = (L / ref_len) if ref_len else None
+    monomer_period = False
+    if repeat and ref_len and ratio:
+        expected = L / max(2, round(ratio))
+        monomer_period = (
+            abs(repeat["unit_bp"] - ref_len) <= 0.20 * ref_len
+            and abs(repeat["unit_bp"] - expected) <= 0.20 * expected
+        )
+
+    if length_anomaly and repeat and frac >= 0.8 and ratio and ratio >= 1.6 and monomer_period:
         anomaly_type = "concatemer"
-        suggested_trim = f"{ref_len + 1}-{L}"
-        curation = (f"Assembly is {round(L / ref_len, 2)}x the reference (tandem genome duplication / "
-                    f"concatemer). Collapse to a single monomer (~{ref_len} bp), removing {suggested_trim}.")
+        # Period-derived, not reference-derived: the measured unit is the monomer.
+        suggested_trim = f"{repeat['unit_bp'] + 1}-{L}"
+        curation = (f"Assembly is {round(ratio, 2)}x the reference and self-aligns with a "
+                    f"genome-scale period of {repeat['unit_bp']} bp (tandem genome duplication / "
+                    f"concatemer). Collapse to a single monomer, removing {suggested_trim}. "
+                    f"COLLAPSE_CONCATEMER re-verifies before acting.")
     elif length_anomaly and repeat:
         anomaly_type = "tandem_repeat"
-        trim_bp = min(excess, repeat["array_len"] - repeat["unit_bp"])
-        if trim_bp > 0:
-            suggested_trim = f"{repeat['array_end'] - trim_bp + 1}-{repeat['array_end']}"
+        # Deliberately NO suggested_trim_region. This script runs at assembly time, so it
+        # has no annotation and cannot tell whether the array carries genes (see the module
+        # docstring on repeat_in_control_region). check_circularity.py can, via --gb, which
+        # is why only the HiFi path may classify control_region_repeat. Emitting a trim here
+        # asserted gene-level safety this script has no evidence for: on NOVA_260909_LA it
+        # proposed multi-kb mid-molecule deletions for OG2940/OG2942/OG2982/OG3037/OG3038,
+        # every one of which overlapped annotated genes.
         curation = (f"Assembly {excess} bp longer than reference; tandem repeat (~{repeat['unit_bp']} bp unit "
-                    f"x ~{repeat['copies']} copies) at {repeat_region}. Review for length heteroplasmy.")
+                    f"x ~{repeat['copies']} copies) at {repeat_region}. Review for length heteroplasmy. "
+                    f"No trim proposed: qualifying the array against gene coordinates needs the "
+                    f"assembly's own annotation, which does not exist yet at this stage.")
     elif length_anomaly:
         anomaly_type = "unresolved"
         curation = f"Assembly {excess} bp longer than reference with no clear tandem repeat; review for duplication / NUMT."

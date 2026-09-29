@@ -132,10 +132,88 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
   Not addressed here, and still limiting invertebrate results: the three independent
   98%-identity gates (`-perc_identity 98`, the blastn module's `awk ... $7 > 98`, and
-  `calculateLCA.py`'s `DEFAULT_PIDENT_CUTOFF`), and `parse_nominal()`'s lack of a class
-  or order rank, which makes `Hexactinellida`, `Asteroidea sp.` and `Tetractinellida`
-  unmatchable by construction (~37 of the 69 invertebrates in this samplesheet). Every
-  one of the ~11 samples still missing an LCA has core_nt evidence at 81-97%.
+  `calculateLCA.py`'s `DEFAULT_PIDENT_CUTOFF`). Every one of the ~11 samples still
+  missing an LCA has core_nt evidence at 81-97%.
+
+  The rank half of that note is now handled, see "Nominal labels above family" below,
+  though deliberately without releasing anything new through the gate.
+
+- **An over-length GetOrganelle assembly was handed a trim that would delete genes.**
+
+  `check_getorganelle.py` flagged seven assemblies in NOVA_260909_LA and proposed a
+  `suggested_trim_region` for six of them. Genes span the full length of every one
+  (about half the annotated features sit past the midpoint), so each of those six
+  trims overlapped real genes. OG3004 was the worst case: called `concatemer` at
+  2.04x against a 15,182 bp *Shinkaia crosnieri* reference at 75% identity, with
+  `curation_suggestion` reading "Collapse to a single monomer (~15182 bp), removing
+  15183-30972" for a molecule whose 13 CDS occupy all 30,972 bp.
+
+  Nothing was corrupted: `COLLAPSE_CONCATEMER` re-verifies the monomer by
+  self-alignment and passed all seven through, so the published lengths are
+  unchanged. The exposure was a person acting on the suggestion by hand.
+
+  Two causes, both fixed:
+  - `find_tandem_repeat` reduced over EVERY off-diagonal self-hit: `min`/`max` for the
+    array bounds and the smallest offset as the period. Two short unrelated repeats
+    near opposite ends therefore reported an array spanning the whole molecule
+    (OG3004: `repeat_region=1-30956` of 30,972 bp) with an arbitrarily small period,
+    which made `copies` meaningless. HSPs are now clustered on the offset each implies
+    and the largest cluster is reported, its representative offset being the period.
+    A tandem array of unit U self-aligns at U, 2U, 3U..., so a real array agrees on one
+    offset and scattered repeats do not.
+  - The `concatemer` branch tested only the array fraction and the length ratio. It now
+    also requires a period at the genome scale: the measured unit within 20% of both the
+    reference length and `L/round(ratio)`. The trim it emits is derived from that
+    measured period rather than from the reference length, which is what encoded the
+    assumption that the monomer is the first `ref_len` bases.
+
+  The `tandem_repeat` branch now proposes **no trim at all**. This script runs at
+  assembly time and its own docstring says why that matters: control-region location
+  needs the assembly's annotation, which does not exist yet, which is why only
+  `check_circularity.py` (given `--gb`) may classify `control_region_repeat`. Emitting
+  a trim here asserted gene-level safety the script has no evidence for.
+
+  `check_circularity.py` keeps the same detector and the same genome-period test, so
+  one assembly cannot be a concatemer on one path and not the other. Its
+  `control_region_repeat` branch is untouched. New regression cover in
+  `tests/unit/test_tandem_repeat_clustering.py`, including that a real 2x and 3x
+  concatemer are still called and trimmed at the monomer boundary.
+
+- **Nominal labels above family were unmatchable, and read as a failed species test.**
+
+  `species_validation.py` classified the label with `species_name_utils.parse_nominal`,
+  whose vocabulary stops at family, so a class or order label became a genus claim:
+  `Asteroidea sp.` resolved to `('genus', 'Asteroidea')`, a genus that does not exist.
+  It could never match, and the sample was reported as having failed species validation
+  rather than as a specimen never identified to species. 39 of the 80 labels in this
+  samplesheet were affected (26 class, 11 order, plus 2 re-ranked otherwise).
+
+  The label is now resolved with `nominal_rank.parse_rank`, against the sample's own
+  resolved lineage rather than a Latin suffix, because no suffix separates the ranks
+  here: Asteroidea and Scleralcyonacea are both -acea/-oidea, Hexactinellida and
+  Tetractinellida both -ida. `SPECIES_VALIDATION` passes `--lineage` from
+  `meta.class`/`meta.order`/`meta.family`; without it such a label stays `higher`, which
+  still reports but never asserts a rank it cannot prove. `parse_nominal` remains the
+  authority for the species, genus and family claims it already handled, so those paths
+  are byte-identical.
+
+  **This releases nothing new.** `match_at_rank` gained order/class/phylum/higher
+  branches that check the evidence and record the agreeing rank as
+  `<rank>_unvalidated`, with `Found_in_blast_YN` still `No`. That is the principle
+  `bin/nominal_rank.py` already states: knowing the rank "does not let anything new
+  through", it lets the pipeline say the specimen was never identified to species
+  instead of that it failed species validation. What changes is that a class-level
+  label with agreeing class-level evidence now reads `class_unvalidated` instead of a
+  bare `unmatched` indistinguishable from a sample whose evidence CONTRADICTS its
+  label. Whether a class-level ID is publishable is a policy decision and is not made
+  here.
+
+  One subtlety the two classifiers disagreed on: `parse_rank` returns the whole label
+  for a tentative species, `parse_nominal` the genus, and `match_at_rank` compares that
+  value against the LCA genus. Passing it through unchanged would have stopped OG2982
+  (`Munidopsis cf, aries`) matching at all, so the genus is extracted. Verified against
+  the real batch: of the 12 samples that reached `Found_in_blast_YN=Yes`, none regress.
+  Cover in `tests/unit/test_species_validation_higher_ranks.py`.
 
 ### `Added`
 

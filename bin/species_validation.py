@@ -16,12 +16,59 @@ import re
 from collections import namedtuple
 import sys
 
+from nominal_rank import parse_rank
 from species_name_utils import (
     UNRESOLVED_TAXON_TOKENS,
     genus_of,
     normalise_open_nomenclature,
     parse_nominal,
 )
+
+# nominal_rank.parse_rank's vocabulary onto the one match_at_rank speaks. parse_rank
+# is the newer classifier and the only one that knows the ranks above family, which
+# is why it resolves the label here; parse_nominal is still the authority for the
+# species / genus / family claims it already handles, so those paths are untouched.
+_RANK_ALIASES = {"tentative_species": "species_uncertain", "unresolved": None}
+
+
+def resolve_nominal(raw, lineage=None):
+    """(rank, taxon) for a nominal label, including the ranks above family.
+
+    parse_nominal alone reads 'Asteroidea sp.' as ('genus', 'Asteroidea') because a
+    trailing 'sp.' looks like open nomenclature whatever precedes it. That asserts a
+    genus which does not exist, so it could never match and was reported as a failed
+    species validation rather than as a specimen identified only to class. parse_rank
+    resolves it against the sample's own lineage instead of guessing at a suffix.
+    """
+    if not raw:
+        return (None, None)
+    fallback = parse_nominal(raw)
+    if fallback[0] in ("species", "species_uncertain", "family"):
+        return fallback
+    rank, taxon = parse_rank(raw, lineage)
+    rank = _RANK_ALIASES.get(rank, rank)
+    if rank is None or not taxon:
+        return fallback
+    # The two classifiers disagree on what `taxon` means for a tentative species:
+    # parse_rank returns the whole label ('Munidopsis cf, aries'), parse_nominal the
+    # genus. match_at_rank compares this value against the LCA's GENUS, so hand it the
+    # genus or a 'cf.' sample stops matching. parse_rank is still worth reaching here:
+    # it catches 'Munidopsis cf, aries' (comma and all), which parse_nominal reads as a
+    # bare genus.
+    if rank == "species_uncertain":
+        return (rank, genus_of(taxon) or taxon)
+    return (rank, taxon)
+
+
+def parse_lineage_arg(text):
+    """'class=Asteroidea,order=Velatida' -> {'class': 'Asteroidea', ...}."""
+    lineage = {}
+    for part in str(text or "").split(","):
+        key, _, value = part.partition("=")
+        key, value = key.strip().lower(), value.strip()
+        if key and value:
+            lineage[key] = value
+    return lineage
 
 SPECIES_IN_LCA_COLUMN = "species_in_LCA"   # <--- NEW
 
@@ -242,6 +289,11 @@ def match_at_rank(nominal, blast_hits, row):
                          LCA row agrees at genus                     -> 'genus'
       species_uncertain  as for genus                     -> 'genus_downgraded'
       family             the LCA row agrees at family                -> 'family'
+      order/class/phylum the LCA row agrees at that rank, but the claim is
+                         above what this gate validates  -> '<rank>_unvalidated',
+                         and found_in_blast stays 'No'
+      higher             as above, trying order then class then phylum, for a
+                         label whose own rank could not be pinned
       None               never                                      -> 'unmatched'
 
     Not falling back to genus for a binomial is the point of the design, not a
@@ -282,10 +334,35 @@ def match_at_rank(nominal, blast_hits, row):
             return "Yes", "family"
         return "No", "unmatched"
 
+    # Above family: order, class, phylum, and 'higher' when the label's own rank
+    # could not be pinned. The evidence is checked and the agreeing rank RECORDED,
+    # but Found_in_blast_YN stays "No" so nothing new passes the QC gate.
+    #
+    # That split is deliberate. bin/nominal_rank.py states the principle: knowing
+    # the rank "does not let anything new through. It lets the pipeline say 'this
+    # specimen was never identified to species' instead of 'this specimen failed
+    # species validation'". Before this branch existed these labels returned a bare
+    # 'unmatched', indistinguishable from a sample whose evidence CONTRADICTS its
+    # label -- and that covered ~37 of the 69 invertebrates in NOVA_260909_LA.
+    # Now a class-level label with agreeing class-level evidence reads
+    # 'class_unvalidated' rather than 'unmatched'.
+    #
+    # Releasing these is a policy decision about whether a class-level ID is
+    # publishable, not a parsing question, so it is not made here.
+    if rank in ("order", "class", "phylum", "higher"):
+        name = normalise_name(value)
+        if not name:
+            return "No", "unmatched"
+        candidates = ("order", "class", "phylum") if rank == "higher" else (rank,)
+        for candidate in candidates:
+            if name == normalise_name(_lca_value(row, candidate)):
+                return "No", f"{candidate}_unvalidated"
+        return "No", "unmatched"
+
     return "No", "unmatched"
 
 
-def compare_lca_and_blast(nominal_species, og_id, lca_files, blast_files, output_file, assembly_prefix=None, record_file=None):
+def compare_lca_and_blast(nominal_species, og_id, lca_files, blast_files, output_file, assembly_prefix=None, record_file=None, lineage=None):
     """Write the per-region summary TSV and the lca_validation record.
 
     Returns True on success. This function no longer touches the database: the
@@ -339,7 +416,7 @@ def compare_lca_and_blast(nominal_species, og_id, lca_files, blast_files, output
     # What rank does the label actually claim? Classified from the RAW value, so
     # the normalisation above cannot turn a bare genus into something that reads
     # as an explicit 'sp.' claim and change the answer.
-    nominal = parse_nominal(raw_db_species) if has_nominal_species else (None, None)
+    nominal = resolve_nominal(raw_db_species, lineage) if has_nominal_species else (None, None)
     if has_nominal_species:
         print(f"[INFO] Nominal '{raw_db_species}' asserts rank "
               f"{nominal[0] or 'none'}: {nominal[1] or '-'}")
@@ -478,6 +555,20 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--lineage",
+        default=None,
+        metavar="RANK=NAME,...",
+        help=(
+            "The sample's RESOLVED lineage from the samplesheet, e.g. "
+            "'class=Asteroidea,order=Velatida,family=Pterasteridae'. Used only to "
+            "pin the rank a higher-than-family nominal label actually claims: "
+            "'Asteroidea sp.' is a class, 'Tetractinellida' an order, and no Latin "
+            "suffix can tell those apart (Asteroidea/Scleralcyonacea are both "
+            "-acea/-oidea; Hexactinellida/Tetractinellida both -ida). Omit it and "
+            "such a label stays 'higher', which is reported but never validated."
+        ),
+    )
+    parser.add_argument(
         "--assembly-prefix",
         default=None,
         help=(
@@ -519,5 +610,6 @@ if __name__ == "__main__":
         output_file,
         assembly_prefix=args.assembly_prefix,
         record_file=args.record_file,
+        lineage=parse_lineage_arg(args.lineage),
     )
     sys.exit(0 if ok else 1)
