@@ -12,6 +12,11 @@ nextflow_workflow {
                 def fp = [ mt_assembly_prefix: 'OG1.ilmn.260909.getorg1770' ]
                 def rs = [ mt_assembly_prefix: 'OG1.ilmn.260909.getorg1770reseed' ]
                 def na = [ mt_assembly_prefix: 'OG1.ilmn.260909.getorg1770_concat' ]
+                // OG2 mirrors OG2936: an anomalous 3000 bp first pass against a clean 1900 bp
+                // reseed, a ratio of 0.633 that loses the size rule without the anomaly rule.
+                def fx2 = "\${projectDir}/tests/precomputed_circularity/fixtures/OG2"
+                def a2 = [ mt_assembly_prefix: 'OG2.ilmn.260909.getorg1770' ]
+                def r2 = [ mt_assembly_prefix: 'OG2.ilmn.260909.getorg1770reseed' ]
                 input[0] = Channel.of(
                     'OG1.ilmn.260909.getorg1770',
                     'OG1.ilmn.260909.getorg1770reseed',
@@ -23,11 +28,16 @@ nextflow_workflow {
                 )
                 input[1] = Channel.of(
                     [ fp, file("\${fx}/OG1.ilmn.260909.getorg1770/mtdna/OG1.ilmn.260909.getorg1770.fasta") ],
-                    [ rs, file("\${fx}/OG1.ilmn.260909.getorg1770reseed/mtdna/OG1.ilmn.260909.getorg1770reseed.fasta") ]
+                    [ rs, file("\${fx}/OG1.ilmn.260909.getorg1770reseed/mtdna/OG1.ilmn.260909.getorg1770reseed.fasta") ],
+                    // Three contigs and NO check TSV: the fragmented-with-no-verdict case.
+                    [ na, file("\${projectDir}/tests/precomputed_circularity/fixtures/multi/OG1.ilmn.260909.getorg1770_concat.fasta") ],
+                    [ a2, file("\${fx2}/OG2.ilmn.260909.getorg1770/mtdna/OG2.ilmn.260909.getorg1770.fasta") ],
+                    [ r2, file("\${fx2}/OG2.ilmn.260909.getorg1770reseed/mtdna/OG2.ilmn.260909.getorg1770reseed.fasta") ]
                 )
                 input[2] = Channel.of(
                     [ fp, file("\${fx}/OG1.ilmn.260909.getorg1770/mtdna/OG1.ilmn.260909.getorg1770.getorg_check.tsv") ],
-                    [ rs, file("\${fx}/OG1.ilmn.260909.getorg1770reseed/mtdna/OG1.ilmn.260909.getorg1770reseed.getorg_check.tsv") ]
+                    [ rs, file("\${fx}/OG1.ilmn.260909.getorg1770reseed/mtdna/OG1.ilmn.260909.getorg1770reseed.getorg_check.tsv") ],
+                    [ a2, file("\${fx2}/OG2.ilmn.260909.getorg1770/mtdna/OG2.ilmn.260909.getorg1770.getorg_check.tsv") ]
                 )
                 input[3] = file("\${projectDir}/assets/placeholders/empty_circularity_check.tsv")
                 input[4] = Channel.of(
@@ -48,6 +58,7 @@ nextflow_workflow {
             def run_prefix = workflow.out.resolved.collectEntries { [(it[0]): it[1]] }
             def stamped = workflow.out.stamped.collectEntries { [(it[0]): [it[1], it[2]]] }
             def counts = workflow.out.counts.collectEntries { [(it[0]): it[1]] }
+            def winners = workflow.out.winners.collectEntries { [(it[0]): it[1]] }
             assertAll(
                 { assert workflow.success },
 
@@ -70,8 +81,16 @@ nextflow_workflow {
                 // --- 1d: two variants in, ONE assembly out. Before this the precomputed path
                 // emitted both and annotated both. The circular reseed wins on rule 3, exactly
                 // as it would on the live path.
-                { assert workflow.out.winners.size() == 1 },
-                { assert workflow.out.winners[0] == ['OG1.ilmn.260909.getorg1770', 'OG1.ilmn.260909.getorg1770reseed'] },
+                { assert workflow.out.winners.size() == 2 },
+                { assert winners['OG1.ilmn.260909.getorg1770'] == 'OG1.ilmn.260909.getorg1770reseed' },
+
+                // The OG2936 fix. The anomalous molecule is 1.58x the clean one, so the size rule
+                // alone hands it the win -- which is how a 31,154 bp assembly the check had
+                // already flagged ("10,842 bp longer than reference … review for duplication /
+                // NUMT") displaced a 19,791 bp single-contig mitogenome, and cost the one sample
+                // in NOVA_260909_LA that had a submittable genome. A molecule KNOWN to be
+                // length-anomalous must not win on the very excess the anomaly describes.
+                { assert winners['OG2.ilmn.260909.getorg1770'] == 'OG2.ilmn.260909.getorg1770reseed' },
 
                 // --- 1b: the launch guard counts what a glob really matched. A glob that
                 // resolves to nothing must report 0 rather than look like "not supplied",
@@ -85,7 +104,13 @@ nextflow_workflow {
                 // so a mistyped param slipped past the guard and the run went on to take the NA
                 // placeholder for every assembly -- the exact failure the guard exists to stop.
                 { assert counts['evidence_typo'] == 0 },
-                { assert counts['evidence_one_file'] == 1 }
+                { assert counts['evidence_one_file'] == 1 },
+
+                // A multi-record assembly with no verdict is KNOWN not to be circular: several
+                // contigs cannot be one closed genome. It used to stay unknown, and unknown does
+                // not block the QC gate while known-false does, so 8 fragmented assemblies in
+                // NOVA_260909_LA were never held on not_circular.
+                { assert stamped['OG1.ilmn.260909.getorg1770_concat'] == ['false', false] }
             )
         }
     }

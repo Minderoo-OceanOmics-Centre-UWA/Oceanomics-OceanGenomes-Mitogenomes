@@ -9,6 +9,29 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **Selection preferred an oversized molecule the circularity check had already flagged.** Found in
+  NOVA_260909_LA_mitogenomes-4. OG2936's welded first pass is 31,154 bp against a 20,312 bp
+  reference -- `length_ratio=1.534`, `length_anomaly=yes`, "10,842 bp longer than reference with no
+  clear tandem repeat; review for duplication / NUMT" -- and it beat a clean 19,791 bp single-contig
+  reseed, because `19791/31154 = 0.635` falls below the `1/1.5` tolerance and the size rule fires
+  first. It cost the one sample in that batch with a submittable genome, and a fresh run from
+  assembly would have made the same choice: this is the size rule, not the join.
+  `AssemblySelection.prefer` now demotes a molecule KNOWN to be length-anomalous ahead of the size
+  rule, reading `length_anomaly` from the check evidence. Only an explicit `yes` demotes, so an
+  unchecked molecule is never promoted by the absence of a verdict. Inert on the live path, where
+  `GETORGANELLE_CHECK` runs after selection and no verdict exists yet.
+- **A fragmented assembly with no verdict is now recorded as non-circular, not unknown.** Several
+  contigs cannot be one closed genome, so this is derivable from the file rather than a guess. It
+  matters because unknown does not block the QC gate while known-false does: 8 assemblies of 2 to 5
+  contigs went through NOVA_260909_LA as unknown and were never held on `not_circular`. A
+  single-record assembly with no verdict stays unknown, because nothing has established either way.
+- **With the join off, welded molecules are no longer offered to selection.** A precomputed glob still
+  matches the `_rgj` FASTAs an earlier run left on disk, and 7 of them won selection in
+  NOVA_260909_LA_mitogenomes-4 -- publishing welded molecules from a run configured not to weld, and
+  ones that Stage 3 then correctly refuses to submit. `selectPrecomputedAssemblies` drops them when
+  `skip_getorganelle_join` is set.
+
+
 - **The precomputed-evidence guard counted a mistyped param as a match, and let the run through.**
   Found by the guard's own first real use. `precomputedGlobCount` measured the size of what
   `file(pattern, glob: true, checkIfExists: false)` returned, and that call has two shapes: a

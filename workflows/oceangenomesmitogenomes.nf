@@ -90,6 +90,37 @@ def buildAssemblyUploadRows(canonical_rows, variant_rows, mito_depth, no_depth_f
     return measured.mix(unmeasured)
 }
 
+// Read the 'length_anomaly' column from a circularity-check evidence TSV.
+//
+// Selection needs it: the size rule prefers the bigger molecule, and this is the finding that
+// says the molecule is bigger than it should be. OG2936's welded first pass carried
+// length_anomaly=yes with a 10,842 bp excess over its reference and still won on size.
+// Written by bin/check_getorganelle.py / check_circularity.py as yes/no/NA.
+def evidenceLengthAnomaly(tsv) {
+    try {
+        def rows = tsv.text.readLines()
+        if (rows.size() < 2) return null
+        def header = rows[0].split('\\t', -1)
+        def idx = header.findIndexOf { it.trim() == 'length_anomaly' }
+        def values = rows[1].split('\\t', -1)
+        if (idx < 0 || idx >= values.size()) return null
+        def value = values[idx].trim().toLowerCase()
+        return value in ['yes', 'true'] ? true : (value in ['no', 'false'] ? false : null)
+    } catch (ignored) {
+        return null
+    }
+}
+
+// How many records a FASTA holds. A multi-record assembly cannot be one circular molecule,
+// which is a fact about the file rather than a verdict needing a check.
+def fastaRecordCount(fasta) {
+    try {
+        return fasta.text.readLines().count { it.startsWith('>') }
+    } catch (ignored) {
+        return 0
+    }
+}
+
 def evidenceFinalVerdictCircular(tsv) {
     try {
         def rows = tsv.text.readLines()
@@ -198,8 +229,19 @@ def attachPrecomputedCircularity(fasta_ch, evidence_ch, placeholder) {
             def ev = (items.size() > 3 && items[3] != null) ? items[3] : placeholder
             def real = (items.size() > 3 && items[3] != null)
             def circ = real ? evidenceFinalVerdictCircular(ev) : null
+            def anomaly = real ? evidenceLengthAnomaly(ev) : null
+
+            // With no verdict of its own, a MULTI-RECORD assembly is still known not to be a
+            // circular molecule: several contigs cannot be one closed genome. Deriving that is
+            // not a guess, and it matters because unknown does NOT block the QC gate while
+            // known-false does -- 8 fragmented assemblies (2 to 5 contigs) went through as
+            // unknown in NOVA_260909_LA and so were never held on not_circular. A SINGLE-record
+            // assembly with no verdict stays unknown, because nothing has established either way.
+            if (circ == null && fastaRecordCount(fasta) > 1) circ = false
+
             def meta_ext = meta + [ mt_assembly_run_prefix: assemblyRunPrefixOf(meta.mt_assembly_prefix) ]
             if (circ != null) meta_ext = meta_ext + [ circular: circ ]
+            if (anomaly != null) meta_ext = meta_ext + [ length_anomaly: anomaly ]
             [ meta_ext, fasta, ev, real ]
         }
 }
@@ -211,8 +253,8 @@ def selectPrecomputedBest(rows, double tolerance) {
     def sorted = rows.sort { a, b -> a[0].mt_assembly_prefix <=> b[0].mt_assembly_prefix }
     def best = sorted[0]
     sorted.drop(1).each { candidate ->
-        def c = AssemblySelection.measure(candidate[1], candidate[0].circular)
-        def b = AssemblySelection.measure(best[1], best[0].circular)
+        def c = AssemblySelection.measure(candidate[1], candidate[0].circular, candidate[0].length_anomaly)
+        def b = AssemblySelection.measure(best[1], best[0].circular, best[0].length_anomaly)
         if (AssemblySelection.prefer(c, b, tolerance)) best = candidate
     }
     return best
@@ -269,7 +311,15 @@ def precomputedOatkEvidence(pattern) {
 //
 // Returns [ meta, fasta, evidence ].
 def selectPrecomputedAssemblies(String label, fasta_ch, evidence_ch, placeholder, double tolerance) {
-    def paired = attachPrecomputedCircularity(fasta_ch, evidence_ch, placeholder)
+    // With the reference-guided join off, a welded molecule is not something this pipeline
+    // produces, so it must not be offered one either. A precomputed glob still matches the
+    // _rgj FASTAs a previous run left on disk, and 7 of them won selection in
+    // NOVA_260909_LA_mitogenomes-4 -- publishing welded molecules from a run configured not to
+    // weld, and (being rescue variants) ones that cannot be submitted.
+    def candidates = params.skip_getorganelle_join
+        ? fasta_ch.filter { _meta, fasta -> !fasta.name.contains('_rgj') }
+        : fasta_ch
+    def paired = attachPrecomputedCircularity(candidates, evidence_ch, placeholder)
     // log.info, not view: view prints to stdout only, so this count was absent from
     // .nextflow.log and unavailable when working out after the fact why a run had no
     // circularity. It is the single most useful number for that question.

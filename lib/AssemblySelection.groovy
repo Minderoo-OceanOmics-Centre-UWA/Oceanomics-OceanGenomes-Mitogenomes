@@ -13,19 +13,28 @@
  *   1. an empty candidate never wins;
  *   2. an empty incumbent always loses;
  *   3. circular beats non-circular -- the only outright success available here;
- *   4. a large size difference decides on size, because a variant that recovered
+ *   4. a molecule the circularity check called LENGTH-ANOMALOUS loses to one it did not.
+ *      This sits ahead of size on purpose: the size rule rewards the bigger molecule, and a
+ *      length anomaly is the finding that the molecule is bigger than it should be. OG2936's
+ *      welded first pass is 31,154 bp against a 20,312 bp reference (ratio 1.534, "review for
+ *      duplication / NUMT") and beat a clean 19,791 bp single contig purely on that size. Only
+ *      an explicit anomaly demotes: unknown is not treated as anomalous, so this can never
+ *      promote a molecule on the absence of a check;
+ *   5. a large size difference decides on size, because a variant that recovered
  *      several times more sequence in more pieces is not a regression;
- *   5. within the same size class, FEWER SPACER Ns wins. A reference-guided join
+ *   6. within the same size class, FEWER SPACER Ns wins. A reference-guided join
  *      manufactures one record by welding contigs with 100bp N runs, and any gene
  *      crossing a weld is corrupted: OG2998's CYTB reads ATT..TAA in the plain
  *      concatenation and ACT..TCT across the join. Rule 6 would otherwise reward
  *      the join for the single record the welding bought it;
- *   6. within the same size class, fewer records wins;
- *   7. otherwise keep the candidate, which is the more informed assembly.
+ *   7. within the same size class, fewer records wins;
+ *   8. otherwise keep the candidate, which is the more informed assembly.
  *
- * Rule 5 is a no-op on the live reseed-vs-first-pass decision, where both sides are
- * raw GetOrganelle output and carry no spacer Ns. It only engages once a welded
- * molecule is in the comparison.
+ * Rule 6 is a no-op on the live reseed-vs-first-pass decision, where both sides are
+ * raw GetOrganelle output and carry no spacer Ns. It only engages once a welded molecule is in
+ * the comparison. Rule 4 is likewise inert there: GETORGANELLE_CHECK runs AFTER this decision
+ * on the live path, so no anomaly verdict exists yet. It is the precomputed path, which
+ * reloads a previous run's verdicts, that has the evidence to act on.
  */
 class AssemblySelection {
 
@@ -35,7 +44,7 @@ class AssemblySelection {
      * Unreadable or absent is reported as empty rather than thrown, because a
      * selection must still resolve when one candidate's file is missing.
      */
-    static Map measure(fasta, Boolean circular = null) {
+    static Map measure(fasta, Boolean circular = null, Boolean lengthAnomaly = null) {
         int bp = 0, records = 0, ns = 0
         try {
             fasta.text.readLines().each { line ->
@@ -48,9 +57,9 @@ class AssemblySelection {
                 }
             }
         } catch (ignored) {
-            return [bp: 0, records: 0, ns: 0, circular: circular]
+            return [bp: 0, records: 0, ns: 0, circular: circular, length_anomaly: lengthAnomaly]
         }
-        return [bp: bp, records: records, ns: ns, circular: circular]
+        return [bp: bp, records: records, ns: ns, circular: circular, length_anomaly: lengthAnomaly]
     }
 
     /** True when `candidate` should displace `incumbent`. Both from measure(). */
@@ -64,6 +73,14 @@ class AssemblySelection {
         if (candidate.circular != null && incumbent.circular != null
             && candidate.circular != incumbent.circular) {
             return candidate.circular as boolean
+        }
+
+        // A molecule KNOWN to be length-anomalous must not win the size rule below, which is
+        // the rule that would reward it for the very excess the anomaly describes. Only an
+        // explicit true demotes, so an unchecked molecule is never promoted by this.
+        if (candidate.length_anomaly != incumbent.length_anomaly) {
+            if (candidate.length_anomaly == true) return false
+            if (incumbent.length_anomaly == true) return true
         }
 
         double ratio = (candidate.bp as double) / (incumbent.bp as double)
