@@ -31,6 +31,33 @@ include { ENA_VALIDATION_SUMMARY} from '../../../modules/local/genome_qc/ena_val
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+// Is this assembly a scaffolding artefact rather than a molecule anyone sequenced?
+//
+//   <prefix>_concat  -- every contig glued end to end by SANITISE_FASTA
+//   <prefix>_rgj     -- contigs welded in reference order with 100bp N spacers
+//
+// Both exist so a partial mitogenome can still be annotated and get a species ID. Neither
+// is submittable: the junctions are inferred, and the sequence across them is not in the
+// organism. `<prefix>_collapsed` is deliberately NOT here -- a collapse rewrites a confirmed
+// concatemer back to its monomer, which IS the real molecule.
+//
+// Kept as a file-scope def rather than a lib/ class on purpose: lib/*.groovy is resolved
+// against the LAUNCHED script's directory, so a nextflow_pipeline test whose script lives
+// under tests/ cannot see it, and tests/ena_prep_no_uploads failed with "No such variable"
+// the moment this subworkflow depended on one. bin/assembly_variant.py is the Python half of
+// the same rule and tests/unit/test_assembly_variant.py asserts the two have not drifted.
+def isRescueMolecule(name) {
+    // Declared INSIDE the function on purpose. `def x = ...` at script scope is a local of
+    // the generated run() method, not a field, so a def function cannot see it: hoisting this
+    // list out gives "MissingPropertyException: No such property: RESCUE_SUFFIXES" the first
+    // time the closure runs, and nf-test reports that as an ordinary assertion failure.
+    def RESCUE_SUFFIXES = ['_rgj', '_concat']
+    if (!name) return false
+    return name.toString().split('\\.').any { token ->
+        RESCUE_SUFFIXES.any { suffix -> token.endsWith(suffix) }
+    }
+}
+
 workflow ENA_SUBMISSION_PREP {
 
     take:
@@ -281,12 +308,30 @@ workflow ENA_SUBMISSION_PREP {
     // package records its verdict, so the build has to see the result. The
     // status file is emitted for a failing flat file too, so a FAIL still
     // produces a package that says why -- it does not silently drop a sample.
+    // An _rgj / _concat is never sent to ENA, whatever its gates say. Both are scaffolding
+    // artefacts -- contigs glued or welded together so a partial mitogenome can be annotated
+    // and get a species ID -- and their junctions are inferred, not observed. Nothing used to
+    // distinguish them here, which is how OG2936's _rgj reached submission_ready=true in
+    // NOVA_260909_LA and would have gone to PRJEB110568.
+    //
+    // They still run table2asn: that output is a free read on annotation quality and is how
+    // the OG2951 / OG3090 start-stop defects surfaced. Only the webin call is withheld.
+    //
+    // Branched rather than filtered, so a rescue variant keeps its candidate package and its
+    // validation record. Filtering would leave it with no webin status and the package join
+    // below would drop the row silently -- the exact failure this subworkflow has been bitten
+    // by before.
+    ch_webin_targets = ENA_FLATFILE.out.embl_file.branch { meta, _embl ->
+        rescue:      isRescueMolecule(meta.full_seqid ?: meta.mt_assembly_prefix)
+        submittable: true
+    }
+
     if (params.ena_webin_validate) {
         if (!secrets.WEBIN_USERNAME || !secrets.WEBIN_PASSWORD) {
             error "Nextflow secrets WEBIN_USERNAME and WEBIN_PASSWORD are required when --ena_webin_validate is enabled."
         }
 
-        WEBIN_VALIDATE(ENA_FLATFILE.out.embl_file, params.ena_validation_attempt)
+        WEBIN_VALIDATE(ch_webin_targets.submittable, params.ena_validation_attempt)
         ch_multiqc_files = ch_multiqc_files.mix(WEBIN_VALIDATE.out.tool_params.collect { it[1] })
         ch_multiqc_files = ch_multiqc_files.mix(WEBIN_VALIDATE.out.status.collect { it[1] })
         ch_versions = ch_versions.mix(WEBIN_VALIDATE.out.versions.first())
@@ -305,8 +350,13 @@ workflow ENA_SUBMISSION_PREP {
 
     // An empty list stages no file, which the module reads as NOT_REQUESTED.
     // Without this the join would starve the build whenever validation is off.
+    // A rescue variant has no webin status because it was never offered to webin, so it
+    // supplies the same empty list an --ena_webin_validate false run uses (the module reads
+    // that as NOT_REQUESTED). Without this it would vanish from the package build.
     ch_ena_package_input = params.ena_webin_validate
-        ? ch_ena_package_base.join(WEBIN_VALIDATE.out.status, by: 0)
+        ? ch_ena_package_base.join(
+              WEBIN_VALIDATE.out.status.mix(ch_webin_targets.rescue.map { meta, _embl -> [ meta, [] ] }),
+              by: 0)
         : ch_ena_package_base.map { it + [ [] ] }
     BUILD_ENA_CANDIDATE_PACKAGE(ch_ena_package_input)
     ch_multiqc_files = ch_multiqc_files.mix(BUILD_ENA_CANDIDATE_PACKAGE.out.tool_params.collect { it[1] })
@@ -352,8 +402,15 @@ workflow ENA_SUBMISSION_PREP {
         ch_ena_validation_files = ch_ena_validation_files
             .mix( WEBIN_VALIDATE.out.status )                                                     // Webin status: converted set
             .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_webin_status ] } )                  //   + NOT_RUN: quarantined + conv-failed
+            .mix( ch_webin_targets.rescue.map { meta, _embl -> [ meta, notrun_webin_status ] } )   //   + NOT_RUN: rescue variants, never offered to webin
             .mix( WEBIN_VALIDATE.out.manifest )                                                   // Webin manifest: converted set
             .mix( ch_ena_no_embl.map { meta -> [ meta, notrun_webin_manifest ] } )                //   + NOT_RUN: quarantined + conv-failed
+            .mix( ch_webin_targets.rescue.map { meta, _embl -> [ meta, notrun_webin_manifest ] } ) //   + NOT_RUN: rescue variants
+        // The rescue rows are LOAD-BEARING, not tidiness. ena_record_slots is a fixed 7 with
+        // webin on, and a rescue variant converts successfully, so it is in neither
+        // WEBIN_VALIDATE.out nor ch_ena_no_embl. Without these two placeholders it contributes
+        // 5 of 7, its groupKey never fills, and the assembly vanishes from the validation
+        // record entirely -- no row, no held fragment, nothing to notice.
     }
 
     // Fixed, known contributor count per sample -> constant groupKey + plain groupTuple, so

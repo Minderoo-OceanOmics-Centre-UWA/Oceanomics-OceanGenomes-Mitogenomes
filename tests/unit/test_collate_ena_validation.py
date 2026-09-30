@@ -188,5 +188,41 @@ class CollateEnaValidationTests(unittest.TestCase):
         self.assertEqual(record["annotation"], "emma1.0.2")
 
 
+    # --- rescue variants -----------------------------------------------------
+    # An _rgj / _concat can never be submission_ready, however clean its gates are.
+    # OG2936.ilmn.260909.getorg1770_rgj.mitos2110 passed table2asn, conversion and webin in
+    # NOVA_260909_LA and came back submission_ready=true, because readiness is pure gate
+    # arithmetic and nothing here knew what kind of molecule it described. The webin call is
+    # guarded upstream so a rescue variant never reaches webin at all; this is the second lock,
+    # for any entry point that gets there another way.
+
+    def test_a_fully_passing_rgj_is_still_not_ready(self):
+        self.prefix = "OG2936.ilmn.260909.getorg1770_rgj.mitos2110"
+        record = self.build([self.table(), self.conversion(), self.webin()])
+        self.assertEqual(record["table2asn_status"], "PASS")
+        self.assertEqual(record["conversion_status"], "PASS")
+        self.assertEqual(record["webin_status"], "PASS")
+        self.assertEqual(record["submission_ready"], "false")
+        self.assertEqual(record["webin_reason"], "not_submittable:rescue_variant")
+
+    def test_a_fully_passing_concat_is_still_not_ready(self):
+        self.prefix = "OG2998.ilmn.260909.getorg1770reseed_concat.mitos2110"
+        record = self.build([self.table(), self.conversion(), self.webin()])
+        self.assertEqual(record["submission_ready"], "false")
+        self.assertEqual(record["webin_reason"], "not_submittable:rescue_variant")
+
+    def test_the_real_molecule_is_unaffected(self):
+        """The same gates on a genuine assembly must still read ready."""
+        self.prefix = "OG3000.ilmn.260909.getorg1770reseed.mitos2110"
+        record = self.build([self.table(), self.conversion(), self.webin()])
+        self.assertEqual(record["submission_ready"], "true")
+        self.assertEqual(record["webin_reason"], "validated")
+
+    def test_a_collapsed_molecule_is_unaffected(self):
+        """A collapse yields the real monomer, so it stays submittable."""
+        self.prefix = "OG1.ilmn.260909.getorg1770_collapsed.mitos2110"
+        record = self.build([self.table(), self.conversion(), self.webin()])
+        self.assertEqual(record["submission_ready"], "true")
+
 if __name__ == "__main__":
     unittest.main()

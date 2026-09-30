@@ -9,6 +9,32 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **An `_rgj` / `_concat` could be marked `submission_ready` and sent to ENA.** Nothing in the pipeline
+  distinguished a scaffolding artefact from a molecule: the QC gate is content-based
+  (`bin/evaluate_qc_conditions.py`) and readiness is pure gate arithmetic
+  (`bin/collate_ena_validation.py`), so `OG2936.ilmn.260909.getorg1770_rgj.mitos2110` passed table2asn,
+  conversion and webin in NOVA_260909_LA and came back `submission_ready=true`. Both forms exist only so
+  a partial mitogenome can be annotated and get a species ID; their junctions are inferred, and the
+  sequence across them is not in the organism. `<prefix>_collapsed` is deliberately NOT in this set,
+  because a collapse yields the real monomer.
+  - The webin call is withheld: `ENA_FLATFILE.out.embl_file` is branched, not filtered, so a rescue
+    variant keeps its candidate package and its validation record. Filtering would have left it with no
+    webin status and the package join would have dropped the row silently.
+  - The two `NOT_RUN` webin placeholders it now contributes are load-bearing, not tidiness.
+    `ena_record_slots` is a fixed 7 with webin on, and a rescue variant converts successfully so it is in
+    neither `WEBIN_VALIDATE.out` nor `ch_ena_no_embl`; without them it contributed 5 of 7, its groupKey
+    never filled, and the assembly vanished from the validation record entirely.
+  - `submission_ready` is forced `false` with `webin_reason=not_submittable:rescue_variant` as a second
+    lock, so an entry point that reaches webin another way still cannot produce a readiness claim.
+  - They still run table2asn: that output is a free read on annotation quality and is how the OG2951 /
+    OG3090 start-stop defects surfaced. Only the submission is withheld.
+  - The rule lives in `bin/assembly_variant.py` and as `isRescueMolecule()` in
+    `subworkflows/local/ena_submission_prep/main.nf`, with `tests/unit/test_assembly_variant.py`
+    comparing the two suffix lists so they cannot drift. It is a file-scope `def` rather than a `lib/`
+    class because `lib/*.groovy` resolves against the launched script's directory, so a
+    `nextflow_pipeline` test whose script lives under `tests/` cannot see one.
+
+
 - **`tests/qc_gate_streaming` had not run since 06a9d95.** That commit moved
   `attachCircularityEvidence` from `upload_results_mito` to `mitogenome_qc`, and the test's import was
   never updated, so all three tests failed on "Cannot find a component" and the QC-gate streaming
