@@ -12,6 +12,7 @@ Usage:
 
 import os
 import csv
+import re
 import sys
 import argparse
 from pathlib import Path
@@ -287,7 +288,76 @@ def read_fasta_seq(path):
     return "".join(seq).upper()
 
 
-def score_cds_dir(cds_dir, genetic_code, lineage=None):
+_COMPLEMENT = str.maketrans("ACGTRYKMBVDHNacgtrykmbvdhn", "TGCAYRMKVBHDNtgcayrmkvbhdn")
+
+
+def _revcomp(seq):
+    """Reverse complement, stdlib only (this module stays importable without Biopython)."""
+    return seq.translate(_COMPLEMENT)[::-1]
+
+
+def cds_from_gff(gff_path, genetic_code=None):
+    """Spliced CDS nucleotide sequences read from a GFF plus its reoriented genome FASTA.
+
+    Why this exists: an annotator may publish its per-gene CDS files with the terminator
+    removed (EMMA does), and scoring those suspends the terminator check entirely -- a false
+    negative that hides a genuinely broken CDS. The GFF span is the annotation as declared,
+    so it carries the stop, and classify_cds() already treats a span whose length is not a
+    multiple of three as a poly-A-completed truncated stop. Both EMMA conventions therefore
+    score correctly with no note parsing: of OG2647's 13 PCGs, the 7 with a real terminator
+    are multiples of 3 ending in a stop, and the 6 carrying EMMA's "putative TAA stop codon"
+    note have spans of 691/1141/785/1046/349/1381, none divisible by 3.
+
+    The FASTA must be the annotation's own `<name>.fa` sibling, NOT the pre-annotation
+    assembly: EMMA reorients the molecule, so the two are the same length and different
+    sequence, and the GFF coordinates only mean anything against the reoriented one.
+
+    A gene with MORE THAN ONE CDS row is deliberately skipped rather than assembled here.
+    Joining exons needs an order this function cannot infer safely: a gene spanning the
+    origin is written as two pieces whose correct order is high-coordinate first, which is
+    the opposite of sorting by start. Callers fall back to the per-gene file for those.
+
+    Returns {bare gene name: nt} for the genes it could resolve, or {} if the GFF or its
+    FASTA is missing or unreadable.
+    """
+    if not gff_path:
+        return {}
+    gff = Path(gff_path)
+    fasta = gff.with_suffix(".fa")
+    if not gff.is_file() or not fasta.is_file():
+        return {}
+    try:
+        genome = read_fasta_seq(fasta)
+        if not genome:
+            return {}
+        rows = {}
+        for line in gff.read_text().splitlines():
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 9 or fields[2] != "CDS":
+                continue
+            match = re.search(r"Name=([^;]+)", fields[8])
+            if not match:
+                continue
+            gene = match.group(1).strip().replace("MT-", "").upper()
+            rows.setdefault(gene, []).append((int(fields[3]), int(fields[4]), fields[6]))
+    except (OSError, ValueError):
+        return {}
+
+    spliced = {}
+    for gene, spans in rows.items():
+        if len(spans) != 1:
+            continue
+        start, end, strand = spans[0]
+        if start < 1 or end > len(genome) or end < start:
+            continue
+        seq = genome[start - 1:end]
+        spliced[gene] = _revcomp(seq) if strand == "-" else seq
+    return spliced
+
+
+def score_cds_dir(cds_dir, genetic_code, lineage=None, gff_path=None):
     """Score every exported CDS in a directory, per gene.
 
     Split out of check_cds_integrity so a second consumer can reuse the
@@ -296,13 +366,20 @@ def score_cds_dir(cds_dir, genetic_code, lineage=None):
     every EMMA sample: the convention is a property of the annotator's output,
     not of the caller.
 
-    Returns (per_gene, stop_excluded) where per_gene is a list of
-    (gene, issues, advisories) in filename order, and stop_excluded says whether
-    this annotator omits terminators. Callers that want a single verdict should
-    use check_cds_integrity() rather than collapsing per_gene themselves.
+    `gff_path` lets a stop-excluded annotator still be checked properly: the per-gene files
+    have no terminator to test, but the GFF span does, so the frame/terminator check is
+    re-run against the annotation as declared instead of being suspended. Omit it and the
+    old behaviour (suspend the terminator check, keep the frame check) applies unchanged.
+
+    Returns (per_gene, stop_excluded, convention_note): per_gene is a list of
+    (gene, issues, advisories) in filename order, stop_excluded says whether this annotator
+    omits terminators, and convention_note is the run-level advisory about that convention
+    (None when it does not apply). The note is NOT attached to any gene, so a per-gene
+    consumer does not report it as a defect. Callers wanting a single verdict should use
+    check_cds_integrity() rather than collapsing per_gene themselves.
     """
     if not cds_dir or not Path(cds_dir).is_dir() or genetic_code is None:
-        return None, False
+        return None, False, None
 
     # Annotators disagree about whether an exported CDS includes its terminator.
     # mitos_to_emma.py writes the stop codon; EMMA does not (an EMMA ATP6 of 681 nt
@@ -322,7 +399,7 @@ def score_cds_dir(cds_dir, genetic_code, lineage=None):
         except OSError:
             records.append((gene, None))
     if not records:
-        return None, False
+        return None, False, None
 
     stops_present = 0
     stops_checked = 0
@@ -339,6 +416,13 @@ def score_cds_dir(cds_dir, genetic_code, lineage=None):
     # Fewer than 40% carrying a terminator means this annotator excludes them.
     stop_excluded = stops_checked >= 3 and stops_present <= 0.4 * stops_checked
 
+    # A stop-excluded annotator used to have its terminator check suspended outright, which
+    # meant a genuinely broken EMMA CDS could not be seen at all. Re-read those CDS from the
+    # GFF span, which does carry the terminator, and score them properly. Per gene, so a gene
+    # the GFF cannot resolve (multi-exon, out of range) still falls back to the suspension
+    # rather than going unchecked.
+    from_gff = cds_from_gff(gff_path, genetic_code) if stop_excluded else {}
+
     per_gene = []
     for gene, nt in records:
         issues, advisories = [], []
@@ -350,8 +434,12 @@ def score_cds_dir(cds_dir, genetic_code, lineage=None):
             issues.append(f"{gene}:empty_cds")
             per_gene.append((gene, issues, advisories))
             continue
+        # Prefer the GFF span for a stop-excluded annotator: it is the same CDS with its
+        # terminator still attached, so it can be checked rather than excused.
+        scored = from_gff.get(gene) or nt
+        graded_from_gff = scored is not nt
         try:
-            info = classify_cds(nt, genetic_code, lineage=lineage, gene=gene)
+            info = classify_cds(scored, genetic_code, lineage=lineage, gene=gene)
         except ValueError as exc:
             issues.append(f"{gene}:{exc}")
             per_gene.append((gene, issues, advisories))
@@ -360,9 +448,15 @@ def score_cds_dir(cds_dir, genetic_code, lineage=None):
             issues.append(f"{gene}:implausible_start({info['start_codon']})")
         elif info["start_class"] == "alternative_documented":
             advisories.append(f"{gene}:alternative_start({info['start_codon']})")
-        # A stop-excluded CDS must still be in frame; only the terminator check
-        # is suspended, not the frame check.
-        if stop_excluded:
+        if graded_from_gff:
+            # Fully checked, on the declared span. classify_cds already accepts a span whose
+            # length is not a multiple of 3 as a poly-A-completed truncated stop, which is
+            # the other convention EMMA uses, so no note parsing is needed.
+            if not info["stop_ok"]:
+                issues.append(f"{gene}:no_stop({scored[-3:]},rem{len(scored) % 3})")
+        elif stop_excluded:
+            # No usable GFF span for this gene: only the terminator check is suspended,
+            # never the frame check.
             if len(nt) % 3:
                 issues.append(f"{gene}:frame_remainder({len(nt) % 3})")
         elif not info["stop_ok"]:
@@ -371,10 +465,24 @@ def score_cds_dir(cds_dir, genetic_code, lineage=None):
             issues.append(f"{gene}:internal_stops({info['internal_stops']})")
         per_gene.append((gene, issues, advisories))
 
-    return per_gene, stop_excluded
+    # Returned SEPARATELY, not attached to a gene. It is a statement about the annotator, and
+    # hanging it on the first gene's advisories made a per-gene consumer report it as a CDS
+    # defect on whichever gene sorted first -- 10 phantom ATP6 findings in the run snapshot.
+    #
+    # The suffix matters to a reader: cds_convention:stop_codon_excluded on its own used to
+    # mean "the terminator was not checked at all", which is no longer true when the GFF span
+    # could be read instead.
+    convention_note = None
+    if stop_excluded:
+        graded = sum(1 for gene, _i, _a in per_gene if gene in from_gff)
+        convention_note = ("cds_convention:stop_codon_excluded(checked_from_gff)"
+                           if graded and graded == len(per_gene)
+                           else "cds_convention:stop_codon_excluded")
+
+    return per_gene, stop_excluded, convention_note
 
 
-def check_cds_integrity(cds_dir, annotation_name, genetic_code, lineage=None):
+def check_cds_integrity(cds_dir, annotation_name, genetic_code, lineage=None, gff_path=None):
     """Classify EVERY exported CDS, not a fixed 13-gene list.
 
     The existing annotation_qc_gate.py cannot serve as the annotation verdict: it
@@ -384,12 +492,15 @@ def check_cds_integrity(cds_dir, annotation_name, genetic_code, lineage=None):
 
     Returns (status, issues) where status is 'ok', 'advisory' or 'broken'.
     """
-    per_gene, stop_excluded = score_cds_dir(cds_dir, genetic_code, lineage=lineage)
+    per_gene, _stop_excluded, convention_note = score_cds_dir(
+        cds_dir, genetic_code, lineage=lineage, gff_path=gff_path)
     if per_gene is None:
         return "not_evaluated", []
 
     issues = [i for _gene, gene_issues, _adv in per_gene for i in gene_issues]
-    advisories = (["cds_convention:stop_codon_excluded"] if stop_excluded else [])
+    # The convention note comes from score_cds_dir, because only it knows whether the GFF span
+    # could be read and therefore whether the terminator was actually checked.
+    advisories = ([convention_note] if convention_note else [])
     advisories += [a for _gene, _iss, gene_adv in per_gene for a in gene_adv]
 
     if issues:
@@ -596,7 +707,7 @@ def process_gff(gff_path, annotation_name, class_name="",
     # rather than indistinguishable from a genuine pass.
     lineage = class_name or (taxon or {}).get("phylum", "")
     integrity_status, integrity_issues = check_cds_integrity(
-        cds_dir, annotation_name, genetic_code, lineage=lineage)
+        cds_dir, annotation_name, genetic_code, lineage=lineage, gff_path=gff_path)
 
     # classify_missing reads order/class/phylum; the same dict already carries them.
     taxonomy = {

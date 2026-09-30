@@ -151,7 +151,14 @@ def snapshot(run, out, samplesheet=None):
             continue
         code = int(code)
         lineage = (tax.get(og, {}) or {}).get("class", "")
-        per_gene, _stop_excluded = score_cds_dir(cds_dir, code, lineage=lineage)
+        # Pass the GFF for the same reason the pipeline does: a stop-excluded annotator's
+        # per-gene files cannot be terminator-checked, and the GFF span can. Without it this
+        # snapshot would disagree with the gate it is meant to be compared against.
+        gffs = sorted(glob.glob(f"{run}/mitogenomes/{og}/{assembly}/annotation/*.gff"))
+        # The run-level convention note is deliberately discarded: this TSV is one row per
+        # CDS, and an annotator-wide advisory is not a finding about any gene.
+        per_gene, _stop_excluded, _note = score_cds_dir(cds_dir, code, lineage=lineage,
+                                                       gff_path=gffs[0] if gffs else None)
         if not per_gene:
             continue
         for gene, gene_issues, gene_advisories in per_gene:

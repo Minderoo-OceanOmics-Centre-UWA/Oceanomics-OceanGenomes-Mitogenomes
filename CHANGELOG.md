@@ -9,6 +9,37 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **The terminator check was suspended entirely on the EMMA path, hiding real defects.** EMMA publishes
+  `annotation/cds/*.fa` with the stop codon removed, so scoring those files reports `no_stop` on every
+  CDS. `check_cds_integrity` detected that convention and switched the terminator check OFF -- the safe
+  response at the time, but it meant a genuinely broken fish CDS could not be reported at all. All 9
+  EMMA samples in NOVA_260909_LA read `advisory | cds_convention:stop_codon_excluded`, and nothing
+  about their terminators had been checked.
+  - The GFF span is the annotation as declared and does carry the terminator, so `cds_from_gff()` reads
+    each CDS from it against the annotation's own reoriented `<name>.fa` sibling -- NOT the
+    pre-annotation assembly, which EMMA reorients into a different sequence of the same length.
+  - No note parsing is needed for EMMA's other convention: `classify_cds` already accepts a span whose
+    length is not a multiple of three as a poly-A-completed truncated stop. Of OG2647's 13 PCGs, the 7
+    with a real terminator are multiples of 3 ending in a stop and the 6 carrying the
+    `putative TAA stop codon` note have spans of 691/1141/785/1046/349/1381, none divisible by 3.
+  - Fallbacks are per gene, so nothing goes unchecked by accident: a gene with more than one CDS row is
+    skipped rather than assembled (an origin-spanning gene's pieces are high-coordinate first, which is
+    the opposite of sorting by start), and a missing GFF or missing sibling FASTA returns to the old
+    suspension.
+  - The advisory now says which: `cds_convention:stop_codon_excluded(checked_from_gff)` when every gene
+    was scored from the GFF. The bare string used to mean "the terminator was not checked", and leaving
+    it would have been a false reassurance.
+  - `score_cds_dir` returns that note as a third value rather than hanging it on the first gene's
+    advisories, because a per-gene consumer reported it as a CDS defect on whichever gene sorted first
+    (10 phantom ATP6 findings in the run snapshot).
+
+  **Measured on NOVA_260909_LA_mitogenomes-4, all 110 assemblies: 0 `annotation_integrity_status`
+  flips**, so no `passed` and no `proceed_qc` change, and the 99 invertebrate assemblies are untouched.
+  The only difference is the advisory suffix on the 11 EMMA assemblies. The fish in that batch genuinely
+  have clean CDS; what changed is that a broken one would now be caught, which unit tests pin directly
+  (a missing terminator and an internal stop both report `broken` where they previously could not).
+
+
 - **ENA prep: wrong-named source files, a false held reason, two missing held reasons, and an
   unsubmittable organism.** Four faults that between them lost samples silently or lied about why.
   - `BUILD_SOURCE_MODIFIERS` wrote `.src` files under OTHER assemblies' names and exited 0. When no

@@ -164,7 +164,7 @@ class ScoreCdsDirTests(unittest.TestCase):
                 "ND1": "ATG" + "GGG" * 5 + "TAA",
                 "ATP6": "ATG" + "GGG" * 5 + "TAA",
             })
-            per_gene, stop_excluded = score_cds_dir(d, 4)
+            per_gene, stop_excluded, _note = score_cds_dir(d, 4)
         self.assertEqual([g for g, _i, _a in per_gene], ["ATP6", "ND1"])
         self.assertFalse(stop_excluded)
         self.assertEqual([i for _g, i, _a in per_gene], [[], []])
@@ -175,10 +175,14 @@ class ScoreCdsDirTests(unittest.TestCase):
             # Six in-frame genes, none carrying a terminator: the EMMA convention.
             d = make_cds_dir(tmp, {g: "ATG" + "GGG" * 5
                                    for g in ("ND1", "ND2", "ND3", "ND4", "ND5", "ND6")})
-            per_gene, stop_excluded = score_cds_dir(d, 4)
+            per_gene, stop_excluded, _note = score_cds_dir(d, 4)
         self.assertTrue(stop_excluded)
         flat = [i for _g, issues, _a in per_gene for i in issues]
         self.assertEqual(flat, [], f"stop-excluded CDS must not be flagged: {flat}")
+        # The convention note must NOT be attached to a gene: a per-gene consumer would
+        # report it as a CDS defect on whichever gene sorted first.
+        per_gene_advisories = [a for _g, _i, adv in per_gene for a in adv]
+        self.assertEqual(per_gene_advisories, [])
 
     def test_frame_check_survives_stop_exclusion(self):
         """Only the terminator check is suspended, never the frame check."""
@@ -186,13 +190,122 @@ class ScoreCdsDirTests(unittest.TestCase):
             genes = {g: "ATG" + "GGG" * 5 for g in ("ND1", "ND2", "ND3", "ND4", "ND5")}
             genes["ND6"] = "ATG" + "GGG" * 5 + "G"   # remainder 1
             d = make_cds_dir(tmp, genes)
-            per_gene, stop_excluded = score_cds_dir(d, 4)
+            per_gene, stop_excluded, _note = score_cds_dir(d, 4)
         self.assertTrue(stop_excluded)
         flat = [i for _g, issues, _a in per_gene for i in issues]
         self.assertEqual(flat, ["ND6:frame_remainder(1)"])
 
     def test_missing_dir_reports_not_evaluated(self):
-        per_gene, stop_excluded = score_cds_dir(None, 4)
+        per_gene, stop_excluded, note = score_cds_dir(None, 4)
         self.assertIsNone(per_gene)
         self.assertFalse(stop_excluded)
+        self.assertIsNone(note)
         self.assertEqual(check_cds_integrity(None, "sample", 4), ("not_evaluated", []))
+
+def make_emma_pair(tmp, genes):
+    """Build an EMMA-shaped annotation: a reoriented genome + GFF, plus stop-EXCLUDED CDS files.
+
+    `genes` is {gene: full_nt_including_terminator}. The per-gene CDS files get that sequence
+    with its last codon removed, which is what EMMA publishes and what makes stop_excluded
+    fire; the GFF span covers the full sequence, terminator included.
+    """
+    d = Path(tmp)
+    cds = d / "cds"
+    cds.mkdir()
+    genome, gff_rows, offset = [], [], 0
+    for gene, full in genes.items():
+        start = offset + 1
+        end = offset + len(full)
+        genome.append(full)
+        offset = end
+        gff_rows.append(
+            f"asm\tEmma\tCDS\t{start}\t{end}\t.\t+\t0\tID={gene};Name=MT-{gene}\n")
+        # EMMA drops the terminator from the per-gene file: a whole codon for a real stop,
+        # or the partial T/TA for a poly-A-completed one.
+        trimmed = full[:-3] if len(full) % 3 == 0 else full[:len(full) - (len(full) % 3)]
+        (cds / f"MT-{gene}.asm.emma102.fa").write_text(f">asm\n{trimmed}\n")
+    (d / "asm.emma102.fa").write_text(">asm\n" + "".join(genome) + "\n")
+    gff = d / "asm.emma102.gff"
+    gff.write_text("##gff-version 3\n" + "".join(gff_rows))
+    return cds, gff
+
+
+class StopExcludedIsCheckedFromTheGffTests(unittest.TestCase):
+    """The terminator check used to be SUSPENDED for a stop-excluded annotator.
+
+    EMMA publishes annotation/cds/*.fa without the stop codon, so scoring those files reports
+    no_stop on every CDS. The old code detected that and switched the terminator check off
+    entirely -- which made a genuinely broken EMMA CDS invisible, a false negative on all 9
+    fish in NOVA_260909_LA. The GFF span carries the terminator, so it can be checked instead.
+    """
+
+    # Six clean genes are enough for the >=3 / <=40% convention detection to fire.
+    CLEAN = {f"ND{i}": "ATG" + "GGG" * 5 + "TAA" for i in range(1, 7)}
+
+    def test_a_clean_emma_annotation_is_fully_checked_and_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cds, gff = make_emma_pair(tmp, dict(self.CLEAN))
+            status, issues = check_cds_integrity(cds, "asm", 2, gff_path=gff)
+        self.assertEqual(status, "advisory")
+        # The suffix is the claim that matters: the terminator WAS checked.
+        self.assertEqual(issues, ["cds_convention:stop_codon_excluded(checked_from_gff)"])
+
+    def test_a_poly_a_completed_terminator_is_not_a_defect(self):
+        """A span whose length is not a multiple of 3 is EMMA's other convention."""
+        genes = dict(self.CLEAN)
+        genes["ATP6"] = "ATG" + "GGG" * 5 + "T"      # 16 nt, truncated stop
+        with tempfile.TemporaryDirectory() as tmp:
+            cds, gff = make_emma_pair(tmp, genes)
+            status, issues = check_cds_integrity(cds, "asm", 2, gff_path=gff)
+        self.assertEqual(status, "advisory")
+        self.assertFalse([i for i in issues if "ATP6" in i], issues)
+
+    def test_a_missing_terminator_is_now_caught(self):
+        """This is the whole point: before, no_stop here was unreportable."""
+        genes = dict(self.CLEAN)
+        genes["CYTB"] = "ATG" + "GGG" * 5 + "CCC"    # in frame, ends on no stop
+        with tempfile.TemporaryDirectory() as tmp:
+            cds, gff = make_emma_pair(tmp, genes)
+            status, issues = check_cds_integrity(cds, "asm", 2, gff_path=gff)
+        self.assertEqual(status, "broken")
+        self.assertTrue([i for i in issues if i.startswith("CYTB:no_stop")], issues)
+
+    def test_an_internal_stop_is_now_caught(self):
+        genes = dict(self.CLEAN)
+        genes["CO1"] = "ATG" + "GGG" + "TAA" + "GGG" + "TAA"
+        with tempfile.TemporaryDirectory() as tmp:
+            cds, gff = make_emma_pair(tmp, genes)
+            status, issues = check_cds_integrity(cds, "asm", 2, gff_path=gff)
+        self.assertEqual(status, "broken")
+        self.assertTrue([i for i in issues if i.startswith("CO1:internal_stops")], issues)
+
+    def test_without_a_gff_the_old_suspension_still_applies(self):
+        """The fallback has to stay: a gene the GFF cannot resolve must not go unchecked."""
+        genes = dict(self.CLEAN)
+        genes["CYTB"] = "ATG" + "GGG" * 5 + "CCC"
+        with tempfile.TemporaryDirectory() as tmp:
+            cds, _gff = make_emma_pair(tmp, genes)
+            status, issues = check_cds_integrity(cds, "asm", 2)
+        self.assertEqual(status, "advisory")
+        self.assertEqual(issues, ["cds_convention:stop_codon_excluded"])
+
+    def test_the_gff_is_read_against_the_reoriented_fasta_not_the_assembly(self):
+        """A missing sibling .fa must fall back, never score against the wrong sequence."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cds, gff = make_emma_pair(tmp, dict(self.CLEAN))
+            Path(tmp, "asm.emma102.fa").unlink()
+            status, issues = check_cds_integrity(cds, "asm", 2, gff_path=gff)
+        self.assertEqual(status, "advisory")
+        self.assertEqual(issues, ["cds_convention:stop_codon_excluded"])
+
+    def test_a_multi_exon_gene_falls_back_rather_than_guessing_exon_order(self):
+        """An origin-spanning gene's pieces are high-coordinate first, not sorted by start."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cds, gff = make_emma_pair(tmp, dict(self.CLEAN))
+            gff.write_text(gff.read_text() +
+                           "asm\tEmma\tCDS\t1\t9\t.\t+\t0\tID=ND1;Name=MT-ND1\n")
+            _status, issues = check_cds_integrity(cds, "asm", 2, gff_path=gff)
+        # ND1 now has two CDS rows, so it is not GFF-graded and the run-wide note drops the
+        # (checked_from_gff) claim rather than overstating what was verified.
+        self.assertEqual(issues, ["cds_convention:stop_codon_excluded"])
+
