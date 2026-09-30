@@ -148,21 +148,6 @@ def seedSubsetSelected(statusFile) {
     }
 }
 
-// Total assembled bases and record count of a GetOrganelle FASTA, as [bp, n].
-def assemblyExtent(fasta) {
-    try {
-        def bp = 0, n = 0
-        fasta.text.readLines().each { line ->
-            if (line.startsWith('>')) n++ else bp += line.trim().length()
-        }
-        return [bp, n]
-    } catch (ignored) {
-        return [0, 0]
-    }
-}
-
-// Did GetOrganelle call this assembly a circular genome? Same evidence needsReseed
-// uses, so "circular" means the same thing on both sides of the reseed decision.
 def logSaysCircular(logFile) {
     try {
         return (logFile.text =~ /Result status of .*: circular genome/) as boolean
@@ -176,33 +161,16 @@ def logSaysCircular(logFile) {
 // This used to be `rs_fasta.size() > 0` under a comment claiming it picked "the
 // better of" the two, so ANY non-empty reseed displaced the first pass -- which is
 // how INV04_BOLOCERA published a 12-scaffold reseed over a 2-scaffold first pass.
-// The rules, in order:
-//   1. an empty reseed never wins (the original rule, kept);
-//   2. circular beats non-circular -- the only outright success needsReseed knows;
-//   3. a large size difference decides on size, because a reseed that recovered
-//      several times more sequence in more pieces is not a regression (INV04:
-//      14,745 bp in 12 vs 2,975 bp in 2);
-//   4. within the same size class, fewer records wins;
-//   5. otherwise keep the reseed, which is the more informed assembly.
+//
+// The rules themselves now live in lib/AssemblySelection.groovy, because the
+// precomputed ("skip assembly") path has to make the same decision and a second
+// copy of them would drift. See that file for the ordered rule list. This function
+// stays as the reseed-vs-first-pass entry point: it supplies the live path's
+// circularity source (the GetOrganelle log) and the measured extents.
 def preferReseed(rs_fasta, rs_log, fp_fasta, fp_log, tolerance) {
-    try { if (rs_fasta == null || rs_fasta.size() == 0) return false } catch (ignored) { return false }
-    try { if (fp_fasta == null || fp_fasta.size() == 0) return true } catch (ignored) { return true }
-
-    def rsCirc = logSaysCircular(rs_log)
-    def fpCirc = logSaysCircular(fp_log)
-    if (rsCirc != fpCirc) return rsCirc
-
-    def (rsBp, rsN) = assemblyExtent(rs_fasta)
-    def (fpBp, fpN) = assemblyExtent(fp_fasta)
-    if (rsBp == 0) return false
-    if (fpBp == 0) return true
-
-    def ratio = (rsBp as double) / (fpBp as double)
-    if (ratio >= tolerance) return true
-    if (ratio <= 1.0d / tolerance) return false
-
-    if (rsN != fpN) return rsN < fpN
-    return true
+    def candidate = AssemblySelection.measure(rs_fasta, logSaysCircular(rs_log))
+    def incumbent = AssemblySelection.measure(fp_fasta, logSaysCircular(fp_log))
+    return AssemblySelection.prefer(candidate, incumbent, tolerance as double)
 }
 
 // Is this divergence tier worth re-selecting a reference for? CONGENERIC already has

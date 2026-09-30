@@ -1,0 +1,77 @@
+nextflow_workflow {
+
+    name "The skip-assembly path keeps circularity and still picks one assembly"
+    script "tests/precomputed_circularity/main.nf"
+    workflow "PRECOMPUTED_SELECTION"
+
+    test("run prefixes group variants, circularity is restored, and one assembly survives") {
+        when {
+            workflow {
+                """
+                def fx = "\${projectDir}/tests/precomputed_circularity/fixtures/OG1"
+                def fp = [ mt_assembly_prefix: 'OG1.ilmn.260909.getorg1770' ]
+                def rs = [ mt_assembly_prefix: 'OG1.ilmn.260909.getorg1770reseed' ]
+                def na = [ mt_assembly_prefix: 'OG1.ilmn.260909.getorg1770_concat' ]
+                input[0] = Channel.of(
+                    'OG1.ilmn.260909.getorg1770',
+                    'OG1.ilmn.260909.getorg1770reseed',
+                    'OG1.ilmn.260909.getorg1770reseed_rgj',
+                    'OG1.ilmn.260909.getorg1770reseed_concat',
+                    'OG1.ilmn.260909.getorg1770_concat',
+                    'OG1.ilmn.260909.getorg1770_collapsed',
+                    'OG1.ilmn.260909.mitohifi310'
+                )
+                input[1] = Channel.of(
+                    [ fp, file("\${fx}/OG1.ilmn.260909.getorg1770/mtdna/OG1.ilmn.260909.getorg1770.fasta") ],
+                    [ rs, file("\${fx}/OG1.ilmn.260909.getorg1770reseed/mtdna/OG1.ilmn.260909.getorg1770reseed.fasta") ]
+                )
+                input[2] = Channel.of(
+                    [ fp, file("\${fx}/OG1.ilmn.260909.getorg1770/mtdna/OG1.ilmn.260909.getorg1770.getorg_check.tsv") ],
+                    [ rs, file("\${fx}/OG1.ilmn.260909.getorg1770reseed/mtdna/OG1.ilmn.260909.getorg1770reseed.getorg_check.tsv") ]
+                )
+                input[3] = file("\${projectDir}/assets/placeholders/empty_circularity_check.tsv")
+                input[4] = Channel.of(
+                    [ 'evidence_present', "\${fx}/*/mtdna/*getorg_check.tsv" ],
+                    [ 'evidence_missing', "\${projectDir}/tests/precomputed_circularity/fixtures/empty_run/*/mtdna/*getorg_check.tsv" ]
+                )
+                """
+            }
+        }
+        then {
+            def run_prefix = workflow.out.resolved.collectEntries { [(it[0]): it[1]] }
+            def stamped = workflow.out.stamped.collectEntries { [(it[0]): [it[1], it[2]]] }
+            def counts = workflow.out.counts.collectEntries { [(it[0]): it[1]] }
+            assertAll(
+                { assert workflow.success },
+
+                // --- 1d: every curated variant of one run collapses to the same key, which is
+                // what lets them be grouped and reduced to a single assembly.
+                { assert run_prefix['OG1.ilmn.260909.getorg1770'] == 'OG1.ilmn.260909.getorg1770' },
+                { assert run_prefix['OG1.ilmn.260909.getorg1770reseed'] == 'OG1.ilmn.260909.getorg1770' },
+                { assert run_prefix['OG1.ilmn.260909.getorg1770reseed_rgj'] == 'OG1.ilmn.260909.getorg1770' },
+                { assert run_prefix['OG1.ilmn.260909.getorg1770reseed_concat'] == 'OG1.ilmn.260909.getorg1770' },
+                { assert run_prefix['OG1.ilmn.260909.getorg1770_concat'] == 'OG1.ilmn.260909.getorg1770' },
+                { assert run_prefix['OG1.ilmn.260909.getorg1770_collapsed'] == 'OG1.ilmn.260909.getorg1770' },
+                // A different assembler is a different run and must not be folded in.
+                { assert run_prefix['OG1.ilmn.260909.mitohifi310'] == 'OG1.ilmn.260909.mitohifi310' },
+
+                // --- 1a: final_verdict_circular must reach meta, or table2asn is told linear
+                // and an origin-spanning gene is rejected with SEQ_FEAT.SeqLocOrder.
+                { assert stamped['OG1.ilmn.260909.getorg1770reseed'] == ['true', true] },
+                { assert stamped['OG1.ilmn.260909.getorg1770'] == ['false', true] },
+
+                // --- 1d: two variants in, ONE assembly out. Before this the precomputed path
+                // emitted both and annotated both. The circular reseed wins on rule 3, exactly
+                // as it would on the live path.
+                { assert workflow.out.winners.size() == 1 },
+                { assert workflow.out.winners[0] == ['OG1.ilmn.260909.getorg1770', 'OG1.ilmn.260909.getorg1770reseed'] },
+
+                // --- 1b: the launch guard counts what a glob really matched. A glob that
+                // resolves to nothing must report 0 rather than look like "not supplied",
+                // because that is what turned a mistyped path into a whole wrong run.
+                { assert counts['evidence_present'] == 2 },
+                { assert counts['evidence_missing'] == 0 }
+            )
+        }
+    }
+}

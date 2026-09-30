@@ -9,6 +9,38 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **The skip-assembly path lost circularity, and stopped selecting an assembly at all.** Both faults were
+  exposed by re-running NOVA_260909_LA with `skip_mitogenome_assembly_getorg` and `precomputed_*` globs.
+  - `meta.circular` was never stamped on the precomputed path. The block already reloaded the original run's
+    `*_check.tsv` and its own comment said the point was that "meta.circular doesn't silently regress to
+    unknown", but the verdict was never written into meta. Combined with a FASTA glob pointing at the source
+    run while the evidence glob pointed at the new run's own empty outdir, every assembly took
+    `empty_circularity_check.tsv` (`final_verdict_circular=NA`). Consequences: `[topology=linear]` at
+    table2asn for genuinely circular genomes, so OG3000 was rejected on `SEQ_FEAT.SeqLocOrder` for its
+    origin-spanning tRNA-Trp `join(16207..16262,1..12)` while its own GFF said `Is_circular=True`; and because
+    unknown circularity does not block QC, `proceed_qc=true` inflated from 5 to 15 and every `not_circular`
+    hold disappeared. `attachPrecomputedCircularity()` now stamps the verdict through the existing
+    `evidenceFinalVerdictCircular()`, and unknown stays unknown rather than becoming a fabricated `false`.
+  - `requirePrecomputedCircularityEvidence()` refuses at launch when a precomputed run has assemblies but no
+    circularity evidence, naming both globs and the consequence. Every `precomputed_*` glob now logs how many
+    files it matched, and the run reports how many assemblies got a real verdict versus the placeholder, so a
+    glob that is right in shape but wrong in its keys is visible too.
+  - Oatk gains `precomputed_mitogenome_circularity_evidence_oatk`. Oatk records topology in a getorg-style
+    check TSV, which the MitoHiFi glob (`*circularity_check.tsv`) has never matched, so **every** precomputed
+    oatk assembly took the NA placeholder however the params were set, and was submitted as linear.
+  - `mt_assembly_run_prefix` was being set to the per-variant prefix, violating the documented contract that
+    it is written once and is identical across variants. Nothing then grouped the variants of a run, so the
+    selection that normally picks one assembly never ran and **all** of them were annotated, BLASTed and
+    QC'd: 110 assemblies for 80 samples, ~1.5x the compute, and `_rgj`/`_concat` rescue molecules reaching
+    ENA submission. `assemblyRunPrefixOf()` restores the contract and the variants reduce to one assembly.
+- **The reseed-vs-first-pass rules moved to `lib/AssemblySelection.groovy`** so the precomputed path uses them
+  instead of a second copy. `preferReseed()` delegates; all seven existing scenarios pass unchanged. A new
+  rule sits between size and contiguity: **fewer spacer Ns wins.** A reference-guided join manufactures one
+  record by welding contigs with 100bp N runs, and any gene crossing a weld is corrupted (OG2998's CYTB reads
+  `ATT..TAA` in the plain concatenation and `ACT..TCT` across the join), so contiguity must not reward it.
+  The rule is a no-op on the live decision, where both sides are raw GetOrganelle output with no spacers.
+
+
 - **`bin/mito_run_snapshot.py` manufactured two regressions that did not exist.** The snapshot is the tool a
   remediation is judged against, so a false finding in it costs a round of work on a healthy pipeline. Both
   defects were live at once when NOVA_260909_LA was reviewed:

@@ -36,6 +36,19 @@ nextflow_workflow {
                     // The original rule, preserved: an empty reseed never wins.
                     ['empty_reseed_loses',        file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/empty.fa"),       file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
                                                   file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv04_first.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
+                    // A welded molecule must not win on the single record the welding
+                    // bought it. welded_reseed.fa is frag_reseed.fa's 8 contigs joined
+                    // with 100bp N spacers, exactly as GETORGANELLE_JOIN does it: 1
+                    // record, 4,700 bp, 700 Ns against 8 records, 4,000 bp, 0 Ns. The
+                    // size ratio is 1.18, under tolerance, so without the spacer rule
+                    // contiguity would hand it the win -- and any gene crossing a weld
+                    // is corrupted, which is how OG2998's CYTB lost its stop codon.
+                    ['welded_reseed_loses',       file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/welded_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/frag_reseed.fa"),  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
+                    // ...and the same comparison the other way round resolves the same
+                    // way, so the rule is a property of the spacers and not of the side.
+                    ['unwelded_reseed_wins',      file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/frag_reseed.fa"),   file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/welded_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
                     // ...and an empty first pass cannot be kept over a real reseed.
                     ['empty_firstpass_loses',     file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv04_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
                                                   file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/empty.fa"),        file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5]
@@ -49,14 +62,16 @@ nextflow_workflow {
                 .collectEntries { [(it[0]): it[1]] }
             assertAll(
                 { assert workflow.success },
-                { assert verdicts.size() == 7 },
+                { assert verdicts.size() == 9 },
                 { assert verdicts['inv04_recovered_much_more'] == 'true' },
                 { assert verdicts['inv01_recovered_more'] == 'true' },
                 { assert verdicts['fragmented_reseed_loses'] == 'false' },
                 { assert verdicts['circular_reseed_wins'] == 'true' },
                 { assert verdicts['circular_firstpass_wins'] == 'false' },
                 { assert verdicts['empty_reseed_loses'] == 'false' },
-                { assert verdicts['empty_firstpass_loses'] == 'true' }
+                { assert verdicts['empty_firstpass_loses'] == 'true' },
+                { assert verdicts['welded_reseed_loses'] == 'false' },
+                { assert verdicts['unwelded_reseed_wins'] == 'true' }
             )
         }
     }

@@ -105,6 +105,162 @@ def evidenceFinalVerdictCircular(tsv) {
     }
 }
 
+// How many files a precomputed_* glob actually matches, logged so the count is in
+// the run log rather than inferred from downstream damage.
+//
+// These globs use checkIfExists: false because several are genuinely optional, which
+// means a wrong path is silently indistinguishable from "not supplied". In
+// NOVA_260909_LA_mitogenomes-4 the circularity-evidence glob pointed at the run's own
+// (empty) outdir while the FASTA glob pointed at the source run, so every assembly
+// received the NA placeholder: table2asn was told [topology=linear] for genuinely
+// circular genomes, and the QC gate stopped holding on not_circular. Nothing in the
+// run said so. file(..., glob: true) resolves synchronously in the workflow body, so
+// the count is available before a single task is submitted.
+def precomputedGlobCount(String paramName, pattern) {
+    if (!pattern) return 0
+    def matches
+    try {
+        matches = file(pattern.toString(), glob: true, checkIfExists: false)
+    } catch (ignored) {
+        matches = []
+    }
+    if (matches == null) matches = []
+    if (!(matches instanceof Collection)) matches = [matches]
+    log.info "precomputed ${paramName}: ${matches.size()} file(s) matched ${pattern}"
+    return matches.size()
+}
+
+// The GetOrganelle RUN a variant belongs to, i.e. mt_assembly_prefix with the curation
+// suffixes removed. On the live path mt_assembly_run_prefix is written once and is
+// identical across every variant of a run (see the contract in the getorganelle
+// subworkflow); the precomputed path used to set it to the per-variant prefix, which
+// made each variant its own run. Nothing then grouped them, so the selection that
+// normally picks one assembly never happened and ALL of them reached annotation: 110
+// assemblies for 80 samples in NOVA_260909_LA_mitogenomes-4, at ~1.5x the compute.
+def assemblyRunPrefixOf(mt_assembly_prefix) {
+    def parts = mt_assembly_prefix.toString().split('\\.')
+    if (parts.length < 4) return mt_assembly_prefix
+    def code = parts[3]
+    def previous = null
+    // Loop because the suffixes stack: getorg1770reseed_rgj is reseed plus _rgj.
+    while (code != previous) {
+        previous = code
+        ['_rgj', '_concat', '_collapsed'].each { suffix ->
+            if (code.endsWith(suffix)) code = code[0..<(code.length() - suffix.length())]
+        }
+        if (code.endsWith('reseed')) code = code[0..<(code.length() - 'reseed'.length())]
+    }
+    return (parts[0..2] + [code]).join('.')
+}
+
+// Pair each precomputed assembly with its circularity evidence, and stamp the verdict
+// onto meta in the same pass.
+//
+// The precomputed block already reloaded the original run's *_check.tsv, and its own
+// comment said the point was that "meta.circular doesn't silently regress to unknown"
+// -- but it never wrote the value into meta, so it regressed anyway. The stamp has to
+// happen AT the join, because that is where the evidence for a given assembly is known.
+// Rebuilding the FASTA channel from the join's output is safe here (and only here)
+// because nothing on this path joins the FASTA and log channels by whole meta.
+//
+// Returns [ meta(+circular, +run prefix), fasta, evidence, real_evidence ].
+def attachPrecomputedCircularity(fasta_ch, evidence_ch, placeholder) {
+    return fasta_ch
+        .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+        .join(
+            evidence_ch.map { meta, ev -> [ meta.mt_assembly_prefix, ev ] },
+            by: 0, remainder: true
+        )
+        // Keep assembly rows; drop evidence that matched no assembly.
+        .filter { items -> items[1] != null }
+        .map { items ->
+            def meta = items[1]
+            def fasta = items[2]
+            def ev = (items.size() > 3 && items[3] != null) ? items[3] : placeholder
+            def real = (items.size() > 3 && items[3] != null)
+            def circ = real ? evidenceFinalVerdictCircular(ev) : null
+            def meta_ext = meta + [ mt_assembly_run_prefix: assemblyRunPrefixOf(meta.mt_assembly_prefix) ]
+            if (circ != null) meta_ext = meta_ext + [ circular: circ ]
+            [ meta_ext, fasta, ev, real ]
+        }
+}
+
+// Reduce the variants of one GetOrganelle run to the single assembly that goes forward,
+// using the same rules as the live reseed-vs-first-pass decision
+// (lib/AssemblySelection.groovy). Sorted first so the fold is deterministic.
+def selectPrecomputedBest(rows, double tolerance) {
+    def sorted = rows.sort { a, b -> a[0].mt_assembly_prefix <=> b[0].mt_assembly_prefix }
+    def best = sorted[0]
+    sorted.drop(1).each { candidate ->
+        def c = AssemblySelection.measure(candidate[1], candidate[0].circular)
+        def b = AssemblySelection.measure(best[1], best[0].circular)
+        if (AssemblySelection.prefer(c, b, tolerance)) best = candidate
+    }
+    return best
+}
+
+// Refuse a precomputed run that has assemblies but no circularity evidence.
+//
+// These globs use checkIfExists: false because several are genuinely optional, so a
+// wrong path is indistinguishable from "not supplied" -- and the fallback is an NA
+// placeholder, which reads as "not circular". In NOVA_260909_LA_mitogenomes-4 the
+// evidence glob pointed at the run's own (empty) outdir while the FASTA glob pointed at
+// the source run, so EVERY assembly took the placeholder: table2asn was told
+// [topology=linear] for genuinely circular genomes (OG3000 was then rejected with
+// SEQ_FEAT.SeqLocOrder on its origin-spanning tRNA-Trp), and the QC gate stopped holding
+// on not_circular, which inflated proceed_qc from 5 to 15. Nothing in the run said so.
+//
+// Hard error, not a warning: there is no useful run to be had from this state.
+def requirePrecomputedCircularityEvidence(String label, String fastaParam, fastaPattern,
+                                          String evidenceParam, evidencePattern) {
+    def n_fasta = precomputedGlobCount(fastaParam, fastaPattern)
+    def n_evidence = precomputedGlobCount(evidenceParam, evidencePattern)
+    if (n_fasta > 0 && n_evidence == 0) {
+        error "Precomputed ${label} assemblies were found but no circularity evidence was.\n" +
+              "  --${fastaParam}\n      ${fastaPattern}\n      matched ${n_fasta} file(s)\n" +
+              "  --${evidenceParam}\n      ${evidencePattern}\n      matched 0 files\n" +
+              "Both globs must point at the run that PRODUCED the assemblies. Pointing the evidence\n" +
+              "glob at this run's own --outdir matches nothing, because no check is re-run on this\n" +
+              "path. Every assembly would take assets/placeholders/empty_circularity_check.tsv\n" +
+              "(final_verdict_circular=NA), which means [topology=linear] at table2asn even for a\n" +
+              "circular genome, and no not_circular hold at the QC gate."
+    }
+}
+
+// Oatk records its topology in a getorg-style check TSV rather than a
+// *circularity_check.tsv, so the MitoHiFi evidence glob has never matched it and every
+// precomputed oatk assembly silently took the NA placeholder. Keyed on the assembly
+// prefix, like every other evidence channel on this path.
+def precomputedOatkEvidence(pattern) {
+    return Channel.fromPath(pattern, checkIfExists: false)
+        .filter { f -> f.parent.parent.name == f.baseName.replaceAll(/\.[^.]+$/, '') }
+        .map { f ->
+            def parts = f.baseName.split('\\.')
+            def prefix = parts.length > 3 ? parts[0..3].join('.') : f.baseName
+            [ [ mt_assembly_prefix: prefix ], f ]
+        }
+}
+
+// Pair precomputed assemblies with their circularity evidence, stamp meta.circular, and
+// reduce each GetOrganelle run's variants to the one assembly that goes forward.
+//
+// Reports how many assemblies got a real verdict, because a glob that is right in shape
+// but wrong in its keys passes requirePrecomputedCircularityEvidence and still leaves most
+// assemblies on the placeholder -- the quiet half of the same bug.
+//
+// Returns [ meta, fasta, evidence ].
+def selectPrecomputedAssemblies(String label, fasta_ch, evidence_ch, placeholder, double tolerance) {
+    def paired = attachPrecomputedCircularity(fasta_ch, evidence_ch, placeholder)
+    paired.map { _meta, _fasta, _ev, real -> real ? 1 : 0 }
+        .reduce([0, 0]) { acc, real -> [ acc[0] + real, acc[1] + 1 ] }
+        .view { c -> "precomputed ${label} circularity: ${c[0]} of ${c[1]} assemblies had a real check TSV (rest took the NA placeholder)" }
+    return paired
+        .map { meta, fasta, ev, real -> [ meta.mt_assembly_run_prefix, [ meta, fasta, ev, real ] ] }
+        .groupTuple()
+        .map { _run_prefix, rows -> selectPrecomputedBest(rows, tolerance) }
+        .map { meta, fasta, ev, _real -> [ meta, fasta, ev ] }
+}
+
 // Read the 'action' column from a COLLAPSE_CONCATEMER report (concatemer_collapse.tsv).
 // 'collapsed' means the assembly was genuinely rewritten to its monomer; anything
 // else (e.g. 'passthrough') means it was left unchanged.
@@ -216,7 +372,9 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_getorg_circularity_evidence = MITOGENOME_ASSEMBLY_GETORG.out.circularity_evidence
         ch_mitogenome_getorg_mtdna_files = MITOGENOME_ASSEMBLY_GETORG.out.mtdna_files
     } else if (params.precomputed_mitogenome_assembly_fasta_getorg) {
-        // Use precomputed results if analysis is skipped
+        requirePrecomputedCircularityEvidence('GetOrganelle',
+            'precomputed_mitogenome_assembly_fasta_getorg', params.precomputed_mitogenome_assembly_fasta_getorg,
+            'precomputed_mitogenome_circularity_evidence_getorg', params.precomputed_mitogenome_circularity_evidence_getorg)
         ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: false)
         // Keep each assembly FASTA only from the variant directory it belongs to
         // (<prefix>/mtdna/<prefix>.fasta). A genuinely collapsed sample also publishes
@@ -236,7 +394,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_getorg_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_getorg, checkIfExists: false)
@@ -252,7 +410,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         // No check is re-run for precomputed assemblies, but the original run's
@@ -277,30 +435,22 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
-        // Restore the one-row-per-assembly contract the assembly subworkflows guarantee:
-        // a precomputed run may have no *_check.tsv for some assemblies (the glob uses
-        // checkIfExists: false), and downstream now attaches evidence with a plain per-key
-        // join, so an absent row would drop the sample at the QC gate rather than delay it.
-        // remainder: true is safe HERE, unlike the collapse join below, because both sides are
-        // Channel.fromPath globs that close immediately -- there is no running task to wait on.
-        ch_mitogenome_getorg_circularity_evidence = ch_mitogenome_getorg_assembly_fasta
-            .map { meta, _fasta -> [ meta.mt_assembly_run_prefix, meta ] }
-            .join(
-                ch_mitogenome_getorg_circularity_evidence.map { meta, ev -> [ meta.mt_assembly_run_prefix, ev ] },
-                by: 0, remainder: true
-            )
-            .filter { items -> items[1] != null }   // keep assembly rows; drop evidence-only remainder
-            .map { items -> [ items[1], (items.size() > 2 && items[2] != null) ? items[2] : no_circularity_evidence ] }
+        // oatk check files this glob also matches are excluded: see the helper.
+        ch_getorg_sel = selectPrecomputedAssemblies('getorg',
+            ch_mitogenome_getorg_assembly_fasta,
+            ch_mitogenome_getorg_circularity_evidence.filter { _m, ev -> !ev.name.contains('oatk') },
+            no_circularity_evidence, params.reseed_length_tolerance as double)
+        ch_mitogenome_getorg_assembly_fasta = ch_getorg_sel.map { meta, fasta, _ev -> [ meta, fasta ] }
+        ch_mitogenome_getorg_circularity_evidence = ch_getorg_sel.map { meta, _fasta, ev -> [ meta, ev ] }
 
-        // Precomputed inputs expose only the final assembly, so there are no provenance
-        // variants to record: the one row a precomputed sample could produce carries the
-        // same mt_assembly_prefix as its canonical row below, which supersedes it. This
-        // channel therefore contributes nothing on this path -- it was already discarded
-        // by the selection that used to run in the parent, and the plain mix that replaced
-        // that selection has no way to discard it, so leave it empty.
+        // Superseded variants are deliberately NOT filed as provenance rows here. Selection
+        // now runs on this path, so losers exist, but the live path's DB push reads each
+        // loser's own GetOrganelle log for topology and on the precomputed path that log is
+        // optional and usually absent. Better empty than written with no evidence; the
+        // losers still carry their rows from the run that produced them.
         ch_mitogenome_getorg_db_results = Channel.empty()
     } else {
 
@@ -357,7 +507,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_hifi_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_hifi, checkIfExists: false)
@@ -373,7 +523,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         // No circularity check is re-run for precomputed assemblies, but the
@@ -395,7 +545,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         // Oatk fallback assemblies are published beside the MitoHiFi results, so a
@@ -419,7 +569,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_hifi_oatk_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_oatk, checkIfExists: false)
@@ -435,23 +585,26 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
 
-        // Restore the one-row-per-assembly contract the assembly subworkflows guarantee, for
-        // the MitoHiFi and oatk assemblies alike -- both feed ch_all_assembly_fasta below, so
-        // both need evidence. See the GetOrganelle equivalent above for why remainder: true is
-        // safe on the precomputed path and not downstream.
-        ch_mitogenome_hifi_circularity_evidence = ch_mitogenome_hifi_assembly_fasta
-            .mix(ch_mitogenome_hifi_oatk_fasta)
-            .map { meta, _fasta -> [ meta.mt_assembly_run_prefix, meta ] }
-            .join(
-                ch_mitogenome_hifi_circularity_evidence.map { meta, ev -> [ meta.mt_assembly_run_prefix, ev ] },
-                by: 0, remainder: true
-            )
-            .filter { items -> items[1] != null }   // keep assembly rows; drop evidence-only remainder
-            .map { items -> [ items[1], (items.size() > 2 && items[2] != null) ? items[2] : no_circularity_evidence ] }
+        //
+        // hifi and oatk pair separately: they write different evidence files.
+        requirePrecomputedCircularityEvidence('MitoHiFi',
+            'precomputed_mitogenome_assembly_fasta_hifi', params.precomputed_mitogenome_assembly_fasta_hifi,
+            'precomputed_mitogenome_circularity_evidence_hifi', params.precomputed_mitogenome_circularity_evidence_hifi)
+
+        ch_hifi_sel = selectPrecomputedAssemblies('hifi', ch_mitogenome_hifi_assembly_fasta,
+            ch_mitogenome_hifi_circularity_evidence, no_circularity_evidence,
+            params.reseed_length_tolerance as double)
+        ch_oatk_sel = selectPrecomputedAssemblies('oatk', ch_mitogenome_hifi_oatk_fasta,
+            precomputedOatkEvidence(params.precomputed_mitogenome_circularity_evidence_oatk),
+            no_circularity_evidence, params.reseed_length_tolerance as double)
+
+        ch_mitogenome_hifi_assembly_fasta = ch_hifi_sel.map { meta, fasta, _ev -> [ meta, fasta ] }
+        ch_mitogenome_hifi_oatk_fasta = ch_oatk_sel.map { meta, fasta, _ev -> [ meta, fasta ] }
+        ch_mitogenome_hifi_circularity_evidence = ch_hifi_sel.mix(ch_oatk_sel).map { meta, _fasta, ev -> [ meta, ev ] }
     } else {
 
         ch_mitogenome_hifi_assembly_fasta = Channel.empty()

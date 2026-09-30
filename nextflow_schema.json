@@ -622,6 +622,10 @@
                     "type": "string",
                     "description": "Glob of precomputed Oatk circularity-check TSVs (*oatk*.getorg_check.tsv) used when the GetOrganelle branch is skipped."
                 },
+                "precomputed_mitogenome_circularity_evidence_oatk": {
+                    "type": "string",
+                    "description": "Glob of precomputed Oatk circularity-check TSVs (*oatk*.getorg_check.tsv), the same files as precomputed_mitogenome_assembly_log_oatk because Oatk records topology there. Needed because the HiFi glob (*circularity_check.tsv) never matches them, which left every precomputed Oatk assembly on the NA placeholder and therefore submitted as linear."
+                },
                 "precomputed_mitogenome_circularity_evidence_hifi": {
                     "type": "string",
                     "description": "Glob of precomputed MitoHiFi circularity-check TSVs (*.circularity_check.tsv) used when the HiFi branch is skipped, so meta.circular is still resolved from the original run's verdict instead of defaulting to unknown/linear."
