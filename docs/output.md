@@ -211,6 +211,20 @@ monomer length rather than re-flagged as over-length. Assemblies with no circula
 - For multi-contig assemblies, contigs are concatenated into one sequence (`*_concat`) to support
   downstream species validation and annotation tooling.
 
+**`GETORGANELLE_JOIN`** (`*_rgj`, reference-guided join) is an alternative to that plain
+concatenation, and is **off by default** (`--skip_getorganelle_join true`). Where a multi-scaffold
+assembly has a real reference, it BLASTs the scaffolds against it and emits them in reference order
+as one record, separated by up to 100bp of `N` (`--max-gap-n`). Its evidence file is
+`<assembly_prefix>.scaffold_join.tsv`.
+
+Both `*_rgj` and `*_concat` are artificial molecules. They exist so a partial mitogenome can still
+be annotated and get a species ID, and neither is a submittable assembly. The join is off because it
+never improved on the concatenation it displaced: across the 12 NOVA_260909_LA samples where both
+forms of the same contigs were annotated, it tied 10 and lost 2, each loss caused by a gene landing
+on an N spacer (OG2998 `CYTB`, OG3058 `ND2`). An inferred scaffold *order* adds nothing for either
+annotation or species ID, while the welds cost real gene models. Enable it with
+`--skip_getorganelle_join false` if you need the ordering for another purpose.
+
 ### Mitogenome annotation
 
 <details markdown="1">

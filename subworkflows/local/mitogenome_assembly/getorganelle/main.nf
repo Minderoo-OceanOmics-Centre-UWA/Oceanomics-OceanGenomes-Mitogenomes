@@ -891,18 +891,45 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     //   results and multi-scaffold results without a reference pass through (the
     //   latter are concatenated downstream by SANITISE_FASTA -> "<prefix>_concat").
     //
+    // params.skip_getorganelle_join (default TRUE, i.e. the join is off) sends every
+    // multi-scaffold assembly down the `direct` arm instead, where SANITISE_FASTA turns it
+    // into a plain `_concat`.
+    //
+    // Why off by default: re-running NOVA_260909_LA with every variant annotated gave 12
+    // samples where an `_rgj` and a `_concat` of the same contigs were both scored. The join
+    // won none of them: 10 ties, 2 losses. OG2998 is decisive -- same CYTB, same 189 bp, no Ns
+    // in either published CDS, but the concatenation reads ATT..TAA (a real terminator) and
+    // the join reads ACT..TCT, because the join placed that gene across its N spacer at
+    // 12044-12143. OG3058's ND2 is clean in the concatenation and no_stop in the join. Neither
+    // form is submittable anyway -- both exist only so a partial mitogenome can be annotated
+    // and get a species ID -- so an inferred scaffold ORDER buys nothing that a plain
+    // concatenation does not, while the welds cost real gene models.
+    //
+    // Left in place rather than deleted so it is one flag to re-enable, and so the four test
+    // fixtures asserting `_rgj` prefixes keep working. lib/AssemblySelection.groovy also
+    // penalises spacer Ns now, so a re-enabled join cannot win on contiguity alone.
     ch_join_branched = ch_fasta_ref.branch { _meta, fasta, ref ->
         def multi = false
         try { multi = fasta.text.readLines().count { it.startsWith('>') } > 1 } catch (ignored) { multi = false }
         // ref is now always a file (the NO_REFERENCE.gb placeholder when none resolved),
         // so "has a real reference" is ref.size() > 0, not ref != null.
-        rgj:    multi && ref.size() > 0
+        rgj:    !params.skip_getorganelle_join && multi && ref.size() > 0
         direct: true
     }
 
-    GETORGANELLE_JOIN (
-        ch_join_branched.rgj
-    )
+    // Initialised empty and populated inside the gate, the same shape the oatk fallback uses.
+    // Deliberately NOT relying on GETORGANELLE_JOIN.out.* being safely empty when the process
+    // runs zero tasks: .collect() on an empty channel would still emit an empty list into
+    // ch_multiqc_files, and .first() would be a no-op only by luck.
+    ch_joined_fasta = Channel.empty()
+    ch_joined_reference = Channel.empty()
+    if (!params.skip_getorganelle_join) {
+        GETORGANELLE_JOIN (
+            ch_join_branched.rgj
+        )
+        ch_joined_fasta = GETORGANELLE_JOIN.out.fasta
+        ch_joined_reference = GETORGANELLE_JOIN.out.reference
+    }
 
     // Re-pair the joined assembly with its (passed-through) reference, mix back the
     // pass-through samples (substituting the empty placeholder where no reference
@@ -914,8 +941,8 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // decides, downstream, which variant the corrected circular verdict belongs to and which
     // DB row the QC gate attaches the evidence to. Pass-through samples restamp to the same
     // value they already had.
-    ch_getorg_check_in = GETORGANELLE_JOIN.out.fasta
-        .join(GETORGANELLE_JOIN.out.reference, by: 0)
+    ch_getorg_check_in = ch_joined_fasta
+        .join(ch_joined_reference, by: 0)
         .map { meta, joined, ref -> [ meta, joined, ref ] }
         .mix( ch_join_branched.direct.map { meta, fasta, ref -> [ meta, fasta, ref ?: no_reference_gb ] } )
         .map { meta, fasta, ref -> [ meta + [ mt_assembly_prefix: fasta.baseName ], fasta, ref ] }
@@ -932,19 +959,23 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // the check evidence. The fasta is what gives the "_rgj" assembly its
     // final_length_bp / contig count in the assembly summary (the pre-join
     // scaffolds carry a different prefix); without it the rgj row has no length.
-    ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.fasta.map { _meta, fasta -> fasta })
-    ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.evidence.map { _meta, ev -> ev })
-    ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_JOIN.out.tool_params.collect { it[1] })
-    ch_versions = ch_versions.mix(GETORGANELLE_JOIN.out.versions.first())
+    if (!params.skip_getorganelle_join) {
+        ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.fasta.map { _meta, fasta -> fasta })
+        ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.evidence.map { _meta, ev -> ev })
+        ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_JOIN.out.tool_params.collect { it[1] })
+        ch_versions = ch_versions.mix(GETORGANELLE_JOIN.out.versions.first())
+    }
 
     // RGJ (reference-guided-join) assembly as its own DB variant. It produces no
     // GetOrganelle log of its own, so reuse the pre-join resolved log (same reads
     // -> same coverage); ch_assembly_log here is still the pre-check version.
-    ch_db_variant_inputs = ch_db_variant_inputs.mix(
-        GETORGANELLE_JOIN.out.fasta
-            .join(ch_assembly_log, by: 0)
-            .map { meta, fasta, log -> [ fasta.baseName, meta, fasta, log ] }
-    )
+    if (!params.skip_getorganelle_join) {
+        ch_db_variant_inputs = ch_db_variant_inputs.mix(
+            GETORGANELLE_JOIN.out.fasta
+                .join(ch_assembly_log, by: 0)
+                .map { meta, fasta, log -> [ fasta.baseName, meta, fasta, log ] }
+        )
+    }
 
     // Carry the "_rgj" identity re-stamp onto the log as well, now that the DB-variant mix
     // above (which needs the PRE-stamp meta, since GETORGANELLE_JOIN.out.fasta carries it) is

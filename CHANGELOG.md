@@ -9,6 +9,32 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **`tests/qc_gate_streaming` had not run since 06a9d95.** That commit moved
+  `attachCircularityEvidence` from `upload_results_mito` to `mitogenome_qc`, and the test's import was
+  never updated, so all three tests failed on "Cannot find a component" and the QC-gate streaming
+  contract went unchecked: that a sample is released as soon as its OWN evidence is in, that an
+  assembly with no circularity check still reaches the gate, and that the collapse rename still
+  matches its evidence. An import naming a real file but a missing component is a silent hole.
+  Fixed and all three pass.
+
+### `Changed`
+
+- **The reference-guided join is off by default** (`--skip_getorganelle_join`, default `true`).
+  `GETORGANELLE_JOIN` welds a multi-scaffold assembly into one record with 100bp N spacers so the
+  scaffolds sit in reference order; multi-scaffold assemblies now become a plain `_concat` instead.
+  Across the 12 NOVA_260909_LA samples where a joined and a concatenated form of the SAME contigs
+  were both annotated, the join won none: 10 ties and 2 losses, each loss a gene landing on a weld.
+  OG2998 is decisive: same CYTB, same 189 bp, no Ns in either published CDS, but the concatenation
+  reads `ATT..TAA` (a real terminator) while the join reads `ACT..TCT`, because the join placed that
+  gene across its spacer at 12044-12143. OG3058's ND2 is clean in the concatenation and `no_stop`
+  in the join. Neither form is submittable -- both exist only so a partial mitogenome can be
+  annotated and get a species ID -- so an inferred scaffold ORDER buys nothing a concatenation does
+  not, while the welds cost real gene models. The module, script, naming contracts, DB plumbing and
+  the four `_rgj` test fixtures are all left in place, so it is one flag to re-enable, and
+  `lib/AssemblySelection.groovy` now penalises spacer Ns so a re-enabled join cannot win on
+  contiguity alone. `_rgj` is also documented in `docs/output.md` for the first time.
+
+
 - **The skip-assembly path lost circularity, and stopped selecting an assembly at all.** Both faults were
   exposed by re-running NOVA_260909_LA with `skip_mitogenome_assembly_getorg` and `precomputed_*` globs.
   - `meta.circular` was never stamped on the precomputed path. The block already reloaded the original run's

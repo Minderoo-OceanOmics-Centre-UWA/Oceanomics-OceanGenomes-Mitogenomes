@@ -563,6 +563,11 @@
                     "type": "boolean",
                     "description": "Skip the automatic GetOrganelle reseed pass on failed/fragmented first-pass assemblies."
                 },
+                "skip_getorganelle_join": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Skip the reference-guided join (GETORGANELLE_JOIN), which welds a multi-scaffold assembly into one record with 100bp N spacers in reference order. Default true (off): multi-scaffold assemblies become a plain _concat instead. The join never produced a better annotation than the concatenation it displaced across 12 NOVA_260909_LA comparisons (10 ties, 2 losses, both from a gene landing on a weld), and neither form is submittable."
+                },
                 "skip_mitogenome_assembly_hifi": {
                     "type": "boolean",
                     "description": "Skip the MitoHiFi (HiFi) assembly branch."
