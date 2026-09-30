@@ -33,11 +33,27 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from orf_utils import classify_cds
+from annotation_stats import score_cds_dir
+from mitos_to_emma import EXTRA_PCG_MAP, NON_GENE_MAP
 
 # Raw MITOS names that are not the vertebrate set, tracked explicitly because
 # these are the ones the conversion used to drop.
 LINEAGE_FEATURES = ("atp9", "msh1", "mutS", "mtMutS", "OH", "OL", "gpI", "gpII", "lagli")
+
+# What each raw MITOS name is CALLED once mitos_to_emma.py has run. Searching the
+# published GFF for the raw name reports every renamed feature as lost: msh1 is
+# published as MTMUTS and OH as REP_ORIGIN_H, so the three mtMutS and 61 OH
+# annotations this script once reported dropped were in fact all present. Only
+# names the rename preserves case-insensitively (atp9 -> ATP9, lagli -> LAGLI)
+# ever looked right. Both tables are imported rather than copied so a new gene
+# added to the converter cannot silently regress this again.
+PUBLISHED_NAME = {raw: internal for raw, internal in EXTRA_PCG_MAP.items()}
+PUBLISHED_NAME.update({raw: spec[0] for raw, spec in NON_GENE_MAP.items()})
+
+
+def published_name(bare_name):
+    """The name `bare_name` is published under, after the conversion rename."""
+    return PUBLISHED_NAME.get(bare_name.lower(), bare_name)
 
 
 def samplesheet_from_params(run):
@@ -122,6 +138,10 @@ def snapshot(run, out, samplesheet=None):
                 assemblies.append(row)
 
     # ---- CDS integrity ---------------------------------------------------
+    # Scored by the pipeline's own scorer, not a local copy of the loop. The copy
+    # had no terminator-convention detection, so every EMMA (fish) CDS was flagged
+    # no_stop: 136 false findings across 9 samples, 13 of 13 PCGs each, because
+    # EMMA publishes its per-gene CDS with the stop codon removed.
     broken = []
     for cds_dir in sorted(glob.glob(f"{run}/mitogenomes/*/*/annotation/cds")):
         parts = Path(cds_dir).parts
@@ -131,29 +151,19 @@ def snapshot(run, out, samplesheet=None):
             continue
         code = int(code)
         lineage = (tax.get(og, {}) or {}).get("class", "")
-        for fa in sorted(Path(cds_dir).glob("*.fa*")):
-            gene = fa.name.split(".")[0].replace("MT-", "")
-            if gene.startswith("RNR") or (gene.startswith("T") and gene != "TOTAL"):
-                continue
-            try:
-                nt = read_fasta(fa)
-                info = classify_cds(nt, code, lineage=lineage, gene=gene)
-            except (OSError, ValueError):
-                continue
-            issues = []
-            if info["start_class"] == "implausible":
-                issues.append(f"implausible_start({info['start_codon']})")
-            elif info["start_class"] == "alternative_documented":
-                issues.append(f"alternative_start({info['start_codon']})")
-            if not info["stop_ok"]:
-                issues.append(f"no_stop({nt[-3:]},rem{len(nt) % 3})")
-            if info["internal_stops"]:
-                issues.append(f"internal_stops({info['internal_stops']})")
-            if issues:
+        per_gene, _stop_excluded = score_cds_dir(cds_dir, code, lineage=lineage)
+        if not per_gene:
+            continue
+        for gene, gene_issues, gene_advisories in per_gene:
+            # score_cds_dir prefixes each finding with the gene; this TSV has a
+            # gene column already, so strip it back off.
+            findings = [f.split(":", 1)[1] if f.startswith(f"{gene}:") else f
+                        for f in gene_issues + gene_advisories]
+            if findings:
                 broken.append({
                     "og_id": og, "assembly": assembly, "gene": gene,
                     "genetic_code": code, "class": lineage,
-                    "issues": ";".join(issues),
+                    "issues": ";".join(findings),
                 })
 
     # ---- raw MITOS features and their fate -------------------------------
@@ -171,11 +181,12 @@ def snapshot(run, out, samplesheet=None):
                 continue
             raw = cols[3]
             b = bare(raw)
-            survived = bool(re.search(rf"Name=(MT-)?{re.escape(b)}[;\s]", published,
+            pub = published_name(b)
+            survived = bool(re.search(rf"Name=(MT-)?{re.escape(pub)}[;\s]", published,
                                       re.I))
             features.append({
                 "og_id": og, "assembly": assembly, "raw_name": raw,
-                "bare_name": b,
+                "bare_name": b, "published_name": pub,
                 "is_lineage_feature": "yes" if b in LINEAGE_FEATURES else "no",
                 "survived_to_published_gff": "yes" if survived else "no",
             })
@@ -192,8 +203,8 @@ def snapshot(run, out, samplesheet=None):
     write("cds_integrity.tsv", broken,
           ["og_id", "assembly", "gene", "genetic_code", "class", "issues"])
     write("raw_features.tsv", features,
-          ["og_id", "assembly", "raw_name", "bare_name", "is_lineage_feature",
-           "survived_to_published_gff"])
+          ["og_id", "assembly", "raw_name", "bare_name", "published_name",
+           "is_lineage_feature", "survived_to_published_gff"])
 
     # ---- summary ---------------------------------------------------------
     lost = collections.Counter()

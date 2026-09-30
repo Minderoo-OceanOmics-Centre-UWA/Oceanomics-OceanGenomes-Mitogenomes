@@ -15,7 +15,7 @@ BIN = Path(__file__).resolve().parents[2] / "bin"
 sys.path.insert(0, str(BIN))
 
 from annotation_stats import (check_cds_integrity, grade_gene_order,
-                              read_conversion_audit)
+                              read_conversion_audit, score_cds_dir)
 from mito_gene_order import REF_GENES
 
 
@@ -148,3 +148,51 @@ class OrderGradingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScoreCdsDirTests(unittest.TestCase):
+    """score_cds_dir is the shared scorer bin/mito_run_snapshot.py reuses.
+
+    The snapshot used to re-implement this loop without the terminator-convention
+    detection, which flagged no_stop on all 13 PCGs of every EMMA sample (136
+    false findings in NOVA_260909_LA). These tests pin the contract it relies on.
+    """
+
+    def test_per_gene_results_are_returned_in_filename_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = make_cds_dir(tmp, {
+                "ND1": "ATG" + "GGG" * 5 + "TAA",
+                "ATP6": "ATG" + "GGG" * 5 + "TAA",
+            })
+            per_gene, stop_excluded = score_cds_dir(d, 4)
+        self.assertEqual([g for g, _i, _a in per_gene], ["ATP6", "ND1"])
+        self.assertFalse(stop_excluded)
+        self.assertEqual([i for _g, i, _a in per_gene], [[], []])
+
+    def test_stop_excluded_is_detected_and_suspends_only_the_terminator(self):
+        """EMMA publishes CDS without the stop codon; that is a convention, not a defect."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # Six in-frame genes, none carrying a terminator: the EMMA convention.
+            d = make_cds_dir(tmp, {g: "ATG" + "GGG" * 5
+                                   for g in ("ND1", "ND2", "ND3", "ND4", "ND5", "ND6")})
+            per_gene, stop_excluded = score_cds_dir(d, 4)
+        self.assertTrue(stop_excluded)
+        flat = [i for _g, issues, _a in per_gene for i in issues]
+        self.assertEqual(flat, [], f"stop-excluded CDS must not be flagged: {flat}")
+
+    def test_frame_check_survives_stop_exclusion(self):
+        """Only the terminator check is suspended, never the frame check."""
+        with tempfile.TemporaryDirectory() as tmp:
+            genes = {g: "ATG" + "GGG" * 5 for g in ("ND1", "ND2", "ND3", "ND4", "ND5")}
+            genes["ND6"] = "ATG" + "GGG" * 5 + "G"   # remainder 1
+            d = make_cds_dir(tmp, genes)
+            per_gene, stop_excluded = score_cds_dir(d, 4)
+        self.assertTrue(stop_excluded)
+        flat = [i for _g, issues, _a in per_gene for i in issues]
+        self.assertEqual(flat, ["ND6:frame_remainder(1)"])
+
+    def test_missing_dir_reports_not_evaluated(self):
+        per_gene, stop_excluded = score_cds_dir(None, 4)
+        self.assertIsNone(per_gene)
+        self.assertFalse(stop_excluded)
+        self.assertEqual(check_cds_integrity(None, "sample", 4), ("not_evaluated", []))

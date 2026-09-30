@@ -287,18 +287,22 @@ def read_fasta_seq(path):
     return "".join(seq).upper()
 
 
-def check_cds_integrity(cds_dir, annotation_name, genetic_code, lineage=None):
-    """Classify EVERY exported CDS, not a fixed 13-gene list.
+def score_cds_dir(cds_dir, genetic_code, lineage=None):
+    """Score every exported CDS in a directory, per gene.
 
-    The existing annotation_qc_gate.py cannot serve as the annotation verdict: it
-    runs on raw MITOS2 output BEFORE any repair, covers only the standard PCG
-    list, and always exits 0 with exceptions degrading to PASS. It is a router.
-    This runs post-merge, on whatever was actually published.
+    Split out of check_cds_integrity so a second consumer can reuse the
+    terminator-convention detection instead of re-deriving it. Reimplementing it
+    is how bin/mito_run_snapshot.py came to report 13 false "no_stop" findings on
+    every EMMA sample: the convention is a property of the annotator's output,
+    not of the caller.
 
-    Returns (status, issues) where status is 'ok', 'advisory' or 'broken'.
+    Returns (per_gene, stop_excluded) where per_gene is a list of
+    (gene, issues, advisories) in filename order, and stop_excluded says whether
+    this annotator omits terminators. Callers that want a single verdict should
+    use check_cds_integrity() rather than collapsing per_gene themselves.
     """
     if not cds_dir or not Path(cds_dir).is_dir() or genetic_code is None:
-        return "not_evaluated", []
+        return None, False
 
     # Annotators disagree about whether an exported CDS includes its terminator.
     # mitos_to_emma.py writes the stop codon; EMMA does not (an EMMA ATP6 of 681 nt
@@ -315,10 +319,10 @@ def check_cds_integrity(cds_dir, annotation_name, genetic_code, lineage=None):
             continue
         try:
             records.append((gene, read_fasta_seq(fa)))
-        except OSError as exc:
+        except OSError:
             records.append((gene, None))
     if not records:
-        return "not_evaluated", []
+        return None, False
 
     stops_present = 0
     stops_checked = 0
@@ -335,20 +339,22 @@ def check_cds_integrity(cds_dir, annotation_name, genetic_code, lineage=None):
     # Fewer than 40% carrying a terminator means this annotator excludes them.
     stop_excluded = stops_checked >= 3 and stops_present <= 0.4 * stops_checked
 
-    issues, advisories = [], []
-    if stop_excluded:
-        advisories.append("cds_convention:stop_codon_excluded")
+    per_gene = []
     for gene, nt in records:
+        issues, advisories = [], []
         if nt is None:
             issues.append(f"{gene}:unreadable")
+            per_gene.append((gene, issues, advisories))
             continue
         if not nt:
             issues.append(f"{gene}:empty_cds")
+            per_gene.append((gene, issues, advisories))
             continue
         try:
             info = classify_cds(nt, genetic_code, lineage=lineage, gene=gene)
         except ValueError as exc:
             issues.append(f"{gene}:{exc}")
+            per_gene.append((gene, issues, advisories))
             continue
         if info["start_class"] == "implausible":
             issues.append(f"{gene}:implausible_start({info['start_codon']})")
@@ -363,6 +369,28 @@ def check_cds_integrity(cds_dir, annotation_name, genetic_code, lineage=None):
             issues.append(f"{gene}:no_stop({nt[-3:]},rem{len(nt) % 3})")
         if info["internal_stops"]:
             issues.append(f"{gene}:internal_stops({info['internal_stops']})")
+        per_gene.append((gene, issues, advisories))
+
+    return per_gene, stop_excluded
+
+
+def check_cds_integrity(cds_dir, annotation_name, genetic_code, lineage=None):
+    """Classify EVERY exported CDS, not a fixed 13-gene list.
+
+    The existing annotation_qc_gate.py cannot serve as the annotation verdict: it
+    runs on raw MITOS2 output BEFORE any repair, covers only the standard PCG
+    list, and always exits 0 with exceptions degrading to PASS. It is a router.
+    This runs post-merge, on whatever was actually published.
+
+    Returns (status, issues) where status is 'ok', 'advisory' or 'broken'.
+    """
+    per_gene, stop_excluded = score_cds_dir(cds_dir, genetic_code, lineage=lineage)
+    if per_gene is None:
+        return "not_evaluated", []
+
+    issues = [i for _gene, gene_issues, _adv in per_gene for i in gene_issues]
+    advisories = (["cds_convention:stop_codon_excluded"] if stop_excluded else [])
+    advisories += [a for _gene, _iss, gene_adv in per_gene for a in gene_adv]
 
     if issues:
         return "broken", issues + advisories

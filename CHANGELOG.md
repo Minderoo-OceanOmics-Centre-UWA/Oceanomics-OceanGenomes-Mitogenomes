@@ -9,6 +9,28 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **`bin/mito_run_snapshot.py` manufactured two regressions that did not exist.** The snapshot is the tool a
+  remediation is judged against, so a false finding in it costs a round of work on a healthy pipeline. Both
+  defects were live at once when NOVA_260909_LA was reviewed:
+  - It searched the published GFF for the RAW MITOS feature name, so every feature the conversion renames read
+    as dropped. `msh1` is published as `MTMUTS` and `OH` as `REP_ORIGIN_H`, so 3 mtMutS, 61 OH, 11 OL, 5 gpI
+    and 1 gpII were reported lost while all 81 were present. Only names the rename preserves
+    case-insensitively (`atp9` -> `ATP9`, `lagli` -> `LAGLI`) ever looked right, which is why the bug hid.
+    The raw name is now mapped through `EXTRA_PCG_MAP` and `NON_GENE_MAP`, imported from `bin/mitos_to_emma.py`
+    rather than copied, and `raw_features.tsv` gains a `published_name` column so the lookup is auditable.
+    The run now reports zero lost features, which is the truth.
+  - It re-implemented the CDS loop without the terminator-convention detection that
+    `bin/annotation_stats.py` has had all along. EMMA publishes per-gene CDS with the stop codon removed, so
+    every EMMA CDS was flagged `no_stop`: 136 findings across 9 fish, 13 of 13 PCGs each. That scoring is now
+    `score_cds_dir()`, split out of `check_cds_integrity()` and shared, so the convention cannot be re-derived
+    wrongly by a second caller. Re-scoring all 110 assemblies of that run reproduces the published
+    `annotation_integrity_status` and `annotation_integrity_issues` byte for byte, and the fish findings fall
+    from 136 to 1, a genuine `alternative_start(TTG)`; every invertebrate class is unchanged.
+
+  Neither defect was ever in the pipeline: the gate already read `advisory | cds_convention:stop_codon_excluded`
+  for all 9 fish, and the `passed=no` rows were failing on gene order, not CDS scoring.
+
+
 - **Invertebrate annotation remediation (NOVA_260909_LA).** The batch produced 72 assemblies from 80 samples
   and cleared 3. Seven changes, each traced to a measured cause in that run:
   - `bin/orf_snap.py`: the reference-free ORF boundary snap, lifted out of `bin/coral_fix_bed.py` so it is no
