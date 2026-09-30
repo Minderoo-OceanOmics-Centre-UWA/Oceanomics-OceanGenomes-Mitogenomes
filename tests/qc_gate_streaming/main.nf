@@ -1,5 +1,5 @@
 // Stub harness for the circularity-evidence attachment at the QC gate in
-// subworkflows/local/upload_results_mito.
+// subworkflows/local/mitogenome_qc.
 //
 // The gate must release each sample as soon as its OWN species validation, annotation stats
 // and circularity evidence are in, rather than waiting for every assembly in the run. It must
@@ -11,7 +11,13 @@ nextflow.enable.dsl = 2
 
 // Import the real implementation rather than copying it, so this test cannot silently pass
 // against a stale duplicate of the logic it is meant to protect.
-include { attachCircularityEvidence } from '../../subworkflows/local/upload_results_mito/main.nf'
+//
+// The path matters: attachCircularityEvidence moved from upload_results_mito to
+// mitogenome_qc in 06a9d95 and this import was never updated, so every test in this file
+// failed on "Cannot find a component" and the whole QC-gate streaming contract went
+// unchecked from then on. An import that names a real file but a missing component is a
+// silent hole, not a loud one.
+include { attachCircularityEvidence } from '../../subworkflows/local/mitogenome_qc/main.nf'
 
 // Stands in for the assembly stage's circularity check, with a per-sample delay so the test
 // can prove a fast sample is not held behind a slow assembly.
