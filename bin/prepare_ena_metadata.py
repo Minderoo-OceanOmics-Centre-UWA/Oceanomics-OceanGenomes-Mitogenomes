@@ -29,6 +29,7 @@ from pathlib import Path
 # sibling import resolves the same way push_species_validation.py imports
 # load_db_config.
 from depth_tsv import read_mean_depth
+from species_name_utils import to_submittable_organism
 
 try:
     import psycopg2
@@ -136,7 +137,9 @@ def fetch_metadata(connection, args: argparse.Namespace) -> dict[str, object]:
         "mean_depth_source": mean_depth_source,
         "program": assembly_program(args.code),
         "platform": platform_for_tech(args.tech),
-        "scientific_name": args.scientific_name,
+        # Same normalisation the flat file gets: an unsubmittable rank name here would
+        # register an ENA sample that its own sequence record cannot reference.
+        "scientific_name": to_submittable_organism(args.scientific_name),
     }
 
 

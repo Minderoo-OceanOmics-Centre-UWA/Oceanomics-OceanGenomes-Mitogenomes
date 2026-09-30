@@ -1,0 +1,2 @@
+sample	status	reason	webin_exit	validation_attempt	error_count	warning_count	webin_cli_version	blocking_errors
+OG1.x	FAIL_INFRASTRUCTURE	webin_or_network_failure	1	initial	0	0	9.0.3	

@@ -9,6 +9,43 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **ENA prep: wrong-named source files, a false held reason, two missing held reasons, and an
+  unsubmittable organism.** Four faults that between them lost samples silently or lied about why.
+  - `BUILD_SOURCE_MODIFIERS` wrote `.src` files under OTHER assemblies' names and exited 0. When no
+    database SeqID matched `--assembly-id` it printed a warning and wrote every sibling variant
+    unfiltered, so OG2936's `_concat` produced `OG2936.ilmn.260909.getorg1770..src` and
+    `...getorg1770_rgj.mitos2110.src` -- correct files under names nothing looks for. The module's
+    optional glob matched none, the task "succeeded" with no output, and the sample was dropped by the
+    inner join in `ena_submission_prep`. Now: no match is a hard `SystemExit` naming every SeqID the
+    database did return (seeing the siblings next to the request is the diagnosis), the `.src` is
+    named from `meta.full_seqid` rather than from the database, and the module's output is that exact
+    name and no longer `optional`, so an empty result is a task failure instead of a silent drop.
+    The SQL also uses `CONCAT_WS` + `NULLIF(m.annotation, '')`, so a NULL annotation no longer builds
+    a trailing-dot SeqID that could never match.
+  - The pre-submission held reason claimed `(task failed and was ignored)`, which was untrue for the
+    case that produced it: both `_concat` tasks exited 0. The reason now states what the channel can
+    actually observe (`BUILD_SOURCE_MODIFIERS emitted no <full_seqid>.src`). It is also keyed on
+    `full_seqid` rather than `meta.id`, which is the SPECIMEN -- several variants of one specimen
+    enter prep together, so the remainder join fanned out and a specimen with three variants produced
+    one row instead of three.
+  - A `FAIL_WEBIN` or `FAIL_CONVERSION` flat file emitted no held fragment at all, which is why
+    OG2943 and OG3015 came out of NOVA_260909_LA "unaccounted": in the samplesheet but in neither
+    `held_samples.tsv` nor the submission-ready set. Both now produce one, and `WEBIN_VALIDATE`
+    appends a trailing `blocking_errors` column carrying the real ERROR text, so the row says
+    `Organism is not Submittable: "Exocoetidae"` rather than `validation_failed`. Appended as a
+    trailing column deliberately: `collate_ena_validation.py` reads the TSV with `DictReader`
+    against a fixed `RECORD_COLUMNS`, so the `ena_validation` table is unchanged.
+    `FAIL_WEBIN` and `FAIL_INFRASTRUCTURE` stay distinct -- one needs the record fixed, the other a
+    rerun.
+  - ENA rejects a bare rank name above genus outright, which is what those two failed on.
+    `to_submittable_organism()` appends `sp.` when `nominal_rank.parse_rank` puts the name at family
+    or above, giving the known-good `Exocoetidae sp.` (which raises only the non-blocking
+    `SEQ_DESCR.OrganismIsUndefinedSpecies`, exactly as `Glyptelasma sp.` already did). It is the
+    caller `normalise_open_nomenclature` defers to, so that function still refuses the family case
+    and a test pins that the layering stays put. Applied in `process_files.py` (so `/organism=` and
+    `##organism` cannot disagree) and `prepare_ena_metadata.py`.
+
+
 - **An `_rgj` / `_concat` could be marked `submission_ready` and sent to ENA.** Nothing in the pipeline
   distinguished a scaffolding artefact from a molecule: the QC gate is content-based
   (`bin/evaluate_qc_conditions.py`) and readiness is pure gate arithmetic

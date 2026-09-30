@@ -186,3 +186,61 @@ class ParseNominalTests(unittest.TestCase):
         # genus set or LCA genus column carries 'Scleractinia' -- so the sample
         # stays held, which is the safe direction.
         self.assertEqual(parse_nominal("Scleractinia"), ("genus", "Scleractinia"))
+
+
+class SubmittableOrganismTests(unittest.TestCase):
+    """A bare rank name above genus is rejected by ENA, after passing every gate upstream.
+
+    OG2943 ("Exocoetidae") and OG3015 ("Synaphobranchidae") both passed table2asn in
+    NOVA_260909_LA and then failed at Webin with 'Organism is not Submittable'. Because a
+    Webin failure emitted no held fragment, they left the run "unaccounted": in the
+    samplesheet, but in neither held_samples.tsv nor the submission-ready set.
+
+    normalise_open_nomenclature deliberately refuses the family case -- its docstring
+    reserves that decision for a caller that knows the rank. This is that caller, so these
+    tests also pin that the refusal stays where it is.
+    """
+
+    def test_family_rank_names_gain_sp(self):
+        self.assertEqual(
+            species_name_utils.to_submittable_organism("Exocoetidae"), "Exocoetidae sp.")
+        self.assertEqual(
+            species_name_utils.to_submittable_organism("Synaphobranchidae"), "Synaphobranchidae sp.")
+
+    def test_higher_ranks_gain_sp_too(self):
+        self.assertEqual(
+            species_name_utils.to_submittable_organism("Porifera"), "Porifera sp.")
+
+    def test_bare_genus_still_routes_through_the_normaliser(self):
+        self.assertEqual(
+            species_name_utils.to_submittable_organism("Serrivomer"), "Serrivomer sp.")
+        self.assertEqual(
+            species_name_utils.to_submittable_organism("Blachea spp."), "Blachea sp.")
+
+    def test_already_submittable_names_are_untouched(self):
+        # Glyptelasma sp. already submits, raising only the non-blocking
+        # SEQ_DESCR.OrganismIsUndefinedSpecies, so it is the known-good target form.
+        self.assertEqual(
+            species_name_utils.to_submittable_organism("Glyptelasma sp."), "Glyptelasma sp.")
+        self.assertEqual(
+            species_name_utils.to_submittable_organism("Asteroidea sp."), "Asteroidea sp.")
+        self.assertEqual(
+            species_name_utils.to_submittable_organism("Notacanthus abbotti"), "Notacanthus abbotti")
+
+    def test_the_family_refusal_stays_in_the_normaliser(self):
+        """If this starts returning 'Exocoetidae sp.', the layering has been undone."""
+        self.assertEqual(
+            species_name_utils.normalise_open_nomenclature("Exocoetidae"), "Exocoetidae")
+
+    def test_sentinels_stay_sentinels(self):
+        """'unknown sp.' is worse than 'unknown': it looks submittable."""
+        for token in species_name_utils.UNRESOLVED_TAXON_TOKENS:
+            self.assertEqual(species_name_utils.to_submittable_organism(token), token)
+
+    def test_empty_and_none(self):
+        self.assertEqual(species_name_utils.to_submittable_organism(""), "")
+        self.assertIsNone(species_name_utils.to_submittable_organism(None))
+
+    def test_idempotent(self):
+        once = species_name_utils.to_submittable_organism("Exocoetidae")
+        self.assertEqual(species_name_utils.to_submittable_organism(once), once)

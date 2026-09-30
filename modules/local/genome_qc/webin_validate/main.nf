@@ -118,9 +118,21 @@ process WEBIN_VALIDATE {
     # The package build copies these counts into package_metadata.json.
     error_count=\$(grep -RihE '(^|[^[:alpha:]])(ERROR|INVALID)([^[:alpha:]]|\$)' webin_output "\${log_file}" 2>/dev/null | wc -l)
     warning_count=\$(grep -RihE '(^|[^[:alpha:]])WARNING([^[:alpha:]]|\$)' webin_output "\${log_file}" 2>/dev/null | wc -l)
-    printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\terror_count\twarning_count\twebin_cli_version\n%s\t%s\t%s\t%s\t%s\t%s\t%s\t9.0.3\n' \\
+
+    # The actual ERROR text, deduped, so a held row can say WHY rather than just
+    # "validation_failed". reason alone sent an operator to the work directory to find
+    # 'Organism is not Submittable: "Exocoetidae"' -- one line that names the fix.
+    #
+    # Appended as a TRAILING column on purpose: bin/collate_ena_validation.py reads this TSV
+    # with DictReader against a fixed RECORD_COLUMNS list, so an extra column is ignored and
+    # the ena_validation DB table is unchanged. Tabs and newlines are stripped and the whole
+    # thing truncated, because this has to stay one TSV field.
+    blocking_errors=\$(grep -RhoE '(ERROR|INVALID):[^\\n]*' webin_output "\${log_file}" 2>/dev/null \\
+        | sed 's/[\\t]/ /g' | sort -u | paste -sd '|' - | cut -c1-500)
+
+    printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\terror_count\twarning_count\twebin_cli_version\tblocking_errors\n%s\t%s\t%s\t%s\t%s\t%s\t%s\t9.0.3\t%s\n' \\
         "\${prefix}" "\${webin_status}" "\${reason}" "\${webin_rc}" "${validation_attempt}" \\
-        "\${error_count}" "\${warning_count}" > "\${status_file}"
+        "\${error_count}" "\${warning_count}" "\${blocking_errors}" > "\${status_file}"
 
     printf '%s\n' '<tr><td>ENA Webin validation</td><td><samp>ena-webin-cli -context sequence -validate</samp></td><td>Validates the ENA flat file without submitting it for ${meta.id}.</td></tr>' > 21_webin_validate.tool_params_mqcrow.html
     printf '"%s":\n    webin-cli: "9.0.3"\n' "${task.process}" > versions.yml
@@ -133,7 +145,7 @@ process WEBIN_VALIDATE {
     mkdir -p validated webin_output
     cp "$embl_file" validated/
     printf 'STUDY\t%s\nNAME\t%s\nFLATFILE\t%s\n' "${meta.ena_study}" "${prefix}" "${embl_file.name}" > ${prefix}.webin_manifest.txt
-    printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\terror_count\twarning_count\twebin_cli_version\n%s\tPASS\tvalidated\t0\t%s\t0\t0\tstub\n' "${prefix}" "${validation_attempt}" > ${prefix}.webin_status.tsv
+    printf 'sample\tstatus\treason\twebin_exit\tvalidation_attempt\terror_count\twarning_count\twebin_cli_version\tblocking_errors\n%s\tPASS\tvalidated\t0\t%s\t0\t0\tstub\t\n' "${prefix}" "${validation_attempt}" > ${prefix}.webin_status.tsv
     printf 'Stub Webin validation passed\n' > ${prefix}.webin_validate.log
     printf 'PASS\n' > webin_output/validation.txt
     printf '%s\n' '<tr><td>ENA Webin validation</td><td><samp>stub</samp></td><td>Stub Webin validation for ${meta.id}.</td></tr>' > 21_webin_validate.tool_params_mqcrow.html

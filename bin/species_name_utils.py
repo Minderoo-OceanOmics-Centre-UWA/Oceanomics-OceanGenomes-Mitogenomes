@@ -87,6 +87,56 @@ def normalise_open_nomenclature(name):
     return s
 
 
+def to_submittable_organism(name, lineage=None):
+    """Turn a resolved taxon name into one ENA will accept as /organism=.
+
+    ENA rejects a bare rank name above genus outright:
+
+        ERROR: Organism is not Submittable: "Exocoetidae".
+        ERROR: Organism is not Submittable: "Synaphobranchidae".
+
+    Both of those passed table2asn in NOVA_260909_LA and then failed at Webin, and
+    because a Webin failure emitted no held fragment they came out of the run
+    "unaccounted" -- in the samplesheet but in neither held_samples.tsv nor the
+    submission-ready set. The submittable form is open nomenclature at that rank,
+    'Exocoetidae sp.', which ENA accepts (it raises only the non-blocking
+    SEQ_DESCR.OrganismIsUndefinedSpecies, exactly as 'Glyptelasma sp.' already does).
+
+        'Exocoetidae'       -> 'Exocoetidae sp.'
+        'Serrivomer'        -> 'Serrivomer sp.'   (via normalise_open_nomenclature)
+        'Asteroidea sp.'    -> unchanged (already qualified)
+        'Notacanthus abbotti' -> unchanged (a real binomial)
+        'unknown'           -> unchanged (a sentinel is not a taxon)
+
+    This is the caller normalise_open_nomenclature's docstring defers to: it
+    deliberately refuses the family case so the decision is made somewhere that knows
+    the rank. `lineage` is passed through to nominal_rank.parse_rank, so a resolved
+    taxonomy decides the rank rather than a guess at a Latin suffix.
+
+    Idempotent.
+    """
+    if not name:
+        return name
+    s = str(name).strip()
+    if s.lower() in UNRESOLVED_TAXON_TOKENS:
+        return s
+
+    # Bare genus and 'Genus spp.' are handled there and need no rank lookup.
+    s = normalise_open_nomenclature(s)
+
+    # Anything already carrying a qualifier, or any multi-word name, is left alone: a
+    # binomial is submittable and 'Family sp.' is already the target form.
+    if len(s.split()) != 1:
+        return s
+
+    from nominal_rank import parse_rank
+
+    rank, _taxon = parse_rank(s, lineage)
+    if rank in ("family", "order", "class", "phylum", "higher"):
+        return f"{s} sp."
+    return s
+
+
 def genus_of(name):
     """Genus = first whitespace-delimited token of a taxon name, else ''.
 

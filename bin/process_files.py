@@ -11,6 +11,7 @@ from orf_utils import start_codons as _orf_start_codons
 from orf_utils import stop_codons as _orf_stop_codons
 from orf_utils import PLAUSIBLE_MITO_STARTS, lineage_alt_starts
 from gene_names import submission_gene_name, bare_gene_name
+from species_name_utils import to_submittable_organism
 
 def parse_args():
     p = argparse.ArgumentParser(description="Process mitogenome files for GenBank submission.")
@@ -514,7 +515,12 @@ def write_meta_directives(output_gff, species, og_id):
 def main():
     args = parse_args()
     OG_ID = args.og_id
-    SPECIES = args.species
+    # ENA takes /organism= verbatim and rejects a bare rank name above genus:
+    # 'Organism is not Submittable: "Exocoetidae"'. Normalise once, here, so the FASTA
+    # defline and the GFF ##organism directive cannot disagree with each other.
+    SPECIES = to_submittable_organism(args.species)
+    if SPECIES != args.species:
+        log(f"ℹ️  organism {args.species!r} is not submittable at its rank; using {SPECIES!r}")
 
 
     outdir = Path(args.outdir)

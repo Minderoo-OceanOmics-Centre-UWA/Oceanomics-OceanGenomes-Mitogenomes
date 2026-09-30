@@ -64,6 +64,12 @@ def parse_args():
     p.add_argument("--og-id", required=True, help="Sample OG_ID / isolate.")
     p.add_argument("--seq-tech", required=True, help="Sequencing tech (e.g., hifi, ilmn, hic).")
     p.add_argument("--assembly-id", required=True, help="Full name of assembly (e.g.OG00.ilmn.220022.getorg1770.emma102).")
+    p.add_argument(
+        "--full-seqid", required=True,
+        help="The SeqID this .src is for, from meta.full_seqid. The file is named from THIS "
+             "rather than from the database, because the pipeline already knows the answer and "
+             "the DB-derived form was the source of wrong-named files.",
+    )
     return p.parse_args()
 
 # ---------------------------
@@ -255,6 +261,40 @@ COLLECTION_DATE_RE = re.compile(
     r"^(?:(?:\d{1,2}-)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-)?\d{4}$"
 )
 
+def seqid_belongs_to(seqid, assembly_id):
+    """Is this database SeqID the one for `assembly_id`?
+
+    A SeqID is "<assembly prefix>.<annotation>", so an exact match or a match up to a
+    trailing dot. The dot is load-bearing: without it "getorg1770" also claims
+    "getorg1770reseed" and "getorg1770_rgj", and table2asn fatals when it is handed more
+    than one source qualifier file.
+    """
+    aid = str(assembly_id or "").strip()
+    if not aid:
+        return False
+    value = str(seqid or "").strip()
+    return value == aid or value.startswith(aid + ".")
+
+
+def no_seqid_match_message(assembly_id, seqids):
+    """Why no database SeqID matched, naming what the database did return.
+
+    Split out so the diagnosis is testable without pandas, and so the message always
+    lists the candidates -- seeing "getorg1770, getorg1770reseed, getorg1770_rgj" next to
+    a request for "getorg1770_concat" IS the diagnosis.
+    """
+    found = ", ".join(sorted({str(s).strip() for s in seqids if str(s).strip()})) or "(none)"
+    return (
+        f"❌ No mitogenome_data SeqID matches assembly-id '{assembly_id}'.\n"
+        f"   The database returned: {found}\n"
+        "   That means this assembly has no mitogenome_data row of its own. A curated\n"
+        "   variant (_concat, _rgj, _collapsed) only gets one if it was pushed under its\n"
+        "   own name. If this run used --skip_upload_results, or prep raced the pushes\n"
+        "   (submission prep no longer waits on the upload receipt), the row may simply\n"
+        "   not be committed yet."
+    )
+
+
 def valid_collection_date(value):
     """True when `value` is a well-formed INSDC collection_date that is not in the future."""
     text = str(value).strip()
@@ -289,8 +329,11 @@ def fetch_bankit_metadata(conn, og_id, tech):
             FROM sequencing seq
         )
         SELECT
+            -- CONCAT_WS + NULLIF, not CONCAT: a NULL/empty annotation column under CONCAT
+            -- produced "OG2936.ilmn.260909.getorg1770." -- a trailing dot that can never equal
+            -- the flat file's SeqID, so the assembly filter below silently matched nothing.
             STRING_AGG(
-                DISTINCT CONCAT(m.og_id, '.', m.tech, '.', m.seq_date, '.', m.code, '.', m.annotation),
+                DISTINCT CONCAT_WS('.', m.og_id, m.tech, m.seq_date, m.code, NULLIF(m.annotation, '')),
                 ', '
             ) AS "SeqID",
             s.og_id AS isolate,
@@ -424,17 +467,21 @@ def main():
     # must receive exactly one .src; staging several trips a "source qualifier
     # file does not exist" fatal. Match on the assembly prefix passed in (the
     # SeqID is "<assembly-id>.<annotation>", so require a trailing dot so that
-    # getorg1770 does not also match getorg1770reseed). Fall back to writing all
-    # (the previous behaviour) only if nothing matches, so this can never drop
-    # more than it should.
+    # getorg1770 does not also match getorg1770reseed).
+    #
+    # No match is now FATAL. It used to print a warning and write every sibling
+    # variant's .src unfiltered, then exit 0 -- so a _concat assembly produced
+    # OG2936.ilmn.260909.getorg1770..src and ...getorg1770_rgj.mitos2110.src, none of
+    # which matched the module's output glob. The task therefore "succeeded" with no
+    # output and the sample was dropped by the inner join in ena_submission_prep,
+    # reported only as a held row blaming a task failure that never happened.
+    # Writing files under other assemblies' names is never the right answer.
     _aid = (args.assembly_id or "").strip()
     if _aid:
-        _match = df_exp["SeqID"].apply(lambda s: s == _aid or s.startswith(_aid + "."))
-        if _match.any():
-            df_exp = df_exp[_match].copy()
-        else:
-            print(f"⚠️  No SeqID matched assembly-id '{_aid}'; writing all "
-                  f"{len(df_exp)} source file(s) unfiltered.", flush=True)
+        _match = df_exp["SeqID"].apply(lambda value: seqid_belongs_to(value, _aid))
+        if not _match.any():
+            raise SystemExit(no_seqid_match_message(_aid, list(df_exp["SeqID"])))
+        df_exp = df_exp[_match].copy()
 
     # A coordinate that cannot be turned into a submittable INSDC lat_lon is
     # dropped rather than guessed at, and the reason is named so the source record
@@ -483,16 +530,23 @@ def main():
             print(f"ℹ️  {_seqid}: no country recorded; recovered geo_loc_name "
                   f"{_value!r} from the registered NCBI BioSample.", flush=True)
 
-    for _, row in df_exp.iterrows():
-        full_seqid = row["SeqID"]
-        src_path = os.path.join(".", f"{full_seqid}.src")
-        with open(src_path, "w") as f:
-            f.write("SeqID\tisolate\ttissue_type\tcountry\tlat_lon\tCollection_date\n")
-            f.write(
-                f"{full_seqid}\t{row['isolate']}\t{row['tissue_type']}\t"
-                f"{row['country']}\t{row['formatted_lat_lon']}\t{row['Collection_date']}\n"
-            )
-        print(f"✅ Wrote: {src_path}")
+    # Exactly one .src, named from --full-seqid rather than from the database.
+    #
+    # Every other column this query returns is per-SPECIMEN; only the STRING_AGG SeqID is
+    # per-assembly, and that value is one the pipeline already holds in meta.full_seqid. Taking
+    # the name from the DB meant a malformed or stale SeqID produced a correctly-shaped file
+    # under a name nothing downstream looks for. The filter above has already proved a row for
+    # this assembly exists; the name now comes from the caller.
+    full_seqid = args.full_seqid.strip()
+    row = df_exp.iloc[0]
+    src_path = os.path.join(".", f"{full_seqid}.src")
+    with open(src_path, "w") as f:
+        f.write("SeqID\tisolate\ttissue_type\tcountry\tlat_lon\tCollection_date\n")
+        f.write(
+            f"{full_seqid}\t{row['isolate']}\t{row['tissue_type']}\t"
+            f"{row['country']}\t{row['formatted_lat_lon']}\t{row['Collection_date']}\n"
+        )
+    print(f"✅ Wrote: {src_path}")
 
 if __name__ == "__main__":
     main()

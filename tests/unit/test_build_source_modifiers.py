@@ -279,5 +279,53 @@ class MissingParentRowTests(unittest.TestCase):
         self.assertEqual([name for name in files if name.endswith(".csv")], [])
 
 
+
+class SeqIdSelectionTests(unittest.TestCase):
+    """Which database SeqID belongs to the assembly being submitted, and what happens when none do.
+
+    The old code warned and wrote every sibling variant's .src unfiltered, then exited 0. For
+    OG2936's _concat that meant OG2936.ilmn.260909.getorg1770..src and
+    ...getorg1770_rgj.mitos2110.src -- correct files under the wrong names, matching no output
+    glob, so the task "succeeded" with nothing and the sample was dropped by a downstream join
+    and reported as a task failure that never happened.
+    """
+
+    def test_exact_and_annotation_suffixed_matches(self):
+        aid = "OG1.ilmn.260909.getorg1770"
+        self.assertTrue(MODULE.seqid_belongs_to("OG1.ilmn.260909.getorg1770", aid))
+        self.assertTrue(MODULE.seqid_belongs_to("OG1.ilmn.260909.getorg1770.mitos2110", aid))
+
+    def test_the_trailing_dot_stops_a_prefix_claiming_its_variants(self):
+        """Without it getorg1770 also claims getorg1770reseed, and table2asn fatals on two .src."""
+        aid = "OG1.ilmn.260909.getorg1770"
+        self.assertFalse(MODULE.seqid_belongs_to("OG1.ilmn.260909.getorg1770reseed", aid))
+        self.assertFalse(MODULE.seqid_belongs_to("OG1.ilmn.260909.getorg1770reseed.mitos2110", aid))
+        self.assertFalse(MODULE.seqid_belongs_to("OG1.ilmn.260909.getorg1770_rgj.mitos2110", aid))
+        self.assertFalse(MODULE.seqid_belongs_to("OG1.ilmn.260909.getorg1770_concat", aid))
+
+    def test_whitespace_and_empties(self):
+        self.assertTrue(MODULE.seqid_belongs_to("  OG1.ilmn.260909.getorg1770  ", "OG1.ilmn.260909.getorg1770"))
+        self.assertFalse(MODULE.seqid_belongs_to("OG1.ilmn.260909.getorg1770", ""))
+        self.assertFalse(MODULE.seqid_belongs_to(None, "OG1.ilmn.260909.getorg1770"))
+
+    def test_the_failure_message_names_what_the_database_returned(self):
+        """Seeing the siblings next to the request IS the diagnosis."""
+        message = MODULE.no_seqid_match_message(
+            "OG2936.ilmn.260909.getorg1770_concat",
+            ["OG2936.ilmn.260909.getorg1770",
+             "OG2936.ilmn.260909.getorg1770reseed",
+             "OG2936.ilmn.260909.getorg1770_rgj.mitos2110"],
+        )
+        self.assertIn("getorg1770_concat", message)
+        self.assertIn("OG2936.ilmn.260909.getorg1770reseed", message)
+        self.assertIn("OG2936.ilmn.260909.getorg1770_rgj.mitos2110", message)
+        # The race is a real cause of this, so the message has to raise it.
+        self.assertIn("skip_upload_results", message)
+
+    def test_the_failure_message_copes_with_no_candidates(self):
+        message = MODULE.no_seqid_match_message("OG1.ilmn.260909.getorg1770", [])
+        self.assertIn("(none)", message)
+
+
 if __name__ == "__main__":
     unittest.main()

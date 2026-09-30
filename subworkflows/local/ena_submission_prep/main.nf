@@ -58,6 +58,41 @@ def isRescueMolecule(name) {
     }
 }
 
+// Read one data row out of a status TSV as a list of trimmed cells.
+//
+// Every status file this subworkflow reads is header + exactly one row. Named so the
+// column indices below are stated once rather than re-derived at each call site, and so
+// the held-reason extraction can be tested without a copy of it living in a test file.
+def statusCells(status_file) {
+    try {
+        def rows = status_file.readLines()
+        return rows.size() > 1 ? rows[1].split('\\t', -1).collect { it?.trim() ?: '' } : []
+    } catch (ignored) {
+        return []
+    }
+}
+
+def statusCell(status_file, int index, String fallback = 'unknown') {
+    def cells = statusCells(status_file)
+    return (index < cells.size() && cells[index]) ? cells[index] : fallback
+}
+
+// WEBIN_VALIDATE writes: sample, status, reason, webin_exit, validation_attempt,
+// error_count, warning_count, webin_cli_version, blocking_errors.
+// blocking_errors is the real ERROR text and is what makes a held row actionable;
+// reason alone is only "validation_failed".
+def webinHeldReason(status_file) {
+    def status = statusCell(status_file, 1)
+    def reason = statusCell(status_file, 2)
+    def errors = statusCell(status_file, 8, '')
+    return [ status, errors ?: reason ]
+}
+
+// ENA_FLATFILE writes: sample, status, reason, ...
+def flatfileFailReason(status_file) {
+    return statusCell(status_file, 2)
+}
+
 workflow ENA_SUBMISSION_PREP {
 
     take:
@@ -260,10 +295,15 @@ workflow ENA_SUBMISSION_PREP {
     // extended with ENA fields since ch_ena_named was built, so map identity would
     // not match. Resolves at channel close, which is when COMPILE_HELD_SAMPLES runs
     // anyway.
-    ch_prep_entered = ch_ena_named.map { meta, _sp, _pr, _ci, _f, _d -> [ meta.id, meta ] }
-    ch_prep_reached = GEN_FILES_TABLE2ASN.out.gbf_file.map { meta, _gbf -> [ meta.id, 'table2asn' ] }
-    ch_prep_src     = BUILD_SOURCE_MODIFIERS.out.src_file.map { meta, _src -> [ meta.id, 'src' ] }
-    ch_prep_fmt     = FORMAT_FILES.out.processed_files.map { it -> [ it[0].id, 'format' ] }
+    // Keyed on full_seqid, not meta.id. meta.id is the SPECIMEN, and several assembly
+    // variants of one specimen enter prep together, so an id key made the remainder join fan
+    // out: one variant's outcome decided the row for all of them, and a specimen with three
+    // variants produced one row instead of three. full_seqid is the per-assembly identity and
+    // is present on every meta in ch_ena_named (set above, hard-errored if unavailable).
+    ch_prep_entered = ch_ena_named.map { meta, _sp, _pr, _ci, _f, _d -> [ meta.full_seqid, meta ] }
+    ch_prep_reached = GEN_FILES_TABLE2ASN.out.gbf_file.map { meta, _gbf -> [ meta.full_seqid, 'table2asn' ] }
+    ch_prep_src     = BUILD_SOURCE_MODIFIERS.out.src_file.map { meta, _src -> [ meta.full_seqid, 'src' ] }
+    ch_prep_fmt     = FORMAT_FILES.out.processed_files.map { it -> [ it[0].full_seqid, 'format' ] }
 
     ch_pre_submission_held = ch_prep_entered
         .join(ch_prep_reached, by: 0, remainder: true)
@@ -275,11 +315,18 @@ workflow ENA_SUBMISSION_PREP {
             // the stage named is therefore the first one that did not, i.e. the one that
             // dropped it. Ordering matters: a sample with a .src got past
             // BUILD_SOURCE_MODIFIERS, one with only processed_files did not.
-            def stage = src ? 'GEN_FILES_TABLE2ASN'
-                            : (fmt ? 'BUILD_SOURCE_MODIFIERS' : 'FORMAT_FILES')
+            //
+            // The reason states the OBSERVATION, not a mechanism. It used to append "(task
+            // failed and was ignored)", which was simply untrue for the case that produced it:
+            // BUILD_SOURCE_MODIFIERS exited 0 and wrote files under other assemblies' names.
+            // This join can see that no output arrived; it cannot see why, and guessing sent
+            // the reader looking for a task failure that never happened.
+            def reason = src ? 'GEN_FILES_TABLE2ASN produced no .gbf'
+                             : (fmt ? "BUILD_SOURCE_MODIFIERS emitted no ${meta.full_seqid}.src"
+                                    : 'FORMAT_FILES emitted no processed files')
             [ "${meta.mt_assembly_prefix}.PRE_SUBMISSION.held.tsv",
               "${meta.id}\t${meta.mt_assembly_prefix}\tPRE_SUBMISSION\t" +
-              "ena_prep_failed: ${stage} produced no output (task failed and was ignored)\n" ]
+              "ena_prep_failed: ${reason}\n" ]
         }
 
     ch_held_fragments = ch_table2asn_held.mix(ch_pre_submission_held)
@@ -336,6 +383,34 @@ workflow ENA_SUBMISSION_PREP {
         ch_multiqc_files = ch_multiqc_files.mix(WEBIN_VALIDATE.out.status.collect { it[1] })
         ch_versions = ch_versions.mix(WEBIN_VALIDATE.out.versions.first())
         ch_validated_ena_flatfile = WEBIN_VALIDATE.out.validated_flatfile
+    }
+
+    // A flat file that fails CONVERSION, and one that fails WEBIN, both emitted no held
+    // fragment at all. OG2943 and OG3015 passed table2asn in NOVA_260909_LA, failed Webin on
+    // 'Organism is not Submittable', and came out of the run "unaccounted" -- named in
+    // run_completeness.txt as being in the samplesheet but in neither held_samples.tsv nor the
+    // submission-ready set, with nothing anywhere saying why.
+    ch_conversion_held = ch_flatfile_status_branched.fail
+        .collectFile { meta, status_file ->
+            [ "${meta.mt_assembly_prefix}.ENA_FLATFILE.held.tsv",
+              "${meta.id}\t${meta.mt_assembly_prefix}\tENA_FLATFILE\t" +
+              "FAIL_CONVERSION: ${flatfileFailReason(status_file)}\n" ]
+        }
+
+    ch_held_fragments = ch_held_fragments.mix(ch_conversion_held)
+
+    if (params.ena_webin_validate) {
+        // FAIL_WEBIN and FAIL_INFRASTRUCTURE are kept apart deliberately: the first is a bad
+        // flat file and needs the record fixed, the second is a network or service failure and
+        // needs a rerun. Collapsing them would send someone editing metadata over an outage.
+        ch_webin_held = WEBIN_VALIDATE.out.status
+            .map { meta, status_file -> [ meta ] + webinHeldReason(status_file) }
+            .filter { _meta, status, _detail -> status != 'PASS' }
+            .collectFile { meta, status, detail ->
+                [ "${meta.mt_assembly_prefix}.WEBIN.held.tsv",
+                  "${meta.id}\t${meta.mt_assembly_prefix}\tWEBIN\t${status}: ${detail}\n" ]
+            }
+        ch_held_fragments = ch_held_fragments.mix(ch_webin_held)
     }
 
     ch_ena_package_base = FORMAT_FILES.out.processed_files

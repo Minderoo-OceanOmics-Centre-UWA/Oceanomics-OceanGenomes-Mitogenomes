@@ -12,10 +12,15 @@ process BUILD_SOURCE_MODIFIERS {
     output:
     tuple val(meta), path("${meta.id}.bankit_metadata.csv")                , emit: bankit_metadata
     tuple val(meta), path("${meta.id}.bankit_metadata_latlon_cleaned.csv") , emit: cleaned_metadata
-    // Require a dot after the assembly prefix (".<annotation>.src") so a prefix
-    // like getorg1770 cannot also collect getorg1770reseed's .src; table2asn must
-    // receive exactly one source qualifier file for the assembly being processed.
-    tuple val(meta), path("${meta.mt_assembly_prefix}.*.src")               , emit: src_file, optional: true
+    // Named exactly, and NOT optional.
+    //
+    // It was `path("${meta.mt_assembly_prefix}.*.src"), optional: true`, which let the script
+    // write .src files under OTHER variants' names, match none of them, and exit 0. The sample
+    // was then dropped by the inner join in ena_submission_prep and reported as a held row
+    // blaming a task failure that never happened. An exact required name turns that into a
+    // task failure that says which file is missing, which the global errorStrategy 'ignore'
+    // still confines to this one assembly.
+    tuple val(meta), path("${meta.full_seqid}.src")                        , emit: src_file
     tuple val(meta), path("16_build_source_modifiers.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                                                    , emit: versions
 
@@ -23,7 +28,7 @@ process BUILD_SOURCE_MODIFIERS {
     task.ext.when == null || task.ext.when
 
     script:
-    def effective_args = "--config ${config} --og-id ${meta.id} --seq-tech ${meta.sequencing_type} --assembly-id ${meta.mt_assembly_prefix}"
+    def effective_args = "--config ${config} --og-id ${meta.id} --seq-tech ${meta.sequencing_type} --assembly-id ${meta.mt_assembly_prefix} --full-seqid ${meta.full_seqid}"
     """
 
     build_source_modifiers.py \\
@@ -31,6 +36,7 @@ process BUILD_SOURCE_MODIFIERS {
         --og-id "${meta.id}" \\
         --seq-tech "${meta.sequencing_type}" \\
         --assembly-id "${meta.mt_assembly_prefix}" \\
+        --full-seqid "${meta.full_seqid}"
 
     cat <<-END_TOOL_PARAMS > 16_build_source_modifiers.tool_params_mqcrow.html
     <tr><td>Build Source Modifiers</td><td><samp>${effective_args}</samp></td><td>Builds GenBank source modifier files for ${meta.id} from SQL metadata.</td></tr>
@@ -43,14 +49,14 @@ process BUILD_SOURCE_MODIFIERS {
     """
 
     stub:
-    def effective_args = "--config ${config} --og-id ${meta.id} --seq-tech ${meta.sequencing_type} --assembly-id ${meta.mt_assembly_prefix}"
+    def effective_args = "--config ${config} --og-id ${meta.id} --seq-tech ${meta.sequencing_type} --assembly-id ${meta.mt_assembly_prefix} --full-seqid ${meta.full_seqid}"
     """
-    # Names must match the output: block exactly, otherwise src_file (optional)
-    # emits nothing and the join into GEN_FILES_TABLE2ASN is empty, silently
-    # truncating every -stub run of ENA_SUBMISSION_PREP before table2asn.
+    # Names must match the output: block exactly. src_file is no longer optional, so a
+    # mismatch here fails the stub loudly instead of silently truncating every -stub run of
+    # ENA_SUBMISSION_PREP before table2asn.
     : > ${meta.id}.bankit_metadata.csv
     : > ${meta.id}.bankit_metadata_latlon_cleaned.csv
-    : > ${meta.mt_assembly_prefix}.stub.src
+    : > ${meta.full_seqid}.src
 
     cat <<-END_TOOL_PARAMS > 16_build_source_modifiers.tool_params_mqcrow.html
     <tr><td>Build Source Modifiers</td><td><samp>${effective_args}</samp></td><td>Builds GenBank source modifier files for ${meta.id} from SQL metadata.</td></tr>
