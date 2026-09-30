@@ -32,7 +32,14 @@ nextflow_workflow {
                 input[3] = file("\${projectDir}/assets/placeholders/empty_circularity_check.tsv")
                 input[4] = Channel.of(
                     [ 'evidence_present', "\${fx}/*/mtdna/*getorg_check.tsv" ],
-                    [ 'evidence_missing', "\${projectDir}/tests/precomputed_circularity/fixtures/empty_run/*/mtdna/*getorg_check.tsv" ]
+                    [ 'evidence_missing', "\${projectDir}/tests/precomputed_circularity/fixtures/empty_run/*/mtdna/*getorg_check.tsv" ],
+                    // A value with no wildcard that does not exist. This is the shape a real
+                    // typo takes: '--param = <path>' with a space-separated '=' passes '=' as
+                    // the value.
+                    [ 'evidence_typo', '=' ],
+                    // ...and a single concrete file that DOES exist must still count, or the
+                    // guard would reject a legitimate non-glob input.
+                    [ 'evidence_one_file', "\${fx}/OG1.ilmn.260909.getorg1770/mtdna/OG1.ilmn.260909.getorg1770.getorg_check.tsv" ]
                 )
                 """
             }
@@ -70,7 +77,15 @@ nextflow_workflow {
                 // resolves to nothing must report 0 rather than look like "not supplied",
                 // because that is what turned a mistyped path into a whole wrong run.
                 { assert counts['evidence_present'] == 2 },
-                { assert counts['evidence_missing'] == 0 }
+                { assert counts['evidence_missing'] == 0 },
+
+                // The hole this closes: file(..., glob: true) returns a COLLECTION for a real
+                // glob (empty when nothing matches) but a single Path for a value with no
+                // wildcard, existing or not. Counting the return shape scored '=' as one match,
+                // so a mistyped param slipped past the guard and the run went on to take the NA
+                // placeholder for every assembly -- the exact failure the guard exists to stop.
+                { assert counts['evidence_typo'] == 0 },
+                { assert counts['evidence_one_file'] == 1 }
             )
         }
     }

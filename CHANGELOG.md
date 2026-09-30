@@ -9,6 +9,25 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **The precomputed-evidence guard counted a mistyped param as a match, and let the run through.**
+  Found by the guard's own first real use. `precomputedGlobCount` measured the size of what
+  `file(pattern, glob: true, checkIfExists: false)` returned, and that call has two shapes: a
+  Collection for a pattern containing a wildcard (empty when nothing matches, which is the case the
+  guard was written for), but a **single Path** for a value with no wildcard -- existing or not,
+  because `checkIfExists` is false. So writing
+  `--precomputed_mitogenome_circularity_evidence_getorg = '<path>'` with a space-separated `=` passes
+  `=` as the value, which counted as 1 match, cleared the guard, and let the run proceed to take the
+  NA placeholder for every assembly: precisely the failure the guard exists to stop. A real glob
+  matching nothing was caught; a typo was not, and the typo is the likelier mistake. It now counts
+  only paths that **exist**, and warns when a resolved path does not (naming the missing wildcard as
+  the likely cause). A single concrete existing file still counts, so a legitimate non-glob input is
+  not rejected.
+- **The "N of M assemblies had a real check TSV" count never reached `.nextflow.log`.** It used
+  `view`, which prints to stdout only, so the single most useful number for working out after the
+  fact why a run had no circularity was absent from the log. It is now `log.info`, and `log.warn`
+  when any assembly fell back to the placeholder.
+
+
 - **The terminator check was suspended entirely on the EMMA path, hiding real defects.** EMMA publishes
   `annotation/cds/*.fa` with the stop codon removed, so scoring those files reports `no_stop` on every
   CDS. `check_cds_integrity` detected that convention and switched the terminator check OFF -- the safe

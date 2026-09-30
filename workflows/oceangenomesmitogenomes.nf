@@ -126,8 +126,27 @@ def precomputedGlobCount(String paramName, pattern) {
     }
     if (matches == null) matches = []
     if (!(matches instanceof Collection)) matches = [matches]
-    log.info "precomputed ${paramName}: ${matches.size()} file(s) matched ${pattern}"
-    return matches.size()
+
+    // Count only paths that EXIST, never the size of what file() handed back.
+    //
+    // file(..., glob: true) returns a Collection for a pattern containing a wildcard -- empty
+    // when it matches nothing, which is the case this guard was written for. But for a value
+    // with NO wildcard it returns a single Path, and with checkIfExists: false it does that
+    // whether or not the path exists. Counting the return shape therefore scored a typo as one
+    // match: writing
+    //     --precomputed_mitogenome_circularity_evidence_getorg = '<path>'
+    // with a space-separated '=' makes the value '=', which counted 1, slipped through this
+    // guard, and let a run proceed to take the NA placeholder for every assembly -- the exact
+    // failure the guard exists to stop. A real glob matching nothing was caught; a mistyped
+    // value was not, and the mistyped value is the likelier mistake.
+    def present = matches.findAll { it != null && it.exists() }
+    if (present.size() != matches.size()) {
+        log.warn "precomputed ${paramName}: ${matches.size() - present.size()} of " +
+                 "${matches.size()} resolved path(s) do not exist -- is '${pattern}' a typo, " +
+                 "or is it missing its wildcard?"
+    }
+    log.info "precomputed ${paramName}: ${present.size()} existing file(s) matched ${pattern}"
+    return present.size()
 }
 
 // The GetOrganelle RUN a variant belongs to, i.e. mt_assembly_prefix with the curation
@@ -251,9 +270,15 @@ def precomputedOatkEvidence(pattern) {
 // Returns [ meta, fasta, evidence ].
 def selectPrecomputedAssemblies(String label, fasta_ch, evidence_ch, placeholder, double tolerance) {
     def paired = attachPrecomputedCircularity(fasta_ch, evidence_ch, placeholder)
+    // log.info, not view: view prints to stdout only, so this count was absent from
+    // .nextflow.log and unavailable when working out after the fact why a run had no
+    // circularity. It is the single most useful number for that question.
     paired.map { _meta, _fasta, _ev, real -> real ? 1 : 0 }
         .reduce([0, 0]) { acc, real -> [ acc[0] + real, acc[1] + 1 ] }
-        .view { c -> "precomputed ${label} circularity: ${c[0]} of ${c[1]} assemblies had a real check TSV (rest took the NA placeholder)" }
+        .subscribe { c ->
+            def message = "precomputed ${label} circularity: ${c[0]} of ${c[1]} assemblies had a real check TSV (rest took the NA placeholder)"
+            if (c[0] < c[1]) log.warn message else log.info message
+        }
     return paired
         .map { meta, fasta, ev, real -> [ meta.mt_assembly_run_prefix, [ meta, fasta, ev, real ] ] }
         .groupTuple()
