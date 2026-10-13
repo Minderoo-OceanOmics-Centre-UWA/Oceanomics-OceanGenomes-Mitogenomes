@@ -53,9 +53,18 @@ process HIC_DATE_QUERY {
         db_params = load_db_config(config_file)
         conn = psycopg2.connect(**db_params)
         cursor = conn.cursor()
-        
+        # The v2 database schema removes og_id and the per-technology tube columns from
+        # sequencing; v_sequencing_browse carries the same runs with og_id and a single
+        # library_tube_id, and becomes visible on the search_path at the v2 cutover. Use it
+        # when visible and the old table otherwise, so this works on either side.
+        cursor.execute("SELECT to_regclass('v_sequencing_browse') IS NOT NULL")
+        v2_view = bool(cursor.fetchone()[0])
+
         # Query for sample date (adjust query as needed)
-        query = "SELECT seq_date FROM sequencing WHERE hic_library_tube_id = %s"
+        if v2_view:
+            query = "SELECT seq_date FROM v_sequencing_browse WHERE library_tube_id = %s"
+        else:
+            query = "SELECT seq_date FROM sequencing WHERE hic_library_tube_id = %s"
         cursor.execute(query, ('${sample_id}',))
         
         result = cursor.fetchone()

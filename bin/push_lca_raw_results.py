@@ -82,9 +82,13 @@ NON_KEY_DB_COLS = [
 ]
 ALL_DB_COLS = KEY_COLS + NON_KEY_DB_COLS
 
-# Conflict target for the upsert. Named rather than inferred because part of
-# the constraint (content_hash) is populated by a BEFORE INSERT trigger.
-CONFLICT_CONSTRAINT = "lca_raw_results_content_unique"
+# Conflict target for the upsert, by columns. It was the constraint name,
+# lca_raw_results_content_unique, but the v2 schema keys the same columns under its
+# primary key, lca_raw_results_pkey: the name differs by schema, the columns do not.
+# content_hash is populated by a BEFORE INSERT trigger, which runs before the
+# conflict check whether the target is named or inferred.
+CONFLICT_COLUMNS = ("og_id", "tech", "seq_date", "code", "annotation",
+                    "sequence_region", "accession_id", "content_hash")
 
 # The columns that constraint covers, alongside the trigger-maintained
 # content_hash. lca_run_date is deliberately NOT part of it: a re-run with an
@@ -165,6 +169,7 @@ def build_insert_query():
 
     cols_sql = ", ".join(q(c) for c in ALL_DB_COLS)
     placeholders = ", ".join(f"%({c})s" for c in ALL_DB_COLS)
+    conflict_sql = ", ".join(q(c) for c in CONFLICT_COLUMNS)
 
     # A conflict means this run reproduced an existing hit exactly, so the only
     # new information is that it was seen again. A hit whose values changed
@@ -174,7 +179,7 @@ def build_insert_query():
     return f"""
     INSERT INTO lca_raw_results ({cols_sql})
     VALUES ({placeholders})
-    ON CONFLICT ON CONSTRAINT {CONFLICT_CONSTRAINT}
+    ON CONFLICT ({conflict_sql})
     DO UPDATE SET "lca_run_date" = EXCLUDED."lca_run_date"
     RETURNING (xmax = 0) AS inserted
     """

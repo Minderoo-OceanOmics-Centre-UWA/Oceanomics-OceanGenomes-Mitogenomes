@@ -315,8 +315,23 @@ def valid_collection_date(value):
 # ---------------------------
 # DB query
 # ---------------------------
+def sequencing_relation(conn):
+    """The relation that carries sequencing runs with their og_id.
+
+    The v2 database schema removes og_id from `sequencing`; the `v_sequencing_browse`
+    view carries it, and becomes visible on the search_path at the v2 cutover. Use the
+    view when it is visible and the old table otherwise, so this works unchanged on
+    either side of the cutover.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('v_sequencing_browse') IS NOT NULL")
+        row = cur.fetchone()
+    return "v_sequencing_browse" if row and row[0] else "sequencing"
+
+
 def fetch_bankit_metadata(conn, og_id, tech):
-    query = """
+    relation = sequencing_relation(conn)
+    query = f"""
         WITH sequencing_info AS (
             SELECT
                 seq.og_id,
@@ -326,7 +341,7 @@ def fetch_bankit_metadata(conn, og_id, tech):
                     THEN SPLIT_PART(seq.sequencing_id, '_', 1)
                     ELSE NULL
                 END AS tissue_id
-            FROM sequencing seq
+            FROM {relation} seq
         )
         SELECT
             -- CONCAT_WS + NULLIF, not CONCAT: a NULL/empty annotation column under CONCAT

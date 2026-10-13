@@ -290,7 +290,11 @@ def process_lca(lca_file, sample, db_params, prune_history=False):
             -- an existing result exactly. The only thing left to record is that
             -- it was seen again; a differing result hashes differently and is
             -- inserted as a new row rather than overwriting the old one.
-            ON CONFLICT ON CONSTRAINT lca_content_unique
+            -- A column list, not ON CONSTRAINT lca_content_unique: the v2 schema keys the
+            -- same columns under its primary key, lca_pkey, so the name differs by schema
+            -- while the columns do not. BEFORE INSERT triggers run before the conflict
+            -- check either way, so content_hash is set when the target is matched.
+            ON CONFLICT (og_id, tech, seq_date, code, annotation, region, content_hash)
             DO UPDATE SET
                 lca_run_date = EXCLUDED.lca_run_date;
             """

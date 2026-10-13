@@ -259,6 +259,23 @@ def extract_ilmn_prefix(filename, sample_id, sequencing_type, date):
     return f"{sample_id}.{sequencing_type}.{date}"
 
 
+def sequencing_relation(cursor):
+    """Where to read sequencing runs from, and which column names a run's library tube.
+
+    The v2 database schema removes og_id and the per-technology tube columns
+    (hic_library_tube_id and the rest) from `sequencing`. The same runs, with og_id and
+    a single library_tube_id, are exposed by the `v_sequencing_browse` view, which
+    becomes visible on the search_path at the v2 cutover. Use the view when it is
+    visible and the old table otherwise, so this works unchanged on either side of the
+    cutover.
+    """
+    cursor.execute("SELECT to_regclass('v_sequencing_browse') IS NOT NULL")
+    row = cursor.fetchone()
+    if row and row[0]:
+        return "v_sequencing_browse", "library_tube_id"
+    return "sequencing", "hic_library_tube_id"
+
+
 def query_hifi_date(cursor, sample_id, completion_date_str):
     if cursor is None:
         return "unknown"
@@ -270,10 +287,11 @@ def query_hifi_date(cursor, sample_id, completion_date_str):
             # run sits outside the window silently takes whatever other
             # sequencing falls inside it: OG16 and OG79 were dated from HiC runs
             # and OG88 from an ONT run.
+            relation, _ = sequencing_relation(cursor)
             cursor.execute(
-                """
+                f"""
                 SELECT seq_date
-                FROM sequencing
+                FROM {relation}
                 WHERE og_id = %s
                   AND seq_type = 'PacBio'
                   AND seq_date >= %s
@@ -306,8 +324,9 @@ def query_hic_date(cursor, sample_id):
         return "unknown"
     # A hic_library_tube_id can appear on multiple sequencing runs. Order by
     # seq_date so the most recent run wins, and warn if there was a collision.
+    relation, tube_column = sequencing_relation(cursor)
     cursor.execute(
-        "SELECT seq_date FROM sequencing WHERE hic_library_tube_id = %s ORDER BY seq_date DESC",
+        f"SELECT seq_date FROM {relation} WHERE {tube_column} = %s ORDER BY seq_date DESC",
         (sample_id,)
     )
     rows = cursor.fetchall()

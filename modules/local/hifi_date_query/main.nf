@@ -54,7 +54,14 @@ process HIFI_DATE_QUERY {
         db_params = load_db_config(config_file)
         conn = psycopg2.connect(**db_params)
         cursor = conn.cursor()
-        
+        # The v2 database schema removes og_id and the per-technology tube columns from
+        # sequencing; v_sequencing_browse carries the same runs with og_id and a single
+        # library_tube_id, and becomes visible on the search_path at the v2 cutover. Use it
+        # when visible and the old table otherwise, so this works on either side.
+        cursor.execute("SELECT to_regclass('v_sequencing_browse') IS NOT NULL")
+        v2_view = bool(cursor.fetchone()[0])
+        relation = "v_sequencing_browse" if v2_view else "sequencing"
+
         completion_date_str = "${completion_date}"
         
         if completion_date_str != "unknown" and completion_date_str.strip():
@@ -70,9 +77,9 @@ process HIFI_DATE_QUERY {
                 completion_date_str_formatted = completion_date.strftime('%y%m%d')
                 
                 # Query using text comparison since seq_date is stored as text
-                query = '''
+                query = f'''
                 SELECT seq_date 
-                FROM sequencing 
+                FROM {relation} 
                 WHERE og_id = %s 
                   AND seq_date >= %s 
                   AND seq_date <= %s
@@ -84,12 +91,12 @@ process HIFI_DATE_QUERY {
             except ValueError as ve:
                 print(f'Error parsing completion date "{completion_date_str}": {ve}', file=sys.stderr)
                 # Fall back to original query without date filtering
-                query = "SELECT seq_date FROM sequencing WHERE og_id = %s ORDER BY seq_date DESC LIMIT 1"
+                query = f"SELECT seq_date FROM {relation} WHERE og_id = %s ORDER BY seq_date DESC LIMIT 1"
                 cursor.execute(query, ('${sample_id}',))
                 
         else:
             # If no completion date available, get the most recent sequencing run
-            query = "SELECT seq_date FROM sequencing WHERE og_id = %s ORDER BY seq_date DESC LIMIT 1"
+            query = f"SELECT seq_date FROM {relation} WHERE og_id = %s ORDER BY seq_date DESC LIMIT 1"
             cursor.execute(query, ('${sample_id}',))
         
         result = cursor.fetchone()
