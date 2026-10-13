@@ -98,7 +98,7 @@ DEFAULT_LEN_TOL_FLOOR = 60
 
 
 def snap_pcg_rows(rows, gseq, code, window=36, len_tol=0.15, skip=(),
-                  lineage=None):
+                  lineage=None, circular=True):
     """Per-PCG ORF-boundary snap, assembly-only (no reference).
 
     For every single-exon PCG row whose reconstructed CDS is not a clean ORF
@@ -118,6 +118,10 @@ def snap_pcg_rows(rows, gseq, code, window=36, len_tol=0.15, skip=(),
     orf_utils.LINEAGE_ALT_STARTS, so omitting it can make the snap attempt a
     repair it need not, never the reverse.
 
+    `circular=False` (a linear contig) turns the doubled-genome space off: windows
+    are clamped to the contig, so a gene cut by an assembly break is never snapped
+    onto sequence from the other end.
+
     Bare names in `skip` are left alone: a gene rebuilt by a reference-transfer
     join owns its own coordinates, and snapping the stale single-exon row it
     replaces would only produce a contradictory second opinion.
@@ -133,7 +137,7 @@ def snap_pcg_rows(rows, gseq, code, window=36, len_tol=0.15, skip=(),
     unrepaired = []
 
     n = len(gseq)
-    gseq2 = (gseq + gseq).upper()
+    gseq2 = (gseq + gseq).upper() if circular else gseq.upper()
 
     # Row spans in doubled coordinates, for neighbour clipping. Each row is also
     # considered one genome-length later, so a neighbour on the far side of the
@@ -145,7 +149,8 @@ def snap_pcg_rows(rows, gseq, code, window=36, len_tol=0.15, skip=(),
         except (ValueError, IndexError):
             continue
         spans.append((lo, hi))
-        spans.append((lo + n, hi + n))
+        if circular:
+            spans.append((lo + n, hi + n))
 
     by_bare = {}
     for i, r in enumerate(rows):

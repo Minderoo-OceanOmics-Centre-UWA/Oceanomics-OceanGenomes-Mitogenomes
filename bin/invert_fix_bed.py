@@ -89,6 +89,8 @@ def main():
                     help="Max nt a boundary may move in either direction.")
     ap.add_argument("--len-tol", type=float, default=0.15,
                     help="Max fractional length change a snapped CDS may take.")
+    ap.add_argument("--linear", action="store_true",
+                    help="Molecule is not circular: never snap a boundary across its ends.")
     args = ap.parse_args()
 
     if not args.bed.exists():
@@ -106,7 +108,7 @@ def main():
 
     fixes, actions, unrepaired = snap_pcg_rows(
         rows, gseq, args.code, window=args.window, len_tol=args.len_tol,
-        lineage=args.lineage)
+        lineage=args.lineage, circular=not args.linear)
 
     fixed_detail = []
     for i, (new_s0, new_e1) in fixes.items():

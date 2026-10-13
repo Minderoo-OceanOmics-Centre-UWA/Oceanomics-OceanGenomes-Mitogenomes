@@ -34,6 +34,32 @@ nextflow_process {
         }
     }
 
+    // A linear contig's ends are assembly breaks: rotating it glues them into a
+    // junction that does not exist (NOVA_260909_LA OG3043 was rotated 1300 bp).
+    test("linear sample is written through unrotated") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_linear', circular:false ],
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/query.fa", checkIfExists: true),
+                    file("${projectDir}/assets/panels/cox1/mollusca.faa", checkIfExists: true)
+                ])
+                """
+            }
+        }
+
+        then {
+            def seqOf = { f -> f.readLines().findAll { !it.startsWith('>') }.join('').trim() }
+            def input = file("${projectDir}/modules/local/select_reference_db/tests/data/query.fa")
+            assertAll(
+                { assert process.success },
+                { assert seqOf(path(process.out.fasta[0][1])) == seqOf(input) },
+                { assert path(process.out.tool_params[0][1]).text.contains('--linear') }
+            )
+        }
+    }
+
     test("stub") {
 
         options "-stub"

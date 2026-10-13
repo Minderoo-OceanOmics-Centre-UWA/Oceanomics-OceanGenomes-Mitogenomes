@@ -308,6 +308,8 @@ def main():
     ap.add_argument("--pcg-len-tol", type=float, default=0.15,
                     help="A snapped PCG ORF whose length differs from the original "
                          "by more than max(60 nt, this fraction) is not applied.")
+    ap.add_argument("--linear", action="store_true",
+                    help="Molecule is not circular: never snap a boundary across its ends.")
     ap.add_argument("--cox1-min-gain", type=int, default=30,
                     help="Replace MITOS's cox1 with the rebuilt intron-split join "
                          "when the clean ORF is at least this many nt longer. A "
@@ -504,6 +506,7 @@ def main():
     # cox1 is excluded once the join owns it, exactly as nad5 always is.
     pcg_fixes, pcg_actions, pcg_unrepaired = snap_pcg_rows(
         rows, gseq, args.code, window=args.pcg_window, len_tol=args.pcg_len_tol,
+        circular=not args.linear,
         # nad5 and cox1 are rebuilt by the reference-transfer passes above when
         # those fire; a snap on the stale single-exon row they replace would only
         # produce a contradictory second opinion. nad5 is always skipped here

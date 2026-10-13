@@ -9,6 +9,14 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **Linear contigs were rotated into a fake circle before annotation.** `ROTATE_ORIGIN` guarded only
+  on "more than one record", so every single linear contig (including each `_concat`) was cut at
+  cox1 and its two assembly breaks glued together; MITOS2 was then told `--linear` about a sequence
+  that already carried the false junction. NOVA_260909_LA OG3043 reached MITOS rotated by 1300 bp.
+  `rotate_to_cox1.py --linear` now writes the input through, set from `meta.circular == false` (the
+  rule MITOS2 already uses; unknown topology still rotates). The same rule drops EMMA's
+  `--rotate MT-TF` for linear vertebrate contigs, and `orf_snap.snap_pcg_rows(circular=False)` stops
+  the boundary snap in both fixers from borrowing a stop codon from the other end of a linear contig.
 - **Selection preferred an oversized molecule the circularity check had already flagged.** Found in
   NOVA_260909_LA_mitogenomes-4. OG2936's welded first pass is 31,154 bp against a 20,312 bp
   reference -- `length_ratio=1.534`, `length_anomaly=yes`, "10,842 bp longer than reference with no

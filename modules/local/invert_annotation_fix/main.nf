@@ -67,7 +67,7 @@ process INVERT_ANNOTATION_FIX {
         // not, never the reverse, so a blank class is safe.
         def lineage_arg = meta.class ? "--lineage '${meta.class}'" : ''
         def origin_arg = "--origin-gene ${origin_gene}"
-        def effective_args = ["invert_fix_bed.py --bed ${bed} --genome ${genome} --code ${gcode} ${lineage_arg} ${base_args}".replaceAll(/ +/, ' ').trim(),
+        def effective_args = ["invert_fix_bed.py --bed ${bed} --genome ${genome} ${topology_arg} --code ${gcode} ${lineage_arg} ${base_args}".replaceAll(/ +/, ' ').trim(),
                               "mitos_to_emma.py --bed result.fixed.bed --genome ${genome} --code ${gcode} ${topology_arg} ${origin_arg}".replaceAll(/ +/, ' ').trim()].join('; ')
         """
         mkdir -p annotation
@@ -81,6 +81,7 @@ process INVERT_ANNOTATION_FIX {
             ${lineage_arg} \\
             --out-bed result.fixed.bed \\
             --status ${prefix}.invert_fix.status.tsv \\
+            ${topology_arg} \\
             ${base_args}
 
         # 2) Re-run the EMMA adapter on the patched BED (joins, translation,

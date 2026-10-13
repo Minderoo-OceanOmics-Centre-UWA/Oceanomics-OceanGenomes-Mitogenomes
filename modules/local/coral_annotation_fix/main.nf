@@ -62,7 +62,7 @@ process CORAL_ANNOTATION_FIX {
         def topology_arg = (meta.circular == false) ? '--linear' : ''
         def mitos_prefix = "${prefix}.mitos${mitos_tag}"
         def origin_arg = "--origin-gene ${origin_gene}"
-        def effective_args = ["coral_fix_bed.py --bed ${bed} --genome ${genome} --ref-gb ${reference_gb} --code ${gcode} ${base_args}".replaceAll(/ +/, ' ').trim(),
+        def effective_args = ["coral_fix_bed.py --bed ${bed} --genome ${genome} ${topology_arg} --ref-gb ${reference_gb} --code ${gcode} ${base_args}".replaceAll(/ +/, ' ').trim(),
                               "mitos_to_emma.py --bed result.fixed.bed --genome ${genome} --code ${gcode} ${topology_arg} ${origin_arg}".replaceAll(/ +/, ' ').trim()].join('; ')
         """
         mkdir -p annotation
@@ -75,6 +75,7 @@ process CORAL_ANNOTATION_FIX {
             --code ${gcode} \\
             --out-bed result.fixed.bed \\
             --status ${prefix}.coral_fix.status.txt \\
+            ${topology_arg} \\
             ${base_args}
 
         # 2) Re-run the EMMA adapter on the patched BED (joins, translation,

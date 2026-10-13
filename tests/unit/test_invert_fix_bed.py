@@ -101,6 +101,48 @@ class BehaviourTests(unittest.TestCase):
         self.assertNotIn("SKIPPED", status.splitlines()[0])
 
 
+class LinearTopologyTests(unittest.TestCase):
+    """A linear contig's ends are assembly breaks. A gene cut by the break must not
+    be 'repaired' with a stop codon borrowed from the other end of the contig."""
+
+    # The only in-frame stop for the gene at the 3' end sits at the very start of
+    # the contig, reachable only by wrapping the origin.
+    GENE = "ATG" + "GCT" * 49            # 150 nt, no stop
+    GENOME = "TAA" + "CCC" * 40 + GENE
+    ROW = ["c", len(GENOME) - 150, len(GENOME), "atp8", 0, "+"]
+
+    def test_circular_snap_may_wrap(self):
+        fixes, _actions, _unrep = orf_snap.snap_pcg_rows(
+            [list(self.ROW)], self.GENOME, 5, circular=True)
+        self.assertEqual(len(fixes), 1)
+        s0, e1 = fixes[0]
+        self.assertLess(e1, s0, "circular snap should take the stop across the origin")
+
+    def test_linear_snap_never_wraps(self):
+        fixes, _actions, unrep = orf_snap.snap_pcg_rows(
+            [list(self.ROW)], self.GENOME, 5, circular=False)
+        for s0, e1 in fixes.values():
+            self.assertLess(s0, e1, "a linear contig has no origin to cross")
+        self.assertIn("atp8", unrep)
+
+    def test_linear_flag_reaches_the_snap(self):
+        proc, out_bed, status = run_fixer([self.ROW], self.GENOME, 5)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "in.bed").write_text("\t".join(str(c) for c in self.ROW) + "\n")
+            (tmp / "g.fa").write_text(">c\n" + self.GENOME + "\n")
+            proc = subprocess.run(
+                [sys.executable, str(SCRIPT), "--bed", str(tmp / "in.bed"),
+                 "--genome", str(tmp / "g.fa"), "--code", "5", "--linear",
+                 "--out-bed", str(tmp / "out.bed"), "--status", str(tmp / "s.tsv")],
+                capture_output=True, text=True,
+                env={"PYTHONPATH": str(BIN), "PATH": "/usr/bin:/bin"})
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            f = (tmp / "out.bed").read_text().split("\t")
+            self.assertLess(int(f[1]), int(f[2]))
+
+
 class StatusFormatTests(unittest.TestCase):
     def test_status_has_a_verdict_and_a_per_gene_table(self):
         genome = "TTT" + "GGG" * 19 + "AGA" + "CCCCCCCCC"

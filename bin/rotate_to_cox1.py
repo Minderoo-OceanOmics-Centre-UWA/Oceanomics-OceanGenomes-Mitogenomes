@@ -35,8 +35,9 @@ from the HSP with the lowest qstart (cox1's true 5' exon), and the rotation is
 declined altogether when even that HSP starts too far into the protein for the
 back-extrapolation to locate the 5' end.
 
-Fail-safe: if no confident cox1 hit is found, or the input is not a single
-contig, the assembly is written through UNROTATED (exit 0) so MITOS2 still runs;
+Fail-safe: if no confident cox1 hit is found, the input is not a single contig,
+or --linear says the molecule is not circular, the assembly is written through
+UNROTATED (exit 0) so MITOS2 still runs;
 mitos_to_emma.py's origin-spanning fallback then handles any residual wrap.
 
 Usage:
@@ -167,6 +168,8 @@ def main():
     ap.add_argument("--genome", required=True, type=Path, help="Assembly FASTA")
     ap.add_argument("--cox1-ref", required=True, type=Path, help="cox1 protein panel (FASTA)")
     ap.add_argument("--out", required=True, type=Path, help="Output (rotated) FASTA")
+    ap.add_argument("--linear", action="store_true",
+                    help="The molecule is not circular: write it through unrotated")
     args = ap.parse_args()
 
     if not args.genome.exists():
@@ -178,7 +181,14 @@ def main():
     if not records:
         sys.exit(f"No sequences read from {args.genome}")
 
-    # Rotation only makes sense for a single circular molecule.
+    # Rotation only makes sense for a single circular molecule. A linear contig's
+    # two ends are assembly breaks, not neighbours: rotating it glues them into a
+    # junction that does not exist, and any gene cut by the break becomes one
+    # fake model spanning both ends (NOVA_260909_LA OG3043 was rotated by 1300 bp).
+    if args.linear:
+        log("linear molecule -- writing through UNROTATED.")
+        write_records(records, args.out)
+        return
     if len(records) != 1:
         log(f"{len(records)} records in {args.genome.name}; not a single contig -- "
             "writing through UNROTATED.")

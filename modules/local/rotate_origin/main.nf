@@ -24,16 +24,25 @@ process ROTATE_ORIGIN {
     path "versions_rotate.yml", emit: versions
 
     script:
+        // Same topology rule as MITOS2: only a molecule KNOWN to be non-circular is
+        // left alone; unknown topology keeps the rotation. Rotating a linear contig
+        // joins its two assembly breaks into a junction that does not exist.
+        def linear = (meta.circular == false)
+        def linear_arg = linear ? '--linear' : ''
+        def params_desc = linear ?
+            "Left the linear (non-circular) assembly for ${meta.id} unrotated: its ends are assembly breaks, so there is no origin to move." :
+            "Re-origins the circular assembly for ${meta.id} to the cox1 start (tblastn vs the sample's phylum-appropriate cox1 panel) so intron-split genes no longer straddle position 1 before MITOS2. Passes through unrotated if no confident cox1 hit."
         """
         mkdir -p rotated
 
         rotate_to_cox1.py \\
             --genome ${fasta} \\
             --cox1-ref ${cox1_ref} \\
-            --out rotated/${fasta.baseName}.fa
+            --out rotated/${fasta.baseName}.fa \\
+            ${linear_arg}
 
         cat <<-END_TOOL_PARAMS > 06_rotate.tool_params_mqcrow.html
-        <tr><td>Rotate origin</td><td><samp>rotate_to_cox1.py --genome ${fasta} --cox1-ref ${cox1_ref}</samp></td><td>Re-origins the circular assembly for ${meta.id} to the cox1 start (tblastn vs the sample's phylum-appropriate cox1 panel) so intron-split genes no longer straddle position 1 before MITOS2. Passes through unrotated if no confident cox1 hit.</td></tr>
+        <tr><td>Rotate origin</td><td><samp>rotate_to_cox1.py --genome ${fasta} --cox1-ref ${cox1_ref} ${linear_arg}</samp></td><td>${params_desc}</td></tr>
         END_TOOL_PARAMS
 
         cat <<-END_VERSIONS > versions_rotate.yml
