@@ -17,6 +17,15 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   rule MITOS2 already uses; unknown topology still rotates). The same rule drops EMMA's
   `--rotate MT-TF` for linear vertebrate contigs, and `orf_snap.snap_pcg_rows(circular=False)` stops
   the boundary snap in both fixers from borrowing a stop codon from the other end of a linear contig.
+- **Multi-scaffold assemblies were glued in file order, whatever their orientation.** In
+  NOVA_260909_LA OG2629 the `_concat` put a 2.7 kb repeat-unit scaffold in backwards (ND6 on the
+  wrong strand, gate FAIL), although GetOrganelle's own graph has a single direct edge giving the
+  correct molecule. New `bin/join_scaffolds_by_graph.py` runs at the end of the GetOrganelle
+  first-pass and reseed tasks and joins two scaffold ends only across a direct, reciprocal, unique
+  edge of the full `extended_K*.assembly_graph.fastg`, trimming the exact k-mer overlap and inserting
+  nothing. Sequence overlap alone was rejected as evidence: OG2636 has a unique 114 bp overlap in the
+  wrong orientation (a fold-back repeat), which the graph correctly leaves unjoined. Unproven
+  scaffolds stay separate for `SANITISE_FASTA` exactly as before; evidence in `*.graph_join.tsv`.
 - **Selection preferred an oversized molecule the circularity check had already flagged.** Found in
   NOVA_260909_LA_mitogenomes-4. OG2936's welded first pass is 31,154 bp against a 20,312 bp
   reference -- `length_ratio=1.534`, `length_anomaly=yes`, "10,842 bp longer than reference with no

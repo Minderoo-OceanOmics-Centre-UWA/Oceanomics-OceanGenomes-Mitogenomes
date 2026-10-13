@@ -26,6 +26,8 @@ process GETORGANELLE_FROMREADS {
     // emit nothing for every invertebrate and starve ch_summary_files.
     path("mtdna/*extended_K*.assembly_graph.fastg.extend-*.fastg")           , emit: simp_assm_graph,  optional: true
     path("mtdna/*extended_K*.assembly_graph.fastg.extend-*.csv")             , emit: contig_label,     optional: true
+    // Which scaffold ends were joined on graph evidence (bin/join_scaffolds_by_graph.py); only for multi-scaffold results.
+    path("mtdna/*.graph_join.tsv")                                           , emit: graph_join,       optional: true
     // path("mtdna/*")                                                         , emit: etc // have only included the files we want above, uncomment if you want everything
     tuple val(meta), path("02_getorganelle_fromreads.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"                                                     , emit: versions
@@ -93,6 +95,23 @@ process GETORGANELLE_FROMREADS {
         sed -i "/^>/s/.*/>${prefix}/g" mtdna/${prefix}.fasta
     else
         touch mtdna/${prefix}.fasta
+    fi
+
+    # Join scaffolds only where GetOrganelle's own graph proves the link: a direct,
+    # unique edge between two scaffold ends (bin/join_scaffolds_by_graph.py). The
+    # k-mer overlap is trimmed and nothing is inserted. Scaffolds without that
+    # evidence stay separate records, which SANITISE_FASTA concatenates as before.
+    # Any failure keeps the FASTA exactly as GetOrganelle wrote it.
+    if [ -s mtdna/${prefix}.fasta ] && [ "\$(grep -c '^>' mtdna/${prefix}.fasta)" -gt 1 ]; then
+        raw_fastg=( mtdna/${prefix}.extended_K*.assembly_graph.fastg )
+        gfa_args=""
+        for g in mtdna/*.selected_graph.gfa; do gfa_args="\$gfa_args --gfa \$g"; done
+        if [ \${#raw_fastg[@]} -eq 1 ] && [ -n "\$gfa_args" ]; then
+            if join_scaffolds_by_graph.py --fasta mtdna/${prefix}.fasta --fastg "\${raw_fastg[0]}" \$gfa_args \\
+                --name ${prefix} --out mtdna/${prefix}.graphjoin.fa --evidence mtdna/${prefix}.graph_join.tsv; then
+                mv mtdna/${prefix}.graphjoin.fa mtdna/${prefix}.fasta
+            fi
+        fi
     fi
 
     wait
