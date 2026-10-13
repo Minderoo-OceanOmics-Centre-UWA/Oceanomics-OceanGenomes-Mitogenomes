@@ -29,6 +29,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import hexactinellid_repair
 from orf_snap import bare_name, parse_bed, snap_pcg_rows
 
 
@@ -121,17 +122,31 @@ def main():
         why = next((a for a in actions if a.startswith(f"PCG-skip {gene} ")), "")
         unrepaired_detail.append((gene, why.split("(", 1)[-1].rstrip(")") if why else "unrepaired"))
 
+    # Lineage-specific repairs the generic snap cannot make: it only moves a
+    # boundary within its window and never adds a gene MITOS dropped. Glass sponges
+    # need both (see bin/hexactinellid_repair.py). A gene this stage repairs is no
+    # longer unrepaired, whatever the snap said about it.
+    if hexactinellid_repair.is_hexactinellid(args.lineage):
+        h_actions, h_fixed, h_unrep = hexactinellid_repair.repair(
+            rows, gseq, args.code, lineage=args.lineage)
+        actions.extend(h_actions)
+        repaired = {g for g, _ in h_fixed}
+        unrepaired = [g for g in unrepaired if g not in repaired]
+        unrepaired_detail = [(g, d) for g, d in unrepaired_detail if g not in repaired] + h_unrep
+        unrepaired += [g for g, _ in h_unrep]
+        fixed_detail.extend(h_fixed)
+
     # PARTIAL, not FIXED, whenever anything was left broken: a sample with one
     # repaired gene and one still-broken gene has not been fixed, and calling it
     # FIXED would let it through the gate on the strength of the half that worked.
     if unrepaired:
-        status = "PARTIAL" if fixes else "FAILED"
+        status = "PARTIAL" if fixed_detail else "FAILED"
     else:
-        status = "FIXED" if fixes else "SKIPPED"
+        status = "FIXED" if fixed_detail else "SKIPPED"
 
     write_bed(args.out_bed, rows)
     write_status(args.status, status, actions, fixed_detail, unrepaired_detail)
-    print(f"[invert_fix_bed] {status}: {len(fixes)} boundary fix(es), "
+    print(f"[invert_fix_bed] {status}: {len(fixed_detail)} fix(es), "
           f"{len(unrepaired)} left unrepaired")
     # Always exit 0: this is a repair attempt, not a gate. The QC step decides
     # whether what came out is publishable.

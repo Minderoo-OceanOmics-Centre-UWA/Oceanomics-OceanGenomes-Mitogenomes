@@ -26,6 +26,13 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   nothing. Sequence overlap alone was rejected as evidence: OG2636 has a unique 114 bp overlap in the
   wrong orientation (a fold-back repeat), which the graph correctly leaves unjoined. Unproven
   scaffolds stay separate for `SANITISE_FASTA` exactly as before; evidence in `*.graph_join.tsv`.
+- **Glass sponges (Hexactinellida) failed annotation on three systematic MITOS calls.** nad2 dropped
+  where it overlaps nad5 (the overlap is real in every RefSeq glass sponge), atp9 started 54 nt late,
+  atp8 stopped short of its stop. The generic snap cannot fix these: its 36 nt window is too narrow,
+  atp9 is not in its gene set, and it never adds a gene. New `bin/hexactinellid_repair.py`, called by
+  `invert_fix_bed.py` when the class is Hexactinellida, rebuilds all three from the sample's own ORFs
+  (plus a partial T/TA stop against the next feature, OG2983 nad1). On the five NOVA_260909_LA glass
+  sponges it reproduces the reference-checked hand repairs exactly and all five pass the gate.
 - **Selection preferred an oversized molecule the circularity check had already flagged.** Found in
   NOVA_260909_LA_mitogenomes-4. OG2936's welded first pass is 31,154 bp against a 20,312 bp
   reference -- `length_ratio=1.534`, `length_anomaly=yes`, "10,842 bp longer than reference with no
