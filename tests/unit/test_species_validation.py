@@ -37,8 +37,11 @@ class NoNominalSpeciesTests(unittest.TestCase):
 
             lca_path = root / "lca.12s.tsv"
             with lca_path.open("w", newline="") as fh:
+                # species_in_LCA follows the BLAST hit, as it does for real: the LCA
+                # is computed from that same table, and species validation now reads
+                # the LCA's own grouping as evidence.
                 fh.write("seq_id\tspecies_in_LCA\n")
-                fh.write(f"{prefix}.emma102.001\tGenus species\n")
+                fh.write(f"{prefix}.emma102.001\t{blast_sciname}\n")
 
             blast_path = root / "blast.12s.tsv"
             with blast_path.open("w") as fh:
@@ -331,3 +334,67 @@ class MatchAtRankTests(unittest.TestCase):
         self.assertEqual(got, ("Yes", "genus"))
         self.assertEqual(
             MODULE.normalise_open_nomenclature("Serrivomer"), "Serrivomer sp.")
+
+
+class LcaWindowEvidenceTests(unittest.TestCase):
+    """Species/genus evidence comes from the LCA window, not the whole BLAST table.
+
+    The filtered table holds every hit over the identity gate; the LCA groups only
+    those within its --cutoff (2 points) of the top hit. A label that is in the
+    table but well below a different species' best hit was never a candidate.
+    """
+
+    Q = "OG3037.ilmn.260909.getorg1770reseed.mitos2110"
+
+    def _blast(self, rows):
+        p = Path(tempfile.mkdtemp()) / "blast_combined.tsv"
+        with p.open("w") as fh:
+            for sciname, pident, title, region in rows:
+                cols = [self.Q, "gi|1|", "1", sciname, sciname, "Eukaryota", str(pident),
+                        "600", "1500", "600", "0", "0", "0", "1", "600", "1", "600",
+                        title, "0.0", "900", "40", "40", "261013", region]
+                fh.write("\t".join(cols) + "\n")
+        return MODULE.load_blast_rows(p)
+
+    def _lca(self, species_in_lca, top, region="CO1", genus="dropped"):
+        return {"seq_id": self.Q, "species_in_LCA": species_in_lca,
+                "top_percent_match": str(top), "sequence_region": region,
+                "genus": genus, "family": "dropped"}
+
+    def test_label_inside_the_window_validates(self):
+        rows = self._blast([("Munidopsis recta", 99.3, "t", "CO1"),
+                            ("Munidopsis exuta", 98.1, "t", "CO1")])
+        hits = MODULE.evidence_for_lca_row(self._lca("Munidopsis recta, Munidopsis exuta", 99.3), rows)
+        self.assertEqual(MODULE.match_at_rank(("species", "Munidopsis exuta"), hits, {}),
+                         ("Yes", "species"))
+
+    def test_label_in_table_but_below_the_window_stays_held(self):
+        # Under the old rule this validated: the name is in the filtered table.
+        rows = self._blast([("Munidopsis recta", 99.8, "t", "CO1"),
+                            ("Munidopsis pallida", 97.2, "t", "CO1")])
+        hits = MODULE.evidence_for_lca_row(self._lca("Munidopsis recta", 99.8), rows)
+        self.assertEqual(MODULE.match_at_rank(("species", "Munidopsis pallida"), hits, {}),
+                         ("No", "unmatched"))
+
+    def test_a_bold_synonym_within_the_window_still_validates(self):
+        rows = self._blast([("Hydrolagus ogilbyi", 99.5,
+                             "334986 Chimaera ogilbyi FOAO734-15|Chimaera ogilbyi|COI-5P", "CO1")])
+        hits = MODULE.evidence_for_lca_row(self._lca("Hydrolagus ogilbyi", 99.5), rows)
+        self.assertEqual(MODULE.match_at_rank(("species", "Chimaera ogilbyi"), hits, {}),
+                         ("Yes", "species"))
+
+    def test_rows_for_another_region_are_not_evidence(self):
+        rows = self._blast([("Munidopsis recta", 99.5, "t", "CO1"),
+                            ("Munidopsis pallida", 99.5, "t", "16s")])
+        hits = MODULE.evidence_for_lca_row(self._lca("Munidopsis recta", 99.5, region="CO1"), rows)
+        self.assertNotIn("munidopsis pallida", hits.species)
+
+    def test_empty_species_in_lca_and_no_rows_is_no_evidence(self):
+        hits = MODULE.evidence_for_lca_row(self._lca("", ""), [])
+        self.assertEqual((hits.species, hits.genera), (frozenset(), frozenset()))
+
+    def test_genus_label_needs_the_genus_in_the_window(self):
+        rows = self._blast([("Uroptychus sp.", 99.0, "t", "CO1")])
+        hits = MODULE.evidence_for_lca_row(self._lca("Uroptychus sp.", 99.0, genus="Uroptychus"), rows)
+        self.assertEqual(MODULE.match_at_rank(("genus", "Uroptychus"), hits, {"genus": "Uroptychus"}),
+                         ("Yes", "genus"))

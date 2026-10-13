@@ -15,4 +15,5 @@ input:
 output:
   - filtered: { type: file, description: Filtered BLAST results TSV, pattern: "blast.*.filtered.tsv" }
   - validation: { type: file, description: Filtered BLAST results TSV for validation, pattern: "blast.*.filtered.tsv" }
+  - near: { type: file, description: "Hits from ext.near_floor (default 90%) up to the identity gate, or the top 10 hits by bitscore if that band is empty; for inspection only", pattern: "blast.*.near.tsv" }
   - summary: { type: file, description: Per-gene summary for MultiQC, pattern: "filtered_summary.*.txt" }

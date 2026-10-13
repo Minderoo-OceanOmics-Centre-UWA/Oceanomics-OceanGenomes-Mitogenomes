@@ -253,10 +253,15 @@ the full annotation directory allows for manual inspection or re-annotation if r
 <summary>Output files</summary>
 
 - `mitogenomes/<sample>/<assembly_prefix>/lca/`
-  - `blast.<gene>.<annotation>.filtered.tsv`: BLAST hits passing length and identity thresholds. A timestamp and gene
-    identifier are appended to each row.
+  - `blast.<gene>.<annotation>.filtered.tsv`: BLAST hits with query span > 200 bp and identity above the gate
+    (97% for invertebrates, 98% for vertebrates). A timestamp and gene identifier are appended to each row.
+  - `blast.<gene>.<annotation>.near.tsv`: hits from 90% up to that gate, in the same format, for inspection only;
+    nothing downstream reads it. If that band is empty it holds the 10 best hits by bitscore at any identity, so it
+    is empty only when BLAST found nothing at all.
   - `filtered_summary.<gene>.txt`: Per-gene hit summaries used by MultiQC (`Species Validation` tables).
   - `lca.<gene>.<annotation>.tsv`: Lowest common ancestor assignments derived from filtered BLAST hits.
+  - `lca_raw.<gene>.<annotation>.tsv`: the top hits (up to 20) that passed the LCA's own gates, with resolved
+    taxonomy.
 
 </details>
 
@@ -266,6 +271,12 @@ per sample: curated DB for default/vertebrate samples, and `--nt_blast_db` when
 `invertebrates=true`. The invertebrate search is restricted to Metazoa (`-taxids 33208`)
 so that a Tbase-scale `core_nt` stays affordable, but is not restricted to the sample's
 own phylum — a contaminated or mislabelled sample must still be able to hit outside it.
+
+The search itself is unfiltered (the full hit list is in the task work dir as `blast.<gene>.<annotation>.tsv`); the
+identity gate is applied afterwards, and `calculateLCA.py --pident` is set to the same value. The LCA's coverage gate
+uses `--coverage_mode overlap --min_coverage 80`: aligned length as a share of the shorter of query and reference.
+The script's original query-cover gate came from eDNA, where the query is shorter than the reference; against a
+whole-gene query it rejected exact matches to barcode-length references.
 
 ### Species validation and SQL uploads
 
@@ -286,7 +297,10 @@ own phylum — a contaminated or mislabelled sample must still be able to hit ou
 </details>
 
 The `SPECIES_VALIDATION` process checks marker concordance against the sample's `nominal_species_id` from the
-samplesheet. The `EVALUATE_QC_CONDITIONS` module determines whether the sample can proceed to GenBank packaging, and
+samplesheet. Its evidence for a species- or genus-level label is the set of taxa the LCA grouped for each region
+(`species_in_LCA`, i.e. the hits within 2 identity points of the top hit), plus any synonym or in-house
+`[organism=...]` name the BLAST rows inside that same window carry. A label that appears in the filtered table but
+well below a different species' best hit is not evidence. The `EVALUATE_QC_CONDITIONS` module determines whether the sample can proceed to GenBank packaging, and
 its decision is reported in the QC summary table. All upload modules emit human-readable logs so that database
 connectivity or data issues can be audited after a run.
 
@@ -364,7 +378,7 @@ submission-ready channel.
 
 A mitogenome needs two validators recorded in `lca_validation` before it is OK to submit.
 `SPECIES_VALIDATION` fills the first (`validator = 'nf-core'`) when the nominal species ID is
-found in the BLAST results. `PUSH_QC_VALIDATOR` fills the second: any sample reaching
+supported by the LCA window of at least one region (see above). `PUSH_QC_VALIDATOR` fills the second: any sample reaching
 `submission_ready = true`, i.e. it cleared table2asn, the EMBL flat-file conversion and the
 webin-cli format check, gets `validator_2 = 'QCd-nf-core'`.
 

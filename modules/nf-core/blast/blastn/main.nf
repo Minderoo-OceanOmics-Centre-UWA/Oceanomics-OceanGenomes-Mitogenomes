@@ -14,6 +14,9 @@ process BLAST_BLASTN {
     output:
     tuple val(meta), path("blast.${gene_type}.${annotation_name}.filtered.tsv"), val(gene_type), val(annotation_name), emit: filtered
     tuple val(meta), path("blast.${gene_type}.${annotation_name}.filtered.tsv"), emit: validation
+    // Hits just below the identity gate, published for inspection only; nothing
+    // downstream consumes it, so LCA / species validation / the DB are unaffected.
+    tuple val(meta), path("blast.${gene_type}.${annotation_name}.near.tsv"), emit: near
     path "filtered_summary.${gene_type}.txt"   , emit: summary
     tuple val(meta), path("08_blast_blastn.${gene_type}.${annotation_name}.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"           , emit: versions
@@ -26,6 +29,10 @@ process BLAST_BLASTN {
     def prefix = task.ext.prefix ?: "blast.${gene_type}.${annotation_name}"
     def effective_args = ["-num_threads ${task.cpus}", "-db ${blast_db}", "-query ${fasta}", args, "-out ${prefix}.tsv"].findAll { it?.toString()?.trim() }.join(' ')
     def stderr_log = "blastn.${gene_type}.${annotation_name}.stderr"
+    // Identity gate for .filtered.tsv (the LCA / species validation / DB input), and the
+    // floor of the .near.tsv band below it. Set per branch in conf/modules.config.
+    def min_pident = task.ext.min_pident ?: 98
+    def near_floor = task.ext.near_floor ?: 90
     // Keyed on the resolved args string rather than on meta.invertebrates, so it stays
     // correct if conf/modules.config re-keys which branch passes -taxids.
     def taxid_preflight = args.contains('-taxids') ? """
@@ -85,16 +92,29 @@ ${taxid_preflight}
     fi
 
     cat <<-END_TOOL_PARAMS > 08_blast_blastn.${gene_type}.${annotation_name}.tool_params_mqcrow.html
-    <tr><td>BLAST BLASTN</td><td><samp>${effective_args}</samp></td><td>Searches ${gene_type} sequence ${annotation_name} against the selected BLAST database for ${meta.id}; output is filtered for length and identity.</td></tr>
+    <tr><td>BLAST BLASTN</td><td><samp>${effective_args}</samp></td><td>Searches ${gene_type} sequence ${annotation_name} against the selected BLAST database for ${meta.id}; output is filtered to query span &gt; 200 and identity &gt; ${min_pident}% (hits from ${near_floor}% up to that are kept in .near.tsv).</td></tr>
     END_TOOL_PARAMS
 
     # Filter the results
-    awk -F '\t' '{if ((\$15 - \$14 > 200) && (\$7 > 98)) print}' ${prefix}.tsv > ${prefix}.filtered.tsv
-    
+    awk -F '\t' '{if ((\$15 - \$14 > 200) && (\$7 > ${min_pident})) print}' ${prefix}.tsv > ${prefix}.filtered.tsv
+
+    # The band just below the gate, so a query with no passing hits still has something
+    # published to look at. If the band is empty too, fall back to the 10 best hits by
+    # bitscore at any identity/span: the file is then empty only when blastn found nothing.
+    awk -F '\t' '{if ((\$15 - \$14 > 200) && (\$7 > ${near_floor}) && (\$7 <= ${min_pident})) print}' ${prefix}.tsv > ${prefix}.near.tsv
+    if [ ! -s ${prefix}.near.tsv ] && [ -s ${prefix}.tsv ]; then
+        echo "WARN: no hits between ${near_floor}% and ${min_pident}% for ${gene_type} / ${annotation_name}; near.tsv holds the top 10 hits by bitscore instead" >&2
+        # awk, not head: head closing the pipe early would SIGPIPE sort under pipefail.
+        # '>|' because the process shell runs with -C (noclobber) and the band filter
+        # above has already created the (empty) file.
+        LC_ALL=C sort -t "\$(printf '\\t')" -k20,20gr ${prefix}.tsv | awk 'NR <= 10' >| ${prefix}.near.tsv
+    fi
+
     # Add in a column for the days date and the gene type
-    sed -i "s/\$/\\t\$(date +%y%m%d)/" ${prefix}.filtered.tsv
-    wait
-    sed -i "s/\$/\\t${gene_type}/" ${prefix}.filtered.tsv
+    run_date=\$(date +%y%m%d)
+    for f in ${prefix}.filtered.tsv ${prefix}.near.tsv; do
+        sed -i "s/\$/\\t\${run_date}\\t${gene_type}/" \$f
+    done
 
     # Create a summary for multiqc
     awk -F '\t' '{combo[\$1"\t"\$4]++} END {print "Sample\tSpecies\tHits"; for (c in combo) print c, combo[c]}' ${prefix}.filtered.tsv > filtered_summary.${gene_type}.txt
@@ -116,6 +136,7 @@ ${taxid_preflight}
     """
     touch ${prefix}.tsv
     touch ${prefix}.filtered.tsv
+    touch ${prefix}.near.tsv
     printf 'Sample\\tSpecies\\tHits\\n' > filtered_summary.${gene_type}.txt
 
     cat <<-END_TOOL_PARAMS > 08_blast_blastn.${gene_type}.${annotation_name}.tool_params_mqcrow.html

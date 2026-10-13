@@ -155,6 +155,39 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Changed`
 
+- **The invertebrate BLAST search no longer filters its own results.** It ran with
+  `-perc_identity 98 -max_target_seqs 500 -evalue 1e-10`, so the work-dir `blast.<gene>.<name>.tsv`
+  was already cut to the 98% hits and there was no way to see what the failing samples did hit
+  (NOVA_260909_LA's ~11 blocked samples all have core_nt evidence at 81-97%). It now runs like the
+  vertebrate search, `-num_alignments 999999 -evalue 1`, keeping only megablast and the Metazoa
+  `-taxids 33208` search-space restriction. The module's awk (span>200, pident>gate) is now the only
+  filter. Measured on all 187 invertebrate queries of NOVA_260909_LA: at the old 98% gate the LCA
+  output is identical to the capped search, runtime is unchanged (median 25 min per search, max
+  78 min), and the raw tables are large (2.5 GB in total, ~97k rows per CO1 query).
+- **The invertebrate identity gate is 97%, not 98%.** It is set as `ext.min_pident` on
+  `BLAST_BLASTN` (the awk) and `--pident 97` on `LCA` (calculateLCA.py drops rows below it before
+  anything else), so the two cannot disagree. Vertebrates stay at 98%. Swept on NOVA_260909_LA's 64
+  invertebrate samples with the overlap cover rule below: 98% gives 37 samples an LCA call, 97% gives
+  41, with no new family-level conflicts against the nominal label; 95% and 90% add only family/order
+  calls while conflicts rise from 5 to 12. There is no identity cap on LCA rank, so a 97-98% top hit
+  can still produce a species-level LCA call.
+- **LCA's coverage gate measures overlap, not query cover.** `calculateLCA.py` came from eDNA, where
+  the query is a short ASV inside a longer reference and `qcovhsp >= 40` only removed junk. Here the
+  query is a whole gene (CO1 ~1.6 kb) and most references are barcode fragments (median ~600 bp), so
+  an exact end-to-end match to a 293 bp 12S record covered 36% of the query and was dropped (OG3037).
+  New `--coverage_mode overlap` gates on aligned length / min(qlen, slen); the pipeline passes
+  `--coverage_mode overlap --min_coverage 80` for every sample, and the script's default stays
+  `qcovhsp` so eDNA use is unchanged. Inverts at 98%: 28 -> 37 samples with a call, no species call
+  below 98%, and the 6 calls that changed all became coarser (more references fell in the 2% window;
+  OG2617 went from a label-conflicting Kulamanamana species to order Zoantharia). Vertebrates (297
+  queries, NOVA_260909_LA + NOVA_260925_LA): 4 calls change, all coarser, and species validation is
+  unchanged sample for sample. The cover values reported in the LCA outputs are still BLAST's.
+- **Species validation reads the LCA window, not the whole filtered table.** A binomial used to
+  validate if its name appeared anywhere in `blast_combined`, i.e. on any hit over the identity gate,
+  even one several points below a different species' best hit. Each LCA row's evidence is now its
+  `species_in_LCA` taxa plus the names the BLAST rows for the same query and region carry within 2
+  points of its top hit, so BOLD synonyms and in-house `[organism=...]` tags still count. The genus
+  check needs the genus in that same window. `blast_combined` is still built and uploaded unchanged.
 - **The reference-guided join is off by default** (`--skip_getorganelle_join`, default `true`).
   `GETORGANELLE_JOIN` welds a multi-scaffold assembly into one record with 100bp N spacers so the
   scaffolds sit in reference order; multi-scaffold assemblies now become a plain `_concat` instead.
@@ -433,6 +466,13 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Added`
 
+- **`blast.<gene>.<annotation>.near.tsv`, the hits just below the identity gate.** A query with no
+  passing hits used to publish an empty `.filtered.tsv` and nothing else, so seeing what it did hit
+  meant digging through the work dir. The BLAST module now also publishes hits with span > 200 and
+  identity from `ext.near_floor` (90) up to the gate, in the same format as `.filtered.tsv`. If that
+  band is empty it holds the 10 best hits by bitscore at any identity, so the file is empty only when
+  BLAST found nothing; across NOVA_260909_LA's 187 invertebrate queries 44 use that fallback and none
+  is empty. Nothing downstream reads it: LCA, species validation and the DB upload are unchanged.
 - The published origin of an invertebrate mitogenome is now measured per taxon instead
   of being tRNA-Met for everything.
 

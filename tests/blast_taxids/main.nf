@@ -72,6 +72,7 @@ workflow BLAST_REAL_SEARCH {
 
     emit:
     filtered = BLAST_BLASTN.out.filtered
+    near     = BLAST_BLASTN.out.near
     summary  = BLAST_BLASTN.out.summary
 }
 

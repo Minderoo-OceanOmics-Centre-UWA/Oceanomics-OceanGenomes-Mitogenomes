@@ -34,7 +34,13 @@ nextflow_workflow {
                 // CDS searched against itself, so there must be at least one hit that
                 // survives the module's awk length/identity filter.
                 { assert path(workflow.out.filtered[0][1]).readLines().size() > 0 },
-                { assert path(workflow.out.summary[0]).text.contains('Hits') }
+                { assert path(workflow.out.summary[0]).text.contains('Hits') },
+                // The self-search has no hits in the 90%-to-gate band, so near.tsv must
+                // take the top-10-by-bitscore fallback rather than publish an empty file,
+                // and carry the same appended date + gene columns as .filtered.tsv.
+                { assert workflow.out.near.size() == 1 },
+                { assert path(workflow.out.near[0][1]).readLines().size() > 0 },
+                { assert path(workflow.out.near[0][1]).readLines().every { it.split('\t').size() == 24 && it.endsWith('\tCO1') } }
             )
         }
     }

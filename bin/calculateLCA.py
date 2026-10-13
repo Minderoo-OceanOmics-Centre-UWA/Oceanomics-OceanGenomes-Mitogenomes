@@ -93,6 +93,25 @@ TAXA_FINAL_COLUMNS = [
 ]
 
 
+COVERAGE_MODES = ("qcovhsp", "overlap")
+
+
+def coverage_for_gate(mode: str, query_coverage: float, alignment_length: int,
+                      qlen: int, subject_length: int) -> float:
+    """Coverage value the --min_coverage gate is applied to.
+
+    qcovhsp  BLAST's per-HSP query cover (the original eDNA behaviour, where the
+             query is a short ASV inside a longer reference).
+    overlap  aligned length as a percentage of the SHORTER of query and subject. For
+             a whole-gene query against a barcode-length reference, query cover can
+             never pass even for an exact end-to-end match; this asks instead whether
+             the alignment spans the region the two sequences could share.
+    """
+    if mode == "overlap":
+        return 100.0 * alignment_length / max(1, min(qlen, subject_length))
+    return query_coverage
+
+
 @dataclass
 class Config:
     """Configuration settings for the LCA analysis."""
@@ -824,7 +843,8 @@ class BLASTLCAAnalyzer:
         input_file: Path,
         pident_cutoff: float,
         coverage_cutoff: float,
-        missing_file: Path
+        missing_file: Path,
+        coverage_mode: str = "qcovhsp",
     ) -> Tuple[Dict[str, List], Dict[str, int]]:
         """Process BLAST results file.
 
@@ -900,7 +920,20 @@ class BLASTLCAAnalyzer:
                             )
                             continue
 
-                        if query_coverage < coverage_cutoff:
+                        # The reported query_coverage stays BLAST's value; only the
+                        # gate depends on --coverage_mode.
+                        try:
+                            gate_coverage = coverage_for_gate(
+                                coverage_mode, query_coverage, int(alignment_length),
+                                qlen, int(subject_length),
+                            )
+                        except ValueError:
+                            self.logger.warning(
+                                f"Line {line_num}: Invalid length/slen value for coverage gate"
+                            )
+                            continue
+
+                        if gate_coverage < coverage_cutoff:
                             continue
 
                         try:
@@ -1310,7 +1343,8 @@ class BLASTLCAAnalyzer:
             missing_file: Path,
             worms_file: Optional[Path] = None,
             normalise_identity: bool = False,
-            use_bitwise: bool = False
+            use_bitwise: bool = False,
+            coverage_mode: str = "qcovhsp",
         ):
         """Run the complete analysis pipeline."""
         self.logger.info("Starting BLAST LCA analysis")
@@ -1321,7 +1355,8 @@ class BLASTLCAAnalyzer:
         self.load_databases(worms_file)
 
         asv_hits, asv_lengths = self.process_blast_file(
-            input_file, pident_cutoff, cover_minimum, missing_file
+            input_file, pident_cutoff, cover_minimum, missing_file,
+            coverage_mode=coverage_mode,
         )
 
         if not asv_hits:
@@ -1401,7 +1436,15 @@ def main():
         "--min_coverage",
         type=float,
         default=config.DEFAULT_COVER_MIN,
-        help=f"Minimum query coverage identity for BLAST hits (default: {config.DEFAULT_COVER_MIN})",
+        help=f"Minimum coverage for BLAST hits, measured as set by --coverage_mode (default: {config.DEFAULT_COVER_MIN})",
+    )
+    parser.add_argument(
+        "--coverage_mode",
+        choices=COVERAGE_MODES,
+        default="qcovhsp",
+        help="What --min_coverage is measured against: 'qcovhsp' (BLAST per-HSP query cover; "
+             "the eDNA default) or 'overlap' (aligned length / min(qlen, slen), for whole-gene "
+             "queries against fragment references). Default: qcovhsp",
     )
     parser.add_argument(
         '--missing_out',
@@ -1469,7 +1512,8 @@ def main():
         worms_file=args.worms_file,
         seq_type=args.seq_type,
         normalise_identity=args.normalise_identity,
-        use_bitwise=args.use_bitwise
+        use_bitwise=args.use_bitwise,
+        coverage_mode=args.coverage_mode,
     )
 
 

@@ -199,47 +199,117 @@ def load_blast_species_set(filepath):
     try:
         with open(filepath, "r", newline="") as f:
             for line in f:
-                fields = line.rstrip("\n").split("\t")
-                if len(fields) <= BLAST_SCINAME_INDEX:
-                    continue
-                name = normalise_name(fields[BLAST_SCINAME_INDEX])
-                have_ncbi_name = bool(name) and name not in _BLAST_NULL_NAMES
-                if have_ncbi_name:
-                    species.add(name)
-
-                # The subject's own identification, which can be a SYNONYM of the
-                # NCBI name for the same taxid. Read on every row, not only on
-                # taxid-less ones, because a synonym appears precisely where an
-                # NCBI name is also present.
-                for field in fields[BLAST_SCINAME_INDEX + 1:]:
-                    if "|" not in field:
-                        continue
-                    for part in field.split("|")[1:]:
-                        part = part.strip()
-                        if BLAST_BINOMIAL_RE.match(part):
-                            species.add(normalise_name(part))
-                            break
-                    break
-
-                if have_ncbi_name:
-                    continue
-                # No NCBI name: try the subject title's [organism=...] tag, which
-                # is how an in-house reference hit carries its identification.
-                for field in fields[BLAST_SCINAME_INDEX + 1:]:
-                    tagged = BLAST_ORGANISM_RE.search(field)
-                    if tagged:
-                        name = normalise_name(tagged.group(1))
-                        if name and name not in _BLAST_NULL_NAMES:
-                            species.add(name)
-                        break
+                species |= _names_from_blast_fields(line.rstrip("\n").split("\t"))
     except FileNotFoundError:
         return BlastHits(species=frozenset(), genera=frozenset())
+    return _hits_from_names(species)
+
+
+def _hits_from_names(species):
     return BlastHits(
         species=frozenset(species),
         # genus_of is the same helper the reference-divergence and
         # reference-relevance checks use, so "congeneric" means one thing.
         genera=frozenset(g for g in (genus_of(s) for s in species) if g),
     )
+
+
+def _names_from_blast_fields(fields):
+    """Every identification one BLAST row carries, normalised (possibly empty)."""
+    species = set()
+    if len(fields) <= BLAST_SCINAME_INDEX:
+        return species
+    name = normalise_name(fields[BLAST_SCINAME_INDEX])
+    have_ncbi_name = bool(name) and name not in _BLAST_NULL_NAMES
+    if have_ncbi_name:
+        species.add(name)
+
+    # The subject's own identification, which can be a SYNONYM of the
+    # NCBI name for the same taxid. Read on every row, not only on
+    # taxid-less ones, because a synonym appears precisely where an
+    # NCBI name is also present.
+    for field in fields[BLAST_SCINAME_INDEX + 1:]:
+        if "|" not in field:
+            continue
+        for part in field.split("|")[1:]:
+            part = part.strip()
+            if BLAST_BINOMIAL_RE.match(part):
+                species.add(normalise_name(part))
+                break
+        break
+
+    if have_ncbi_name:
+        return species
+    # No NCBI name: try the subject title's [organism=...] tag, which
+    # is how an in-house reference hit carries its identification.
+    for field in fields[BLAST_SCINAME_INDEX + 1:]:
+        tagged = BLAST_ORGANISM_RE.search(field)
+        if tagged:
+            name = normalise_name(tagged.group(1))
+            if name and name not in _BLAST_NULL_NAMES:
+                species.add(name)
+            break
+    return species
+
+
+# The window calculateLCA.py groups hits in: every hit within this many identity
+# points of the top hit is a candidate (its --cutoff, default 2.0). The species
+# check asks whether the label is one of THOSE taxa, not merely somewhere in the
+# filtered table.
+LCA_WINDOW = 2.0
+BLAST_PIDENT_INDEX = 6
+BlastRow = namedtuple("BlastRow", ["qseqid", "region", "pident", "names"])
+
+
+def load_blast_rows(filepath):
+    """The filtered BLAST table as (qseqid, region, pident, names) rows.
+
+    The region is the last column, which the BLAST module appends (CO1/12s/16s)
+    and which matches an LCA row's sequence_region. Rows that cannot be parsed are
+    skipped; an empty or missing file yields an empty list.
+    """
+    rows = []
+    try:
+        with open(filepath, "r", newline="") as f:
+            for line in f:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) <= BLAST_PIDENT_INDEX:
+                    continue
+                try:
+                    pident = float(fields[BLAST_PIDENT_INDEX])
+                except ValueError:
+                    continue
+                rows.append(BlastRow(fields[0], fields[-1].strip().lower(), pident,
+                                     frozenset(_names_from_blast_fields(fields))))
+    except FileNotFoundError:
+        return []
+    return rows
+
+
+def evidence_for_lca_row(row, blast_rows, window=LCA_WINDOW):
+    """The identifications that support one LCA row, as BlastHits.
+
+    That is the taxa the LCA itself grouped (species_in_LCA), plus every name the
+    BLAST rows for the same query and region carry within the LCA window of its top
+    hit. The second part keeps what only the raw table knows: a BOLD synonym of the
+    NCBI name (taxid 334986, 'Chimaera ogilbyi' vs 'Hydrolagus ogilbyi') and an
+    in-house reference's [organism=...] tag. Restricting it to the window is the
+    point: a label that is in the table but several points below the best hit was
+    not one of the candidates, and must not validate the sample.
+    """
+    names = {normalise_name(s) for s in (row.get(SPECIES_IN_LCA_COLUMN) or "").split(",")
+             if s.strip()}
+    try:
+        top = float(row.get("top_percent_match") or "")
+    except ValueError:
+        top = None
+    if top is not None:
+        qseqid = (row.get("seq_id") or "").strip()
+        region = (row.get("sequence_region") or "").strip().lower()
+        for b in blast_rows:
+            if b.qseqid == qseqid and b.region == region and b.pident >= top - window:
+                names |= b.names
+    return _hits_from_names(names)
 
 def parse_assembly_key_from_blast(blast_file):
     """
@@ -284,8 +354,8 @@ def match_at_rank(nominal, blast_hits, row):
     Returns (found_in_blast, validated_rank). The rule is: match at the rank the
     label ASSERTS, not at the loosest rank that happens to succeed.
 
-      species            the binomial is in the BLAST species set    -> 'species'
-      genus              the genus is in the BLAST genus set AND the
+      species            the binomial is in the evidence set       -> 'species'
+      genus              the genus is in the evidence genera AND the
                          LCA row agrees at genus                     -> 'genus'
       species_uncertain  as for genus                     -> 'genus_downgraded'
       family             the LCA row agrees at family                -> 'family'
@@ -308,10 +378,15 @@ def match_at_rank(nominal, blast_hits, row):
     in the direction that matters, and the downgrade is recorded rather than
     inferred.
 
-    Requiring BOTH the BLAST genus set and the LCA row to agree for a genus-rank
+    Requiring BOTH the evidence genera and the LCA row to agree for a genus-rank
     match is what keeps a swapped or contaminated sample held: when the hits and
     the LCA agree with each other and both disagree with the label, neither side
     can rescue it.
+
+    ``blast_hits`` is the evidence for THIS LCA row (evidence_for_lca_row): the
+    taxa inside the LCA window, not the whole filtered table. It used to be the
+    whole table, which let a binomial validate on any hit that cleared the
+    identity gate, even one several points below a different species' best hit.
     """
     rank, value = nominal
     if rank is None or not value:
@@ -410,8 +485,8 @@ def compare_lca_and_blast(nominal_species, og_id, lca_files, blast_files, output
             "species match columns will be recorded as N/A."
         )
 
-    # Load BLAST results as parsed sets, not a text blob.
-    blast_hits = load_blast_species_set(f"blast_combined.{prefix}.tsv")
+    # Parsed BLAST rows; each LCA row's evidence is drawn from its own window.
+    blast_rows = load_blast_rows(f"blast_combined.{prefix}.tsv")
 
     # What rank does the label actually claim? Classified from the RAW value, so
     # the normalisation above cannot turn a bare genus into something that reads
@@ -462,7 +537,8 @@ def compare_lca_and_blast(nominal_species, og_id, lca_files, blast_files, output
             match = "Yes" if db_species_norm in species_list_norm else "No"
 
             # Does the evidence support the label's own claim, at the rank it makes?
-            in_blast, validated_rank = match_at_rank(nominal, blast_hits, row)
+            in_blast, validated_rank = match_at_rank(
+                nominal, evidence_for_lca_row(row, blast_rows), row)
             if in_blast == "Yes":
                 sample_validated = True
                 validated_ranks.add(validated_rank)
