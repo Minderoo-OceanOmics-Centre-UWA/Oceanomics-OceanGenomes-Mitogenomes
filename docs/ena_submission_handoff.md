@@ -31,7 +31,7 @@ downstream.
 ## Finding packages
 
 ```
-s3://ocom-oceangenomes/analysed-data/mitogenomes/curated/<og_id>/<assembly_prefix>/
+s3://ocom.oceangenomes/analysed-data/mitogenomes/curated/<og_id>/<assembly_prefix>/
 ```
 
 Each package describes itself; reading one needs no database join.

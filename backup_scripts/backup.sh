@@ -15,7 +15,7 @@
 # Two destinations, run in this order:
 #
 #   1. AWS  : $RUNDIR/mitogenomes/$OG/$ASSEMBLY/ena/package/*
-#             -> s3://ocom-oceangenomes/analysed-data/draft-genomes/$OG/$ASSEMBLY/
+#             -> s3://ocom.oceangenomes/analysed-data/draft-genomes/$OG/$ASSEMBLY/
 #             (the final ENA submission files, flattened into the assembly dir,
 #             alongside the draft genome files already held there)
 #
@@ -54,7 +54,7 @@ module load rclone/1.68.1 2>/dev/null
 RUNDIR_DEFAULT=""
 
 RUNDIR="${RUNDIR:-$RUNDIR_DEFAULT}"
-AWS_DEST="${AWS_DEST:-s3://ocom-oceangenomes/analysed-data/mitogenomes/curated}"
+AWS_DEST="${AWS_DEST:-s3://ocom.oceangenomes/analysed-data/mitogenomes/curated}"
 ACACIA_DEST="${ACACIA_DEST:-pawsey0964:oceanomics-mitochondrial-genomes}"
 
 MOVE=false
