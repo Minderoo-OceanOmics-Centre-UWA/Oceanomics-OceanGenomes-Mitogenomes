@@ -13,7 +13,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "bin"))
 
-from orf_utils import (PLAUSIBLE_MITO_STARTS, START_CODONS_BY_CODE,
+from orf_utils import (NCBI_START_CODONS_BY_CODE, PLAUSIBLE_MITO_STARTS,
+                       START_CODONS_BY_CODE,
                        canonical_gene, classify_cds, lineage_alt_starts)
 
 
@@ -23,6 +24,13 @@ class Code9StartTests(unittest.TestCase):
         ND1 GTG x6, plus TTG. All were rejected by a two-codon table."""
         for codon in ("ATT", "ATC", "TTG", "ATG", "GTG"):
             self.assertIn(codon, START_CODONS_BY_CODE[9], codon)
+
+    def test_ncbi_table9_stays_strict(self):
+        """The submission layer needs NCBI's own set: anything outside it must get
+        a transl_except, so it cannot share the widened table above."""
+        self.assertEqual(set(NCBI_START_CODONS_BY_CODE[9]), {"ATG", "GTG"})
+        for code in (2, 4, 5, 13, 14, 21, 24, 33):
+            self.assertEqual(NCBI_START_CODONS_BY_CODE[code], START_CODONS_BY_CODE[code], code)
 
     def test_code5_and_code9_agree(self):
         """Both are invertebrate mitochondrial tables; a divergent initiator set

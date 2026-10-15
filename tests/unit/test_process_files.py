@@ -282,6 +282,46 @@ class ProcessTblOrderingTests(unittest.TestCase):
         self.assertIn("\t\t\ttransl_except\t(pos:10053..10055,aa:Met)", block)
         self.assertIn(f"\t\t\tnote\t{process_files.START_NOTE_MARK} CTG", block)
 
+    def test_code9_alternative_start_is_declared(self):
+        # NCBI table 9 lists only ATG/GTG. orf_utils treats echinoderm ATT/ATC as
+        # real starts, but table2asn still needs the transl_except, which the
+        # widened table used to suppress (NOVA_260909_LA OG2966 ND3/ND4L).
+        seq = list("A" * 16745)
+        seq[10053 - 1:10053 + 2] = list("ATT")
+        lines = self._process(seq="".join(seq), genetic_code=9).splitlines()
+        cds = lines.index("10053\t10349\tCDS")
+        block = lines[cds:cds + 4]
+        self.assertIn("\t\t\ttransl_except\t(pos:10053..10055,aa:Met)", block)
+
+    def test_code9_gtg_start_is_left_alone(self):
+        seq = list("A" * 16745)
+        seq[10053 - 1:10053 + 2] = list("GTG")
+        self.assertNotIn("aa:Met", self._process(seq="".join(seq), genetic_code=9))
+
+    def test_truncated_stop_without_the_note(self):
+        # MITOS tables carry no polyA note, so the sequence alone has to trigger
+        # aa:TERM (NOVA_260909_LA OG3090 CO2, 685 nt ending on T before tRNA-Lys).
+        seq = list("A" * 16745)
+        seq[10350 - 1] = "T"
+        tbl = UNSORTED_TBL.replace("10053\t10349\tCDS", "10053\t10350\tCDS")
+        lines = self._process(tbl=tbl, seq="".join(seq), genetic_code=5).splitlines()
+        cds = lines.index("10053\t10350\tCDS")
+        block = lines[cds:cds + 6]
+        self.assertIn("\t\t\ttransl_except\t(pos:10350,aa:TERM)", block)
+        self.assertTrue(any(process_files.POLYA_NOTE_MARK in line for line in block))
+
+    def test_leftover_bases_that_are_not_a_stop_prefix_get_no_term(self):
+        # A remainder of "A" is no stop's prefix: a frameshift or bad boundary,
+        # which table2asn should go on flagging.
+        tbl = UNSORTED_TBL.replace("10053\t10349\tCDS", "10053\t10350\tCDS")
+        self.assertNotIn("aa:TERM", self._process(tbl=tbl, seq="A" * 16745, genetic_code=5))
+
+    def test_partial_end_cds_gets_no_term(self):
+        seq = list("A" * 16745)
+        seq[10350 - 1] = "T"
+        tbl = UNSORTED_TBL.replace("10053\t10349\tCDS", "10053\t>10350\tCDS")
+        self.assertNotIn("aa:TERM", self._process(tbl=tbl, seq="".join(seq), genetic_code=5))
+
     def test_implausible_start_codon_is_left_to_fail(self):
         # AAA is an initiator in no mitochondrial code, so it reads as a broken CDS
         # boundary or a bad base call rather than alternative initiation. Declaring

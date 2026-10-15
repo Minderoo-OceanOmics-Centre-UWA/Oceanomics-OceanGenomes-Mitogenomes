@@ -7,7 +7,7 @@ from pathlib import Path
 # One source of truth for the per-code mitochondrial start/stop codon sets. bin/
 # is bind-mounted onto PATH by Nextflow, so this sibling import resolves via
 # sys.path[0] (same pattern as build_source_modifiers.py -> geo_loc_name_utils).
-from orf_utils import start_codons as _orf_start_codons
+from orf_utils import ncbi_start_codons as _orf_start_codons
 from orf_utils import stop_codons as _orf_stop_codons
 from orf_utils import PLAUSIBLE_MITO_STARTS, lineage_alt_starts
 from gene_names import submission_gene_name, bare_gene_name
@@ -152,6 +152,8 @@ def mito_stop_codons(genetic_code: int):
     return _orf_stop_codons(genetic_code)
 
 def mito_start_codons(genetic_code: int):
+    # NCBI's own initiator set, not orf_utils' data-widened one: a codon outside
+    # it needs a transl_except whatever QC thinks of it (code 9 ATT/ATC).
     return _orf_start_codons(genetic_code)
 
 # PLAUSIBLE_MITO_STARTS and lineage_alt_starts() are imported from orf_utils above.
@@ -400,12 +402,22 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
                         log(f"⚠️  {product_of(qual)} starts on {codon}, which no "
                             f"mitochondrial code lists as an initiator -- leaving it "
                             f"for table2asn to flag rather than declaring aa:Met")
-            if seq is not None and has_note and not has_te and not extra_intervals:
+            # Like the start, the sequence decides, not EMMA's polyA note: MITOS
+            # tables (mitos_to_emma.py) never carry that note, so gating on it left
+            # every T/TA-truncated stop on the invert path undeclared and failing
+            # table2asn with SEQ_FEAT.NoStop (NOVA_260909_LA OG3090 CO2).
+            # compute_transl_except_pos only answers when the leftover 1-2 nt are
+            # a stop prefix, so a frameshifted end is still left to fail.
+            partial_end = ic[1].startswith('>')
+            if seq is not None and not has_te and not partial_end and not extra_intervals:
                 pos = compute_transl_except_pos(int(ic[0].lstrip('<>')),
                                                 int(ic[1].lstrip('<>')), seq, stops)
                 if pos:
                     out.append(f"\t\t\ttransl_except\t(pos:{pos},aa:TERM)")
                     added += 1
+                    if not has_note:
+                        out.append(f"\t\t\tnote\tTAA stop codon is completed by the "
+                                   f"addition of {POLYA_NOTE_MARK} to the mRNA")
             for q in qual:
                 # EMMA's protein_id is an internal placeholder UUID
                 # (gnl|Emma|<uuid>), not a real INSDC accession. ENA/GenBank

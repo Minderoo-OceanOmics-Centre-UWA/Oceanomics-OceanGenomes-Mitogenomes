@@ -51,6 +51,11 @@ START_CODONS_BY_CODE = {
     # i.e. ATT/ATC/TTG are the MAJORITY of real starts and were all being
     # rejected, failing 8 otherwise-complete assemblies. Codes 5 and 9 are both
     # invertebrate mitochondrial tables and take the same initiator set.
+    #
+    # This is deliberately wider than NCBI's table 9 (ATG/GTG only): it is the
+    # set the ORF search (refine_orf) and the QC grading treat as real starts.
+    # What table2asn accepts without a transl_except is NCBI_START_CODONS_BY_CODE
+    # below, and that is what process_files.py must test against.
     9: ("TTG", "ATT", "ATC", "ATA", "ATG", "GTG"),
     13: ("TTG", "ATA", "ATG", "GTG"),
     14: ("ATG",),
@@ -60,6 +65,14 @@ START_CODONS_BY_CODE = {
 }
 
 SUPPORTED_CODES = frozenset(START_CODONS_BY_CODE) & frozenset(STOP_CODONS_BY_CODE)
+
+# Exactly NCBI's initiator sets, i.e. what table2asn accepts with no transl_except.
+# Identical to START_CODONS_BY_CODE except where that table was widened from the
+# data (code 9). Widening it there silently stopped process_files.py declaring
+# ATT/ATC starts, and every echinoderm CDS on one failed table2asn with
+# SEQ_FEAT.StartCodon + SEQ_INST.BadProteinStart (NOVA_260909_LA OG2966, OG3009).
+NCBI_START_CODONS_BY_CODE = dict(START_CODONS_BY_CODE)
+NCBI_START_CODONS_BY_CODE[9] = ("ATG", "GTG")
 
 # Union of the initiation codons across every mitochondrial translation table,
 # read out of the EMBOSS EGC.* data files (tables 2, 3, 4, 5, 9, 13, 14, 21; the
@@ -153,6 +166,10 @@ def _require(code):
 
 def start_codons(code):
     return START_CODONS_BY_CODE[_require(code)]
+
+
+def ncbi_start_codons(code):
+    return NCBI_START_CODONS_BY_CODE[_require(code)]
 
 
 def stop_codons(code):
