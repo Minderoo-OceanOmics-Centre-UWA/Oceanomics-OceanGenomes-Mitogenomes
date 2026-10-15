@@ -1,7 +1,7 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://raw.githubusercontent.com/nf-core/oceangenomesmitogenomes/master/nextflow_schema.json",
-    "title": "nf-core/oceangenomesmitogenomes pipeline parameters",
+    "$id": "https://raw.githubusercontent.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/master/nextflow_schema.json",
+    "title": "OceanOmics OceanGenomes Mitogenomes pipeline parameters",
     "description": "An nf-core pipeline for mitogenome assembly and LCA for species validation",
     "type": "object",
     "$defs": {
@@ -22,7 +22,7 @@
                     "mimetype": "text/csv",
                     "pattern": "^\\S+\\.csv$",
                     "description": "Path to comma-separated file containing information about the samples in the experiment.",
-                    "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row. See [usage docs](https://nf-co.re/oceangenomesmitogenomes/usage#samplesheet-input).",
+                    "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row. See [usage docs](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/blob/master/docs/usage.md#samplesheet-input).",
                     "fa_icon": "fas fa-file-csv"
                 },
                 "input_dir": {

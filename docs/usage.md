@@ -1,6 +1,6 @@
-# nf-core/oceangenomesmitogenomes: Usage
+# OceanOmics OceanGenomes Mitogenomes: Usage
 
-The nf-core/oceangenomesmitogenomes workflow assembles, annotates, validates, and packages
+The OceanOmics OceanGenomes Mitogenomes workflow assembles, annotates, validates, and packages
 mitochondrial genomes from PacBio HiFi, Illumina, and Hi-C sequencing runs. This page describes
 pipeline-specific input requirements and the parameters you must provide to execute a full run on
 OceanOmics data holdings.
@@ -11,7 +11,7 @@ OceanOmics data holdings.
 ## Quick start
 
 ```bash
-nextflow run nf-core/oceangenomesmitogenomes \
+nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes \
   -profile singularity \            # or docker / conda / podman / …
   --input oceanomics_samples.csv \   # or --input_dir "/data/OG*/**/*.fastq.gz"
   --outdir results \
@@ -690,7 +690,7 @@ skip_mitogenome_assembly_hifi: false
 ```
 
 ```bash
-nextflow run nf-core/oceangenomesmitogenomes -profile singularity -params-file params.yaml
+nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes -profile singularity -params-file params.yaml
 ```
 
 Avoid using `-c` for parameter injection – reserve it for infrastructure or resource overrides.
@@ -721,7 +721,7 @@ additional tool arguments, follow the guidance in the nf-core documentation:
 Every process ships with a `stub` section so you can validate wiring and configuration quickly:
 
 ```bash
-nextflow run nf-core/oceangenomesmitogenomes \
+nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes \
   -profile test,singularity \
   --input test_data/samplesheet.csv \
   --curated_blast_db test_data/blast_db \

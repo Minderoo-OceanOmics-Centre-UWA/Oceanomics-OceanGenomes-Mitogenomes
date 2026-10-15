@@ -527,7 +527,7 @@ def prepare_tool_parameters(sample_dir: Path, versions_by_group: OrderedDict) ->
         return
 
     tool_params_lines = [
-        "id: 'nf-core-oceangenomesmitogenomes-tool-parameters'",
+        "id: 'oceanomics-oceangenomes-mitogenomes-tool-parameters'",
         "description: 'Exact tool parameters captured from the module command scripts.'",
         "section_name: 'Tool Parameters Used'",
         "plot_type: 'html'",

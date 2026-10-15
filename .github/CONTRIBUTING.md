@@ -1,23 +1,23 @@
-# `nf-core/oceangenomesmitogenomes`: Contributing Guidelines
+# `OceanOmics OceanGenomes Mitogenomes`: Contributing Guidelines
 
 Hi there!
-Many thanks for taking an interest in improving nf-core/oceangenomesmitogenomes.
+Many thanks for taking an interest in improving OceanOmics OceanGenomes Mitogenomes.
 
-We try to manage the required tasks for nf-core/oceangenomesmitogenomes using GitHub issues, you probably came to this page when creating one.
+We try to manage the required tasks for OceanOmics OceanGenomes Mitogenomes using GitHub issues, you probably came to this page when creating one.
 Please use the pre-filled template to save time.
 
 However, don't be put off by this template - other more general issues and suggestions are welcome!
 Contributions to the code are even more welcome ;)
 
 > [!NOTE]
-> If you need help using or modifying nf-core/oceangenomesmitogenomes then the best place to ask is on the nf-core Slack [#oceangenomesmitogenomes](https://nfcore.slack.com/channels/oceangenomesmitogenomes) channel ([join our Slack here](https://nf-co.re/join/slack)).
+> If you need help using or modifying OceanOmics OceanGenomes Mitogenomes, open an issue on [GitHub](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/issues) or ask the OceanOmics bioinformatics team.
 
 ## Contribution workflow
 
-If you'd like to write some code for nf-core/oceangenomesmitogenomes, the standard workflow is as follows:
+If you'd like to write some code for OceanOmics OceanGenomes Mitogenomes, the standard workflow is as follows:
 
-1. Check that there isn't already an issue about your idea in the [nf-core/oceangenomesmitogenomes issues](https://github.com/nf-core/oceangenomesmitogenomes/issues) to avoid duplicating work. If there isn't one already, please create one so that others know you're working on this
-2. [Fork](https://help.github.com/en/github/getting-started-with-github/fork-a-repo) the [nf-core/oceangenomesmitogenomes repository](https://github.com/nf-core/oceangenomesmitogenomes) to your GitHub account
+1. Check that there isn't already an issue about your idea in the [OceanOmics OceanGenomes Mitogenomes issues](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/issues) to avoid duplicating work. If there isn't one already, please create one so that others know you're working on this
+2. [Fork](https://help.github.com/en/github/getting-started-with-github/fork-a-repo) the [OceanOmics OceanGenomes Mitogenomes repository](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes) to your GitHub account
 3. Make the necessary changes / additions within your forked repository following [Pipeline conventions](#pipeline-contribution-conventions)
 4. Use `nf-core pipelines schema build` and add any new parameters to the pipeline JSON schema (requires [nf-core tools](https://github.com/nf-core/tools) >= 1.10).
 5. Submit a Pull Request against the `dev` branch and wait for the code to be reviewed and merged
@@ -61,11 +61,11 @@ These tests are run both with the latest available version of `Nextflow` and als
 
 ## Getting help
 
-For further information/help, please consult the [nf-core/oceangenomesmitogenomes documentation](https://nf-co.re/oceangenomesmitogenomes/usage) and don't hesitate to get in touch on the nf-core Slack [#oceangenomesmitogenomes](https://nfcore.slack.com/channels/oceangenomesmitogenomes) channel ([join our Slack here](https://nf-co.re/join/slack)).
+For further information/help, please consult the [OceanOmics OceanGenomes Mitogenomes documentation](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/blob/master/docs/usage.md) or open an issue on [GitHub](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/issues).
 
 ## Pipeline contribution conventions
 
-To make the `nf-core/oceangenomesmitogenomes` code and processing logic more understandable for new contributors and to ensure quality, we semi-standardise the way the code and other contributions are written.
+To make the `OceanOmics OceanGenomes Mitogenomes` code and processing logic more understandable for new contributors and to ensure quality, we semi-standardise the way the code and other contributions are written.
 
 ### Adding a new step
 
@@ -115,7 +115,7 @@ This repo includes a devcontainer configuration which will create a GitHub Codes
 
 To get started:
 
-- Open the repo in [Codespaces](https://github.com/nf-core/oceangenomesmitogenomes/codespaces)
+- Open the repo in [Codespaces](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/codespaces)
 - Tools installed
   - nf-core
   - Nextflow

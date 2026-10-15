@@ -1,7 +1,7 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://raw.githubusercontent.com/nf-core/oceangenomesmitogenomes/master/assets/schema_input.json",
-    "title": "nf-core/oceangenomesmitogenomes pipeline - params.input schema",
+    "$id": "https://raw.githubusercontent.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/master/assets/schema_input.json",
+    "title": "OceanOmics OceanGenomes Mitogenomes pipeline - params.input schema",
     "description": "Schema for the file provided with params.input",
     "type": "array",
     "items": {

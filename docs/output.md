@@ -1,8 +1,8 @@
-# nf-core/oceangenomesmitogenomes: Output
+# OceanOmics OceanGenomes Mitogenomes: Output
 
 ## Introduction
 
-This page describes the files produced by the nf-core/oceangenomesmitogenomes pipeline. All
+This page describes the files produced by the OceanOmics OceanGenomes Mitogenomes pipeline. All
 paths are reported relative to the pipeline results directory (`--outdir`). Where appropriate we
 highlight the way files are surfaced in the final MultiQC report so you can cross-reference
 tabular outputs with the interactive dashboard. It also includes notes for the standalone

@@ -1,6 +1,6 @@
-# nf-core/oceangenomesmitogenomes: Documentation
+# OceanOmics OceanGenomes Mitogenomes: Documentation
 
-The nf-core/oceangenomesmitogenomes documentation is split into the following pages:
+The OceanOmics OceanGenomes Mitogenomes documentation is split into the following pages:
 
 - [Usage](usage.md)
   - An overview of how the pipeline works, how to run it (including `qc_only_from_annotations.nf`), and a description of all command-line flags.

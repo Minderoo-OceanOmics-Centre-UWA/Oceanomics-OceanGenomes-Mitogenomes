@@ -1,11 +1,9 @@
 #!/usr/bin/env nextflow
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    nf-core/oceangenomesmitogenomes
+    OceanOmics OceanGenomes Mitogenomes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Github : https://github.com/nf-core/oceangenomesmitogenomes
-    Website: https://nf-co.re/oceangenomesmitogenomes
-    Slack  : https://nfcore.slack.com/channels/oceangenomesmitogenomes
+    Github : https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes
 ----------------------------------------------------------------------------------------
 */
 

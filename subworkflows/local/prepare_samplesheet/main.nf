@@ -1,5 +1,5 @@
 //
-// Subworkflow with functionality specific to the nf-core/oceangenomesmitogenomes pipeline
+// Subworkflow with functionality specific to the OceanOmics OceanGenomes Mitogenomes pipeline
 //
 
 /*
