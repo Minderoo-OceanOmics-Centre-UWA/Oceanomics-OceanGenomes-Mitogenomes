@@ -253,10 +253,13 @@ highly appreciated.
 
 ## Citations
 
-If you use nf-core/oceangenomesmitogenomes in your work, please cite:
+If you use the OceanOmics OceanGenomes Mitogenomes pipeline in your work, please cite this repository
+(<https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes>) along with:
 
-1. The nf-core framework: `Ewels et al., Nature Biotechnology 38, 276-278 (2020)` – <https://doi.org/10.1038/s41587-020-0439-x>
+1. The nf-core framework (pipeline template): `Ewels et al., Nature Biotechnology 38, 276-278 (2020)` – <https://doi.org/10.1038/s41587-020-0439-x>
 2. Nextflow: `Di Tommaso et al., Nature Biotechnology 35, 316-319 (2017)` – <https://doi.org/10.1038/nbt.3820>
-3. The specific tools referenced in `CITATIONS.md` (EMMA, GetOrganelle, MitoHiFi, BLAST, TaxonKit, MultiQC, etc.).
+3. The tools listed in `CITATIONS.md` (GetOrganelle, MitoHiFi, EMMA, MITOS2, tRNAscan-SE, BLAST+, etc.).
+
+Each run's MultiQC report also includes a methods section citing the tools that run actually used.
 
 A machine-readable bibliography is provided in `CITATIONS.md` for convenience.

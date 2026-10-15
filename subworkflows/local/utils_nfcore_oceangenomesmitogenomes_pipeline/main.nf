@@ -282,30 +282,57 @@ def validateInputSamplesheet(input) {
 //
 // Generate methods description for MultiQC
 //
-def toolCitationText() {
-    // TODO nf-core: Optionally add in-text citation tools to this list.
-    // Can use ternary operators to dynamically construct based conditions, e.g. params["run_xyz"] ? "Tool (Foo et al. 2023)" : "",
-    // Uncomment function in methodsDescriptionText to render in MultiQC report
-    def citation_text = [
-            "Tools used in the workflow included:",
-            "FastQC (Andrews 2010),",
-            "MultiQC (Ewels et al. 2016)",
-            "."
-        ].join(' ').trim()
+// One entry per tool: [enabled, in-text citation, bibliography entry]. Kept as a
+// single list so the citation sentence and the reference list can't drift apart.
+// `enabled` mirrors the params that gate each branch, so a run only cites the
+// tools it could actually have used. EMMA (vertebrates) and MITOS2 (inverts) are
+// routed per sample on meta.invertebrates, so both are cited whenever
+// annotation is on.
+def toolReferences() {
+    def assembly_getorg = !params.skip_mitogenome_assembly_getorg
+    def assembly_hifi   = !params.skip_mitogenome_assembly_hifi
+    def annotation      = !params.skip_mitogenome_annotation
+    def ena_prep        = !params.skip_ena_submission_prep
+    return [
+        [assembly_getorg, "fastp (Chen et al. 2018)",
+            "<li>Chen, S., Zhou, Y., Chen, Y., & Gu, J. (2018). fastp: an ultra-fast all-in-one FASTQ preprocessor. Bioinformatics, 34(17), i884-i890. doi: <a href=\"https://doi.org/10.1093/bioinformatics/bty560\">10.1093/bioinformatics/bty560</a></li>"],
+        [assembly_getorg, "GetOrganelle (Jin et al. 2020)",
+            "<li>Jin, J.-J., Yu, W.-B., Yang, J.-B., Song, Y., dePamphilis, C. W., Yi, T.-S., & Li, D.-Z. (2020). GetOrganelle: a fast and versatile toolkit for accurate de novo assembly of organelle genomes. Genome Biology, 21, 241. doi: <a href=\"https://doi.org/10.1186/s13059-020-02154-5\">10.1186/s13059-020-02154-5</a></li>"],
+        [assembly_hifi, "MitoHiFi (Uliano-Silva et al. 2023)",
+            "<li>Uliano-Silva, M., Ferreira, J. G. R. N., Krasheninnikova, K., Darwin Tree of Life Consortium, Formenti, G., Abueg, L., Torrance, J., Myers, E. W., Durbin, R., Blaxter, M., & McCarthy, S. A. (2023). MitoHiFi: a python pipeline for mitochondrial genome assembly from PacBio high fidelity reads. BMC Bioinformatics, 24, 288. doi: <a href=\"https://doi.org/10.1186/s12859-023-05385-y\">10.1186/s12859-023-05385-y</a></li>"],
+        [assembly_hifi && params.enable_oatk_fallback, "oatk (Zhou et al. 2025)",
+            "<li>Zhou, C., Brown, M., Blaxter, M., Darwin Tree of Life Consortium, McCarthy, S. A., & Durbin, R. (2025). Oatk: a de novo assembly tool for complex plant organelle genomes. Genome Biology, 26, 235. doi: <a href=\"https://doi.org/10.1186/s13059-025-03676-6\">10.1186/s13059-025-03676-6</a></li>"],
+        [!params.skip_mitogenome_depth || assembly_hifi, "minimap2 (Li 2018)",
+            "<li>Li, H. (2018). Minimap2: pairwise alignment for nucleotide sequences. Bioinformatics, 34(18), 3094-3100. doi: <a href=\"https://doi.org/10.1093/bioinformatics/bty191\">10.1093/bioinformatics/bty191</a></li>"],
+        [assembly_hifi, "SAMtools (Danecek et al. 2021)",
+            "<li>Danecek, P., Bonfield, J. K., Liddle, J., Marshall, J., Ohan, V., Pollard, M. O., Whitwham, A., Keane, T., McCarthy, S. A., Davies, R. M., & Li, H. (2021). Twelve years of SAMtools and BCFtools. GigaScience, 10(2), giab008. doi: <a href=\"https://doi.org/10.1093/gigascience/giab008\">10.1093/gigascience/giab008</a></li>"],
+        [annotation, "EMMA (Al Arab et al. 2017)",
+            "<li>Al Arab, M., Höner zu Siederdissen, C., Tout, K., Sahyoun, A. H., Stadler, P. F., & Bernt, M. (2017). Accurate annotation of protein-coding genes in mitochondrial genomes. Molecular Phylogenetics and Evolution, 106, 209-216. doi: <a href=\"https://doi.org/10.1016/j.ympev.2016.09.024\">10.1016/j.ympev.2016.09.024</a></li>"],
+        [annotation, "MITOS2 (Donath et al. 2019)",
+            "<li>Donath, A., Jühling, F., Al-Arab, M., Bernhart, S. H., Reinhardt, F., Stadler, P. F., Middendorf, M., & Bernt, M. (2019). Improved annotation of protein-coding genes boundaries in metazoan mitochondrial genomes. Nucleic Acids Research, 47(20), 10543-10552. doi: <a href=\"https://doi.org/10.1093/nar/gkz833\">10.1093/nar/gkz833</a></li>"],
+        [annotation, "tRNAscan-SE (Chan et al. 2021)",
+            "<li>Chan, P. P., Lin, B. Y., Mak, A. J., & Lowe, T. M. (2021). tRNAscan-SE 2.0: improved detection and functional classification of transfer RNA genes. Nucleic Acids Research, 49(16), 9077-9096. doi: <a href=\"https://doi.org/10.1093/nar/gkab688\">10.1093/nar/gkab688</a></li>"],
+        [annotation, "BLAST+ (Camacho et al. 2009)",
+            "<li>Camacho, C., Coulouris, G., Avagyan, V., Ma, N., Papadopoulos, J., Bealer, K., & Madden, T. L. (2009). BLAST+: architecture and applications. BMC Bioinformatics, 10, 421. doi: <a href=\"https://doi.org/10.1186/1471-2105-10-421\">10.1186/1471-2105-10-421</a></li>"],
+        [annotation, "the NCBI Taxonomy database (Schoch et al. 2020)",
+            "<li>Schoch, C. L., et al. (2020). NCBI Taxonomy: a comprehensive update on curation, resources and tools. Database, 2020, baaa062. doi: <a href=\"https://doi.org/10.1093/database/baaa062\">10.1093/database/baaa062</a></li>"],
+        [true, "Biopython (Cock et al. 2009)",
+            "<li>Cock, P. J. A., Antao, T., Chang, J. T., Chapman, B. A., Cox, C. J., Dalke, A., Friedberg, I., Hamelryck, T., Kauff, F., Wilczynski, B., & de Hoon, M. J. L. (2009). Biopython: freely available Python tools for computational molecular biology and bioinformatics. Bioinformatics, 25(11), 1422-1423. doi: <a href=\"https://doi.org/10.1093/bioinformatics/btp163\">10.1093/bioinformatics/btp163</a></li>"],
+        [ena_prep, "EMBOSS seqret (Rice et al. 2000)",
+            "<li>Rice, P., Longden, I., & Bleasby, A. (2000). EMBOSS: the European Molecular Biology Open Software Suite. Trends in Genetics, 16(6), 276-277. doi: <a href=\"https://doi.org/10.1016/S0168-9525(00)02024-2\">10.1016/S0168-9525(00)02024-2</a></li>"],
+        [ena_prep, "ENA Webin-CLI",
+            "<li>European Nucleotide Archive. Webin-CLI. <a href=\"https://github.com/enasequence/webin-cli\">https://github.com/enasequence/webin-cli</a></li>"],
+        [true, "MultiQC (Ewels et al. 2016)",
+            "<li>Ewels, P., Magnusson, M., Lundin, S., & Käller, M. (2016). MultiQC: summarize analysis results for multiple tools and samples in a single report. Bioinformatics, 32(19), 3047-3048. doi: <a href=\"https://doi.org/10.1093/bioinformatics/btw354\">10.1093/bioinformatics/btw354</a></li>"],
+    ].findAll { it[0] }
+}
 
-    return citation_text
+def toolCitationText() {
+    return "Tools used in the workflow included: " + toolReferences().collect { it[1] }.join(', ') + "."
 }
 
 def toolBibliographyText() {
-    // TODO nf-core: Optionally add bibliographic entries to this list.
-    // Can use ternary operators to dynamically construct based conditions, e.g. params["run_xyz"] ? "<li>Author (2023) Pub name, Journal, DOI</li>" : "",
-    // Uncomment function in methodsDescriptionText to render in MultiQC report
-    def reference_text = [
-            "<li>Andrews S, (2010) FastQC, URL: https://www.bioinformatics.babraham.ac.uk/projects/fastqc/).</li>",
-            "<li>Ewels, P., Magnusson, M., Lundin, S., & Käller, M. (2016). MultiQC: summarize analysis results for multiple tools and samples in a single report. Bioinformatics , 32(19), 3047–3048. doi: /10.1093/bioinformatics/btw354</li>"
-        ].join(' ').trim()
-
-    return reference_text
+    return toolReferences().collect { it[2] }.join(' ')
 }
 
 def methodsDescriptionText(mqc_methods_yaml) {
@@ -329,12 +356,8 @@ def methodsDescriptionText(mqc_methods_yaml) {
     meta["nodoi_text"] = meta.manifest_map.doi ? "" : "<li>If available, make sure to update the text to include the Zenodo DOI of version of the pipeline used. </li>"
 
     // Tool references
-    meta["tool_citations"] = ""
-    meta["tool_bibliography"] = ""
-
-    // TODO nf-core: Only uncomment below if logic in toolCitationText/toolBibliographyText has been filled!
-    // meta["tool_citations"] = toolCitationText().replaceAll(", \\.", ".").replaceAll("\\. \\.", ".").replaceAll(", \\.", ".")
-    // meta["tool_bibliography"] = toolBibliographyText()
+    meta["tool_citations"] = toolCitationText()
+    meta["tool_bibliography"] = toolBibliographyText()
 
 
     def methods_text = mqc_methods_yaml.text
