@@ -184,6 +184,9 @@ For general nf-core best practices (custom configs, resource tuning, module over
 - `--blast_db_dir`, `--taxonkit_db_dir` – scratch/persistent directories for caching taxonomy resources.
 - `--template_sbt` – GenBank submission template consumed by `table2asn`.
 - `--annotation_files` – standalone QC-only input glob for precomputed `fa/fasta/gff/tbl/gb` annotation bundles.
+- `--blast_precomputed_annotations` – with `--skip_mitogenome_annotation`, run BLAST + LCA, QC, uploads and ENA
+  prep on `--precomputed_mitogenome_annotation_results` (e.g. hand-curated annotations) instead of reusing
+  precomputed BLAST/LCA results. See [docs/usage.md](docs/usage.md#skipping-annotation).
 - `--skip_mitogenome_assembly_getorg`, `--skip_mitogenome_assembly_hifi`, `--skip_mitogenome_annotation`,
   `--skip_upload_results` plus matching `--precomputed_*` paths allow staged re-runs and reuse of existing outputs.
   `--skip_upload_results` turns off the SQL writes and nothing else: local QC (annotation statistics, species

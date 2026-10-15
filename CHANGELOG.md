@@ -490,6 +490,24 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Added`
 
+- **BLAST + LCA can run on annotations this run did not produce.** `--skip_mitogenome_annotation`
+  used to skip BLAST and LCA too, so existing (often hand-curated) annotations could not be
+  species-checked, QC'd, uploaded or ENA-prepped without re-annotating over the curation. With
+  `--blast_precomputed_annotations true`, the bundles in `--precomputed_mitogenome_annotation_results`
+  go through the same BLAST, LCA, QC, upload and submission prep as a normal run. The new
+  `REBUILD_ANNOTATION_BUNDLE` (`bin/rebuild_annotation_bundle.py`) first rebuilds each bundle's
+  `cds/` and `proteins/` and the CO1/12S/16S BLAST inputs from its GFF + FASTA. A file glob cannot
+  carry those directories, and without them `ANNOTATION_STATS` records the PCG ORF check as
+  `not_evaluated`: NOVA_260925_LA OG3104, held for `CO1:no_stop(AAA)` in its original run, passed the
+  gate when re-run from a globbed bundle. The GFF is the source of truth, so a curated GFF wins over
+  a `cds/` that was never regenerated (`cds_check=stale` in
+  `annotation_rebuild/<annotation>.bundle_rebuild.tsv`, protein re-translated the way
+  `mitos_to_emma.py` does). Where `cds/` agrees with the GFF (identical, or EMMA's convention of
+  dropping the stop codon / last rRNA base or two, `trimmed`), the bundle's own `cds/` and
+  `proteins/` are reused, so re-running an untouched bundle reproduces the original run's stats and
+  BLAST input exactly. BLAST and LCA now live in their own `MITOGENOME_BLAST_LCA` subworkflow, called
+  by `MITOGENOME_ANNOTATION` and by this path. Because the process names changed, the first
+  `-resume` of an in-flight run re-runs its BLAST and LCA tasks once.
 - **`blast.<gene>.<annotation>.near.tsv`, the hits just below the identity gate.** A query with no
   passing hits used to publish an empty `.filtered.tsv` and nothing else, so seeing what it did hit
   meant digging through the work dir. The BLAST module now also publishes hits with span > 200 and

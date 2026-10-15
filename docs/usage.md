@@ -589,9 +589,9 @@ The main workflow supports coarse-grained skipping and reuse of pre-computed art
   `--precomputed_mitogenome_assembly_log_hifi`.
 - `--skip_getorganelle_reseed` – disable the automatic reseed pass so GetOrganelle only runs its
   first pass.
-- `--skip_mitogenome_annotation` – skip EMMA / BLAST / LCA; optional inputs
-  `--precomputed_mitogenome_annotation_results`, `--precomputed_mitogenome_blast_results`, and
-  `--precomputed_mitogenome_lca_results` allow you to feed downstream modules.
+- `--skip_mitogenome_annotation` and `--blast_precomputed_annotations` – skip annotation and reuse
+  existing results. These two flags behave differently from what their names suggest, so read
+  [Skipping annotation](#skipping-annotation) before using them.
 - `--skip_upload_results` – disable the SQL upload modules, and only those. Local QC is unaffected:
   annotation statistics, species validation, the QC gate, the QC summary and the held-samples report all
   still run, and the assembly summary still gets its annotation columns. ENA submission prep is unaffected
@@ -609,6 +609,65 @@ The main workflow supports coarse-grained skipping and reuse of pre-computed art
 For precomputed assembly channels to map correctly back onto metadata, file basenames should encode
 `<sample>.<sequencing_type>.<date>...` (for example:
 `OG764.ilmn.240716.getorg1770.fasta`).
+
+### Skipping annotation
+
+Annotation, BLAST and LCA are three steps, but `--skip_mitogenome_annotation` does **not** skip
+only the steps you have results for. It switches off all three together, and the steps after them
+(QC, uploads, ENA prep) then read **all three** precomputed globs:
+
+| Parameter | Default if you don't set it |
+|---|---|
+| `--precomputed_mitogenome_annotation_results` | `<outdir>/mitogenomes/*/*/annotation/*.{fa,fasta,gff,tbl,gb}` |
+| `--precomputed_mitogenome_blast_results` | `<outdir>/mitogenomes/*/*/lca/blast.*filtered.tsv` |
+| `--precomputed_mitogenome_lca_results` | `<outdir>/mitogenomes/*/*/lca/lca.*.tsv` |
+
+Because every glob has a default, there is no such thing as "not providing" BLAST or LCA results.
+If a glob matches no files, that step's results are simply **empty**. The pipeline does not error
+and does not run BLAST instead. Species validation then sees no hits, and every sample is held as
+`species_not_in_blast`.
+
+To run BLAST + LCA on annotations you already have, add `--blast_precomputed_annotations true`:
+
+| What you want | Flags | Annotation | BLAST + LCA |
+|---|---|---|---|
+| Normal run | (neither) | runs | runs |
+| Reuse everything from an earlier run | `--skip_mitogenome_annotation true` | read from the annotation glob | read from the BLAST/LCA globs |
+| Keep your annotations, redo BLAST + LCA (e.g. after hand curation) | `--skip_mitogenome_annotation true`<br>`--blast_precomputed_annotations true` | read from the annotation glob | **run** on those annotations; BLAST/LCA globs ignored |
+
+In every case QC, uploads and ENA prep run afterwards as normal. `--blast_precomputed_annotations`
+on its own, without `--skip_mitogenome_annotation`, does nothing (the run warns).
+
+#### BLAST + LCA on existing annotations
+
+Give the run its samplesheet as usual (`invertebrates` and `genetic_code` choose the BLAST database
+and its arguments), the precomputed assemblies (the assembly rows and the QC gate need them), and the
+annotation bundles:
+
+```bash
+SRC=/scratch/.../NOVA_260925_LA_mitogenomes/mitogenomes
+nextflow run main.nf ... \
+    --input samplesheet.csv \
+    --skip_mitogenome_assembly_getorg true \
+    --skip_mitogenome_assembly_hifi true \
+    --precomputed_mitogenome_assembly_fasta_getorg "$SRC/*/*/mtdna/*.fasta" \
+    --precomputed_mitogenome_assembly_log_getorg "$SRC/*/*/mtdna/*.get_org.log.txt" \
+    --precomputed_mitogenome_circularity_evidence_getorg "$SRC/*/*/mtdna/*.getorg_check.tsv" \
+    --skip_mitogenome_annotation true \
+    --blast_precomputed_annotations true \
+    --precomputed_mitogenome_annotation_results "$SRC/*/*/annotation/*.{fa,gff,tbl}"
+```
+
+- Glob only the bundle's top-level files, one annotation per assembly. Do not glob `cds/`: its
+  `CO1.<prefix>.fa` names would be read as sample IDs, and the regions are re-extracted anyway. Two
+  GFFs for one assembly (e.g. `mitos2110` and `mitos2110_mancurated`) is an error; narrow the glob.
+- Each bundle's `cds/` and `proteins/` (which `ANNOTATION_STATS` needs for the PCG ORF check) and the
+  CO1/12S/16S BLAST inputs are rebuilt from the GFF + FASTA, so an edited GFF is what gets QC'd and
+  BLASTed. `annotation_rebuild/<annotation>.bundle_rebuild.tsv` records every protein-coding and rRNA
+  gene and compares it with the bundle's own `cds/`: `match`, `trimmed` (EMMA's convention of dropping
+  the stop codon; consistent with the GFF, so the bundle's `cds/` and `proteins/` are reused), `stale`
+  (`cds/` disagrees with the GFF, which wins; the protein is re-translated), or `no_cds`.
+- A region the GFF does not annotate is not BLASTed, exactly as on a normal run.
 
 ## Running with parameter files
 

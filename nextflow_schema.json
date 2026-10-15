@@ -574,7 +574,11 @@
                 },
                 "skip_mitogenome_annotation": {
                     "type": "boolean",
-                    "description": "Skip annotation, BLAST and LCA."
+                    "description": "Skip annotation (and, unless --blast_precomputed_annotations is set, BLAST and LCA)."
+                },
+                "blast_precomputed_annotations": {
+                    "type": "boolean",
+                    "description": "With --skip_mitogenome_annotation, run BLAST + LCA (and everything after) on --precomputed_mitogenome_annotation_results instead of reusing precomputed BLAST/LCA results. Each bundle's cds/, proteins/ and CO1/12S/16S are rebuilt from its GFF + FASTA, so a hand-curated GFF is what gets QC'd and BLASTed."
                 },
                 "skip_upload_results": {
                     "type": "boolean",
@@ -641,11 +645,11 @@
                 },
                 "precomputed_mitogenome_blast_results": {
                     "type": "string",
-                    "description": "Glob of precomputed filtered BLAST TSV files used when annotation is skipped."
+                    "description": "Glob of precomputed filtered BLAST TSV files used when annotation is skipped. Ignored with --blast_precomputed_annotations."
                 },
                 "precomputed_mitogenome_lca_results": {
                     "type": "string",
-                    "description": "Glob of precomputed LCA TSV files used when annotation is skipped."
+                    "description": "Glob of precomputed LCA TSV files used when annotation is skipped. Ignored with --blast_precomputed_annotations."
                 },
                 "precomputed_mitogenome_lca_raw_results": {
                     "type": "string",
