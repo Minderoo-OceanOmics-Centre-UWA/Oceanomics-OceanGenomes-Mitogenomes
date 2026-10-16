@@ -37,6 +37,106 @@ def is_complete_annotation(params):
     return True
 
 
+# Phase R (docs/assembly_relations_plan.md §3.3-3.4): an annotation is a row of its own in
+# mito_annotation, keyed on (assembly_id, annotation), and its per-gene lengths are rows in
+# mito_annotation_gene. A re-annotation by a different annotator ADDS a row; it no longer
+# overwrites the previous annotation of the same assembly. is_selected is never touched here
+# (owner decision 3: it is set by a person, if at all).
+#
+# Summary columns this script owns in mito_annotation. manual_curation_notes is deliberately
+# absent: it is written by hand and survives every upload.
+ANNOTATION_COLUMNS = (
+    "extra_genes", "missing_genes", "trna_advisory", "order_correct", "order_variant",
+    "order_variant_taxon_check", "order_deviation", "annotation_gaps", "passed",
+    "length_emma", "cds_no", "trna_no", "rrna_no",
+    "order_status", "order_deviation_detail", "expected_lineage_genes",
+    "missing_expected_lineage_genes", "lineage_gene_advisories",
+    "mitos_unmapped_features", "mitos_known_auxiliary_features", "duplicate_loci",
+    "annotation_integrity_status", "annotation_integrity_issues",
+)
+
+# Gene length parameters, by gene name (mito_gene.gene). A gene with translated_length has a
+# "<gene>_trans" parameter as well. A new gene is an entry here plus an INSERT into mito_gene;
+# no migration.
+GENE_COLUMNS = (
+    "rrna12s", "rrna16s", "atp6", "atp8", "cox1", "cox2", "cox3", "cytb",
+    "nad1", "nad2", "nad3", "nad4", "nad4l", "nad5", "nad6",
+    "trna_phe", "trna_val", "trna_leuuag", "trna_leuuaa", "trna_ile", "trna_met",
+    "trna_thr", "trna_pro", "trna_lys", "trna_asp", "trna_glu", "trna_sergcu",
+    "trna_seruga", "trna_tyr", "trna_cys", "trna_trp", "trna_ala", "trna_asn",
+    "trna_gly", "trna_arg", "trna_his", "trna_gln", "atp9", "mtmuts",
+)
+TRANSLATED_GENES = (
+    "atp6", "atp8", "cox1", "cox2", "cox3", "cytb", "nad1", "nad2", "nad3", "nad4",
+    "nad4l", "nad5", "nad6", "atp9", "mtmuts",
+)
+
+ANNOTATION_UPSERT = """
+-- annotation_updated_at is now(), the DB clock rather than the client's: "was this
+-- annotation refreshed by that run" must not depend on a worker node's time.
+INSERT INTO mito_annotation (
+    assembly_id, annotation, extra_genes, missing_genes, trna_advisory, order_correct,
+    order_variant, order_variant_taxon_check, order_deviation, annotation_gaps, passed,
+    length_emma, cds_no, trna_no, rrna_no,
+    order_status, order_deviation_detail, expected_lineage_genes,
+    missing_expected_lineage_genes, lineage_gene_advisories,
+    mitos_unmapped_features, mitos_known_auxiliary_features, duplicate_loci,
+    annotation_integrity_status, annotation_integrity_issues,
+    annotation_stats_version, annotation_updated_at
+)
+VALUES (
+    %(assembly_id)s, %(annotation)s, %(extra_genes)s, %(missing_genes)s, %(trna_advisory)s, %(order_correct)s,
+    %(order_variant)s, %(order_variant_taxon_check)s, %(order_deviation)s, %(annotation_gaps)s, %(passed)s,
+    %(length_emma)s, %(cds_no)s, %(trna_no)s, %(rrna_no)s,
+    %(order_status)s, %(order_deviation_detail)s, %(expected_lineage_genes)s,
+    %(missing_expected_lineage_genes)s, %(lineage_gene_advisories)s,
+    %(mitos_unmapped_features)s, %(mitos_known_auxiliary_features)s, %(duplicate_loci)s,
+    %(annotation_integrity_status)s, %(annotation_integrity_issues)s,
+    %(annotation_stats_version)s, now()
+)
+ON CONFLICT (assembly_id, annotation)
+DO UPDATE SET
+    extra_genes = EXCLUDED.extra_genes,
+    missing_genes = EXCLUDED.missing_genes,
+    trna_advisory = EXCLUDED.trna_advisory,
+    order_correct = EXCLUDED.order_correct,
+    order_variant = EXCLUDED.order_variant,
+    order_variant_taxon_check = EXCLUDED.order_variant_taxon_check,
+    order_deviation = EXCLUDED.order_deviation,
+    annotation_gaps = EXCLUDED.annotation_gaps,
+    passed = EXCLUDED.passed,
+    length_emma = EXCLUDED.length_emma,
+    cds_no = EXCLUDED.cds_no,
+    trna_no = EXCLUDED.trna_no,
+    rrna_no = EXCLUDED.rrna_no,
+    order_status = EXCLUDED.order_status,
+    order_deviation_detail = EXCLUDED.order_deviation_detail,
+    expected_lineage_genes = EXCLUDED.expected_lineage_genes,
+    missing_expected_lineage_genes = EXCLUDED.missing_expected_lineage_genes,
+    lineage_gene_advisories = EXCLUDED.lineage_gene_advisories,
+    mitos_unmapped_features = EXCLUDED.mitos_unmapped_features,
+    mitos_known_auxiliary_features = EXCLUDED.mitos_known_auxiliary_features,
+    duplicate_loci = EXCLUDED.duplicate_loci,
+    annotation_integrity_status = EXCLUDED.annotation_integrity_status,
+    annotation_integrity_issues = EXCLUDED.annotation_integrity_issues,
+    annotation_stats_version = EXCLUDED.annotation_stats_version,
+    annotation_updated_at = EXCLUDED.annotation_updated_at,
+    updated_at = now()
+RETURNING annotation_id
+"""
+
+
+def gene_rows(annotation_id, params):
+    """(annotation_id, gene, length, translated_length) for every gene with a value."""
+    rows = []
+    for gene in GENE_COLUMNS:
+        length = params.get(gene)
+        translated = params.get(f"{gene}_trans") if gene in TRANSLATED_GENES else None
+        if length is not None or translated is not None:
+            rows.append((annotation_id, gene, length, translated))
+    return rows
+
+
 def load_db_config(config_file):
     if not Path(config_file).exists():
         raise FileNotFoundError(f"❌ Config file '{config_file}' does not exist.")
@@ -102,176 +202,16 @@ if __name__ == "__main__":
         conn = psycopg2.connect(**db_params)
         cursor = conn.cursor()
 
-        # Annotation columns owned by this script. The PK row is pre-created by
-        # the assembly upload, so we don't gate on row existence — we gate on
-        # whether these cells are already (partially) filled.
-        annotation_columns = [
-            "annotation", "extra_genes", "missing_genes", "trna_advisory", "order_correct", "order_variant", "order_variant_taxon_check", "order_deviation",
-            "annotation_gaps", "passed", "length_emma", "seqlength_12s",
-            "seqlength_16s", "seqlength_co1", "cds_no", "trna_no", "rrna_no", "rrna12s",
-            "rrna16s", "atp6", "atp8", "cox1", "cox2", "cox3", "cytb", "nad1", "nad2", "nad3", "nad4", "nad4l",
-            "nad5", "nad6", "trna_phe", "trna_val", "trna_leuuag", "trna_leuuaa", "trna_ile", "trna_met",
-            "trna_thr", "trna_pro", "trna_lys", "trna_asp", "trna_glu", "trna_sergcu", "trna_seruga",
-            "trna_tyr", "trna_cys", "trna_trp", "trna_ala", "trna_asn", "trna_gly", "trna_arg", "trna_his",
-            "trna_gln", "atp6_trans", "atp8_trans", "cox1_trans", "cox2_trans", "cox3_trans", "cytb_trans", "nad1_trans",
-            "nad2_trans", "nad3_trans", "nad4_trans", "nad4l_trans", "nad5_trans", "nad6_trans",
-            # Added by migration 026. Every one of these is refreshed on each
-            # complete upload: a column present in the INSERT list but absent from
-            # the DO UPDATE list is exactly how a value goes stale, and
-            # tests/unit/test_push_emma_column_parity.py asserts the two agree.
-            "order_status", "order_deviation_detail", "expected_lineage_genes",
-            "missing_expected_lineage_genes", "lineage_gene_advisories",
-            "mitos_unmapped_features", "mitos_known_auxiliary_features", "duplicate_loci",
-            "annotation_integrity_status", "annotation_integrity_issues",
-            "atp9", "atp9_trans", "mtmuts", "mtmuts_trans"
-        ]
-
         for index, row in stats.iterrows():
             row_dict = row.to_dict()
             # Extract primary key values
             og_id, tech, seq_date, code = row['og_id'], row['tech'], row['seq_date'], row['code']
             # seq_date is a TEXT column in the DB, but pandas reads 260514 as an int.
-            # Bind it as a string so the existence-check comparison (text = %s) doesn't
-            # fail with "operator does not exist: text = integer".
+            # Bind it as a string so the key comparison (text = %s) doesn't fail with
+            # "operator does not exist: text = integer".
             if seq_date is not None:
                 seq_date = str(seq_date)
-
-            upsert_query = """
-            -- annotation_updated_at is now(), the DB clock rather than the client's.
-            -- "Was this row refreshed by that run" must not depend on a worker node's
-            -- time. annotation_stats_version comes from the CSV.
-            --
-            -- og_num is a generated column maintained by the DB (SUBSTRING(og_id FROM 3)).
-            -- It is intentionally absent from this column list: naming it here would error.
-            INSERT INTO mitogenome_data (
-                og_id, tech, seq_date, code, annotation, extra_genes, missing_genes, trna_advisory, order_correct, order_variant, order_variant_taxon_check, order_deviation, annotation_gaps,
-                passed, length_emma, seqlength_12s,
-                seqlength_16s, seqlength_co1, cds_no, trna_no, rrna_no, rrna12s,
-                rrna16s, atp6, atp8, cox1, cox2, cox3, cytb, nad1, nad2, nad3, nad4, nad4l, 
-                nad5, nad6, trna_phe, trna_val, trna_leuuag, trna_leuuaa, trna_ile, trna_met, 
-                trna_thr, trna_pro, trna_lys, trna_asp, trna_glu, trna_sergcu, trna_seruga, 
-                trna_tyr, trna_cys, trna_trp, trna_ala, trna_asn, trna_gly, trna_arg, trna_his, 
-                trna_gln, atp6_trans, atp8_trans, cox1_trans, cox2_trans, cox3_trans, cytb_trans, nad1_trans, 
-                nad2_trans, nad3_trans, nad4_trans, nad4l_trans, nad5_trans, nad6_trans,
-                order_status, order_deviation_detail, expected_lineage_genes,
-                missing_expected_lineage_genes, lineage_gene_advisories,
-                mitos_unmapped_features, mitos_known_auxiliary_features, duplicate_loci,
-                annotation_integrity_status, annotation_integrity_issues,
-                atp9, atp9_trans, mtmuts, mtmuts_trans,
-                annotation_stats_version, annotation_updated_at
-            )
-            VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s, %(extra_genes)s, %(missing_genes)s, %(trna_advisory)s, %(order_correct)s, %(order_variant)s, %(order_variant_taxon_check)s, %(order_deviation)s,
-                %(annotation_gaps)s, %(passed)s, %(length_emma)s, %(seqlength_12s)s,
-                %(seqlength_16s)s, %(seqlength_co1)s, %(cds_no)s, %(trna_no)s, %(rrna_no)s, %(rrna12s)s,
-                %(rrna16s)s, %(atp6)s, %(atp8)s, %(cox1)s, %(cox2)s, %(cox3)s, %(cytb)s, %(nad1)s, %(nad2)s, %(nad3)s, %(nad4)s, %(nad4l)s,
-                %(nad5)s, %(nad6)s, %(trna_phe)s, %(trna_val)s, %(trna_leuuag)s, %(trna_leuuaa)s, %(trna_ile)s, %(trna_met)s,
-                %(trna_thr)s, %(trna_pro)s, %(trna_lys)s, %(trna_asp)s, %(trna_glu)s, %(trna_sergcu)s, %(trna_seruga)s,
-                %(trna_tyr)s, %(trna_cys)s, %(trna_trp)s, %(trna_ala)s, %(trna_asn)s, %(trna_gly)s, %(trna_arg)s, %(trna_his)s,
-                %(trna_gln)s, %(atp6_trans)s, %(atp8_trans)s, %(cox1_trans)s, %(cox2_trans)s, %(cox3_trans)s, %(cytb_trans)s, %(nad1_trans)s, %(nad2_trans)s, 
-                %(nad3_trans)s, %(nad4_trans)s, %(nad4l_trans)s, %(nad5_trans)s, %(nad6_trans)s,
-                %(order_status)s, %(order_deviation_detail)s, %(expected_lineage_genes)s,
-                %(missing_expected_lineage_genes)s, %(lineage_gene_advisories)s,
-                %(mitos_unmapped_features)s, %(mitos_known_auxiliary_features)s, %(duplicate_loci)s,
-                %(annotation_integrity_status)s, %(annotation_integrity_issues)s,
-                %(atp9)s, %(atp9_trans)s, %(mtmuts)s, %(mtmuts_trans)s,
-                %(annotation_stats_version)s, now()
-            )
-            ON CONFLICT (og_id, tech, seq_date, code) 
-            DO UPDATE SET
-                annotation = EXCLUDED.annotation,
-                extra_genes = EXCLUDED.extra_genes,
-                missing_genes = EXCLUDED.missing_genes,
-                trna_advisory = EXCLUDED.trna_advisory,
-                order_correct = EXCLUDED.order_correct,
-                order_variant = EXCLUDED.order_variant,
-                order_variant_taxon_check = EXCLUDED.order_variant_taxon_check,
-                order_deviation = EXCLUDED.order_deviation,
-                annotation_gaps = EXCLUDED.annotation_gaps,
-                passed = EXCLUDED.passed,
-                length_emma = EXCLUDED.length_emma,
-                seqlength_12s = EXCLUDED.seqlength_12s,
-                seqlength_16s = EXCLUDED.seqlength_16s,
-                seqlength_co1 = EXCLUDED.seqlength_co1,
-                cds_no = EXCLUDED.cds_no,
-                trna_no = EXCLUDED.trna_no,
-                rrna_no = EXCLUDED.rrna_no,
-                rrna12s = EXCLUDED.rrna12s,
-                rrna16s = EXCLUDED.rrna16s,
-                atp6 = EXCLUDED.atp6,
-                atp8 = EXCLUDED.atp8,
-                cox1 = EXCLUDED.cox1,
-                cox2 = EXCLUDED.cox2,
-                cox3 = EXCLUDED.cox3,
-                cytb = EXCLUDED.cytb,
-                nad1 = EXCLUDED.nad1,
-                nad2 = EXCLUDED.nad2,
-                nad3 = EXCLUDED.nad3,
-                nad4 = EXCLUDED.nad4,
-                nad4l = EXCLUDED.nad4l,
-                nad5 = EXCLUDED.nad5,
-                nad6 = EXCLUDED.nad6,
-                trna_phe = EXCLUDED.trna_phe,
-                trna_val = EXCLUDED.trna_val,
-                trna_leuuag = EXCLUDED.trna_leuuag,
-                trna_leuuaa = EXCLUDED.trna_leuuaa,
-                trna_ile = EXCLUDED.trna_ile,
-                trna_met = EXCLUDED.trna_met,
-                trna_thr = EXCLUDED.trna_thr,
-                trna_pro = EXCLUDED.trna_pro,
-                trna_lys = EXCLUDED.trna_lys,
-                trna_asp = EXCLUDED.trna_asp,
-                trna_glu = EXCLUDED.trna_glu,
-                trna_sergcu = EXCLUDED.trna_sergcu,
-                trna_seruga = EXCLUDED.trna_seruga,
-                trna_tyr = EXCLUDED.trna_tyr,
-                trna_cys = EXCLUDED.trna_cys,
-                trna_trp = EXCLUDED.trna_trp,
-                trna_ala = EXCLUDED.trna_ala,
-                trna_asn = EXCLUDED.trna_asn,
-                trna_gly = EXCLUDED.trna_gly,
-                trna_arg = EXCLUDED.trna_arg,
-                trna_his = EXCLUDED.trna_his,
-                trna_gln = EXCLUDED.trna_gln,
-                atp6_trans = EXCLUDED.atp6_trans,
-                atp8_trans = EXCLUDED.atp8_trans,
-                cox1_trans = EXCLUDED.cox1_trans,
-                cox2_trans = EXCLUDED.cox2_trans,
-                cox3_trans = EXCLUDED.cox3_trans,
-                cytb_trans = EXCLUDED.cytb_trans,
-                nad1_trans = EXCLUDED.nad1_trans,
-                nad2_trans = EXCLUDED.nad2_trans,
-                nad3_trans = EXCLUDED.nad3_trans,
-                nad4_trans = EXCLUDED.nad4_trans,
-                nad4l_trans = EXCLUDED.nad4l_trans,
-                nad5_trans = EXCLUDED.nad5_trans,
-                nad6_trans = EXCLUDED.nad6_trans,
-                order_status = EXCLUDED.order_status,
-                order_deviation_detail = EXCLUDED.order_deviation_detail,
-                expected_lineage_genes = EXCLUDED.expected_lineage_genes,
-                missing_expected_lineage_genes = EXCLUDED.missing_expected_lineage_genes,
-                lineage_gene_advisories = EXCLUDED.lineage_gene_advisories,
-                mitos_unmapped_features = EXCLUDED.mitos_unmapped_features,
-                mitos_known_auxiliary_features = EXCLUDED.mitos_known_auxiliary_features,
-                duplicate_loci = EXCLUDED.duplicate_loci,
-                annotation_integrity_status = EXCLUDED.annotation_integrity_status,
-                annotation_integrity_issues = EXCLUDED.annotation_integrity_issues,
-                atp9 = EXCLUDED.atp9,
-                atp9_trans = EXCLUDED.atp9_trans,
-                mtmuts = EXCLUDED.mtmuts,
-                mtmuts_trans = EXCLUDED.mtmuts_trans,
-                annotation_stats_version = EXCLUDED.annotation_stats_version,
-                annotation_updated_at = EXCLUDED.annotation_updated_at
-            RETURNING annotation, extra_genes, missing_genes, trna_advisory, order_correct, order_variant, order_variant_taxon_check, order_deviation, annotation_gaps,
-                passed, length_emma, seqlength_12s,
-                seqlength_16s, seqlength_co1, cds_no, trna_no, rrna_no, rrna12s,
-                rrna16s, atp6, atp8, cox1, cox2, cox3, cytb, nad1, nad2, nad3, nad4, nad4l, 
-                nad5, nad6, trna_phe, trna_val, trna_leuuag, trna_leuuaa, trna_ile, trna_met, 
-                trna_thr, trna_pro, trna_lys, trna_asp, trna_glu, trna_sergcu, trna_seruga, 
-                trna_tyr, trna_cys, trna_trp, trna_ala, trna_asn, trna_gly, trna_arg, trna_his, 
-                trna_gln, atp6_trans, atp8_trans, cox1_trans, cox2_trans, cox3_trans, cytb_trans, nad1_trans, 
-                nad2_trans, nad3_trans, nad4_trans, nad4l_trans, nad5_trans, nad6_trans
-            """
+            key = {"og_id": og_id, "tech": tech, "seq_date": seq_date, "code": code}
 
             params = {
                 "og_id": row_dict["og_id"],
@@ -294,9 +234,6 @@ if __name__ == "__main__":
                 "annotation_gaps": row_dict.get("annotation_gaps"),
                 "passed": row_dict["passed"],
                 "length_emma": row_dict.get("total_length"),
-                "seqlength_12s": row_dict.get("seqlength_12s"),
-                "seqlength_16s": row_dict.get("seqlength_16s"),
-                "seqlength_co1": row_dict.get("seqlength_co1"),
                 "cds_no": row_dict.get("num_cds"),
                 "trna_no": row_dict.get("num_trna"),
                 "rrna_no": row_dict.get("num_rrna"),
@@ -375,41 +312,57 @@ if __name__ == "__main__":
                 "annotation_stats_version": ANNOTATION_STATS_VERSION,
             }
 
-            # The annotation block is written as ONE unit.
+            if not params["annotation"]:
+                print(f"❌ Database error: {og_id}.{tech}.{seq_date}.{code} has no annotation name; "
+                      "an annotation is stored under its annotator, so nothing was written.")
+                continue
+
+            # The assembly row is normally pre-created by the assembly upload. If it is
+            # not there yet, create the bare key (stats NULL) so the annotation has a
+            # parent, exactly as the old single-table upsert did.
+            cursor.execute(
+                """
+                INSERT INTO mito_assembly (og_id, tech, seq_date, code)
+                VALUES (%(og_id)s, %(tech)s, %(seq_date)s, %(code)s)
+                ON CONFLICT (og_id, tech, seq_date, code) DO NOTHING
+                """,
+                key,
+            )
+            cursor.execute(
+                """
+                SELECT assembly_id FROM mito_assembly
+                WHERE og_id = %(og_id)s AND tech = %(tech)s
+                  AND seq_date = %(seq_date)s AND code = %(code)s
+                """,
+                key,
+            )
+            params["assembly_id"] = cursor.fetchone()[0]
+
+            # The annotation block is written as ONE unit: the summary row and its gene
+            # rows, in one transaction.
             #
-            # This used to refuse any write into a row that already had annotation
-            # data, so a rerun that FIXED an annotation left the old values in the
-            # database unless someone remembered --force. With the integrity and
-            # status columns added that is actively misleading: an
-            # annotation_integrity_issues string from a previous run would sit next
-            # to an annotation that is now clean, and nothing would say so.
-            #
-            # A COMPLETE incoming row now supersedes the stored block in full, every
-            # annotation column overwritten and the status and issue columns reset to
-            # their newly computed values. The protection the old rule was reaching
-            # for (never mix old and new) is better served by checking that the
-            # incoming row is complete than by refusing to write at all, so an
-            # INCOMPLETE row still preserves what is there and still needs --force.
-            #
-            # Same direction as force_db_overwrite defaulting to true: correcting a
-            # record is the normal reason to re-run a sample.
+            # A COMPLETE incoming row supersedes the stored annotation of the same
+            # annotator in full, every summary column overwritten and the gene rows
+            # replaced. An INCOMPLETE row still preserves a stored annotation of the
+            # same annotator and still needs --force. A different annotator is a
+            # different annotation: it is added, and the existing one is left alone.
             incoming_complete = is_complete_annotation(params)
             if not force_overwrite and not incoming_complete:
                 cursor.execute(
                     f"""
-                    SELECT {", ".join(annotation_columns)}
-                    FROM mitogenome_data
-                    WHERE og_id = %(og_id)s
-                      AND tech = %(tech)s
-                      AND seq_date = %(seq_date)s
-                      AND code = %(code)s
+                    SELECT {", ".join(ANNOTATION_COLUMNS)},
+                           (SELECT count(*) FROM mito_annotation_gene g
+                            WHERE g.annotation_id = n.annotation_id)
+                    FROM mito_annotation n
+                    WHERE n.assembly_id = %(assembly_id)s AND n.annotation = %(annotation)s
                     """,
-                    {"og_id": og_id, "tech": tech, "seq_date": seq_date, "code": code},
+                    params,
                 )
                 existing = cursor.fetchone()
-                if existing is not None and any(v is not None for v in existing):
-                    preserved = dict(zip(annotation_columns, existing))
-                    attempted = {col: params[col] for col in annotation_columns}
+                if existing is not None and (any(v is not None for v in existing[:-1]) or existing[-1]):
+                    preserved = dict(zip(ANNOTATION_COLUMNS, existing[:-1]))
+                    preserved["gene_rows"] = existing[-1]
+                    attempted = {col: params[col] for col in ANNOTATION_COLUMNS}
                     print(
                         f"⚠️ Existing values preserved for {og_id}.{tech}.{seq_date}.{code}: "
                         "the incoming annotation row is INCOMPLETE and the stored row "
@@ -417,13 +370,26 @@ if __name__ == "__main__":
                     )
                     print(f"   🔒 Preserved (kept) values:    {preserved}")
                     print(f"   ⬆️ New values NOT uploaded:    {attempted}")
+                    conn.rollback()
                     continue
 
-            cursor.execute(upsert_query, params)
-            returned = cursor.fetchone()
+            cursor.execute(ANNOTATION_UPSERT, params)
+            annotation_id = cursor.fetchone()[0]
+            cursor.execute("DELETE FROM mito_annotation_gene WHERE annotation_id = %s", (annotation_id,))
+            genes = gene_rows(annotation_id, params)
+            if genes:
+                cursor.executemany(
+                    "INSERT INTO mito_annotation_gene (annotation_id, gene, length, translated_length) "
+                    "VALUES (%s, %s, %s, %s)",
+                    genes,
+                )
             conn.commit()
 
-            print(f"📌 Final stored values: {dict(zip(annotation_columns, returned))}")
+            final = {"annotation_id": annotation_id, "annotation": params["annotation"]}
+            final.update({col: params[col] for col in ANNOTATION_COLUMNS})
+            final["gene_rows"] = len(genes)
+            print(f"📌 Final stored values: {final}")
+            # Parsed by bin/compile_upload_report.py, hence still "mitogenome_data".
             if force_overwrite:
                 print(f"✅ Success: Overwrote mitogenome_data for {sample} (--force).")
             else:

@@ -86,11 +86,15 @@ def main() -> int:
     try:
         with psycopg2.connect(**load_config(Path(args.config))) as connection:
             with connection.cursor() as cursor:
+                # Per assembly, not per row: since Phase R mitogenome_data is a view with
+                # one row per (assembly, annotation), and depth belongs to the assembly.
                 cursor.execute(
                     """
                     SELECT count(*), count(mean_depth),
                            count(*) FILTER (WHERE depth_method = 'remap_full_v1')
-                    FROM mitogenome_data
+                    FROM (SELECT DISTINCT og_id, tech, seq_date, code,
+                                          mean_depth, depth_method
+                          FROM mitogenome_data) assemblies
                     """
                 )
                 total, measured, uniform = cursor.fetchone()
