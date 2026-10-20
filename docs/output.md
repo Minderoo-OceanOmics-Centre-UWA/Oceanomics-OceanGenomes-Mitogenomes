@@ -2,187 +2,259 @@
 
 ## Introduction
 
-This page describes the files produced by the OceanOmics OceanGenomes Mitogenomes pipeline. All
-paths are reported relative to the pipeline results directory (`--outdir`). Where appropriate we
-highlight the way files are surfaced in the final MultiQC report so you can cross-reference
-tabular outputs with the interactive dashboard. It also includes notes for the standalone
-`qc_only_from_annotations.nf` entrypoint that runs only the QC packaging subworkflow.
+This page describes the files the OceanOmics OceanGenomes Mitogenomes pipeline publishes. All paths
+are relative to the results directory (`--outdir`). Where a file feeds the MultiQC report, the
+section it appears in is named so you can cross-reference the tables with the dashboard. The
+standalone entrypoints `qc_only_from_annotations.nf` and `ena.nf` are covered at the end.
 
-## Pipeline overview
+## Naming
 
-The workflow is built with [Nextflow](https://www.nextflow.io/) and generates the following major
-results:
+Every assembly gets an **assembly prefix**, `<sample>.<sequencing_type>.<date>.<assembler><version>`,
+for example `OG3092.ilmn.260925.getorg1770` (GetOrganelle 1.7.7.0), `OG910.hifi.241127.v3mitohifi`
+(MitoHiFi 3) or `<sample>.hifi.<date>.v10oatk` (Oatk 1.0). Curated variants of an assembly get their
+own prefix by suffix:
 
-- [Samplesheet preparation](#samplesheet-preparation) – optional creation of a harmonised samplesheet.
-- [Mitogenome assembly (GetOrganelle)](#mitogenome-assembly-getorganelle) – short-read assemblies and logs.
-- [Mitogenome assembly (MitoHiFi)](#mitogenome-assembly-mitohifi) – HiFi assemblies, stats and plots.
-- [Mitogenome assembly (Oatk fallback)](#mitogenome-assembly-oatk-fallback) – reference-free HiFi assembly (optional).
-- [Mitogenome assembly summary](#mitogenome-assembly-summary) – MultiQC-compatible table comparing assembly QC across tools.
-- [Concatemer collapse and FASTA sanitisation](#concatemer-collapse-and-fasta-sanitisation) – internal preparation steps before annotation.
-- [Mitogenome annotation](#mitogenome-annotation) – EMMA (vertebrate) / MITOS2 (invertebrate) annotations and per-gene FASTA exports.
-- [BLAST filtering and LCA calls](#blast-filtering-and-lca) – gene-level hits and lowest common ancestor tables.
-- [Species validation and SQL uploads](#species-validation-and-sql-uploads) – QA summaries plus database upload logs.
-- [Submission-ready packaging](#submission-ready-packaging) – GenBank-formatted artefacts produced by the QC subworkflow.
-- [Standalone QC-only workflow](#standalone-qc-only-workflow-qc_only_from_annotationsnf) – outputs when running only QC from precomputed annotations.
-- [MultiQC](#multiqc) – consolidated visual and tabular QC report.
-- [Pipeline information](#pipeline-information) – run-level metadata and provenance files.
+| Suffix | Meaning |
+|---|---|
+| `reseed` | GetOrganelle second pass seeded from a related reference ([details](#mitogenome-assembly-getorganelle)) |
+| `_concat` | multi-contig assembly concatenated into one record for annotation ([details](#concatemer-collapse-and-fasta-sanitisation)) |
+| `_rgj` | reference-guided join, off by default ([details](#concatemer-collapse-and-fasta-sanitisation)) |
+| `_collapsed` | head-to-tail concatemer collapsed to one monomer ([details](#concatemer-collapse-and-fasta-sanitisation)) |
 
-### Samplesheet preparation
+Each variant is a separate directory under `mitogenomes/<sample>/` with its own annotation, LCA and
+QC results.
+
+Annotation outputs add the annotator and its version, e.g. `.emma102` (EMMA 1.0.2) or `.mitos2110`
+(MITOS 2.1.10). The prefix plus annotation version is the **`full_seqid`**
+(`OG3092.ilmn.260925.getorg1770.emma102`). Everything from GenBank packaging onwards is named on it,
+so two annotations of one assembly never overwrite each other.
+
+## Results directory layout
+
+```text
+<outdir>/
+├── samplesheet/                 samplesheet.csv, taxonomy_resolution.tsv
+├── prepare/                     lca_cache_manifest.json
+├── mitogenomes/
+│   └── <sample>/
+│       ├── fastp/               Hi-C read trimming reports (Hi-C only)
+│       └── <assembly_prefix>/
+│           ├── mtdna/           assembly, assembler logs, circularity and depth evidence
+│           ├── annotation/      EMMA / MITOS2 annotation bundle and annotation QC
+│           ├── annotation_rebuild/   only with --blast_precomputed_annotations
+│           ├── lca/             BLAST hits and LCA calls per marker
+│           ├── genbank/         table2asn inputs and outputs
+│           ├── ena/             ENA metadata, candidate package and validation
+│           └── <assembly_prefix>_multiqc_report.html
+├── species_validation/          per-assembly species validation tables
+├── qc/                          per-assembly QC summary
+├── sql_uploaded_data/           database upload logs (only with --sql_config)
+├── ena/                         run-level ENA readiness tables
+├── multiqc/                     cohort MultiQC report and assembly summary
+├── getorganelle_checkpoints/    GetOrganelle resume checkpoints
+├── held_samples.tsv             samples held at any stage, with the reason
+├── run_completeness.txt         every samplesheet sample accounted for
+└── pipeline_info/               Nextflow reports, params, software versions
+```
+
+Runs launched with `nextflow_run.sh` also get `pipeline_info/launcher/` and `backup_scripts/`
+([details](#pipeline-information)).
+
+## Samplesheet preparation
 
 <details markdown="1">
 <summary>Output files</summary>
 
-- `create/`
-  - `samplesheet.csv`: Enriched samplesheet generated by `CREATE_SAMPLESHEET_ENRICHED` when `--input_dir` is used.
-    Includes `sample`, `sequencing_type`, `single_end`, `original_id`, `completion_date`, `date`,
-    `assembly_prefix`, `nominal_species_id`, `invertebrates`, `fastq_1`, and `fastq_2`.
+- `samplesheet/`
+  - `samplesheet.csv`: the samplesheet the run used. In `--input_dir` mode this is the enriched
+    sheet built by `CREATE_SAMPLESHEET_ENRICHED`, with columns `sample`, `sequencing_type`,
+    `single_end`, `original_id`, `completion_date`, `date`, `assembly_prefix`,
+    `nominal_species_id`, `reference_species_id`, `class`, `family`, `order`, `invertebrates`,
+    `genetic_code`, `fastq_1` and `fastq_2`.
+  - `taxonomy_resolution.tsv`: where each sample's lineage came from (the OceanOmics `species`
+    table or the NCBI taxdump).
+- `prepare/lca_cache_manifest.json`: checksum manifest for the shared FishBase and taxdump cache
+  that every LCA task reads (see `--taxonkit_db_dir` in [usage.md](usage.md#external-resource-files)).
 
 </details>
 
-The samplesheet helper scans staged FASTQ files, infers read pairing and sequencing technology, and
-queries SQL metadata (when available through `--sql_config`) to emit a unified CSV that is fed
-directly into schema validation and branching.
+The samplesheet helper scans the staged FASTQ files, infers read pairing and sequencing technology,
+and queries the database (`--sql_config`) for collection metadata and taxonomy. The taxonomic `class`
+sets the per-sample genetic code and the annotation path. If the taxonomy check aborts the run, fix
+`samplesheet/samplesheet.csv` by hand and rerun with `--input`.
 
-### Mitogenome assembly (GetOrganelle)
+## Mitogenome assembly (GetOrganelle)
+
+Illumina and Hi-C samples are assembled with GetOrganelle. Raw Hi-C reads are trimmed with fastp
+first (`--skip_hic_fastp` turns this off).
 
 <details markdown="1">
 <summary>Output files</summary>
 
-- `mitogenomes/<sample>/<assembly_prefix>/`
-  - `mtdna/<assembly_prefix>.fasta`: Final GetOrganelle assembly with the FASTA header rewritten to match the
-    per-sample prefix.
-  - `mtdna/<assembly_prefix>.get_org.log.txt`: GetOrganelle execution log capturing command-line parameters and statistics.
-  - `mtdna/*`: Additional files preserved from the GetOrganelle work directory (depth profiles, intermediate contigs, etc.).
-  - `<assembly_prefix>reseed.genedb.fasta`: Custom gene (label) database built from the reseed reference, present only
-    when a reseed was attempted (see below).
-  - `mtdna/<assembly_prefix>reseed.*`: Reseed assembly and log, present only when the first pass was reseeded.
+- `mitogenomes/<sample>/fastp/`: `*.fastp.json`, `*.fastp.html`, `*.fastp.log` for Hi-C samples.
+  Trimmed reads are not published.
+- `mitogenomes/<sample>/<assembly_prefix>/mtdna/`
+  - `<assembly_prefix>.fasta`: the assembly, FASTA header rewritten to the prefix.
+  - `<assembly_prefix>.get_org.log.txt`: GetOrganelle log (parsed by the assembly summary).
+  - `*.selected_graph.gfa`, `*extended_K*.assembly_graph.fastg`, `*.extend-*.fastg`,
+    `*.extend-*.csv`: assembly graphs and their label tables.
+  - `<assembly_prefix>.graph_join.tsv`: how the selected graph paths were combined.
+  - `<assembly_prefix>.getorg_check.tsv`: circularity evidence from `GETORGANELLE_CHECK`, including
+    any concatemer or tandem-repeat anomaly.
+  - `<assembly_prefix>.mito_depth.tsv`: uniform read depth ([details](#read-depth)).
+- `mitogenomes/<sample>/<assembly_prefix>reseed/`: the reseed pass, when one ran. Same `mtdna/`
+  files as above, named `<assembly_prefix>reseed.*`, plus:
+  - `mtdna/reference_seed/`: what seeded it.
+    - Vertebrates: the NCBI reference as `<accession>.fasta` / `<accession>.gb`, the lookup result
+      `<assembly_prefix>.findmitoreference_status.tsv`, and the custom gene database
+      `<assembly_prefix>reseed.genedb.fasta` with its `.genedb_status.tsv`.
+    - Invertebrates: `<assembly_prefix>.seed.fasta`, `<assembly_prefix>.reference.gb` and
+      `<assembly_prefix>.genedb.fasta` from the curated group database, with the selection record
+      `.reference_select.txt` (or `.fallback_select.txt` when the first pass was empty).
+- `getorganelle_checkpoints/<assembly_prefix>_getorganelle/`: GetOrganelle working state kept so a
+  `-resume` does not restart a long assembly from scratch.
 
 </details>
 
-By default, GetOrganelle runs with `-R 20 -w 95 --continue` (override via
-`--getorganelle_fromreads_args`). The module also keeps per-sample checkpoint outputs under
-`getorganelle_checkpoints/` in `--outdir`, which supports robust resume behavior.
+GetOrganelle runs with `-R 20 -w 95 --continue` by default (override with
+`--getorganelle_fromreads_args`).
 
-**Automatic reseed.** When a first-pass assembly fails or comes back fragmented/non-circular (the generic
-`animal_mt` seed was too divergent), the pipeline downloads a closely related mitogenome via
-`MITOHIFI_FINDMITOREFERENCE` and re-runs GetOrganelle with that reference as a custom seed (`-s`) **and** a custom
-gene/label database (`--genes`) built from the reference's annotated genes (`GETORGANELLE_GENEDB`). The gene database
-is only built when the reference yields at least `--getorganelle_genedb_min_genes` genes (default `10`); otherwise the
-sample keeps its first-pass result. The better of the two assemblies is carried forward, so no sample is dropped.
+**Automatic reseed.** When a first pass fails or comes back fragmented or non-circular because the
+generic `animal_mt` seed was too divergent, the pipeline reruns GetOrganelle with a related
+mitogenome as the seed (`-s`) and a gene database built from that reference as the labels (`--genes`).
+Vertebrates take the reference from `MITOHIFI_FINDMITOREFERENCE`. Invertebrates take it from the
+curated per-phylum database in `assets/refdb/<group>/`, chosen by BLASTing the first-pass assembly
+against it, or by ranking candidates against a read subsample when the first pass produced nothing.
+The vertebrate gene database is built only when the reference yields at least
+`--getorganelle_genedb_min_genes` genes (default `10`); otherwise the sample keeps its first pass.
+The better of the two assemblies is carried forward, so no sample is dropped. `--skip_getorganelle_reseed`
+turns the reseed off.
 
-These files form the short-read reference for later annotation and validation steps.
-
-### Mitogenome assembly (MitoHiFi)
+## Mitogenome assembly (MitoHiFi)
 
 <details markdown="1">
 <summary>Output files</summary>
 
 - `mitogenomes/<sample>/<assembly_prefix>/mtdna/`
-  - `<assembly_prefix>.fasta`: HiFi-derived circularised assembly with header normalised to the prefix.
-  - `<assembly_prefix>.gb`: GenBank annotation file emitted by MitoHiFi.
-  - `<assembly_prefix>.contigs_stats.tsv`: Per-contig metrics summarised in MultiQC (`MitoHiFi Contig Stats` section).
-  - `<assembly_prefix>.contigs_stats.with_coverage.tsv`: The same table with MitoHiFi's legacy
-    reference-recruited `avg_coverage` / `coverage_cv` columns appended.
-  - `<assembly_prefix>.coverage.tsv`: Legacy MitoHiFi depth, over reference-recruited reads only.
-  - `<assembly_prefix>.mito_depth.tsv`: Uniform remap-based read depth (`Mitogenome Read Depth` section
-    in MultiQC). Written for every assembler, not just MitoHiFi, and the only depth figure comparable
-    across GetOrganelle / MitoHiFi / Oatk and across Illumina / HiC / HiFi. Carries `mean_depth`,
-    `median_depth`, `depth_cv`, breadth at 1x/10x/20x, the mitochondrial read fraction, and the filter
-    thresholds actually applied. See "Mitogenome read depth" in `docs/usage.md`.
-  - `<assembly_prefix>.hifiasm.log`, `<assembly_prefix>.log`: Tool and wrapper logs (also parsed by MultiQC).
-  - `all_potential_contigs.fa`, `shared_genes.tsv`, PNG plots, and subdirectories (`contigs_circularization/`,
-    `coverage_mapping/`, `reads_mapping_and_assembly/`, …) capturing all diagnostic artefacts from MitoHiFi.
+  - `<assembly_prefix>.fasta`: circularised HiFi assembly, header normalised to the prefix.
+  - `<assembly_prefix>.gb`: MitoHiFi's own GenBank annotation (not the one the pipeline uses).
+  - `<assembly_prefix>.contigs_stats.tsv`: per-contig metrics (`MitoHiFi Contig Stats` in MultiQC).
+  - `<assembly_prefix>.contigs_stats.with_coverage.tsv`: the same table with MitoHiFi's legacy
+    `avg_coverage` / `coverage_cv` columns appended, corrected by the circularity check.
+  - `<assembly_prefix>.coverage.tsv`: legacy MitoHiFi depth over reference-recruited reads only.
+  - `<assembly_prefix>.circularity_check.tsv`: circularity evidence from `MITOHIFI_CHECK_CIRCULARITY`.
+  - `<assembly_prefix>.mito_depth.tsv`: uniform read depth ([details](#read-depth)).
+  - `<assembly_prefix>.reference_candidates_status.tsv`, `<assembly_prefix>.reference_ranking.tsv`:
+    which NCBI references were considered and how they ranked.
+  - `<assembly_prefix>.reference_divergence.txt`: the pre-assembly taxonomy guard (`CONGENERIC`,
+    `NON_CONGENERIC`, `CROSS_ORDER`, ...).
+  - `<assembly_prefix>.hifiasm.log`, `<assembly_prefix>.log`: hifiasm and MitoHiFi logs.
+  - `all_potential_contigs.fa`, `shared_genes.tsv`, PNG plots, `contigs_circularization/`,
+    `contigs_filtering/`, `MitoReference/`: MitoHiFi diagnostics. The read-mapping directories
+    (`reads_mapping_and_assembly/`, `coverage_mapping/`) are not published.
+- `assembly/`: a placeholder FASTA and `<prefix>.assembly_status.tsv` for any HiFi sample that
+  produced no assembly at all, so it is still reported rather than silently dropped.
 
 </details>
 
-The assembly prefix encodes sample metadata and MitoHiFi version so that downstream artefacts retain the provenance
-of the HiFi run. The MultiQC report links to the tabular and graphical summaries stored in this directory.
+The prefix encodes the MitoHiFi version, so downstream files keep the provenance of the HiFi run.
 
-### Mitogenome assembly (Oatk fallback)
+## Mitogenome assembly (Oatk fallback)
 
 <details markdown="1">
 <summary>Output files</summary>
 
-- `mitogenomes/<sample>/<assembly_prefix>/mtdna/`
-  - `<assembly_prefix>.fasta`: Structure-solved Oatk contig republished under the clean prefix name (the same
-    convention MitoHiFi uses), so it flows into annotation like any other assembly.
-  - `<assembly_prefix>.mito.ctg.fasta`: Native Oatk mitochondrial contig, kept for provenance.
+- `mitogenomes/<sample>/<assembly_prefix>/mtdna/` (prefix ends `.v10oatk`)
+  - `<assembly_prefix>.fasta`: the structure-solved Oatk contig under the prefix name, so it flows
+    into annotation like any other assembly.
+  - `<assembly_prefix>.mito.ctg.fasta`: Oatk's native mitochondrial contig, kept for provenance.
   - `<assembly_prefix>.gfa`: Oatk assembly graph.
-  - `<assembly_prefix>.oatk.log`: Oatk run log.
+  - `<assembly_prefix>.oatk.log`, `<assembly_prefix>.oatk_status.tsv`: run log and outcome.
+  - `<assembly_prefix>.getorg_check.tsv`: circularity evidence read from the GFA self-link.
 
 </details>
 
-These files are produced **only** when `--enable_oatk_fallback true` and the reference-based MitoHiFi path cannot be
-used or fails to assemble the sample. Routing reasons include no usable NCBI reference, an exhausted technical lookup,
-a cross-order reference, or an empty MitoHiFi assembly. Oatk assembles the HiFi reads de novo and
-locates the mitogenome by profile-HMM search against the `--oatk_mito_db` clade database, so it needs no species
-reference. The selected Oatk outcome is carried forward under its own assembly prefix. See
-[usage.md](usage.md#reference-free-oatk-fallback) for setup.
+These files exist **only** when `--enable_oatk_fallback true` and the MitoHiFi path could not be
+used for the sample: no usable NCBI reference, a reference lookup that still failed after its
+retries, a cross-order reference, or an empty MitoHiFi assembly. Oatk assembles the HiFi reads de
+novo and finds the mitogenome by profile-HMM search against `--oatk_mito_db`, so it needs no species
+reference. It is reported in the assembly summary as `assembler=Oatk`, with no reference species and
+no `no_congeneric_reference` flag. See [usage.md](usage.md#reference-free-oatk-fallback) for setup.
 
-### Mitogenome assembly summary
+## Read depth
+
+`<assembly_prefix>.mito_depth.tsv` (in `mtdna/`, written for every assembler) is the only depth
+figure comparable across GetOrganelle, MitoHiFi and Oatk, and across Illumina, Hi-C and HiFi. It
+carries `mean_depth`, `median_depth`, `depth_cv`, breadth at 1x/10x/20x, the mitochondrial read
+fraction, and the filter thresholds applied. It appears in MultiQC as `Mitogenome Read Depth` and
+populates `mitogenome_data.mean_depth`. See [Mitogenome read depth](usage.md#mitogenome-read-depth)
+for how it is measured.
+
+## Mitogenome assembly summary
 
 <details markdown="1">
 <summary>Output files</summary>
 
-- `multiqc/`
-  - `mitogenome_assembly_summary_mqc.tsv`: MultiQC custom-content TSV with one row per sample per assembler run.
-  - `per_sample/<sample>/<sample>_multiqc_report.html`: Per-sample MultiQC report filtered from the same staged
-    MultiQC inputs as the cohort report.
+- `multiqc/mitogenome_assembly_summary_mqc.tsv`: one row per assembly, shown in MultiQC as
+  `Mitogenome assembly summary`.
 
 </details>
 
-The `MITOGENOME_ASSEMBLY_SUMMARY` process scans the staged MitoHiFi and GetOrganelle outputs already produced by the
-pipeline. It uses final FASTA files, MitoHiFi `contigs_stats`/coverage TSVs, GetOrganelle `get_org.log.txt` files,
-selected graph files, and annotation statistics CSVs when available. Missing files are tolerated; unavailable fields
-are left blank and warnings are written to the task log.
+`MITOGENOME_ASSEMBLY_SUMMARY` reads the assembly outputs above plus the annotation statistics.
+Missing files are tolerated: the field is left blank and a warning goes to the task log.
 
-The table columns are:
-`sample_id`, `assembler`, `status`, `final_length_bp`, `circularised`, `num_candidate_contigs`,
-`num_final_contigs`, `num_genes`, `missing_genes`, `frameshift_flag`, `mean_coverage`, `coverage_cv`,
-`reference_species`, `reference_accession`, `numt_flag`, and `manual_review_reason`.
+Columns: `assembly_prefix`, `sample_id`, `assembler`, `status`, `final_length_bp`, `circularised`,
+`num_candidate_contigs`, `num_final_contigs`, `num_genes`, `num_cds`, `missing_genes`,
+`frameshift_flag`, `mean_coverage`, `coverage_cv`, `reference_species`, `reference_accession`,
+`numt_flag` and `manual_review_reason`.
 
 `status` is the QC verdict and means the same thing for every assembler, so the column can be sorted,
-filtered and counted across a mixed cohort. It takes exactly three values: `complete` (a final assembly
-exists and no blocking QC reason survived), `manual_review` (a final assembly exists but a blocking
-reason stands, listed in `manual_review_reason`) and `failed` (the assembler errored or produced no final
-assembly). It deliberately says nothing about topology; read `circularised` for that. A `complete` status
-is likewise not a statement about gene content; the 37-gene / 13-PCG check only decides whether soft flags
-(`low_mean_coverage`, `no_congeneric_reference`, a tRNA-only shortfall) are downgraded from blocking to
-advisory, which is why some `complete` rows still carry text in `manual_review_reason`.
+filtered and counted across a mixed cohort. It takes exactly three values: `complete` (a final
+assembly exists and no blocking QC reason survived), `manual_review` (a final assembly exists but a
+blocking reason stands, listed in `manual_review_reason`) and `failed` (the assembler errored or
+produced no final assembly). It says nothing about topology; read `circularised` for that.
 
-Manual review reasons are semicolon-separated and can include `missing_final_fasta`, `not_circularised`,
-`multiple_candidate_contigs`, `multiple_final_contigs`, `missing_genes`, `missing_protein_coding_genes`,
-`frameshift_detected`, `low_mean_coverage`, `high_coverage_variability`, `possible_numt`,
-`ambiguous_getorganelle_graph`, `failed_run`, `length_anomaly`, `length_outside_expected_range`,
-`reference_mismatch`, `reference_divergent`, `no_congeneric_reference`, and `data_limited`.
-`data_limited` marks assemblies limited by input data rather than a pipeline defect.
-`missing_protein_coding_genes` fires when the annotation-derived CDS count falls below
-`--mitogenome_summary_expected_pcg_count`, catching collapses that tRNA counts mask in the total gene count.
+**Blocking and advisory reasons.** An assembly that is circular, in the expected length range and
+carries all 13 protein-coding genes and both rRNAs is treated as a finished mitogenome (the
+"complete core"). On a complete-core assembly the soft reasons (`low_mean_coverage`,
+`high_coverage_variability`, `no_congeneric_reference`, `reference_divergent`, `reference_mismatch`,
+and a tRNA-only gene shortfall) are recorded but advisory, which is why some `complete` rows still
+carry text in `manual_review_reason`. Everything else blocks.
 
-The reference-related reasons come from the pre-assembly reference-divergence guard
-(`no_congeneric_reference`) and the post-assembly reference-relevance check
-(`reference_divergent` / `reference_mismatch`). All three are **advisory on a complete-core
-assembly**: a circular molecule of the expected length carrying all 13 protein-coding genes and
-both rRNAs is a finished mitogenome whatever reference was used to build it, so these reasons are
-recorded for curation but do not by themselves force `manual_review`. They describe the reference,
-not the assembly; when a poor reference actually damages an assembly, the damage itself
-(`missing_protein_coding_genes`, or any structural flag) still blocks.
+Manual review reasons are semicolon-separated and can include `missing_final_fasta`,
+`not_circularised`, `multiple_candidate_contigs`, `multiple_final_contigs`, `missing_genes`,
+`missing_protein_coding_genes`, `frameshift_detected`, `low_mean_coverage`,
+`high_coverage_variability`, `possible_numt`, `ambiguous_getorganelle_graph`, `failed_run`,
+`length_anomaly`, `length_outside_expected_range`, `reference_mismatch`, `reference_divergent`,
+`no_congeneric_reference` and `data_limited`.
 
-`reference_divergent` means the reference corresponds to the assembly but is a distant relative, so a
-closer reference would seed and annotate better. `reference_mismatch` is the stronger claim that the
-reference neither covers nor matches the assembly, i.e. the species label pointed `findMitoReference`
-at the wrong reference entirely. The check measures coverage against the **reference** length, not the
-assembly length, so a concatemer, a control-region tandem repeat or a fragmented assembly does not read
-as a bad reference; it never calls a congeneric reference a mismatch; and its identity floor is
-taxon-aware (82% for vertebrates, 88% for invertebrates), because anthozoan mtDNA evolves far more
-slowly than teleost mtDNA, where congeneric references routinely align at 78-88%.
+- `data_limited` marks assemblies limited by the input data (low coverage plus fragmentation) rather
+  than by a pipeline defect.
+- `missing_protein_coding_genes` fires when the annotation-derived CDS count is below
+  `--mitogenome_summary_expected_pcg_count`, catching collapses that tRNA counts mask in the total.
+- `ambiguous_getorganelle_graph` means GetOrganelle resolved more than one path through the graph.
+- The reference reasons come from the pre-assembly reference-divergence guard
+  (`no_congeneric_reference`) and the post-assembly reference-relevance check
+  (`reference_divergent` / `reference_mismatch`). They describe the reference, not the assembly;
+  when a poor reference actually damages an assembly, the damage itself (missing PCGs, or a
+  structural flag) still blocks.
 
-QC thresholds are configurable with:
-`--mitogenome_summary_min_mean_coverage`, `--mitogenome_summary_max_coverage_cv`,
-`--mitogenome_summary_min_length`, `--mitogenome_summary_max_length`,
-`--mitogenome_summary_expected_gene_count`, and `--mitogenome_summary_expected_pcg_count`.
+`reference_divergent` means the reference matches the assembly but is a distant relative, so a closer
+reference would seed and annotate better. `reference_mismatch` is the stronger claim that the
+reference neither covers nor matches the assembly, i.e. the species label pointed the reference
+lookup at the wrong taxon. The check measures coverage against the **reference** length, so a
+concatemer, a control-region repeat or a fragmented assembly does not read as a bad reference; it
+never calls a congeneric reference a mismatch; and its identity floor is taxon-aware (82% for
+vertebrates, 88% for invertebrates), because anthozoan mtDNA evolves far more slowly than teleost
+mtDNA.
 
-The parser can also be run manually on an existing result tree:
+QC thresholds are set with `--mitogenome_summary_min_mean_coverage`,
+`--mitogenome_summary_max_coverage_cv`, `--mitogenome_summary_min_length`,
+`--mitogenome_summary_max_length`, `--mitogenome_summary_expected_gene_count` and
+`--mitogenome_summary_expected_pcg_count` (defaults in
+[usage.md](usage.md#assembly-summary-qc-thresholds)).
+
+The parser can also be run by hand on an existing result tree:
 
 ```bash
 mitogenome_assembly_summary.py \
@@ -190,296 +262,311 @@ mitogenome_assembly_summary.py \
   --output mitogenome_assembly_summary_mqc.tsv
 ```
 
-`assets/multiqc_config.yml` registers this TSV as a section titled `Mitogenome assembly summary`, so it appears in
-the final MultiQC report without a separate user-supplied config.
+## Concatemer collapse and FASTA sanitisation
 
-### Concatemer collapse and FASTA sanitisation
+Three steps sit between assembly and annotation.
 
-Two internal steps run between assembly and annotation. Neither publishes intermediate FASTAs to `--outdir`.
+**`COLLAPSE_CONCATEMER`** runs only on assemblies whose circularity evidence says
+`anomaly_type=concatemer`. It re-verifies the duplication by self-alignment and rewrites the assembly
+as a single monomer; anything it cannot confirm passes through unchanged, so it can only ever fix a
+genuine duplication. In the original assembly's `mtdna/`:
 
-**`COLLAPSE_CONCATEMER`** runs first, only on assemblies whose circularity evidence has
-`anomaly_type=concatemer`. When the circularity check
-flags a clean head-to-tail concatemer (an assembly roughly 2x the true length), `collapse_concatemer.py` re-verifies
-the multimer by self-alignment and rewrites it to a single monomer; anything it cannot confirm is passed through
-unchanged, so the step can only ever fix a genuine duplication. Its per-sample report
-(`<assembly_prefix>.concatemer_collapse.tsv`) feeds the assembly summary so a collapsed concatemer is reported at its
-monomer length rather than re-flagged as over-length. Assemblies with no circularity evidence bypass this step.
+- `<assembly_prefix>.concatemer_collapse.tsv`: the collapse decision (`collapsed` or passthrough).
+- `<assembly_prefix>.post_curation_check.tsv`: circularity evidence for the result.
 
-**`SANITISE_FASTA`** then normalises the (possibly collapsed) FASTA before annotation:
+A genuine collapse becomes a new assembly, `<assembly_prefix>_collapsed`, with its own annotation,
+database row and depth measurement. Its `mtdna/` holds `<assembly_prefix>_collapsed.fasta` plus a
+mirror of the original assembly's `mtdna/` files and the two reports above, so the curated directory
+carries the full provenance next to its annotation. The assembly summary reports it at its monomer
+length rather than flagging it as over-length.
 
-- For single-contig assemblies, FASTA files are passed through unchanged.
-- For multi-contig assemblies, contigs are concatenated into one sequence (`*_concat`) to support
-  downstream species validation and annotation tooling.
+Control-region tandem repeats are not collapsed. They stay in review with the suggested trim in the
+circularity evidence, because the repeat may be real.
 
-**`GETORGANELLE_JOIN`** (`*_rgj`, reference-guided join) is an alternative to that plain
-concatenation, and is **off by default** (`--skip_getorganelle_join true`). Where a multi-scaffold
-assembly has a real reference, it BLASTs the scaffolds against it and emits them in reference order
-as one record, separated by up to 100bp of `N` (`--max-gap-n`). Its evidence file is
-`<assembly_prefix>.scaffold_join.tsv`.
+**`SANITISE_FASTA`** then prepares the FASTA for annotation. A single-contig assembly passes through.
+A multi-contig assembly is concatenated into one record and published as
+`<assembly_prefix>_concat/mtdna/<assembly_prefix>_concat.fasta`, so a partial mitogenome can still be
+annotated and given a species ID.
 
-Both `*_rgj` and `*_concat` are artificial molecules. They exist so a partial mitogenome can still
-be annotated and get a species ID, and neither is a submittable assembly. The join is off because it
-never improved on the concatenation it displaced: across the 12 NOVA_260909_LA samples where both
-forms of the same contigs were annotated, it tied 10 and lost 2, each loss caused by a gene landing
-on an N spacer (OG2998 `CYTB`, OG3058 `ND2`). An inferred scaffold *order* adds nothing for either
-annotation or species ID, while the welds cost real gene models. Enable it with
-`--skip_getorganelle_join false` if you need the ordering for another purpose.
+**`GETORGANELLE_JOIN`** (`_rgj`, reference-guided join) is an alternative to that plain
+concatenation and is **off by default** (`--skip_getorganelle_join true`). Where a multi-scaffold
+assembly has a real reference, it BLASTs the scaffolds against it and joins them in reference order
+with up to 100 bp of `N` between them. Output: `<assembly_prefix>_rgj/mtdna/<assembly_prefix>_rgj.fasta`
+and `<assembly_prefix>_rgj.scaffold_join.tsv`.
 
-### Mitogenome annotation
+Both `_rgj` and `_concat` are artificial molecules: neither is a submittable assembly. The join is
+off because it never beat the concatenation: across the 12 NOVA_260909_LA samples where both forms
+were annotated, it tied 10 and lost 2, each loss a gene landing on an `N` spacer (OG2998 `CYTB`,
+OG3058 `ND2`). An inferred scaffold order adds nothing for annotation or species ID, while the joins
+cost real gene models. Enable it with `--skip_getorganelle_join false` if you need the ordering for
+another purpose.
 
-<details markdown="1">
-<summary>Output files</summary>
-
-- `mitogenomes/<sample>/<assembly_prefix>/`
-  - `annotation/`: Directory of annotation results (EMMA for vertebrates, MITOS2 for invertebrates), including:
-    - `<prefix>.<tool><version>.fa|gff|tbl|svg`: Primary annotation outputs (e.g. `.emma100`, `.mitos2110`).
-    - `cds/*.<tool><version>.fa`: Gene-specific nucleotide FASTA files (CO1, 12S, 16S are fed into BLAST).
-    - `proteins/*.<tool><version>.fa`: Protein translations per locus.
-  - `versions_emma.yml`: Tool provenance for EMMA (not published to the results directory by default).
-
-</details>
-
-Vertebrate samples are annotated with EMMA; invertebrate samples (`invertebrates=true`) are annotated with MITOS2,
-whose output is reshaped to the same EMMA directory contract. Both use the per-sample mitochondrial genetic code
-resolved from taxonomic class in samplesheet preparation (e.g. Cnidaria → 4), so divergent lineages such as corals are
-translated with the correct code rather than a single global table.
-
-Annotation outputs are reused by the BLAST/LCA subworkflow, QC gating, and GenBank packaging stages, so retaining
-the full annotation directory allows for manual inspection or re-annotation if required.
-
-### BLAST filtering and LCA
+## Mitogenome annotation
 
 <details markdown="1">
 <summary>Output files</summary>
 
-- `mitogenomes/<sample>/<assembly_prefix>/lca/`
-  - `blast.<gene>.<annotation>.filtered.tsv`: BLAST hits with query span > 200 bp and identity above the gate
-    (97% for invertebrates, 98% for vertebrates). A timestamp and gene identifier are appended to each row.
-  - `blast.<gene>.<annotation>.near.tsv`: hits from 90% up to that gate, in the same format, for inspection only;
-    nothing downstream reads it. If that band is empty it holds the 10 best hits by bitscore at any identity, so it
-    is empty only when BLAST found nothing at all.
-  - `filtered_summary.<gene>.txt`: Per-gene hit summaries used by MultiQC (`Species Validation` tables).
-  - `lca.<gene>.<annotation>.tsv`: Lowest common ancestor assignments derived from filtered BLAST hits.
-  - `lca_raw.<gene>.<annotation>.tsv`: the top hits (up to 20) that passed the LCA's own gates, with resolved
-    taxonomy.
+- `mitogenomes/<sample>/<assembly_prefix>/annotation/`
+  - `<assembly_prefix>.<annotation>.fa|gff|tbl`: the annotation (e.g. `.emma102`, `.mitos2110`).
+    EMMA also writes an `.svg` map.
+  - `cds/<GENE>.<assembly_prefix>.<annotation>.fa`: per-gene nucleotide FASTA. `CO1`, `RNR1` (12S)
+    and `RNR2` (16S) are the BLAST inputs.
+  - `proteins/MT-<GENE>.<assembly_prefix>.<annotation>.fa`: protein translations.
+  - `<assembly_prefix>.annotation_stats.csv`: gene counts, missing genes, gene order and the PCG ORF
+    check (`EMMA Annotation Stats` in MultiQC). This is the annotation QC verdict.
+  - `<assembly_prefix>.reference_relevance.txt`: the post-assembly reference-relevance check.
+  - `mtdna_rescue/`: status of the vertebrate ND4L/ATP8 and tRNA rescue passes, when one ran.
+  - MITOS2 (invertebrates) only:
+    - `mitos_raw/`: MITOS2's native output (`result.bed`, `.gff`, `.faa`, `.fas`, `.geneorder`,
+      `.mitos`, `.png`, `.seq`).
+    - `mitos_fix/`: the invertebrate/coral annotation fixer's status and corrected BED.
+    - `mitos_conversion_audit.tsv`: how MITOS2 output was mapped to the EMMA layout.
+    - `<assembly_prefix>.reference.gb`, `.seed.fasta`, `.genedb.fasta`, `.reference_select.txt`:
+      the annotation reference picked label-free from the curated group database, when one was
+      selected.
+- `mitogenomes/<sample>/<assembly_prefix>/versions_emma.yml` or `versions_mitos.yml`: annotator
+  version.
 
 </details>
 
-Both the BLAST and LCA modules consume cached taxonomy databases (`taxdb` and `taxdump`). The filtered tables serve as
-inputs for species validation and the downstream SQL upload modules. BLAST database choice is made
-per sample: curated DB for default/vertebrate samples, and `--nt_blast_db` when
-`invertebrates=true`. The invertebrate search is restricted to Metazoa (`-taxids 33208`)
-so that a Tbase-scale `core_nt` stays affordable, but is not restricted to the sample's
-own phylum — a contaminated or mislabelled sample must still be able to hit outside it.
+Vertebrate samples are annotated with EMMA; invertebrate samples (`invertebrates=true`) with MITOS2,
+whose output is reshaped into the same layout as EMMA's. Both use the per-sample mitochondrial
+genetic code resolved from taxonomic class during samplesheet preparation (e.g. Cnidaria → 4).
 
-The search itself is unfiltered (the full hit list is in the task work dir as `blast.<gene>.<annotation>.tsv`); the
-identity gate is applied afterwards, and `calculateLCA.py --pident` is set to the same value. The LCA's coverage gate
-uses `--coverage_mode overlap --min_coverage 80`: aligned length as a share of the shorter of query and reference.
-The script's original query-cover gate came from eDNA, where the query is shorter than the reference; against a
-whole-gene query it rejected exact matches to barcode-length references.
+For vertebrates, two rescue passes patch the bundle in place when EMMA misses genes: one recovers
+ND4L/ATP8 by alignment, one recovers tRNAs with tRNAscan-SE. Each publishes its status to
+`annotation/mtdna_rescue/`.
 
-### Species validation and SQL uploads
+The annotation bundle is reused by BLAST/LCA, the QC gate and GenBank packaging, so keeping the
+whole directory lets you inspect or hand-curate an annotation and rerun from it
+([Skipping annotation](usage.md#skipping-annotation)).
+
+With `--blast_precomputed_annotations`, the bundle's `cds/` and `proteins/` are rebuilt from the GFF
+and FASTA, and `annotation_rebuild/<annotation>.bundle_rebuild.tsv` records, gene by gene, whether
+the bundle's own files matched the GFF.
+
+## BLAST filtering and LCA
 
 <details markdown="1">
 <summary>Output files</summary>
 
-- `species_validation/`
-  - `lca_results.<sample>.tsv`: Summary of the LCA decision for each marker.
-  - `lca_combined.<sample>.tsv`, `blast_combined.<sample>.tsv`: Aggregated tables passed to the upload modules and MultiQC.
-- `sql_uploaded_data/`
-  - `<sample>.mtdna.upload.txt`: Log of assembly statistics pushed to the OceanOmics SQL database.
-  - `<sample>.annotation.upload.txt`: Confirmation log from annotation uploads.
-  - `<sample>.annotation_stats.csv`: CSV summarising annotation QC metrics (also plotted in MultiQC).
-  - `<sample>.lca_blast.upload.txt`: Log from the combined BLAST/LCA upload.
-- `qc/`
-  - `<sample>.qc_summary.tsv`: Consolidated flag showing species chosen for QC, annotation pass/fail status, and missing genes.
+- `mitogenomes/<sample>/<assembly_prefix>/lca/` (one set per marker: `CO1`, `12s`, `16s`)
+  - `blast.<gene>.<assembly_prefix>.<annotation>.filtered.tsv`: hits with query span > 200 bp and
+    identity at or above the gate (97% for invertebrates, 98% for vertebrates), with a timestamp and
+    gene identifier appended.
+  - `blast.<gene>.<assembly_prefix>.<annotation>.near.tsv`: hits from 90% up to the gate, for
+    inspection only; nothing downstream reads it. If that band is empty it holds the 10 best hits by
+    bitscore at any identity, so it is empty only when BLAST found nothing.
+  - `filtered_summary.<gene>.txt`: per-gene hit summary.
+  - `lca.<gene>.<assembly_prefix>.<annotation>.tsv`: lowest common ancestor call.
+  - `lca_raw.<gene>.<assembly_prefix>.<annotation>.tsv`: the top hits (up to 20) that passed the
+    LCA's own gates, with resolved taxonomy.
+  - `lca_short.<gene>.<assembly_prefix>.<annotation>.tsv`: condensed LCA table, when produced.
 
 </details>
 
-The `SPECIES_VALIDATION` process checks marker concordance against the sample's `nominal_species_id` from the
-samplesheet. Its evidence for a species- or genus-level label is the set of taxa the LCA grouped for each region
-(`species_in_LCA`, i.e. the hits within 2 identity points of the top hit), plus any synonym or in-house
-`[organism=...]` name the BLAST rows inside that same window carry. A label that appears in the filtered table but
-well below a different species' best hit is not evidence. The `EVALUATE_QC_CONDITIONS` module determines whether the sample can proceed to GenBank packaging, and
-its decision is reported in the QC summary table. All upload modules emit human-readable logs so that database
-connectivity or data issues can be audited after a run.
+The curated database (`--curated_blast_db`) is searched for vertebrates and `--nt_blast_db` for
+invertebrates. The invertebrate search is restricted to Metazoa (`-taxids 33208`) so that `core_nt`
+stays affordable, but not to the sample's own phylum: a contaminated or mislabelled sample must still
+be able to hit outside it.
 
-If `--skip_upload_results` is set, only the `PUSH_*` modules are skipped. `ENA_SUBMISSION_PREP` still runs,
-because it reads from the database without writing to it; its ENA manifest takes `COVERAGE` from the run's own
-depth measurement rather than from the `mitogenome_data` row, and records which source it used as
-`mean_depth_source` in the package metadata. Use `--skip_ena_submission_prep` to turn submission prep off
-independently.
+The search itself is unfiltered (the full hit list stays in the task work directory); the identity
+gate is applied afterwards, and the LCA uses the same value. The LCA's coverage gate is
+`--coverage_mode overlap --min_coverage 80`: aligned length as a share of the shorter of query and
+reference. A query-cover gate would reject exact matches to barcode-length references when the query
+is a whole gene.
 
-If `--sql_config` is omitted entirely, the `PUSH_*` modules and `ENA_SUBMISSION_PREP` are both skipped.
-Either way `ANNOTATION_STATS`, `SPECIES_VALIDATION`, `EVALUATE_QC_CONDITIONS`, `QC_SUMMARY`,
-`COMPILE_HELD_SAMPLES` and the assembly summary all still run, so a run without a database still reports gene
+## Species validation and QC
+
+<details markdown="1">
+<summary>Output files</summary>
+
+- `species_validation/` (one set per assembly prefix)
+  - `lca_results.<assembly_prefix>.tsv`: the LCA decision for each marker
+    (`Species Validation (LCA Summary)` in MultiQC).
+  - `lca_combined.<assembly_prefix>.tsv`, `blast_combined.<assembly_prefix>.tsv`: the combined
+    tables passed to the uploads.
+  - `taxonomic_evidence.<assembly_prefix>.tsv`: the per-region evidence the decision used.
+  - `validation_record.<assembly_prefix>.json`: the record written to `lca_validation`.
+- `qc/<assembly_prefix>.qc_summary.tsv`: species chosen for QC, annotation pass/fail and missing
+  genes (`QC Summary` in MultiQC).
+- `held_samples.tsv`: every sample held at any stage, with the stage and reason.
+- `run_completeness.txt`: counts of samplesheet samples, held samples and submission-ready samples,
+  and whether every samplesheet sample is accounted for. A sample missing from both lists means a
+  task failed silently.
+
+</details>
+
+`SPECIES_VALIDATION` checks the sample's `nominal_species_id` against the markers. Its evidence for a
+species- or genus-level label is the set of taxa the LCA grouped for each region (`species_in_LCA`,
+the hits within 2 identity points of the top hit), plus any synonym or in-house `[organism=...]` name
+on the BLAST rows inside that same window. A label that appears in the filtered table but well below
+a different species' best hit is not evidence. The label is matched at the rank it actually names,
+so a genus-only or family-only ID is validated at that rank. `EVALUATE_QC_CONDITIONS` then decides
+whether the assembly proceeds to GenBank packaging.
+
+Without `--sql_config`, the annotation statistics, species validation, QC gate, QC summary, held
+samples report and assembly summary all still run, so a run without a database still reports gene
 counts, missing genes and a completeness verdict.
 
-### Submission-ready packaging
+## Database uploads
+
+<details markdown="1">
+<summary>Output files</summary>
+
+- `sql_uploaded_data/`
+  - `<assembly_prefix>.mtdna.upload.txt`: assembly row (`mitogenome_data`).
+  - `<assembly_prefix>.annotation.upload.txt`: annotation statistics.
+  - `<assembly_prefix>.lca_blast.upload.txt`, `<assembly_prefix>.lca_raw.upload.txt`: BLAST/LCA
+    rows (`blast_filtered_lca`, `lca`, `lca_raw_results`).
+  - `<assembly_prefix>.species_validation.upload.txt`: `lca_validation` row.
+  - `<full_seqid>.ena_validation.upload.txt`: `ena_validation_attempts` row.
+  - `<full_seqid>.qc_validator.upload.txt`: the second-validator write ([below](#automatic-second-validator)).
+  - `upload_results_summary_mqc.tsv`, `upload_results_appendix.txt`: run summary across all uploads
+    (`SQL Upload Summary` in MultiQC).
+
+</details>
+
+Uploads need `--sql_config` and are turned off by `--skip_upload_results`. Each upload writes a
+readable log, so connectivity or data problems can be audited after the run. The ENA validation and
+second-validator writes are non-fatal: a failure is logged and the run continues.
+
+## GenBank and ENA packaging
+
+Runs when `--sql_config` and `--ena_study` are both set and `--skip_ena_submission_prep` is not.
 
 <details markdown="1">
 <summary>Output files</summary>
 
 - `mitogenomes/<sample>/<assembly_prefix>/genbank/`
-  - `processed/*.fa|fasta|gff|tbl|cmt`: GenBank-ready sequence, feature table, and comment files produced by `FORMAT_FILES`.
-  - `<sample>.bankit_metadata.csv`, `<sample>.bankit_metadata_latlon_cleaned.csv`: Sample metadata exported from SQL via
-    `BUILD_SOURCE_MODIFIERS`.
-  - `<assembly_prefix>*.src`: Source modifier template files required by table2asn.
-  - `genes/` and `proteins/`: Gene-level FASTA collections used for translation checks.
-  - `<assembly_prefix>.sqn`, `<assembly_prefix>.val`, `<assembly_prefix>.stats`, `<assembly_prefix>.dr`,
-    `<assembly_prefix>.gbf`: GenBank package plus validator and discrepancy reports generated by table2asn.
-  - `<full_seqid>.table2asn_status.tsv`, `<full_seqid>.table2asn_findings.tsv`: Normalised validation gate.
-    `ERROR`, `REJECT`, and discrepancy `FATAL` findings quarantine only that sample; warnings are reported and continue.
-  - `ena/<assembly_prefix>.embl.gz`: ENA EMBL-Bank flat file emitted only when table2asn and conversion checks pass.
-  - `ena/validated/<full_seqid>.embl.gz`, `ena/<full_seqid>.webin_manifest.txt`,
-    `ena/<full_seqid>.webin_status.tsv`, `ena/webin_output/`: Submission-ready bundle and reports when
-    `--ena_webin_validate` is enabled and Webin validation passes.
-  - `ena/<full_seqid>.ena_validation_result.tsv`: normalized result for every submission gate, including
-    explicit `NOT_RUN`, `NOT_REQUESTED`, and `NOT_APPLICABLE` states. It is keyed on `full_seqid` (assembly
-    prefix plus annotation version) and carries the annotation in its own column, so two annotations of one
-    assembly are two records rather than one overwriting the other. Its `submission_ready` column is `true`
-    when the flatfile cleared every gate this pipeline runs, which is the signal the submission pipeline consumes.
-- `ena/ena_validation_results_mqc.tsv`: batch-level ENA submission-readiness table included in MultiQC.
-- `sql_uploaded_data/<full_seqid>.ena_validation.upload.txt`: non-fatal PostgreSQL upload result.
-- `sql_uploaded_data/<full_seqid>.qc_validator.upload.txt`: non-fatal result of the
-  second-validator write described below.
-- `sql_uploaded_data/upload_results_summary_mqc.tsv`: final summary across pre-QC and ENA validation uploads.
-- `mitogenomes/<sample>/<assembly_prefix>/ena/package/`: the complete per-version
-  genome-context candidate, including the full-SeqID EMBL flat file, chromosome
-  list, feature table, package metadata, and checksums. It also holds
-  the collaborator handover pair, `<full_seqid>.fa` and `<full_seqid>.gff`.
-  `<full_seqid>.package_metadata.json` is the whole handoff: identity, digests, a
-  `flatfile_validation` block (status, reason, error and warning counts, webin-cli
-  version), a `manifest` block rendering the Webin genome-context keys this
-  pipeline can fill under the names Webin uses, and a `specimen` block of the
-  flatfile's source-feature facts. There is no standalone manifest file. `STUDY`,
-  `SAMPLE` and `RUN_REF` are absent from the `manifest` block by design: the
-  study, the sample and the read submissions are registered by the downstream
-  submission pipeline, so nothing here could be more than a guess at them. The
-  metadata also stores no readiness verdict and no published path: the durable
-  location is whatever the caller globbed. No feature in any of these files
-  carries a `/locus_tag`:
-  tags are allocated and injected by the downstream ENA submission pipeline, so
-  the qualifier is absent rather than empty (an empty one fails validation).
-- `mitogenomes/<sample>/<assembly_prefix>/ena/validation/flatfile/`: the
-  sequence-context flatfile format check, run for every candidate. This is the
-  pipeline's last ENA gate, and a pass here sets `submission_ready = true`. It is
-  also the only artefact webin-cli has checked: the genome-context keys in the
-  package metadata are never put to Webin here, because genome-context validation
-  resolves `SAMPLE` first and the sample is registered downstream.
+  - `processed/<full_seqid>.fa|gff|tbl|cmt`: FASTA, GFF, feature table and structured comment with
+    submission-ready headers (`FORMAT_FILES`).
+  - `<sample>.bankit_metadata.csv`, `<sample>.bankit_metadata_latlon_cleaned.csv`: sample metadata
+    from the database (`BUILD_SOURCE_MODIFIERS`).
+  - `<full_seqid>.src`: source modifier table for table2asn.
+  - `genes/`, `proteins/`: extracted gene sequences (`<full_seqid>.genes.fa` and per-gene files)
+    and their translations, each header tagged with the genetic code.
+  - `<full_seqid>.sqn`, `.val`, `.dr`, `.gbf` (and `.stats` when table2asn writes one): the
+    table2asn package plus validator and discrepancy reports. `ERROR`, `REJECT` and discrepancy
+    `FATAL` findings quarantine only that assembly; warnings are reported and it continues.
+    `FATAL: NO_LOCUS_TAGS` is expected on every record and treated as advisory.
+- `mitogenomes/<sample>/<assembly_prefix>/ena/`
+  - `metadata/<full_seqid>.ena_input_metadata.json`: the inputs the package was built from.
+  - `package/`: the ENA genome-context candidate, everything named on `full_seqid`: the EMBL flat
+    file (`.embl.gz`), chromosome list (`.chromosome_list.tsv.gz`), feature table (`.tbl`),
+    `package_metadata.json`, the collaborator handover files (`.fa`, `.gff`, `.genes.fa`) and
+    `checksums.sha256`. [ena_package.md](ena_package.md) documents the package in full.
+  - `validation/flatfile/`: the webin-cli sequence-context format check: `.webin_manifest.txt`,
+    `.webin_status.tsv`, `.webin_validate.log`, `webin_output/`, and `validated/<full_seqid>.embl.gz`
+    when it passed. This is the pipeline's last ENA gate.
+  - `validation/<full_seqid>.ena_validation_result.tsv`: the result of every submission gate,
+    including explicit `NOT_RUN`, `NOT_REQUESTED` and `NOT_APPLICABLE` states, with the annotation in
+    its own column. `submission_ready` is `true` when the flat file cleared every gate this pipeline
+    runs; that is the signal the downstream submission pipeline consumes.
+- `ena/`
+  - `ena_validation_results_mqc.tsv`: run-level readiness table (`ENA submission readiness` in
+    MultiQC, alongside the `Table2ASN submission gate`, `Table2ASN findings`,
+    `ENA flat-file conversion` and `ENA Webin validation` sections).
+  - `ena_run_summary.tsv`: one row per assembly with each gate's result and the validation attempt
+    token.
 
 </details>
 
-These artefacts provide the material required to submit validated mitogenomes to GenBank and ENA. Table2asn or Webin
-findings do not stop a large batch: the affected sample is reported and omitted from the corresponding downstream
-submission-ready channel.
+Table2asn or Webin failures do not stop a batch: the affected assembly is reported and left out of
+the submission-ready set. The package records no locus tags (they are allocated downstream) and no
+`STUDY`, `SAMPLE` or `RUN_REF`, because the study, BioSample and read submissions are registered by
+the downstream submission pipeline. `ENA_SUBMISSION_PREP` only reads from the database, so it runs
+under `--skip_upload_results` too. Its `COVERAGE` comes from this run's depth measurement, and the
+package records which source it used as `mean_depth_source`.
 
-#### Automatic second validator
+### Automatic second validator
 
-A mitogenome needs two validators recorded in `lca_validation` before it is OK to submit.
+A mitogenome needs two validators recorded in `lca_validation` before it can be submitted.
 `SPECIES_VALIDATION` fills the first (`validator = 'nf-core'`) when the nominal species ID is
-supported by the LCA window of at least one region (see above). `PUSH_QC_VALIDATOR` fills the second: any sample reaching
-`submission_ready = true`, i.e. it cleared table2asn, the EMBL flat-file conversion and the
-webin-cli format check, gets `validator_2 = 'QCd-nf-core'`.
+supported by the LCA window of at least one region. `PUSH_QC_VALIDATOR` fills the second: any
+assembly reaching `submission_ready = true` (it cleared table2asn, the EMBL conversion and the
+webin-cli format check) gets `validator_2 = 'QCd-nf-core'`.
 
-Two properties of that write are deliberate and load-bearing:
+- **It never overwrites.** The `UPDATE` only fires when `validator_2` is NULL or blank, and there is
+  no `--force`. A human reviewer who already signed off stays recorded.
+- **It never inserts.** With no `lca_validation` row there is no first validator either, so the
+  missing row is logged instead.
 
-- **It never overwrites.** The `UPDATE` is guarded on `validator_2` being NULL or blank, and
-  there is no `--force` flag. A human reviewer who already signed off stays recorded, because
-  the whole point of the column is that a second, independent validator looked at the sample.
-- **It never inserts.** With no `lca_validation` row there is no first validator either, so a
-  lone `validator_2` would be meaningless. The missing row is logged instead.
+With `--ena_webin_validate false`, `submission_ready` is always `false`, so no second validator is
+recorded. The per-assembly outcome (`validator_2_set`, `preserved`, `not_ready`, `no_row`,
+`failed`) appears in the `Validator 2` column of the MultiQC SQL upload summary.
 
-Because `submission_ready` is `false` whenever `--ena_webin_validate false` is set, the second
-validator is simply not recorded in runs with the format check switched off. The per-sample
-outcome (`validator_2_set`, `preserved`, `not_ready`, `no_row`, `failed`) appears in the
-`Validator 2` column of the MultiQC SQL upload summary.
+`ena_validation_attempts` keeps one row per `(full_seqid, ena_study, validation_attempt)`; a rerun
+under the same key overwrites it. See [ENA Webin validation](usage.md#ena-webin-validation) for the
+attempt token.
 
-When `ena.nf` is used independently, it publishes the same per-sample `genbank/ena/` bundle and also writes:
-
-- `ena/ena_run_summary.tsv`: one row per requested sample showing the table2asn gate or EMBL preflight result,
-  conversion status, Webin status, submission-ready decision, and validation-attempt token.
-- `ena/ena_validation_results_mqc.tsv` and the standalone MultiQC report: the same normalized results in a
-  reviewable batch table.
-- `mitogenomes/<sample>/<assembly_prefix>/genbank/ena/<full_seqid>.ena_preflight_status.tsv`: Webin-only input
-  gzip and structural status.
-- `mitogenomes/<sample>/<assembly_prefix>/genbank/ena/<full_seqid>.ena_preflight_check.tsv`: EMBL record,
-  source-feature, organism, terminator, and sequence counts.
-
-When `--sql_config` is supplied and uploads are not skipped, the standalone runner uses the same uploader and
-emits the same `*.ena_validation.upload.txt` log. `ena_validation_attempts` holds one row per
-`(full_seqid, ena_study, validation_attempt)`: a rerun under the same key overwrites that row (`updated`,
-with `attempt_count` incremented) instead of adding history. Nothing freezes the
-row: submission state belongs to the separate submission pipeline, so the latest
-validation of a sequence is always the one recorded. Use a new
-`--ena_validation_attempt` token for a deliberately separate, independently
-tracked attempt.
-The explicit numbered SQL migrations in `sql/` create the validation and uniform
-depth structures, and retire the locus registry and the selection tables that
-this pipeline no longer populates. They are not run automatically by the pipeline.
-
-### Standalone QC-only workflow (`qc_only_from_annotations.nf`)
-
-When you run `qc_only_from_annotations.nf`, the pipeline skips assembly, annotation, BLAST/LCA, and
-SQL upload modules, and executes only `ENA_SUBMISSION_PREP` on existing annotation files.
-
-<details markdown="1">
-<summary>Output files</summary>
-
-- `mitogenomes/<sample>/<assembly_prefix>/genbank/`
-  - `processed/*.fa|fasta|gff|tbl|cmt`: Processed files with submission-ready headers and structured comments.
-  - `<sample>.bankit_metadata.csv`, `<sample>.bankit_metadata_latlon_cleaned.csv`: Metadata exports from SQL.
-  - `<assembly_prefix>*.src`: Source modifier files for table2asn.
-  - `genes/`, `proteins/`: Extracted/translated gene collections.
-  - `<assembly_prefix>.sqn`, `<assembly_prefix>.val`, `<assembly_prefix>.stats`, `<assembly_prefix>.dr`,
-    `<assembly_prefix>.gbf`: Final table2asn products and reports.
-  - `ena/*.embl.gz`: ENA flat files for samples passing the non-fatal table2asn gate.
-
-</details>
-
-Species naming in this mode comes from `lca_validation.validated_species_name`, queried using parsed
-assembly-prefix fields:
-`og_id = part[0]`, `tech = part[1]`, `seq_date = part[2]`, `code = part[3]`,
-`annotation = part[4]`. The validated name is injected into FASTA/GFF organism headers used by
-GenBank packaging. If no SQL match is found, species is set to `unknown`.
-
-### MultiQC
+## MultiQC
 
 <details markdown="1">
 <summary>Output files</summary>
 
 - `multiqc/`
-  - `multiqc_report.html`: Standalone HTML report.
-  - `per_sample/<sample>/<sample>_multiqc_report.html`: One filtered report per detected sample. These reports are
-    generated by default and can be disabled with `--skip_per_sample_multiqc true`.
-  - `multiqc_data/`: Parsed metrics from GetOrganelle, MitoHiFi, BLAST/LCA, QC evaluation, and the generic nf-core
-    summary plugins.
-  - `multiqc_plots/`: Static assets corresponding to each section of the report.
+  - `multiqc_report.html`: the cohort report.
+  - `multiqc_data/`, `multiqc_plots/`: parsed data and static plots.
+- `mitogenomes/<sample>/<assembly_prefix>/<assembly_prefix>_multiqc_report.html`: one filtered report
+  per assembly, built from the same inputs. Turn these off with `--skip_per_sample_multiqc true`.
 
 </details>
 
-Beyond the standard FastQC aggregation, the pipeline injects several custom tables into MultiQC, including the
-`Mitogenome assembly summary`, `MitoHiFi Contig Stats`, `Species Validation (LCA Summary)`,
-`EMMA Annotation Stats`, `QC Summary`, `Table2ASN submission gate`, `ENA flat-file conversion`,
-`ENA Webin validation`, and GenBank `Table2ASN Validation` sections defined in
-`assets/multiqc_config.yml`. The consolidated software versions YAML is also added to the report inputs for
-traceability.
+Custom sections, defined in `assets/multiqc_config.yml`: `Mitogenome assembly summary`,
+`Mitogenome Read Depth`, `MitoHiFi Contig Stats`, `Species Validation (LCA Summary)`,
+`EMMA Annotation Stats`, `QC Summary`, `SQL Upload Summary`, `ENA submission readiness`,
+`Table2ASN submission gate`, `Table2ASN findings`, `ENA flat-file conversion`,
+`ENA EMBL preflight` and `ENA Webin validation`. The collated software versions are included too.
 
-### Pipeline information
+## Pipeline information
 
 <details markdown="1">
 <summary>Output files</summary>
 
 - `pipeline_info/`
-  - `nf_core_oceangenomesmitogenomes_software_mqc_versions.yml` and related files collecting tool versions from
-    every subworkflow.
-  - Standard Nextflow reports: `execution_report.html`, `execution_timeline.html`, `execution_trace.txt`,
-    `pipeline_dag.*`.
-  - `params.json`: Snapshot of all runtime parameters.
-  - `samplesheet.valid.csv`: Copy of the validated input samplesheet used for the run (if supplied).
-  - `pipeline_report*`: Optional email reports when `--email`/`--email_on_fail` is configured.
+  - `execution_report_<timestamp>.html`, `execution_timeline_<timestamp>.html`,
+    `execution_trace_<timestamp>.txt`, `pipeline_dag_<timestamp>.html`: Nextflow reports, one set
+    per launch.
+  - `params_<timestamp>.json`: the parameters of each launch.
+  - `nf_core_oceangenomesmitogenomes_software_mqc_versions.yml`: every tool version.
+  - `memory_hints.json`: the memory tier that succeeded per sample for GetOrganelle and Oatk, so a
+    `-resume` requests it directly instead of climbing from the lowest tier again.
+  - `pipeline_report.html`, `pipeline_report.txt`: only when `--email` / `--email_on_fail` is set.
+  - `launcher/` (runs started by `nextflow_run.sh`): a snapshot of the launch script, the repo commit
+    it ran from, and any `OG_*` overrides in the environment.
+- `backup_scripts/backup.sh` (runs started by `nextflow_run.sh`): the backup script with this run's
+  directory baked in. `sbatch backup_scripts/backup.sh` copies each `ena/package/` to
+  `s3://ocom.oceangenomes/analysed-data/mitogenomes/curated/<sample>/<assembly_prefix>/` and the
+  whole `mitogenomes/` tree to Acacia.
+- `quarantine_stale_route/`: only when a rerun finds an assembly directory built under different
+  routing (a change in the sample's class, invertebrate flag or genetic code, recorded in each
+  assembly directory's `route.json`). The old directory is moved here rather than mixed with
+  the new results, and the run log names it.
 
 </details>
 
-These artefacts record the exact configuration and runtime behaviour of the workflow so that analyses can be audited
-or reproduced.
+## Standalone QC-only workflow (`qc_only_from_annotations.nf`)
+
+This entrypoint skips assembly, annotation, BLAST/LCA and the assembly uploads, and runs the
+[GenBank and ENA packaging](#genbank-and-ena-packaging) stage on existing annotation files. It
+publishes the same `genbank/` and `ena/` trees per assembly, the run-level `ena/` tables, and,
+unless `--skip_upload_results true`, the `*.ena_validation.upload.txt` and
+`*.qc_validator.upload.txt` logs.
+
+The species name comes from `lca_validation.validated_species_name`, matched on fields parsed from
+each file name (`og_id.tech.seq_date.code.annotation`), and the genetic code from the taxonomic
+class that same query returns. A file with no database match gets species `unknown`.
+
+## Standalone ENA runner (`ena.nf`)
+
+`ena.nf` converts existing table2asn `.gbf` files to EMBL and validates them, or validates existing
+EMBL files. It publishes per assembly under `mitogenomes/<sample>/<assembly_prefix>/ena/validation/`:
+
+- `flatfile/`: as in the main pipeline.
+- `local/<full_seqid>.ena_preflight_status.tsv`, `local/<full_seqid>.ena_preflight_check.tsv`: gzip
+  and EMBL structure checks on input flat files (`--ena_mode validate` only).
+- `<full_seqid>.ena_validation_result.tsv`.
+
+plus `ena/ena_run_summary.tsv`, `ena/ena_validation_results_mqc.tsv` and a standalone MultiQC report.
+With `--sql_config` and uploads on, it writes the same `*.ena_validation.upload.txt` logs.
