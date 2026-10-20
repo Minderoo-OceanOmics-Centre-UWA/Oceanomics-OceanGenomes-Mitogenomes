@@ -1,0 +1,27 @@
+>Feature SYN.ilmn.000000.getorg1770
+3	101	gene
+			gene	MT-CO1
+3	101	mRNA
+			gene	MT-CO1
+3	101	CDS
+			product	p
+			transl_table	2
+			protein_id	gnl|Emma|0
+			note	putative AAA stop codon is completed by the addition of 3' A residues to the mRNA
+110	129	gene
+			gene	MT-TS2
+110	129	tRNA
+			product	tRNA-X
+130	223	gene
+			gene	MT-CO2
+130	223	mRNA
+			gene	MT-CO2
+130	223	CDS
+			product	p
+			transl_table	2
+			protein_id	gnl|Emma|2
+			note	putative TAA stop codon is completed by the addition of 3' A residues to the mRNA
+224	243	gene
+			gene	MT-TK
+224	243	tRNA
+			product	tRNA-X

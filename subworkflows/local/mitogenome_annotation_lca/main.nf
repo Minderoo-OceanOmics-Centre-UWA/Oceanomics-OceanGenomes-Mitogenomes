@@ -11,6 +11,7 @@ include { EMMA_GENE_RESCUE       } from '../../../modules/local/emma_gene_rescue
 include { TRNA_RESCUE_GATE       } from '../../../modules/local/trna_rescue_gate'
 include { TRNA_SCAN              } from '../../../modules/local/trna_scan'
 include { TRNA_RESCUE            } from '../../../modules/local/trna_rescue'
+include { EMMA_STOP_REPAIR       } from '../../../modules/local/emma_stop_repair'
 include { ROTATE_ORIGIN          } from '../../../modules/local/rotate_origin'
 include { MITOS2                 } from '../../../modules/local/mitos2'
 include { ANNOTATION_QC_GATE     } from '../../../modules/local/annotation_qc_gate'
@@ -325,6 +326,27 @@ workflow MITOGENOME_ANNOTATION {
                 .map { row -> [ row[0], row.size() > 2 && row[2] ? row[2] : row[1] ] }
         )
 
+    //
+    // MODULE: EMMA stop repair.
+    // EMMA can end a PCG one codon short of an encoded TAA, depending only on where
+    // the assembly was linearised (NOVA_260925_LA: 9 CO1 + 2 ND1 held, four of them
+    // byte-identical genomes to passing batch-mates). Runs last, on every EMMA
+    // bundle, so PCGs added by the ND4L/ATP8 rescue are covered too. A bundle with
+    // nothing to repair comes back unchanged; a failed task falls back to its input.
+    //
+    EMMA_STOP_REPAIR ( ch_emma_results_trna )
+
+    ch_emma_results_final = ch_emma_results_trna
+        .join(EMMA_STOP_REPAIR.out.results, remainder: true)
+        .filter { row -> row[1] != null }
+        .map { row -> [ row[0], row.size() > 2 && row[2] ? row[2] : row[1] ] }
+
+    // CO1 for BLAST/LCA follows the repair, so a repaired CO1 is what gets searched.
+    ch_emma_co1 = EMMA.out.co1_sequences
+        .join(EMMA_STOP_REPAIR.out.co1_sequences, remainder: true)
+        .filter { row -> row[1] != null }
+        .map { row -> [ row[0], row.size() > 2 && row[2] ? row[2] : row[1] ] }
+
     // TWO ROTATIONS, TWO DIFFERENT JOBS -- do not merge them.
     //
     // This one (ROTATE_ORIGIN, below) sets the LINEARISATION POINT before annotation, so
@@ -504,17 +526,17 @@ workflow MITOGENOME_ANNOTATION {
     ch_invert_s16     = INVERT_ANNOTATION_FIX.out.s16_sequences.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
     ch_invert_results = INVERT_ANNOTATION_FIX.out.results.join(ch_not_coral).map { meta, f, _x -> [meta, f] }
 
-    // Merge annotators: verts (EMMA, ND4L/ATP8- then tRNA-rescued) + PASS
+    // Merge annotators: verts (EMMA, ND4L/ATP8- then tRNA-rescued, then stop-repaired) + PASS
     // invertebrates (MITOS2 untouched) + FIX non-corals (stage 1) + FIX
     // sequence-confirmed corals (stage 1 then stage 2). Every invertebrate now
     // arrives through the gate, so there is no ungated arm left.
-    // co1/12S/16S come straight from EMMA for every
-    // vertebrate sample -- neither rescue touches those, so BLAST/LCA is
-    // unaffected by the rescue outcomes.
-    ch_annot_co1     = EMMA.out.co1_sequences.mix(ch_mitos_co1_pass, ch_invert_co1, CORAL_ANNOTATION_FIX.out.co1_sequences)
+    // 12S/16S come straight from EMMA for every vertebrate sample -- no rescue
+    // touches them. CO1 comes from EMMA_STOP_REPAIR, which can extend its stop
+    // by up to 3 nt (and is otherwise EMMA's file unchanged).
+    ch_annot_co1     = ch_emma_co1.mix(ch_mitos_co1_pass, ch_invert_co1, CORAL_ANNOTATION_FIX.out.co1_sequences)
     ch_annot_s12     = EMMA.out.s12_sequences.mix(ch_mitos_s12_pass, ch_invert_s12, CORAL_ANNOTATION_FIX.out.s12_sequences)
     ch_annot_s16     = EMMA.out.s16_sequences.mix(ch_mitos_s16_pass, ch_invert_s16, CORAL_ANNOTATION_FIX.out.s16_sequences)
-    ch_annot_results = ch_emma_results_trna.mix(ch_mitos_results_pass, ch_invert_results, CORAL_ANNOTATION_FIX.out.results)
+    ch_annot_results = ch_emma_results_final.mix(ch_mitos_results_pass, ch_invert_results, CORAL_ANNOTATION_FIX.out.results)
 
     // Per-sample region count, emitted once per annotated sample (including the
     // 0-region case). Downstream this both sizes the result groups and identifies
@@ -522,11 +544,13 @@ workflow MITOGENOME_ANNOTATION {
     ch_annot_region_counts = ch_annot_results
         .map { meta, files -> [ meta, countAnnotatedRegions(files) ] }
     ch_annot_params  = EMMA.out.tool_params.mix(EMMA_GENE_RESCUE.out.tool_params, TRNA_RESCUE.out.tool_params,
+                                                EMMA_STOP_REPAIR.out.tool_params,
                                                 ROTATE_ORIGIN.out.tool_params,
                                                 MITOS2.out.tool_params, INVERT_ANNOTATION_FIX.out.tool_params,
                                                 CORAL_ANNOTATION_FIX.out.tool_params)
     ch_annot_versions = EMMA.out.versions.mix(EMMA_GENE_RESCUE_GATE.out.versions, EMMA_GENE_RESCUE.out.versions,
                                               TRNA_RESCUE_GATE.out.versions, TRNA_SCAN.out.versions, TRNA_RESCUE.out.versions,
+                                              EMMA_STOP_REPAIR.out.versions,
                                               ROTATE_ORIGIN.out.versions, MITOS2.out.versions,
                                               ANNOTATION_QC_GATE.out.versions, INVERT_ANNOTATION_FIX.out.versions,
                                               CORAL_ANNOTATION_FIX.out.versions,

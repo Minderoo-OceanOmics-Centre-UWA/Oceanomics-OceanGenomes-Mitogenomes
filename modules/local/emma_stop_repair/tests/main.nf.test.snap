@@ -1,0 +1,26 @@
+{
+    "stub": {
+        "content": [
+            [
+                "versions.yml:md5,461707949ecacdf8f277c043e69f659f"
+            ]
+        ],
+        "timestamp": "2026-10-20T13:29:32.285975283",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "extends the short CO1 and leaves the genuine poly-A CO2": {
+        "content": [
+            [
+                "versions.yml:md5,e30b16931653ed677a6c440c8cb79b2e"
+            ]
+        ],
+        "timestamp": "2026-10-20T13:29:23.893756926",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}
