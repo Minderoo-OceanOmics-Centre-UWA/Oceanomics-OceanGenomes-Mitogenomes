@@ -15,9 +15,8 @@
 # Two destinations, run in this order:
 #
 #   1. AWS  : $RUNDIR/mitogenomes/$OG/$ASSEMBLY/ena/package/*
-#             -> s3://ocom.oceangenomes/analysed-data/draft-genomes/$OG/$ASSEMBLY/
-#             (the final ENA submission files, flattened into the assembly dir,
-#             alongside the draft genome files already held there)
+#             -> s3://ocom.oceangenomes/analysed-data/mitogenomes/curated/$OG/$ASSEMBLY/
+#             (the final ENA submission files, flattened into the assembly dir)
 #
 #   2. Acacia: $RUNDIR/mitogenomes/*
 #             -> pawsey0964:oceanomics-mitochondrial-genomes/
@@ -123,7 +122,7 @@ ACACIA_FAILED=0
 
 # --- Stage 1: ENA packages to AWS --------------------------------------------
 # One rclone call per assembly: the package contents are flattened into
-# draft-genomes/$OG/$ASSEMBLY/ so nothing is nested under an ena/package path.
+# $AWS_DEST/$OG/$ASSEMBLY/ so nothing is nested under an ena/package path.
 if ! $SKIP_AWS && ! $AUDIT_ONLY; then
     log "=== stage 1: ena packages -> $AWS_DEST ==="
 

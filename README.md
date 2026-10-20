@@ -14,7 +14,7 @@ convert raw reads into validated mitogenomes. This pipeline automates the comple
 
 - Samplesheet handling (`--input` CSV or `--input_dir` glob) with schema validation and optional SQL-enriched metadata creation.
 - Platform-aware assembly using GetOrganelle (short/Hi-C) and MitoHiFi (HiFi) with metadata-aware prefixes.
-- Sanitisation, annotation (EMMA), BLAST validation, and lowest common ancestor (LCA) calling across key loci.
+- Sanitisation, annotation (EMMA for vertebrates, MITOS2 for invertebrates), BLAST validation, and lowest common ancestor (LCA) calling across key loci.
 - Optional SQL upload modules that push assembly, annotation, and validation outputs into the OceanOmics database.
 - QC gating and GenBank packaging (table2asn) for samples that satisfy species validation checks.
 - Standalone QC-only execution (`qc_only_from_annotations.nf`) for precomputed annotations.
@@ -43,14 +43,14 @@ rapid wiring tests.
 - **ENA candidates** – produce a complete genome-context package for every viable
   assembly/annotation version, using full OceanOmics SeqIDs; the flat file carries
   no `/locus_tag`, since tags are allocated and injected by the downstream
-  submission pipeline. Every technology with a viable mitogenome is published to
-  its own ENA child study. Choosing one package per specimen per technology and
-  submitting it belongs to the downstream submission pipeline; this pipeline
-  ends at the flatfile format check and reports the verdict as
-  `submission_ready`.
+  submission pipeline. Every candidate in a run is validated against the run's
+  `--ena_study`. Choosing one package per specimen and submitting it belongs to
+  the downstream submission pipeline; this pipeline ends at the flatfile format
+  check and reports the verdict as `submission_ready`. See
+  [docs/ena_package.md](docs/ena_package.md).
 - **Reporting** – collate MultiQC inputs, generate run-level reports, and write `pipeline_info/` provenance files.
 
-See `docs/images` for workflow logos and refer to `docs/output.md` for a stage-by-stage file manifest.
+See [docs/output.md](docs/output.md) for a stage-by-stage file manifest.
 
 ## Quick start
 
@@ -155,9 +155,11 @@ Reference launch scripts are provided for both contexts:
 
 Comprehensive usage and output documentation is maintained under `docs/`:
 
-- `docs/usage.md` – parameter descriptions, samplesheet schema, external resource requirements, and execution advice.
-- `docs/output.md` – per-stage file inventories, MultiQC sections, and guidance on interpreting database/QC artefacts.
-- `docs/README.md` – entry point with links to the above.
+- [`docs/usage.md`](docs/usage.md): parameter descriptions, samplesheet schema, external resource requirements, database migrations, and execution advice.
+- [`docs/output.md`](docs/output.md): per-stage file inventories, MultiQC sections, and guidance on interpreting database/QC artefacts.
+- [`docs/ena_package.md`](docs/ena_package.md): the ENA submission package and the hand-over to the downstream submission pipeline.
+- [`sql/README.md`](sql/README.md): what each database migration does.
+- [`docs/README.md`](docs/README.md): entry point with links to the above.
 
 For general nf-core best practices (custom configs, resource tuning, module overrides), see <https://nf-co.re/docs>.
 
@@ -174,14 +176,14 @@ For general nf-core best practices (custom configs, resource tuning, module over
   the OatkDB `<clade>_mito.fam` profile-HMM (required when enabled; fetch with `bin/download_oatk_db.sh`). Tune with
   `--oatk_syncmer_size` / `--oatk_syncmer_coverage`.
 - `--translation_table` – mitochondrial genetic code for **vertebrate/unresolved** samples (default `2`). Invertebrate
-  codes are derived per-sample from taxonomic class (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4),
-  so this no longer forces a single code across all samples.
+  codes are derived per sample from taxonomic class via `assets/taxonomy/mito_genetic_codes.json` (e.g. Cnidaria → 4,
+  Mollusca/Arthropoda → 5, Echinodermata → 9, Tunicata → 13), so this does not force a single code across all samples.
 - `--curated_blast_db` – absolute path to the OceanGenomes-curated BLAST database.
 - `--nt_blast_db` – absolute path to the NCBI nt BLAST database PREFIX, e.g. `.../db/core_nt`
   (used for invertebrate samples, searched with `-taxids 33208`). Must be nt-scale: the
   RefSeq-only `mito` database returns almost no invertebrate hits, and does so silently.
 - `--sql_config` – PostgreSQL config required for `--input_dir` (enriched samplesheet creation). If omitted with
-  `--input`, upload + QC stages are skipped with a warning.
+  `--input`, SQL uploads and ENA submission prep are skipped with a warning; local QC still runs.
 - `--blast_db_dir`, `--taxonkit_db_dir` – scratch/persistent directories for caching taxonomy resources.
 - `--template_sbt` – GenBank submission template consumed by `table2asn`.
 - `--annotation_files` – standalone QC-only input glob for precomputed `fa/fasta/gff/tbl/gb` annotation bundles.
@@ -216,7 +218,7 @@ nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes 
 This repository ships with standard nf-core profiles (`test`, `test_full`, `docker`, `singularity`, `podman`,
 `conda`, `apptainer`, `wave`, etc.) defined in `nextflow.config`. Additional helpers include:
 
-- `-profile pawsey` (via `pawsey_profile.config`) – Slurm + Singularity defaults for Setonix.
+- `-c pawsey_profile.config` – Slurm + Singularity defaults for Setonix (used by `nextflow_run.sh`).
 - `-stub-run` – execute stub sections for rapid validation of channel wiring and configuration.
 - `-profile debug` – enable verbose logging, hash dumps, and DAG validation.
 
@@ -227,13 +229,18 @@ JSON and keep `-c` for infrastructure overrides.
 
 Final results are published under `--outdir` with predictable subdirectories:
 
-- `mitogenomes/` – assemblies, annotations, BLAST/LCA outputs, and GenBank packaging artefacts per sample.
-- `species_validation/`, `qc/` and `sql_uploaded_data/` – per-sample species-validation tables, QC summaries and
+- `samplesheet/` – the samplesheet the run used, plus where each sample's taxonomy came from.
+- `mitogenomes/` – per sample and assembly: assembly, annotation, BLAST/LCA, GenBank packaging, the ENA candidate
+  package, and a per-assembly MultiQC report.
+- `species_validation/`, `qc/` and `sql_uploaded_data/` – per-assembly species-validation tables, QC summaries and
   SQL upload logs. Only `sql_uploaded_data/` depends on a database; the rest are written on every run.
-- `multiqc/` – consolidated HTML report plus supporting data.
-- `pipeline_info/` – Nextflow reports, parameter snapshots, software versions, and validated samplesheet copies.
+- `ena/` – run-level ENA submission-readiness tables.
+- `held_samples.tsv`, `run_completeness.txt` – which samples were held and why, and a check that every sample is
+  accounted for.
+- `multiqc/` – consolidated HTML report, supporting data, and the assembly summary table.
+- `pipeline_info/` – Nextflow reports, parameter snapshots, software versions, and memory hints for `-resume`.
 
-Refer to `docs/output.md` for exhaustive listings.
+Refer to [docs/output.md](docs/output.md) for exhaustive listings.
 
 ## Testing
 
