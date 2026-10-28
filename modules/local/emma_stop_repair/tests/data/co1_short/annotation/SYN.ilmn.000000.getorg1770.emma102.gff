@@ -1,0 +1,12 @@
+##gff-version 3
+##sequence-region	SYN.ilmn.000000.getorg1770	1	243
+SYN.ilmn.000000.getorg1770	Emma	gene	3	101	.	+	.	ID=g0;Name=MT-CO1
+SYN.ilmn.000000.getorg1770	Emma	mRNA	3	101	.	+	.	ID=m0;Parent=g0;Name=MT-CO1
+SYN.ilmn.000000.getorg1770	Emma	CDS	3	101	0.0	+	0	ID=c0;Parent=m0;Name=MT-CO1;Product=p;Note=putative AAA stop codon is completed by the addition of 3' A residues to the mRNA
+SYN.ilmn.000000.getorg1770	Emma	gene	110	129	.	+	.	ID=g1;Name=MT-TS2
+SYN.ilmn.000000.getorg1770	Emma	tRNA	110	129	1e-20	+	.	ID=t1;Parent=g1;Name=MT-TS2
+SYN.ilmn.000000.getorg1770	Emma	gene	130	223	.	+	.	ID=g2;Name=MT-CO2
+SYN.ilmn.000000.getorg1770	Emma	mRNA	130	223	.	+	.	ID=m2;Parent=g2;Name=MT-CO2
+SYN.ilmn.000000.getorg1770	Emma	CDS	130	223	0.0	+	0	ID=c2;Parent=m2;Name=MT-CO2;Product=p;Note=putative TAA stop codon is completed by the addition of 3' A residues to the mRNA
+SYN.ilmn.000000.getorg1770	Emma	gene	224	243	.	+	.	ID=g3;Name=MT-TK
+SYN.ilmn.000000.getorg1770	Emma	tRNA	224	243	1e-20	+	.	ID=t3;Parent=g3;Name=MT-TK

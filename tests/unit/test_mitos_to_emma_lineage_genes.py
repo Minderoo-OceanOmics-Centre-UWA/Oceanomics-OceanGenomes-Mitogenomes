@@ -91,6 +91,15 @@ class LocusClusteringTests(unittest.TestCase):
         rows = self._rows([(1, 70, "+", None), (15000, 15070, "+", None)])
         self.assertEqual(len(m.cluster_loci(rows, max_intron=10000)), 2)
 
+    def test_suffixed_copies_on_opposite_strands_split(self):
+        """MITOS numbers duplicate copies _0/_1 too. NOVA_260909_LA OG3090 had
+        trnL1_0 (-) and trnL1_1 (+) 2.2 kb apart joined into one mixed-strand
+        tRNA, which table2asn rejects with SEQ_FEAT.MixedStrand."""
+        rows = self._rows([(25411, 25476, "+", "1"), (27584, 64, "-", "0")])
+        loci = m.cluster_loci(rows)
+        self.assertEqual(len(loci), 2)
+        self.assertEqual({l[0]["strand"] for l in loci}, {"+", "-"})
+
     def test_opposite_strands_never_merge(self):
         rows = self._rows([(1, 70, "+", None), (200, 270, "-", None)])
         self.assertEqual(len(m.cluster_loci(rows, max_intron=10000)), 2)

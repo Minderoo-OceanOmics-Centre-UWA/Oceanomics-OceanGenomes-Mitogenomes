@@ -311,14 +311,23 @@ def cluster_loci(rows, max_intron=DEFAULT_MAX_INTRON):
     they are exons of one gene), or when they share a strand and sit within
     ``max_intron`` of each other. Anything else opens a new locus.
 
-    Deliberately conservative: a single row, or any set of rows carrying explicit
-    part suffixes, always yields exactly one locus, so no existing annotation in
-    this batch can change shape as a side effect of this fix.
+    Deliberately conservative: a single row, or any set of same-strand rows
+    carrying explicit part suffixes, always yields exactly one locus. Suffixed
+    rows on different strands cannot be exons of one gene and become one locus
+    per strand.
     """
     explicit = [r for r in rows if r["frag"] is not None]
     implicit = [r for r in rows if r["frag"] is None]
 
-    loci = [explicit] if explicit else []
+    # MITOS also numbers plain duplicate copies with _0/_1, so the suffix alone
+    # cannot be trusted as "exons of one gene". Exons share a strand: rows on
+    # opposite strands are separate copies (NOVA_260909_LA OG3090 trnL1_0 on -
+    # and trnL1_1 on +, 2.2 kb apart, had been joined into one mixed-strand tRNA
+    # that table2asn rejects). Same-strand suffixed rows still form one locus, so
+    # intron-split genes (coral nad5_0/nad5_1) are untouched.
+    loci = []
+    for strand in sorted({r["strand"] for r in explicit}):
+        loci.append([r for r in explicit if r["strand"] == strand])
     for r in sorted(implicit, key=lambda e: e["start"]):
         placed = False
         for locus in loci:

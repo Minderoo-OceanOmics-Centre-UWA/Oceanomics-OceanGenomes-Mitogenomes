@@ -1,6 +1,6 @@
-# nf-core/oceangenomesmitogenomes: Usage
+# OceanOmics OceanGenomes Mitogenomes: Usage
 
-The nf-core/oceangenomesmitogenomes workflow assembles, annotates, validates, and packages
+The OceanOmics OceanGenomes Mitogenomes workflow assembles, annotates, validates, and packages
 mitochondrial genomes from PacBio HiFi, Illumina, and Hi-C sequencing runs. This page describes
 pipeline-specific input requirements and the parameters you must provide to execute a full run on
 OceanOmics data holdings.
@@ -11,7 +11,7 @@ OceanOmics data holdings.
 ## Quick start
 
 ```bash
-nextflow run nf-core/oceangenomesmitogenomes \
+nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes \
   -profile singularity \            # or docker / conda / podman / …
   --input oceanomics_samples.csv \   # or --input_dir "/data/OG*/**/*.fastq.gz"
   --outdir results \
@@ -58,7 +58,8 @@ Required parameters for this standalone workflow:
 | `--sql_config` | ✔ | PostgreSQL config used to fetch `validated_species_name` from `lca_validation` and to build source modifier tables. |
 | `--template_sbt` | ✔ | `.sbt` template passed to `table2asn` via `GEN_FILES_TABLE2ASN`. |
 | `--outdir` | ✔ | Output directory for published GenBank/QC artefacts. |
-| `--translation_table` | Optional | Fallback mitochondrial genetic code for gene translation when no per-sample code is available (defaults to `2`). In QC-only mode the taxonomic class is not re-derived, so this value is used directly. |
+| `--translation_table` | Optional | Fallback mitochondrial genetic code (default `2`). The code is normally resolved per sample from the taxonomic class the SQL query returns; this value is used only for a class with no confirmed code, and the run warns for each such sample. |
+| `--skip_upload_results` | Optional | Skip the ENA validation and second-validator writes (default `false`). |
 
 Filename parsing and SQL matching rules:
 
@@ -87,7 +88,7 @@ that matches your container/conda environment.
 | `--nt_blast_db` | Conditional | NCBI nt BLAST database PREFIX (e.g. `.../db/core_nt`) used when samples are marked `invertebrates=true`; searched with `-taxids 33208`. Must be nt-scale — the RefSeq-only `mito` database yields almost no invertebrate hits. |
 | `--mitos_refdb` | Conditional | MITOS2 RefSeq reference data directory (parent of the version dir), downloaded from Zenodo. Required whenever invertebrate samples (annotated with MITOS2) are present. |
 | `--mitos_refseq_ver` | Optional | MITOS2 reference version subdir name passed to `runmitos.py -r` (default `refseq89m`). |
-| `--sql_config` | Conditional | INI file with `[postgres] dbname,user,password,host,port`. Required for `--input_dir`; optional for `--input` if upload/QC is skipped. |
+| `--sql_config` | Conditional | INI file with `[postgres] dbname,user,password,host,port`. Required for `--input_dir`. Optional for `--input`: without it SQL uploads and ENA submission prep are off, and local QC still runs. |
 | `--blast_db_dir` | ✔ | Directory used to cache the downloaded `taxdb.*` files; re-use between runs to avoid repeated downloads. |
 | `--taxonkit_db_dir` | ✔ | Directory used to cache the NCBI taxdump for TaxonKit. |
 | `--template_sbt` | ✔ | Submission template passed to `table2asn` when packaging GenBank artefacts. |
@@ -105,16 +106,17 @@ that matches your container/conda environment.
 | `--getorganelle_firstpass_group_genes` | Optional | Label the FIRST GetOrganelle pass with the sample's curated group gene database instead of only the stock `animal_mt` LabelDatabase (default `true`). The stock seed still recruits the reads; only labelling changes. |
 | `--getorganelle_empty_first_pass_rescue` | Optional | Reseed a first pass that produced no contig at all from the sample's whole curated group database (default `true`). Without it an empty first pass cannot select a seed subset and can never be reseeded. |
 | `--hinted_memory_base_gb` | Optional | Attempt-1 memory (GB) for `GETORGANELLE_FROMREADS`, `GETORGANELLE_RESEED` and `OATK` when no per-sample hint exists (default `64`). On Setonix the memory request is what is billed, so this dominates SU. |
+| `--skip_hic_fastp` | Optional | Skip fastp trimming of raw Hi-C reads before GetOrganelle (default `false`). Override the fastp arguments with `--hic_fastp_args`. |
+| `--force_db_overwrite` | Optional | Replace an existing `mitogenome_data` row on upload (default `true`). Set `false` for insert-only uploads, which keep a row that already holds a real result. Neither mode replaces a successful assembly row with `failed to assemble`. |
+| `--lca_prune_history` | Optional | Delete `lca` / `lca_raw_results` rows this run did not reproduce (default `false`). Those tables are content-keyed upserts, so a rerun is correct without it and superseded results are kept as history. |
+| `--translation_table` | Optional | Mitochondrial genetic code for vertebrate/unresolved samples (default `2`). Invertebrate codes are derived per sample from the taxonomic `class` via `assets/taxonomy/mito_genetic_codes.json` (Cnidaria, Ctenophora, Porifera → 4; Mollusca, Arthropoda, Annelida and most other protostomes → 5; Echinodermata, Platyhelminthes → 9; Tunicata → 13), so this does not force a single code across the run. |
+| `--allow_unknown_taxonomy` | Optional | Continue with a warning when a sample's taxonomic `class` is `unknown` (default `false`, i.e. the run aborts). An unknown class is treated as vertebrate by every downstream chooser, so this is for deliberate one-offs only. |
 
 Invertebrate reseeds take their seed and gene-label database from the curated per-phylum databases in
 `assets/refdb/<group>/`, chosen from the sample's `class` (Cnidaria → anthozoa, Gastropoda → mollusca,
 Malacostraca → arthropoda, and so on). An invertebrate class no database covers is **not** reseeded from another
 phylum: it keeps its first-pass assembly, and the run log names it. See
 [`assets/refdb/README.md`](../assets/refdb/README.md) for what each database contains and how to add a group.
-| `--skip_hic_fastp` | Optional | Skip fastp trimming of raw Hi-C reads before GetOrganelle (default `false`). Override the fastp arguments with `--hic_fastp_args`. |
-| `--force_db_overwrite` | Optional | Overwrite existing `mitogenome_data` rows on SQL upload instead of the default insert-only behaviour (default `false`). |
-| `--translation_table` | Optional | Mitochondrial genetic code for vertebrate/unresolved samples (default `2`). Invertebrate codes are derived per-sample from the taxonomic `class` column (Cnidaria → 4, echinoderms/flatworms → 9, other invertebrates → 4), so this no longer forces a single code across the whole run. |
-| `--allow_unknown_taxonomy` | Optional | Continue with a warning when a sample's taxonomic `class` is `unknown` (default `false`, i.e. the run aborts). An unknown class is treated as vertebrate by every downstream chooser, so this is for deliberate one-offs only. |
 
 The resolved per-sample code reaches every artefact that states one: the genome FASTA, the
 `.tbl`, the `mgcode` passed to table2asn, the translation table, and the `[mgcode=]` tag on
@@ -155,8 +157,8 @@ of any non-cnidarian sample you push through it.
 `--input_dir` mode requires `--sql_config` because the enriched samplesheet generator queries
 OceanOmics metadata. Pass `--taxonkit_db_dir` as well: the generator falls back to the NCBI
 taxdump for samples the `species` table cannot resolve, and without it those samples fail the
-taxonomy check. When running with `--input`, you can omit `--sql_config`, but upload/QC stages
-are then skipped with a warning.
+taxonomy check. When running with `--input`, you can omit `--sql_config`: SQL uploads and ENA
+submission prep are then skipped with a warning, and local QC still runs.
 
 ### Reference-free Oatk fallback
 
@@ -190,34 +192,18 @@ The chromosome-list row uses the reusable chromosome name `MT`:
 OG910.hifi.241127.v3mitohifi.emma102	MT	Circular-Chromosome	Mitochondrion
 ```
 
-For the prepared OG111 pilot, restore and stage its matching 2023 Illumina
-lanes, then launch the complete Pawsey run:
-
-```bash
-bin/stage_ena_pilot_input.sh
-./nextflow_run_ena_pilot.sh
-```
-
 Packages are written beneath
-`<outdir>/mitogenomes/OG910/OG910.hifi.241127.v3mitohifi/ena/package/`.
+`<outdir>/mitogenomes/<sample>/<assembly_prefix>/ena/package/`.
 `<full_seqid>.package_metadata.json` is the single file the submission pipeline
 reads: its `manifest` block holds the Webin genome-context keys under the names
 Webin uses, and its `specimen` block holds the flatfile's source-feature facts.
 `STUDY`, `SAMPLE` and `RUN_REF` are not in it, because the study, the sample and
-the read submissions are registered downstream.
+the read submissions are registered downstream. [ena_package.md](ena_package.md)
+documents the package and the hand-over to the submission pipeline.
 
 The flatfile carries no `/locus_tag` on any feature. Locus tags are allocated and
 injected by the downstream submission pipeline, so `table2asn` reports
 `NO_LOCUS_TAGS` on every record and the pipeline treats that code as advisory.
-
-Apply the ENA migrations after the existing depth and validation migrations:
-
-```bash
-singularity exec \
-  "/software/projects/pawsey1348/singularity/nextflow_cache/tylerpeirce-psycopg2-0.1.img" \
-  python bin/apply_ena_migrations.py \
-  --config /home/tpeirce/postgresql_details/oceanomics.cfg
-```
 
 `--ena_webin_validate` (on by default) format-validates every converted
 flatfile with `ena-webin-cli -context sequence`. That is where the pipeline
@@ -242,16 +228,15 @@ It has no default, so a run without it stops rather than validating against
 whatever it fell back to.
 
 The password is stored in Nextflow's secret store rather than a parameter or params file. The pipeline invokes
-Webin with `-validate` only and never submits records. Individual Webin failures are written to the sample's
-`genbank/ena/` directory and do not terminate unrelated jobs. Only files under `ena/validated/` have passed both
-the local table2asn gate and Webin validation.
+Webin with `-validate` only and never submits records. Individual Webin failures are written to the assembly's
+`ena/validation/flatfile/` directory and do not terminate unrelated jobs. Only files under
+`ena/validation/flatfile/validated/` have passed both the local table2asn gate and Webin validation.
 
 ### Standalone ENA conversion and validation
 
 Use `ena.nf` when table2asn or EMBL outputs already exist and the assembly, annotation, and QC stages should not run.
-The runner always performs Webin validation and therefore requires the two Webin secrets described above. Each row's
-study is resolved from the technology in its `mt_assembly_prefix`, and a row whose technology is not `hifi`, `hic` or
-`ilmn` stops the run rather than being validated against a default study.
+The runner always performs Webin validation and therefore requires the two Webin secrets described above. Every row
+validates against the run's single `--ena_study`, which is required.
 
 To convert table2asn `.gbf` files and then validate them, create a CSV with these columns:
 
@@ -277,91 +262,8 @@ nextflow run ena.nf \
 
 Add `--sql_config /path/to/postgres.cfg` to either standalone command to upload the normalized
 validation attempt to PostgreSQL after Webin finishes. Use `--skip_upload_results true` for an
-explicitly file-only run. The database schema is never created by Nextflow; apply the migrations
-deliberately before enabling this upload, in order:
-
-```bash
-psql --dbname oceanomics --file sql/001_create_ena_validation_attempts.sql
-psql --dbname oceanomics --file sql/002_ena_validation_attempts_single_row_per_attempt.sql
-psql --dbname oceanomics --file sql/003_mitogenome_data_uniform_depth.sql
-psql --dbname oceanomics --file sql/004_ena_candidate_packages.sql
-psql --dbname oceanomics --file sql/005_ena_validation_attempts_genome_context.sql
-psql --dbname oceanomics --file sql/006_ena_tech_aware_locus_tags.sql
-psql --dbname oceanomics --file sql/007_insdc_biosample_accessions.sql
-psql --dbname oceanomics --file sql/008_ena_submission_queue.sql
-psql --dbname oceanomics --file sql/009_ena_locus_registry_canonical_order.sql
-psql --dbname oceanomics --file sql/010_drop_ena_locus_tables.sql
-psql --dbname oceanomics --file sql/011_drop_local_package_validation.sql
-psql --dbname oceanomics --file sql/012_drop_ena_selection_layer.sql
-psql --dbname oceanomics --file sql/013_drop_ena_candidate_runs.sql
-psql --dbname oceanomics --file sql/014_ena_validation_attempts_full_seqid.sql
-psql --dbname oceanomics --file sql/015_ena_submissions.sql
-psql --dbname oceanomics --file sql/016_mitogenome_data_og_num_generated.sql
-psql --dbname oceanomics --file sql/017_lca_content_addressed_rows.sql
-psql --dbname oceanomics --file sql/018_mitogenome_data_og_num_first.sql
-```
-
-`010` retires `ena_locus_registry` and `ena_candidate_loci` now that locus tags are assigned by
-the downstream submission pipeline. It copies both into `*_archive` tables first: the tags behind
-already-submitted records cannot be rebuilt from the flatfiles.
-
-`012` retires the selection layer for the same reason: choosing and submitting a package belongs to
-the downstream pipeline, so `ena_candidate_packages`, `ena_submission_selections` and the
-`ena_submission_queue` view are dropped, along with the package, production-Webin, checksum and
-run-provenance columns on `ena_validation_attempts`. That leaves `submission_ready` meaning what
-this pipeline can actually attest: the flatfile passed every gate. This drop is not reversible from
-the repository, so dump those three relations first if you want them.
-
-`015` adds `ena_submissions`, the submission ledger, and the `ena_submission_status` view.
-Nothing in this pipeline writes or reads either one: validation must not depend on submission
-state. The table is written by the downstream submitter, keyed on `(full_seqid, webin_mode)`, and
-holds the submission status, the accessions ENA returns (`ERZ`, `GCA`, sequence, `ERS`), the
-BioSample the submission actually carried, the locus tag prefix and the run accessions. See
-`docs/ena_submission_handoff.md` for the contract. `ena_submission_status` joins the latest
-validation attempt per `full_seqid` to that ledger, so one query says what is validated and what
-has happened to it since.
-
-`016` restores `mitogenome_data.og_num` as a stored generated column, `(SUBSTRING(og_id FROM 3))::integer`,
-which is what `sample`, `draft_genomes`, `lca` and `lca_raw_results` already use. The live table had
-lost the generation expression and become a plain nullable column that nothing writes, so it was
-populated on 28 of 289 rows. PostgreSQL cannot convert a column in place, so the migration drops and
-re-adds it: the values are all recomputed from `og_id`, and `og_num` moves to the last column position.
-Do not name `og_num` in any `INSERT` or `UPDATE` column list; a generated column rejects it.
-
-`017` records the content-addressing rework of `lca` and `lca_raw_results`: the `content_hash`
-and `taxon_rank_db` columns, the `lca_set_content_hash()` trigger function and its two triggers,
-the swap of both unique keys from `lca_run_date` to `content_hash`, and the rename of both
-foreign keys off the ambiguous `fk_mitogenome`. That change was applied directly to the live
-database around 2026-08-20 and never written down, while the code half of it shipped in
-`55321df`. It is a no-op against the live database and is what lets a rebuilt one satisfy the
-`ON CONFLICT ON CONSTRAINT lca_content_unique` / `lca_raw_results_content_unique` targets that
-`push_lca_blast_results.py` and `push_lca_raw_results.py` name. `content_hash` is
-trigger-maintained: never name it in an `INSERT` or `UPDATE` column list.
-
-`018` puts `og_num` back as column 1 of `mitogenome_data`, where it was before `016`. `016` had
-to drop and re-add the column to make it generated, which moved it to last. PostgreSQL cannot
-reorder columns, so `018` rebuilds the table, copies the rows, re-points the three inbound
-foreign keys and re-grants `readonly`. The `_1` suffixes on `mitogenome_data_pkey_1`,
-`mitogenome_data_unique_1` and `mitogenome_data_depth_method_idx_1` are deliberate and preserved:
-the unsuffixed names still belong to the `mitogenome_data_SS260818` snapshot. **Run it only when
-no pipeline is writing to `mitogenome_data`** — it is one transaction, but the foreign-key swap
-will block or fail against an in-flight push.
-
-`bin/apply_ena_migrations.py --config <cfg>` applies the pending migrations from that list, in order,
-under an advisory lock, and audits the schema before and after. It records each one in
-`public.schema_migrations` (filename, sha256, applied_at) and skips anything already recorded, so a
-migration runs exactly once. `--check-only` reports the current state and the pending list without
-changing anything. `--baseline` records every listed migration as applied *without running any of
-it*, for onboarding a database they were already applied to; it refuses once the ledger is
-non-empty. Editing a migration after it has been applied is an error — the database no longer
-matches the file — so the runner fails on checksum drift unless you pass `--force`; write a new
-migration instead.
-
-`014` re-keys `ena_validation_attempts` on `full_seqid` (the assembly prefix plus the annotation
-version, e.g. `OG82.ilmn.240313.getorg1770.emma102`) and gives the annotation its own column after
-`code`, matching the id every other ENA artifact already carries. It rebuilds the table, so rows
-written before it carry `full_seqid = assembly_prefix` and a NULL `annotation` until those
-assemblies are validated again.
+explicitly file-only run. Nextflow never creates the database schema: apply the migrations first
+(see [Database migrations](#database-migrations)).
 
 `ena_validation_attempts` keeps one row per `(full_seqid, ena_study, validation_attempt)`.
 Rerunning under the same attempt token overwrites that row rather than adding a new one, so retrying
@@ -465,9 +367,9 @@ These thresholds are deliberately broad defaults for animal mitochondrial assemb
 the command line or a params file when processing taxa with known compact, expanded, or unusual
 mitogenomes.
 
-The pipeline also writes one filtered MultiQC report per detected sample under
-`multiqc/per_sample/<sample>/<sample>_multiqc_report.html`. Set `--skip_per_sample_multiqc true`
-to generate only the cohort-level report.
+The pipeline also writes one filtered MultiQC report per assembly, at
+`mitogenomes/<sample>/<assembly_prefix>/<assembly_prefix>_multiqc_report.html`. Set
+`--skip_per_sample_multiqc true` to generate only the cohort-level report.
 
 ## Samplesheet requirements (`--input`)
 
@@ -527,10 +429,10 @@ dates:
 - Hi-C: detects `HICL`/`HIC` in the file name and queries the sequencing date from the SQL database.
 
 The generated CSV includes enriched metadata columns:
-`sample,sequencing_type,single_end,original_id,completion_date,date,assembly_prefix,nominal_species_id,invertebrates,fastq_1,fastq_2`.
+`sample,sequencing_type,single_end,original_id,completion_date,date,assembly_prefix,nominal_species_id,reference_species_id,class,family,order,invertebrates,genetic_code,fastq_1,fastq_2`.
 
-The current implementation writes `samplesheet.csv` and validates it against
-`assets/schema_input.json`.
+It is published to `<outdir>/samplesheet/samplesheet.csv`, with `taxonomy_resolution.tsv` beside
+it, and validated against `assets/schema_input.json`.
 
 ## External resource files
 
@@ -577,6 +479,30 @@ The pipeline orchestrates several helper modules that all require absolute file 
 Optional helpers include `--binddir` (Singularity bind mount root) and `--tempdir` (work directory
 for large temporary files).
 
+## Database migrations
+
+Nextflow never creates or alters the database schema. The numbered migrations in `sql/` are applied
+deliberately, before a run that uploads, with the migration runner:
+
+```bash
+python bin/apply_ena_migrations.py --config /path/to/postgres.cfg --check-only   # report pending
+python bin/apply_ena_migrations.py --config /path/to/postgres.cfg                # apply pending
+```
+
+It applies the pending migrations from its list, in order, under an advisory lock, and audits the
+schema before and after. Each one is recorded in `public.schema_migrations` (filename, sha256,
+applied_at) and skipped once recorded, so a migration runs exactly once. `--baseline` records every
+listed migration as applied *without running any of it*, for onboarding a database they were already
+applied to; it refuses once the ledger is non-empty. Editing a migration after it has been applied
+is an error (the database no longer matches the file), so the runner fails on checksum drift unless
+you pass `--force`: write a new migration instead.
+
+On Setonix there is no `psql` or `psycopg2` on the login nodes, so run it inside the psycopg2
+container with `singularity exec <image> python bin/apply_ena_migrations.py ...`.
+
+[`sql/README.md`](../sql/README.md) describes what each migration does and the ones that need care
+(irreversible drops, table rebuilds, generated columns that must never be written).
+
 ## Skipping stages and reusing results
 
 The main workflow supports coarse-grained skipping and reuse of pre-computed artefacts:
@@ -589,9 +515,9 @@ The main workflow supports coarse-grained skipping and reuse of pre-computed art
   `--precomputed_mitogenome_assembly_log_hifi`.
 - `--skip_getorganelle_reseed` – disable the automatic reseed pass so GetOrganelle only runs its
   first pass.
-- `--skip_mitogenome_annotation` – skip EMMA / BLAST / LCA; optional inputs
-  `--precomputed_mitogenome_annotation_results`, `--precomputed_mitogenome_blast_results`, and
-  `--precomputed_mitogenome_lca_results` allow you to feed downstream modules.
+- `--skip_mitogenome_annotation` and `--blast_precomputed_annotations` – skip annotation and reuse
+  existing results. These two flags behave differently from what their names suggest, so read
+  [Skipping annotation](#skipping-annotation) before using them.
 - `--skip_upload_results` – disable the SQL upload modules, and only those. Local QC is unaffected:
   annotation statistics, species validation, the QC gate, the QC summary and the held-samples report all
   still run, and the assembly summary still gets its annotation columns. ENA submission prep is unaffected
@@ -609,6 +535,65 @@ The main workflow supports coarse-grained skipping and reuse of pre-computed art
 For precomputed assembly channels to map correctly back onto metadata, file basenames should encode
 `<sample>.<sequencing_type>.<date>...` (for example:
 `OG764.ilmn.240716.getorg1770.fasta`).
+
+### Skipping annotation
+
+Annotation, BLAST and LCA are three steps, but `--skip_mitogenome_annotation` does **not** skip
+only the steps you have results for. It switches off all three together, and the steps after them
+(QC, uploads, ENA prep) then read **all three** precomputed globs:
+
+| Parameter | Default if you don't set it |
+|---|---|
+| `--precomputed_mitogenome_annotation_results` | `<outdir>/mitogenomes/*/*/annotation/*.{fa,fasta,gff,tbl,gb}` |
+| `--precomputed_mitogenome_blast_results` | `<outdir>/mitogenomes/*/*/lca/blast.*filtered.tsv` |
+| `--precomputed_mitogenome_lca_results` | `<outdir>/mitogenomes/*/*/lca/lca.*.tsv` |
+
+Because every glob has a default, there is no such thing as "not providing" BLAST or LCA results.
+If a glob matches no files, that step's results are simply **empty**. The pipeline does not error
+and does not run BLAST instead. Species validation then sees no hits, and every sample is held as
+`species_not_in_blast`.
+
+To run BLAST + LCA on annotations you already have, add `--blast_precomputed_annotations true`:
+
+| What you want | Flags | Annotation | BLAST + LCA |
+|---|---|---|---|
+| Normal run | (neither) | runs | runs |
+| Reuse everything from an earlier run | `--skip_mitogenome_annotation true` | read from the annotation glob | read from the BLAST/LCA globs |
+| Keep your annotations, redo BLAST + LCA (e.g. after hand curation) | `--skip_mitogenome_annotation true`<br>`--blast_precomputed_annotations true` | read from the annotation glob | **run** on those annotations; BLAST/LCA globs ignored |
+
+In every case QC, uploads and ENA prep run afterwards as normal. `--blast_precomputed_annotations`
+on its own, without `--skip_mitogenome_annotation`, does nothing (the run warns).
+
+#### BLAST + LCA on existing annotations
+
+Give the run its samplesheet as usual (`invertebrates` and `genetic_code` choose the BLAST database
+and its arguments), the precomputed assemblies (the assembly rows and the QC gate need them), and the
+annotation bundles:
+
+```bash
+SRC=/scratch/.../NOVA_260925_LA_mitogenomes/mitogenomes
+nextflow run main.nf ... \
+    --input samplesheet.csv \
+    --skip_mitogenome_assembly_getorg true \
+    --skip_mitogenome_assembly_hifi true \
+    --precomputed_mitogenome_assembly_fasta_getorg "$SRC/*/*/mtdna/*.fasta" \
+    --precomputed_mitogenome_assembly_log_getorg "$SRC/*/*/mtdna/*.get_org.log.txt" \
+    --precomputed_mitogenome_circularity_evidence_getorg "$SRC/*/*/mtdna/*.getorg_check.tsv" \
+    --skip_mitogenome_annotation true \
+    --blast_precomputed_annotations true \
+    --precomputed_mitogenome_annotation_results "$SRC/*/*/annotation/*.{fa,gff,tbl}"
+```
+
+- Glob only the bundle's top-level files, one annotation per assembly. Do not glob `cds/`: its
+  `CO1.<prefix>.fa` names would be read as sample IDs, and the regions are re-extracted anyway. Two
+  GFFs for one assembly (e.g. `mitos2110` and `mitos2110_mancurated`) is an error; narrow the glob.
+- Each bundle's `cds/` and `proteins/` (which `ANNOTATION_STATS` needs for the PCG ORF check) and the
+  CO1/12S/16S BLAST inputs are rebuilt from the GFF + FASTA, so an edited GFF is what gets QC'd and
+  BLASTed. `annotation_rebuild/<annotation>.bundle_rebuild.tsv` records every protein-coding and rRNA
+  gene and compares it with the bundle's own `cds/`: `match`, `trimmed` (EMMA's convention of dropping
+  the stop codon; consistent with the GFF, so the bundle's `cds/` and `proteins/` are reused), `stale`
+  (`cds/` disagrees with the GFF, which wins; the protein is re-translated), or `no_cds`.
+- A region the GFF does not annotate is not BLASTed, exactly as on a normal run.
 
 ## Running with parameter files
 
@@ -631,7 +616,7 @@ skip_mitogenome_assembly_hifi: false
 ```
 
 ```bash
-nextflow run nf-core/oceangenomesmitogenomes -profile singularity -params-file params.yaml
+nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes -profile singularity -params-file params.yaml
 ```
 
 Avoid using `-c` for parameter injection – reserve it for infrastructure or resource overrides.
@@ -662,7 +647,7 @@ additional tool arguments, follow the guidance in the nf-core documentation:
 Every process ships with a `stub` section so you can validate wiring and configuration quickly:
 
 ```bash
-nextflow run nf-core/oceangenomesmitogenomes \
+nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes \
   -profile test,singularity \
   --input test_data/samplesheet.csv \
   --curated_blast_db test_data/blast_db \
@@ -678,5 +663,5 @@ config path) without launching long compute jobs.
 
 ## Output summary
 
-See `docs/output.md` for a detailed, stage-by-stage description of result files, including MultiQC
-sections, SQL upload logs, and the GenBank submission bundle layout.
+See [output.md](output.md) for a stage-by-stage description of result files, including MultiQC
+sections, SQL upload logs, and the GenBank and ENA package layout.

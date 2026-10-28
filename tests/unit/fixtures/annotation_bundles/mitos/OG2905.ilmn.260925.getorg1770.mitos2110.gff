@@ -1,0 +1,77 @@
+##gff-version 3
+##sequence-region	OG2905.ilmn.260925.getorg1770	1	16662
+OG2905.ilmn.260925.getorg1770	mitos	region	1	16662	.	+	.	ID=OG2905.ilmn.260925.getorg1770:1..16662;Is_circular=True;Name=OG2905.ilmn.260925.getorg1770;genome=mitochondrion;mol_type=genomic DNA
+OG2905.ilmn.260925.getorg1770	mitos	gene	1	1554	.	+	.	ID=gene-CO1;Name=MT-CO1;Product=cytochrome c oxidase subunit I
+OG2905.ilmn.260925.getorg1770	mitos	CDS	1	1554	.	+	.	ID=CO1;Parent=gene-CO1;Name=MT-CO1;Product=cytochrome c oxidase subunit I
+OG2905.ilmn.260925.getorg1770	mitos	gene	1555	1624	.	+	.	ID=gene-TR;Name=MT-TR;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	1555	1624	.	+	.	ID=TR;Parent=gene-TR;Name=MT-TR;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	1625	1921	.	+	.	ID=gene-ND4L;Name=MT-ND4L;Product=NADH dehydrogenase subunit 4L
+OG2905.ilmn.260925.getorg1770	mitos	CDS	1625	1921	.	+	.	ID=ND4L;Parent=gene-ND4L;Name=MT-ND4L;Product=NADH dehydrogenase subunit 4L
+OG2905.ilmn.260925.getorg1770	mitos	gene	1970	2623	.	+	.	ID=gene-CO2;Name=MT-CO2;Product=cytochrome c oxidase subunit II
+OG2905.ilmn.260925.getorg1770	mitos	CDS	1970	2623	.	+	.	ID=CO2;Parent=gene-CO2;Name=MT-CO2;Product=cytochrome c oxidase subunit II
+OG2905.ilmn.260925.getorg1770	mitos	gene	2610	2682	.	+	.	ID=gene-TK;Name=MT-TK;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	2610	2682	.	+	.	ID=TK;Parent=gene-TK;Name=MT-TK;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	2684	2848	.	+	.	ID=gene-ATP8;Name=MT-ATP8;Product=ATP synthase F0 subunit 8
+OG2905.ilmn.260925.getorg1770	mitos	CDS	2684	2848	.	+	.	ID=ATP8;Parent=gene-ATP8;Name=MT-ATP8;Product=ATP synthase F0 subunit 8
+OG2905.ilmn.260925.getorg1770	mitos	gene	2896	3525	.	+	.	ID=gene-ATP6;Name=MT-ATP6;Product=ATP synthase F0 subunit 6
+OG2905.ilmn.260925.getorg1770	mitos	CDS	2896	3525	.	+	.	ID=ATP6;Parent=gene-ATP6;Name=MT-ATP6;Product=ATP synthase F0 subunit 6
+OG2905.ilmn.260925.getorg1770	mitos	gene	3602	4312	.	+	.	ID=gene-CO3;Name=MT-CO3;Product=cytochrome c oxidase subunit III
+OG2905.ilmn.260925.getorg1770	mitos	CDS	3602	4312	.	+	.	ID=CO3;Parent=gene-CO3;Name=MT-CO3;Product=cytochrome c oxidase subunit III
+OG2905.ilmn.260925.getorg1770	mitos	gene	4312	4382	.	-	.	ID=gene-TS2;Name=MT-TS2;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	4312	4382	.	-	.	ID=TS2;Parent=gene-TS2;Name=MT-TS2;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	4409	4759	.	+	.	ID=gene-ND3;Name=MT-ND3;Product=NADH dehydrogenase subunit 3
+OG2905.ilmn.260925.getorg1770	mitos	CDS	4409	4759	.	+	.	ID=ND3;Parent=gene-ND3;Name=MT-ND3;Product=NADH dehydrogenase subunit 3
+OG2905.ilmn.260925.getorg1770	mitos	gene	4994	5064	.	+	.	ID=gene-TH;Name=MT-TH;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	4994	5064	.	+	.	ID=TH;Parent=gene-TH;Name=MT-TH;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	5195	6577	.	+	.	ID=gene-ND4;Name=MT-ND4;Product=NADH dehydrogenase subunit 4
+OG2905.ilmn.260925.getorg1770	mitos	CDS	5195	6577	.	+	.	ID=ND4;Parent=gene-ND4;Name=MT-ND4;Product=NADH dehydrogenase subunit 4
+OG2905.ilmn.260925.getorg1770	mitos	gene	6691	6758	.	+	.	ID=gene-TS1;Name=MT-TS1;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	6691	6758	.	+	.	ID=TS1;Parent=gene-TS1;Name=MT-TS1;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	6759	8648	.	+	.	ID=gene-ND5;Name=MT-ND5;Product=NADH dehydrogenase subunit 5
+OG2905.ilmn.260925.getorg1770	mitos	CDS	6759	8648	.	+	.	ID=ND5;Parent=gene-ND5;Name=MT-ND5;Product=NADH dehydrogenase subunit 5
+OG2905.ilmn.260925.getorg1770	mitos	gene	8695	9156	.	-	.	ID=gene-ND6;Name=MT-ND6;Product=NADH dehydrogenase subunit 6
+OG2905.ilmn.260925.getorg1770	mitos	CDS	8695	9156	.	-	.	ID=ND6;Parent=gene-ND6;Name=MT-ND6;Product=NADH dehydrogenase subunit 6
+OG2905.ilmn.260925.getorg1770	mitos	gene	9198	10273	.	+	.	ID=gene-CYTB;Name=MT-CYTB;Product=cytochrome b
+OG2905.ilmn.260925.getorg1770	mitos	CDS	9198	10273	.	+	.	ID=CYTB;Parent=gene-CYTB;Name=MT-CYTB;Product=cytochrome b
+OG2905.ilmn.260925.getorg1770	mitos	gene	10336	10407	.	+	.	ID=gene-TF;Name=MT-TF;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	10336	10407	.	+	.	ID=TF;Parent=gene-TF;Name=MT-TF;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	10407	11294	.	+	.	ID=gene-RNR1;Name=MT-RNR1;Product=12S ribosomal RNA
+OG2905.ilmn.260925.getorg1770	mitos	rRNA	10407	11294	.	+	.	ID=RNR1;Parent=gene-RNR1;Name=MT-RNR1;Product=12S ribosomal RNA
+OG2905.ilmn.260925.getorg1770	mitos	gene	11296	11365	.	+	.	ID=gene-TE;Name=MT-TE;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	11296	11365	.	+	.	ID=TE;Parent=gene-TE;Name=MT-TE;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	11381	11452	.	+	.	ID=gene-TT;Name=MT-TT;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	11381	11452	.	+	.	ID=TT;Parent=gene-TT;Name=MT-TT;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	11911	13500	.	-	.	ID=gene-RNR2;Name=MT-RNR2;Product=16S ribosomal RNA
+OG2905.ilmn.260925.getorg1770	mitos	rRNA	11911	13500	.	-	.	ID=RNR2;Parent=gene-RNR2;Name=MT-RNR2;Product=16S ribosomal RNA
+OG2905.ilmn.260925.getorg1770	mitos	gene	13545	14507	.	-	.	ID=gene-ND2;Name=MT-ND2;Product=NADH dehydrogenase subunit 2
+OG2905.ilmn.260925.getorg1770	mitos	CDS	13545	14507	.	-	.	ID=ND2;Parent=gene-ND2;Name=MT-ND2;Product=NADH dehydrogenase subunit 2
+OG2905.ilmn.260925.getorg1770	mitos	gene	14610	14681	.	-	.	ID=gene-TI;Name=MT-TI;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	14610	14681	.	-	.	ID=TI;Parent=gene-TI;Name=MT-TI;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	14684	15661	.	-	.	ID=gene-ND1;Name=MT-ND1;Product=NADH dehydrogenase subunit 1
+OG2905.ilmn.260925.getorg1770	mitos	CDS	14684	15661	.	-	.	ID=ND1;Parent=gene-ND1;Name=MT-ND1;Product=NADH dehydrogenase subunit 1
+OG2905.ilmn.260925.getorg1770	mitos	gene	15662	15733	.	-	.	ID=gene-TL2;Name=MT-TL2;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	15662	15733	.	-	.	ID=TL2;Parent=gene-TL2;Name=MT-TL2;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	15764	15834	.	-	.	ID=gene-TG;Name=MT-TG;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	15764	15834	.	-	.	ID=TG;Parent=gene-TG;Name=MT-TG;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	15837	15907	.	-	.	ID=gene-TY;Name=MT-TY;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	15837	15907	.	-	.	ID=TY;Parent=gene-TY;Name=MT-TY;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	15912	15981	.	+	.	ID=gene-TD;Name=MT-TD;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	15912	15981	.	+	.	ID=TD;Parent=gene-TD;Name=MT-TD;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	15985	16056	.	-	.	ID=gene-TM;Name=MT-TM;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	15985	16056	.	-	.	ID=TM;Parent=gene-TM;Name=MT-TM;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	16062	16133	.	+	.	ID=gene-TV;Name=MT-TV;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	16062	16133	.	+	.	ID=TV;Parent=gene-TV;Name=MT-TV;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	16134	16200	.	-	.	ID=gene-TC;Name=MT-TC;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	16134	16200	.	-	.	ID=TC;Parent=gene-TC;Name=MT-TC;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	16201	16269	.	-	.	ID=gene-TW;Name=MT-TW;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	16201	16269	.	-	.	ID=TW;Parent=gene-TW;Name=MT-TW;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	16276	16345	.	+	.	ID=gene-TA;Name=MT-TA;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	16276	16345	.	+	.	ID=TA;Parent=gene-TA;Name=MT-TA;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	16346	16417	.	-	.	ID=gene-TL1;Name=MT-TL1;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	16346	16417	.	-	.	ID=TL1;Parent=gene-TL1;Name=MT-TL1;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	16418	16489	.	-	.	ID=gene-TN;Name=MT-TN;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	16418	16489	.	-	.	ID=TN;Parent=gene-TN;Name=MT-TN;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	16491	16561	.	+	.	ID=gene-TQ;Name=MT-TQ;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	16491	16561	.	+	.	ID=TQ;Parent=gene-TQ;Name=MT-TQ;Product=
+OG2905.ilmn.260925.getorg1770	mitos	gene	16563	16632	.	-	.	ID=gene-TP;Name=MT-TP;Product=
+OG2905.ilmn.260925.getorg1770	mitos	tRNA	16563	16632	.	-	.	ID=TP;Parent=gene-TP;Name=MT-TP;Product=

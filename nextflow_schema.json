@@ -1,7 +1,7 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://raw.githubusercontent.com/nf-core/oceangenomesmitogenomes/master/nextflow_schema.json",
-    "title": "nf-core/oceangenomesmitogenomes pipeline parameters",
+    "$id": "https://raw.githubusercontent.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/master/nextflow_schema.json",
+    "title": "OceanOmics OceanGenomes Mitogenomes pipeline parameters",
     "description": "An nf-core pipeline for mitogenome assembly and LCA for species validation",
     "type": "object",
     "$defs": {
@@ -22,7 +22,7 @@
                     "mimetype": "text/csv",
                     "pattern": "^\\S+\\.csv$",
                     "description": "Path to comma-separated file containing information about the samples in the experiment.",
-                    "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row. See [usage docs](https://nf-co.re/oceangenomesmitogenomes/usage#samplesheet-input).",
+                    "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row. See [usage docs](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/blob/master/docs/usage.md#samplesheet-input).",
                     "fa_icon": "fas fa-file-csv"
                 },
                 "input_dir": {
@@ -574,7 +574,11 @@
                 },
                 "skip_mitogenome_annotation": {
                     "type": "boolean",
-                    "description": "Skip annotation, BLAST and LCA."
+                    "description": "Skip annotation (and, unless --blast_precomputed_annotations is set, BLAST and LCA)."
+                },
+                "blast_precomputed_annotations": {
+                    "type": "boolean",
+                    "description": "With --skip_mitogenome_annotation, run BLAST + LCA (and everything after) on --precomputed_mitogenome_annotation_results instead of reusing precomputed BLAST/LCA results. Each bundle's cds/, proteins/ and CO1/12S/16S are rebuilt from its GFF + FASTA, so a hand-curated GFF is what gets QC'd and BLASTed."
                 },
                 "skip_upload_results": {
                     "type": "boolean",
@@ -641,11 +645,11 @@
                 },
                 "precomputed_mitogenome_blast_results": {
                     "type": "string",
-                    "description": "Glob of precomputed filtered BLAST TSV files used when annotation is skipped."
+                    "description": "Glob of precomputed filtered BLAST TSV files used when annotation is skipped. Ignored with --blast_precomputed_annotations."
                 },
                 "precomputed_mitogenome_lca_results": {
                     "type": "string",
-                    "description": "Glob of precomputed LCA TSV files used when annotation is skipped."
+                    "description": "Glob of precomputed LCA TSV files used when annotation is skipped. Ignored with --blast_precomputed_annotations."
                 },
                 "precomputed_mitogenome_lca_raw_results": {
                     "type": "string",

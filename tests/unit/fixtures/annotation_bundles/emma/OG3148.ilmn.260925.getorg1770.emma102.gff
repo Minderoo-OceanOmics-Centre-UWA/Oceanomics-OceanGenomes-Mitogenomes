@@ -1,0 +1,91 @@
+##gff-version 3
+##source-version Emma beta
+##sequence-region	OG3148.ilmn.260925.getorg1770	1	16506
+OG3148.ilmn.260925.getorg1770	Emma	region	1	16506	.	+	0	Is_circular=true
+OG3148.ilmn.260925.getorg1770	Emma	gene	1025	1096	.	+	.	ID=8b2cbc50-a4bb-56fc-add1-8d747abadaef;Name=MT-TV
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	1025	1096	2.8e-19	+	.	ID=45cb8c87-b25e-5fbe-96b8-59c942988264;Parent=8b2cbc50-a4bb-56fc-add1-8d747abadaef;Name=MT-TV;Product=tRNA-Val(UAC)
+OG3148.ilmn.260925.getorg1770	Emma	gene	1097	2798	.	+	.	ID=a12d3bda-a464-535d-b430-183aaaf46d94;Name=MT-RNR2
+OG3148.ilmn.260925.getorg1770	Emma	rRNA	1097	2798	0.0	+	.	ID=942d7f40-cb17-5fcd-9108-05e29dbad676;Parent=a12d3bda-a464-535d-b430-183aaaf46d94;Name=MT-RNR2;Product=16S rRNA
+OG3148.ilmn.260925.getorg1770	Emma	gene	2799	2872	.	+	.	ID=62d39548-dc4b-5095-97c3-d3ecbee78b2b;Name=MT-TL2
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	2799	2872	1.7e-25	+	.	ID=f2dd2bbc-eeeb-541e-85c5-351c9a72a213;Parent=62d39548-dc4b-5095-97c3-d3ecbee78b2b;Name=MT-TL2;Product=tRNA-Leu(UAA)
+OG3148.ilmn.260925.getorg1770	Emma	gene	2873	3847	.	+	.	ID=02362ca0-650d-5f8c-adc8-bbd3098a3314;Name=MT-ND1
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	2873	3847	.	+	.	ID=7d7987d6-08ea-5f53-b505-e760fa1114da;Parent=02362ca0-650d-5f8c-adc8-bbd3098a3314;Name=MT-ND1
+OG3148.ilmn.260925.getorg1770	Emma	CDS	2873	3847	1.1e-193	+	0	ID=e75a0f35-b96c-5a63-ac84-f31a1a57751a;Parent=7d7987d6-08ea-5f53-b505-e760fa1114da;Name=MT-ND1;Product=NADH dehydrogenase subunit 1
+OG3148.ilmn.260925.getorg1770	Emma	gene	3852	3921	.	+	.	ID=faf9c3f9-ed79-5162-89cc-9750f9f55816;Name=MT-TI
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	3852	3921	1.5e-24	+	.	ID=4bccf5a7-dc41-58f0-996a-901977c4e437;Parent=faf9c3f9-ed79-5162-89cc-9750f9f55816;Name=MT-TI;Product=tRNA-Ile(GAU)
+OG3148.ilmn.260925.getorg1770	Emma	gene	3921	3991	.	-	.	ID=12c9c309-de78-5afb-a3e8-8941ab76442e;Name=MT-TQ
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	3921	3991	1.3e-22	-	.	ID=d679eb27-32de-5e80-9124-d254f3656509;Parent=12c9c309-de78-5afb-a3e8-8941ab76442e;Name=MT-TQ;Product=tRNA-Gln(UUG)
+OG3148.ilmn.260925.getorg1770	Emma	gene	3991	4060	.	+	.	ID=4d4fd36c-cd54-5ffa-8c41-03add6543c45;Name=MT-TM
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	3991	4060	1.4e-21	+	.	ID=e4ddd5e9-06c0-595f-ad1e-8e79032f5f79;Parent=4d4fd36c-cd54-5ffa-8c41-03add6543c45;Name=MT-TM;Product=tRNA-Met(CAU)
+OG3148.ilmn.260925.getorg1770	Emma	gene	4061	5106	.	+	.	ID=a8d1ced9-205c-5915-9b24-235237705b99;Name=MT-ND2
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	4061	5106	.	+	.	ID=44f202dd-3449-5d5b-8505-c23b2d767003;Parent=a8d1ced9-205c-5915-9b24-235237705b99;Name=MT-ND2
+OG3148.ilmn.260925.getorg1770	Emma	CDS	4061	5106	3.1e-162	+	0	ID=b4840cea-818e-5731-8da2-89c7a1b170ba;Parent=44f202dd-3449-5d5b-8505-c23b2d767003;Name=MT-ND2;Product=NADH dehydrogenase subunit 2;Note=putative TAA stop codon is completed by the addition of 3' A residues to the mRNA
+OG3148.ilmn.260925.getorg1770	Emma	gene	8802	9586	.	+	.	ID=2a91a776-1156-5748-b24c-beaf9a78f74c;Name=MT-CO3
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	8802	9586	.	+	.	ID=3a1c969a-4541-56ba-bd3c-d986524b6847;Parent=2a91a776-1156-5748-b24c-beaf9a78f74c;Name=MT-CO3
+OG3148.ilmn.260925.getorg1770	Emma	CDS	8802	9586	6.0e-171	+	0	ID=c61d3892-113b-5671-b009-e91a1e6e3a1c;Parent=3a1c969a-4541-56ba-bd3c-d986524b6847;Name=MT-CO3;Product=cytochrome c oxidase subunit III;Note=putative TAA stop codon is completed by the addition of 3' A residues to the mRNA
+OG3148.ilmn.260925.getorg1770	Emma	gene	5107	5177	.	+	.	ID=a39a3347-8e99-572f-849f-34b1d7e571b7;Name=MT-TW
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	5107	5177	1.2e-22	+	.	ID=e2444ee3-670c-5747-8382-920c232bd1bd;Parent=a39a3347-8e99-572f-849f-34b1d7e571b7;Name=MT-TW;Product=tRNA-Trp(UCA)
+OG3148.ilmn.260925.getorg1770	Emma	gene	5179	5247	.	-	.	ID=0dc4b91b-1b91-5c3f-9cb9-8d5a9fa45f35;Name=MT-TA
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	5179	5247	6.5e-20	-	.	ID=87618a67-947e-5710-a3c9-a60f0d01c17b;Parent=0dc4b91b-1b91-5c3f-9cb9-8d5a9fa45f35;Name=MT-TA;Product=tRNA-Ala(UGC)
+OG3148.ilmn.260925.getorg1770	Emma	gene	5249	5321	.	-	.	ID=24c5e42d-95ca-5fdd-83cb-57d565cc0a0f;Name=MT-TN
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	5249	5321	3.3e-27	-	.	ID=aaf91d7b-6a70-5852-814f-6c6e6986ab4b;Parent=24c5e42d-95ca-5fdd-83cb-57d565cc0a0f;Name=MT-TN;Product=tRNA-Asn(GUU)
+OG3148.ilmn.260925.getorg1770	Emma	gene	5356	5420	.	-	.	ID=20f2fc4a-7eb1-5807-a64a-22aac9616c45;Name=MT-TC
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	5356	5420	7.8e-19	-	.	ID=c6550c7e-ec6a-5236-a334-8681f8495d32;Parent=20f2fc4a-7eb1-5807-a64a-22aac9616c45;Name=MT-TC;Product=tRNA-Cys(GCA)
+OG3148.ilmn.260925.getorg1770	Emma	gene	5421	5490	.	-	.	ID=26a47891-15cb-51fb-964a-3a2d1a2f4e81;Name=MT-TY
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	5421	5490	2.7e-25	-	.	ID=65c7f532-57b1-5ddd-859a-5f4c9af4de6b;Parent=26a47891-15cb-51fb-964a-3a2d1a2f4e81;Name=MT-TY;Product=tRNA-Tyr(GUA)
+OG3148.ilmn.260925.getorg1770	Emma	gene	5492	7042	.	+	.	ID=d1389e07-09f7-5fb5-b570-e598b9bdb9d8;Name=MT-CO1
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	5492	7042	.	+	.	ID=c15daafd-0b9e-5757-b43a-ae9e9b0306c4;Parent=d1389e07-09f7-5fb5-b570-e598b9bdb9d8;Name=MT-CO1
+OG3148.ilmn.260925.getorg1770	Emma	CDS	5492	7042	0.0	+	0	ID=4733d36a-902a-527d-be31-280507091b2c;Parent=c15daafd-0b9e-5757-b43a-ae9e9b0306c4;Name=MT-CO1;Product=cytochrome c oxidase subunit I
+OG3148.ilmn.260925.getorg1770	Emma	gene	7043	7113	.	-	.	ID=284ea722-3d40-51db-ad32-1261ec52960d;Name=MT-TS2
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	7043	7113	1.0e-25	-	.	ID=6e3ab5c9-3f28-5282-842a-b3a1239e7694;Parent=284ea722-3d40-51db-ad32-1261ec52960d;Name=MT-TS2;Product=tRNA-Ser(UGA)
+OG3148.ilmn.260925.getorg1770	Emma	gene	7117	7187	.	+	.	ID=49c59301-f195-55ed-ac3e-4cb02fa696ab;Name=MT-TD
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	7117	7187	2.4e-18	+	.	ID=9c26a04f-49c8-50b3-826c-51c2a16dc8a8;Parent=49c59301-f195-55ed-ac3e-4cb02fa696ab;Name=MT-TD;Product=tRNA-Asp(GUC)
+OG3148.ilmn.260925.getorg1770	Emma	gene	7195	7885	.	+	.	ID=123e03cc-414d-5a91-a8a8-8032976f22a1;Name=MT-CO2
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	7195	7885	.	+	.	ID=672f2c24-a5cb-5346-85f3-50ca20e3d91b;Parent=123e03cc-414d-5a91-a8a8-8032976f22a1;Name=MT-CO2
+OG3148.ilmn.260925.getorg1770	Emma	CDS	7195	7885	3.0e-138	+	0	ID=e9bce84d-0c0a-5344-aac6-0fbb70b16c90;Parent=672f2c24-a5cb-5346-85f3-50ca20e3d91b;Name=MT-CO2;Product=cytochrome c oxidase subunit II;Note=putative TAA stop codon is completed by the addition of 3' A residues to the mRNA
+OG3148.ilmn.260925.getorg1770	Emma	gene	9587	9657	.	+	.	ID=8c24687b-5586-57d9-9e0a-82904c94342f;Name=MT-TG
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	9587	9657	1.1e-20	+	.	ID=8035a2b1-80ce-5d60-b76f-71a619c7ac04;Parent=8c24687b-5586-57d9-9e0a-82904c94342f;Name=MT-TG;Product=tRNA-Gly(UCC)
+OG3148.ilmn.260925.getorg1770	Emma	gene	9658	10006	.	+	.	ID=99729c05-ff8a-5178-a1d0-f9817bb6212c;Name=MT-ND3
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	9658	10006	.	+	.	ID=2e0943c0-ca45-55e1-b399-729e09c1fa05;Parent=99729c05-ff8a-5178-a1d0-f9817bb6212c;Name=MT-ND3
+OG3148.ilmn.260925.getorg1770	Emma	CDS	9658	10006	1.6e-66	+	0	ID=e513ff3f-00e1-52fe-a53d-944f00f62bd0;Parent=2e0943c0-ca45-55e1-b399-729e09c1fa05;Name=MT-ND3;Product=NADH dehydrogenase subunit 3;Note=putative TAA stop codon is completed by the addition of 3' A residues to the mRNA
+OG3148.ilmn.260925.getorg1770	Emma	gene	10007	10075	.	+	.	ID=457ee8f5-5386-5fec-ba36-c77b8d327ca6;Name=MT-TR
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	10007	10075	9.8e-15	+	.	ID=37bc983a-cf01-553e-9016-459cdc1e6711;Parent=457ee8f5-5386-5fec-ba36-c77b8d327ca6;Name=MT-TR;Product=tRNA-Arg(UCG)
+OG3148.ilmn.260925.getorg1770	Emma	gene	10076	10372	.	+	.	ID=3ead32aa-d92a-533f-b698-b9641d329a03;Name=MT-ND4L
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	10076	10372	.	+	.	ID=68ca2040-1318-55ee-9377-c037b49ac7f1;Parent=3ead32aa-d92a-533f-b698-b9641d329a03;Name=MT-ND4L
+OG3148.ilmn.260925.getorg1770	Emma	CDS	10076	10372	6.8e-51	+	0	ID=09c13236-b304-58fd-99f4-9c4c7d2a2cf6;Parent=68ca2040-1318-55ee-9377-c037b49ac7f1;Name=MT-ND4L;Product=NADH dehydrogenase subunit 4L
+OG3148.ilmn.260925.getorg1770	Emma	gene	10366	11746	.	+	.	ID=60365d7c-7abb-5364-89a4-61d72156e0a8;Name=MT-ND4
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	10366	11746	.	+	.	ID=85b0994b-9c56-51a7-b113-d1be1a6e2248;Parent=60365d7c-7abb-5364-89a4-61d72156e0a8;Name=MT-ND4
+OG3148.ilmn.260925.getorg1770	Emma	CDS	10366	11746	1.7e-251	+	0	ID=aa4d6aee-4556-5719-8d07-95dbd468177b;Parent=85b0994b-9c56-51a7-b113-d1be1a6e2248;Name=MT-ND4;Product=NADH dehydrogenase subunit 4;Note=putative TAA stop codon is completed by the addition of 3' A residues to the mRNA
+OG3148.ilmn.260925.getorg1770	Emma	gene	7886	7959	.	+	.	ID=7864e590-11b2-50a7-b2c3-1880a48b6708;Name=MT-TK
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	7886	7959	4.6e-25	+	.	ID=020cbb86-8942-52bc-93e5-26f0ef7f371c;Parent=7864e590-11b2-50a7-b2c3-1880a48b6708;Name=MT-TK;Product=tRNA-Lys(UUU)
+OG3148.ilmn.260925.getorg1770	Emma	gene	11747	11815	.	+	.	ID=45b98170-142e-5dc2-ae2e-b08ebe69b842;Name=MT-TH
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	11747	11815	1.0e-22	+	.	ID=7a9dc414-5874-5f9f-9a1d-52504430ec37;Parent=45b98170-142e-5dc2-ae2e-b08ebe69b842;Name=MT-TH;Product=tRNA-His(GUG)
+OG3148.ilmn.260925.getorg1770	Emma	gene	11816	11883	.	+	.	ID=dfc44554-ba8e-5189-a264-461e2f4260b4;Name=MT-TS1
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	11816	11883	3.3e-18	+	.	ID=21788e69-d5d5-5780-9ac6-5cbcdb30f8a0;Parent=dfc44554-ba8e-5189-a264-461e2f4260b4;Name=MT-TS1;Product=tRNA-Ser(GCU)
+OG3148.ilmn.260925.getorg1770	Emma	gene	11889	11961	.	+	.	ID=1b6330d4-7491-58e5-b5b8-9e6ca6705d6d;Name=MT-TL1
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	11889	11961	7.2e-26	+	.	ID=8f7126d1-5000-563c-a697-82f005567240;Parent=1b6330d4-7491-58e5-b5b8-9e6ca6705d6d;Name=MT-TL1;Product=tRNA-Leu(UAG)
+OG3148.ilmn.260925.getorg1770	Emma	gene	11962	13800	.	+	.	ID=657c302e-24cf-552c-9678-04aa96c19ede;Name=MT-ND5
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	11962	13800	.	+	.	ID=2a7b395c-77f1-5499-849b-1d9ce5eaf90f;Parent=657c302e-24cf-552c-9678-04aa96c19ede;Name=MT-ND5
+OG3148.ilmn.260925.getorg1770	Emma	CDS	11962	13800	0.0	+	0	ID=9e004a20-0ca5-5b8c-97a5-3ab076290167;Parent=2a7b395c-77f1-5499-849b-1d9ce5eaf90f;Name=MT-ND5;Product=NADH dehydrogenase subunit 5
+OG3148.ilmn.260925.getorg1770	Emma	gene	7961	8128	.	+	.	ID=39f477f0-b594-5c01-b16b-f475ccb5b290;Name=MT-ATP8
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	7961	8128	.	+	.	ID=0098b657-7f28-50eb-a73a-b08623ec9dc4;Parent=39f477f0-b594-5c01-b16b-f475ccb5b290;Name=MT-ATP8
+OG3148.ilmn.260925.getorg1770	Emma	CDS	7961	8128	1.4e-25	+	0	ID=a90aac7a-6225-5733-9a5d-663ba06e8404;Parent=0098b657-7f28-50eb-a73a-b08623ec9dc4;Name=MT-ATP8;Product=ATP synthase F0 subunit 8
+OG3148.ilmn.260925.getorg1770	Emma	gene	8119	8802	.	+	.	ID=28b00b89-7741-5592-8f28-8f93e4bddf14;Name=MT-ATP6
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	8119	8802	.	+	.	ID=ce2ea27a-3328-57b3-ab5b-5c16f5c4d2ff;Parent=28b00b89-7741-5592-8f28-8f93e4bddf14;Name=MT-ATP6
+OG3148.ilmn.260925.getorg1770	Emma	CDS	8119	8802	9.5e-119	+	0	ID=67ec74ca-1e29-5b34-a610-9f48e48d7e07;Parent=ce2ea27a-3328-57b3-ab5b-5c16f5c4d2ff;Name=MT-ATP6;Product=ATP synthase F0 subunit 6;Note=putative non-standard start codon TTG
+OG3148.ilmn.260925.getorg1770	Emma	gene	13797	14318	.	-	.	ID=62c52888-73ce-56c9-ac2a-36e2d9c1496c;Name=MT-ND6
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	13797	14318	.	-	.	ID=0c4fc4fa-df94-5580-aba2-72c588851bde;Parent=62c52888-73ce-56c9-ac2a-36e2d9c1496c;Name=MT-ND6
+OG3148.ilmn.260925.getorg1770	Emma	CDS	13797	14318	3.0e-85	-	0	ID=459553a7-a1ca-5eca-8bfb-afc6d333d56b;Parent=0c4fc4fa-df94-5580-aba2-72c588851bde;Name=MT-ND6;Product=NADH dehydrogenase subunit 6
+OG3148.ilmn.260925.getorg1770	Emma	gene	14319	14387	.	-	.	ID=ab27aba2-705f-5aae-a026-3bf0915939a2;Name=MT-TE
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	14319	14387	2.3e-23	-	.	ID=391a212c-2346-5aba-992e-50085cff7f86;Parent=ab27aba2-705f-5aae-a026-3bf0915939a2;Name=MT-TE;Product=tRNA-Glu(UUC)
+OG3148.ilmn.260925.getorg1770	Emma	gene	14392	15532	.	+	.	ID=4ec278e0-96e5-5456-bc96-3b052f21130c;Name=MT-CYTB
+OG3148.ilmn.260925.getorg1770	Emma	mRNA	14392	15532	.	+	.	ID=9d7f9b1a-313a-511d-bc0c-97169e04746c;Parent=4ec278e0-96e5-5456-bc96-3b052f21130c;Name=MT-CYTB
+OG3148.ilmn.260925.getorg1770	Emma	CDS	14392	15532	5.2e-228	+	0	ID=1407123d-774b-54a9-b05b-1242f4dd4664;Parent=9d7f9b1a-313a-511d-bc0c-97169e04746c;Name=MT-CYTB;Product=cytochrome b;Note=putative TAA stop codon is completed by the addition of 3' A residues to the mRNA
+OG3148.ilmn.260925.getorg1770	Emma	gene	15533	15604	.	+	.	ID=da2c210c-f987-5878-a3c1-0f438c31ad97;Name=MT-TT
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	15533	15604	2.2e-23	+	.	ID=c4aa0901-302c-5438-968a-7acef2edb9c7;Parent=da2c210c-f987-5878-a3c1-0f438c31ad97;Name=MT-TT;Product=tRNA-Thr(UGU)
+OG3148.ilmn.260925.getorg1770	Emma	gene	15604	15673	.	-	.	ID=def6b626-8d40-5e92-b782-83d15de0fcd1;Name=MT-TP
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	15604	15673	9.6e-22	-	.	ID=e27350c5-d1c6-52c8-befe-62f033632928;Parent=def6b626-8d40-5e92-b782-83d15de0fcd1;Name=MT-TP;Product=tRNA-Pro(UGG)
+OG3148.ilmn.260925.getorg1770	Emma	gene	1	68	.	+	.	ID=96fea01d-a099-5821-8054-3db7e9088ac3;Name=MT-TF
+OG3148.ilmn.260925.getorg1770	Emma	tRNA	1	68	1.8e-19	+	.	ID=8d29aea3-ddd6-57a8-8819-667a8de3e1d4;Parent=96fea01d-a099-5821-8054-3db7e9088ac3;Name=MT-TF;Product=tRNA-Phe(GAA)
+OG3148.ilmn.260925.getorg1770	Emma	gene	69	1024	.	+	.	ID=b836caf0-bb76-556b-8608-f1cf4c411a97;Name=MT-RNR1
+OG3148.ilmn.260925.getorg1770	Emma	rRNA	69	1024	0.0	+	.	ID=d65b400e-fe06-5e8d-a07d-e7744cdd8653;Parent=b836caf0-bb76-556b-8608-f1cf4c411a97;Name=MT-RNR1;Product=12S rRNA

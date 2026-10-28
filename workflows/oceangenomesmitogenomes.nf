@@ -15,6 +15,8 @@ include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_ocea
 include { MITOGENOME_ASSEMBLY_GETORG       } from '../subworkflows/local/mitogenome_assembly/getorganelle'
 include { MITOGENOME_ASSEMBLY_MITOHIFI     } from '../subworkflows/local/mitogenome_assembly/mitohifi'
 include { MITOGENOME_ANNOTATION     } from '../subworkflows/local/mitogenome_annotation_lca'
+include { MITOGENOME_BLAST_LCA      } from '../subworkflows/local/mitogenome_blast_lca'
+include { REBUILD_ANNOTATION_BUNDLE } from '../modules/local/rebuild_annotation_bundle'
 include { COLLAPSE_CONCATEMER       } from '../modules/local/collapse_concatemer'
 include { MIRROR_MTDNA_TO_COLLAPSED } from '../modules/local/mirror_mtdna_to_collapsed'
 include { UPLOAD_RESULTS; UPLOAD_ENA_RESULTS } from '../subworkflows/local/upload_results_mito'
@@ -350,6 +352,94 @@ def collapseAction(tsv) {
     } catch (ignored) {
         return ''
     }
+}
+
+// Precomputed annotation bundles (--precomputed_mitogenome_annotation_results), one
+// [meta, files] row per assembly. Kept at file scope because the main workflow body sits
+// at Groovy's 64KB method limit; these are pure channel operations, like
+// buildAssemblyUploadRows.
+def loadPrecomputedAnnotation(pattern, samplesheet_meta) {
+    return Channel.fromPath(pattern)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
+            def date = parts.length > 2 ? parts[2] : null
+            // Reconstruct the assembly prefix (id.tech.date.assembler) from the
+            // annotation filename so downstream naming (e.g. <prefix>.annotation_stats.csv)
+            // stays per-assembly. Without this, meta.mt_assembly_prefix is null
+            // on the upload-only path and CSVs collide as null.annotation_stats.csv.
+            def mt_assembly_prefix = parts.length > 3 ? parts[0..3].join('.') : filename
+            return [ mt_assembly_prefix, [meta_id, sequencing_type, date], file ]
+        }
+        // FORMAT_FILES needs the whole per-assembly annotation bundle (fasta, gff,
+        // tbl/gb) staged together -- glob matches every one of those files
+        // individually, so group them back into one list per assembly prefix,
+        // mirroring the path("annotation/*") bundle that
+        // MITOGENOME_ANNOTATION.out.annotation_results emits when annotation isn't
+        // skipped. Without this, only the last-matched file (e.g. the GFF) reaches
+        // FORMAT_FILES and it fails with "Missing in .: FASTA".
+        .groupTuple(by: 0)
+        .map { mt_assembly_prefix, sample_keys, files -> [ sample_keys[0], mt_assembly_prefix, files ] }
+        .combine(samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, files, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, files)
+        }
+}
+
+// Precomputed per-region BLAST / LCA / LCA-raw results, one [meta, file] row per file.
+// All three share the naming <kind>.<region>.<og_id>.<tech>.<date>.<assembler>[.<annot>],
+// so the assembly prefix is parts[2..5]. Reconstructing it keeps downstream naming
+// (e.g. <prefix>.lca_blast.upload.txt) per-assembly; without it, meta.mt_assembly_prefix
+// is null on the upload-only path and several assembly attempts for one OG collide.
+def loadPrecomputedRegionResult(pattern, samplesheet_meta) {
+    return Channel.fromPath(pattern)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[2]
+            def sequencing_type = parts.length > 3 ? parts[3] : null
+            def date = parts.length > 4 ? parts[4] : null
+            def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .combine(samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
+        }
+}
+
+// Region count per assembly from precomputed BLAST files, for the downstream group sizing.
+// On this path the results are already on disk, so counting the precomputed BLAST
+// files per assembly is exact and costs nothing: the fromPath channel
+// closes at startup, long before anything it gates.
+//
+// Derived from the ANNOTATION results, not from the BLAST results, so it
+// is TOTAL over the assemblies that reach UPLOAD_RESULTS -- an assembly
+// with annotation files but no BLAST files gets a count of 0 rather than
+// no row at all. Built the other way round it was total only by accident:
+// such an assembly appeared in neither region_counts nor the
+// zero-region stand-in that UPLOAD_RESULTS derives BY FILTERING
+// region_counts, so it never reached SPECIES_VALIDATION. That was survivable
+// only while nothing downstream joined on species validation; the main
+// annotation path has been total by construction all along, and this makes
+// the precomputed path match it.
+def precomputedRegionCounts(annotation_results, blast_results) {
+    def blast_counts = blast_results
+        .map { meta, _file -> [ meta.mt_assembly_prefix, 1 ] }
+        .groupTuple(by: 0)
+        .map { prefix, ones -> [ prefix, ones.size() ] }
+    return annotation_results
+        .map { meta, _files -> [ meta.mt_assembly_prefix, meta ] }
+        .unique { keyed -> keyed[0] }
+        .join(blast_counts, by: 0, remainder: true)
+        .filter { items -> items[1] != null }   // keep annotation rows only
+        .map { items -> [ items[1], (items.size() > 2 && items[2]) ? items[2] : 0 ] }
 }
 
 /*
@@ -955,6 +1045,9 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_annotation_reference_gb = ch_mitogenome_hifi_reference_gb
         .mix(ch_mitogenome_getorg_reference_gb)
 
+    if (params.blast_precomputed_annotations && !params.skip_mitogenome_annotation) {
+        log.warn "--blast_precomputed_annotations has no effect without --skip_mitogenome_annotation"
+    }
     if (!params.skip_mitogenome_annotation) {
         MITOGENOME_ANNOTATION (
             ch_annotation_input_sanitised,
@@ -974,120 +1067,45 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_assembly_summary_files = ch_assembly_summary_files.mix(
             MITOGENOME_ANNOTATION.out.reference_relevance.map { meta, f -> f })
     } else if (params.precomputed_mitogenome_annotation_results) {
-        // Use precomputed results if analysis is skipped
-        ch_mitogenome_annotation_results = Channel.fromPath(params.precomputed_mitogenome_annotation_results)
-        .map { file ->
-            def filename = file.baseName
-            def parts = filename.split('\\.')
-            def meta_id = parts[0]
-            def sequencing_type = parts.length > 1 ? parts[1] : null
-            def date = parts.length > 2 ? parts[2] : null
-            // Reconstruct the assembly prefix (id.tech.date.assembler) from the
-            // annotation filename so downstream naming (e.g. <prefix>.annotation_stats.csv)
-            // stays per-assembly. Without this, meta.mt_assembly_prefix is null
-            // on the upload-only path and CSVs collide as null.annotation_stats.csv.
-            def mt_assembly_prefix = parts.length > 3 ? parts[0..3].join('.') : filename
-            return [ mt_assembly_prefix, [meta_id, sequencing_type, date], file ]
+        // Use precomputed results if analysis is skipped. --blast_precomputed_annotations
+        // runs BLAST + LCA here on the supplied annotations; otherwise the precomputed
+        // BLAST/LCA results are reused (those globs always have defaults, so "not given"
+        // cannot be the switch).
+        ch_mitogenome_annotation_results = loadPrecomputedAnnotation(
+            params.precomputed_mitogenome_annotation_results, ch_samplesheet_meta)
+        if (!params.blast_precomputed_annotations) {
+            ch_mitogenome_blast_results = loadPrecomputedRegionResult(
+                params.precomputed_mitogenome_blast_results, ch_samplesheet_meta)
+            ch_mitogenome_lca_results = loadPrecomputedRegionResult(
+                params.precomputed_mitogenome_lca_results, ch_samplesheet_meta)
+            ch_mitogenome_lca_raw_results = params.precomputed_mitogenome_lca_raw_results
+                ? loadPrecomputedRegionResult(params.precomputed_mitogenome_lca_raw_results, ch_samplesheet_meta)
+                : Channel.empty()
+            ch_mitogenome_region_counts = precomputedRegionCounts(
+                ch_mitogenome_annotation_results, ch_mitogenome_blast_results)
+        } else {
+            // cds/, proteins/ and the BLAST regions rebuilt from each bundle's GFF + FASTA
+            // (a glob cannot carry cds/ and proteins/, and a curation may have left them
+            // stale), then the same BLAST/LCA the annotation subworkflow runs. The rebuilt
+            // bundle replaces the globbed one, so ANNOTATION_STATS gets its ORF check back.
+            REBUILD_ANNOTATION_BUNDLE ( ch_mitogenome_annotation_results )
+            ch_mitogenome_annotation_results = REBUILD_ANNOTATION_BUNDLE.out.bundle
+            MITOGENOME_BLAST_LCA (
+                REBUILD_ANNOTATION_BUNDLE.out.co1_sequences,
+                REBUILD_ANNOTATION_BUNDLE.out.s12_sequences,
+                REBUILD_ANNOTATION_BUNDLE.out.s16_sequences,
+                curated_blast_db,
+                nt_blast_db
+            )
+            ch_mitogenome_blast_results = MITOGENOME_BLAST_LCA.out.blast_filtered_results
+            ch_mitogenome_lca_results = MITOGENOME_BLAST_LCA.out.lca_results
+            ch_mitogenome_lca_raw_results = MITOGENOME_BLAST_LCA.out.lca_raw_results
+            ch_mitogenome_region_counts = REBUILD_ANNOTATION_BUNDLE.out.region_count
+                .map { meta, n -> [ meta, n.toString().trim().toInteger() ] }
+            ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_BLAST_LCA.out.multiqc_files)
+            ch_versions = ch_versions.mix(MITOGENOME_BLAST_LCA.out.versions)
+                .mix(REBUILD_ANNOTATION_BUNDLE.out.versions.first())
         }
-        // FORMAT_FILES needs the whole per-assembly annotation bundle (fasta, gff,
-        // tbl/gb) staged together -- glob matches every one of those files
-        // individually, so group them back into one list per assembly prefix,
-        // mirroring the path("annotation/*") bundle that
-        // MITOGENOME_ANNOTATION.out.annotation_results emits when annotation isn't
-        // skipped. Without this, only the last-matched file (e.g. the GFF) reaches
-        // FORMAT_FILES and it fails with "Missing in .: FASTA".
-        .groupTuple(by: 0)
-        .map { mt_assembly_prefix, sample_keys, files -> [ sample_keys[0], mt_assembly_prefix, files ] }
-        .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, mt_assembly_prefix, files, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
-            return tuple(meta_ext, files)
-        }
-        ch_mitogenome_blast_results = Channel.fromPath(params.precomputed_mitogenome_blast_results)
-        .map { file ->
-            def filename = file.baseName
-            def parts = filename.split('\\.')
-            // blast.<gene_type>.<og_id>.<tech>.<date>.<assembler>[.<annot_version>].filtered
-            def meta_id = parts[2]
-            def sequencing_type = parts.length > 1 ? parts[3] : null
-            def date = parts.length > 2 ? parts[4] : null
-            // Reconstruct the assembly prefix (id.tech.date.assembler) so downstream
-            // naming (e.g. <prefix>.lca_blast.upload.txt) stays per-assembly. Without
-            // this, meta.mt_assembly_prefix is null on the upload-only path and
-            // multiple assembly attempts for one OG collide on the same filename.
-            def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
-            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
-        }
-        .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
-            return tuple(meta_ext, file)
-        }
-        ch_mitogenome_lca_results = Channel.fromPath(params.precomputed_mitogenome_lca_results)
-        .map { file ->
-            def filename = file.baseName
-            def parts = filename.split('\\.')
-            // lca.<gene_type>.<og_id>.<tech>.<date>.<assembler>[.<annot_version>]
-            def meta_id = parts[2]
-            def sequencing_type = parts.length > 3 ? parts[3] : null
-            def date = parts.length > 4 ? parts[4] : null
-            def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
-            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
-        }
-        .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
-            return tuple(meta_ext, file)
-        }
-        ch_mitogenome_lca_raw_results = params.precomputed_mitogenome_lca_raw_results
-            ? Channel.fromPath(params.precomputed_mitogenome_lca_raw_results)
-                .map { file ->
-                    def filename = file.baseName
-                    def parts = filename.split('\\.')
-                    // lca_raw.<region>.<og_id>.<tech>.<date>.<assembler>[.<annot_version>]
-                    def meta_id = parts[2]
-                    def sequencing_type = parts.length > 3 ? parts[3] : null
-                    def date = parts.length > 4 ? parts[4] : null
-                    def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
-                    return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
-                }
-                .combine(ch_samplesheet_meta, by: 0)
-                .map { sample_key, mt_assembly_prefix, file, meta ->
-                    def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
-                    return tuple(meta_ext, file)
-                }
-            : Channel.empty()
-
-        // Region count per assembly for the downstream group sizing. On this path
-        // the results are already on disk, so counting the precomputed BLAST
-        // files per assembly is exact and costs nothing: the fromPath channel
-        // closes at startup, long before anything it gates.
-        //
-        // Derived from the ANNOTATION results, not from the BLAST results, so it
-        // is TOTAL over the assemblies that reach UPLOAD_RESULTS -- an assembly
-        // with annotation files but no BLAST files gets a count of 0 rather than
-        // no row at all. Built the other way round it was total only by accident:
-        // such an assembly appeared in neither region_counts nor the
-        // zero-region stand-in that UPLOAD_RESULTS derives BY FILTERING
-        // region_counts, so it never reached SPECIES_VALIDATION. That was survivable
-        // only while nothing downstream joined on species validation; the main
-        // annotation path has been total by construction all along, and this makes
-        // the precomputed path match it.
-        ch_mitogenome_blast_counts = ch_mitogenome_blast_results
-            .map { meta, _file -> [ meta.mt_assembly_prefix, 1 ] }
-            .groupTuple(by: 0)
-            .map { prefix, ones -> [ prefix, ones.size() ] }
-
-        ch_mitogenome_region_counts = ch_mitogenome_annotation_results
-            .map { meta, _files -> [ meta.mt_assembly_prefix, meta ] }
-            .unique { keyed -> keyed[0] }
-            .join(ch_mitogenome_blast_counts, by: 0, remainder: true)
-            .filter { items -> items[1] != null }   // keep annotation rows only
-            .map { items -> [ items[1], (items.size() > 2 && items[2]) ? items[2] : 0 ] }
     } else {
 
         ch_mitogenome_annotation_results = Channel.empty()
