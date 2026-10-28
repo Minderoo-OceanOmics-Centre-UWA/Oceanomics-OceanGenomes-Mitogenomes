@@ -123,7 +123,11 @@ if __name__ == "__main__":
             "missing_expected_lineage_genes", "lineage_gene_advisories",
             "mitos_unmapped_features", "mitos_known_auxiliary_features", "duplicate_loci",
             "annotation_integrity_status", "annotation_integrity_issues",
-            "atp9", "atp9_trans", "mtmuts", "mtmuts_trans"
+            "atp9", "atp9_trans", "mtmuts", "mtmuts_trans",
+            # Added by genomes_db_review migration 068: the gene-set standard `passed`
+            # and missing_genes were judged against. REQUIRED_FOR_COMPLETE already
+            # demands it; until 068 it was then thrown away.
+            "completeness_profile"
         ]
 
         for index, row in stats.iterrows():
@@ -157,7 +161,7 @@ if __name__ == "__main__":
                 missing_expected_lineage_genes, lineage_gene_advisories,
                 mitos_unmapped_features, mitos_known_auxiliary_features, duplicate_loci,
                 annotation_integrity_status, annotation_integrity_issues,
-                atp9, atp9_trans, mtmuts, mtmuts_trans,
+                atp9, atp9_trans, mtmuts, mtmuts_trans, completeness_profile,
                 annotation_stats_version, annotation_updated_at
             )
             VALUES (
@@ -174,7 +178,7 @@ if __name__ == "__main__":
                 %(missing_expected_lineage_genes)s, %(lineage_gene_advisories)s,
                 %(mitos_unmapped_features)s, %(mitos_known_auxiliary_features)s, %(duplicate_loci)s,
                 %(annotation_integrity_status)s, %(annotation_integrity_issues)s,
-                %(atp9)s, %(atp9_trans)s, %(mtmuts)s, %(mtmuts_trans)s,
+                %(atp9)s, %(atp9_trans)s, %(mtmuts)s, %(mtmuts_trans)s, %(completeness_profile)s,
                 %(annotation_stats_version)s, now()
             )
             ON CONFLICT (og_id, tech, seq_date, code) 
@@ -260,6 +264,7 @@ if __name__ == "__main__":
                 atp9_trans = EXCLUDED.atp9_trans,
                 mtmuts = EXCLUDED.mtmuts,
                 mtmuts_trans = EXCLUDED.mtmuts_trans,
+                completeness_profile = EXCLUDED.completeness_profile,
                 annotation_stats_version = EXCLUDED.annotation_stats_version,
                 annotation_updated_at = EXCLUDED.annotation_updated_at
             RETURNING annotation, extra_genes, missing_genes, trna_advisory, order_correct, order_variant, order_variant_taxon_check, order_deviation, annotation_gaps,
@@ -372,6 +377,7 @@ if __name__ == "__main__":
                 "atp9_trans": row_dict.get("atp9_trans"),
                 "mtmuts": row_dict.get("mtmuts"),
                 "mtmuts_trans": row_dict.get("mtmuts_trans"),
+                "completeness_profile": row_dict.get("completeness_profile") or None,
                 "annotation_stats_version": ANNOTATION_STATS_VERSION,
             }
 
