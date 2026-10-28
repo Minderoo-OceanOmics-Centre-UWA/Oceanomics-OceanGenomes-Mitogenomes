@@ -26,6 +26,7 @@ include { COMPILE_HELD_SAMPLES      } from '../modules/local/compile_held_sample
 include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
 include { MITOGENOME_COVERAGE      } from '../modules/local/mitogenome_coverage/main'
 include { MITOGENOME_ASSEMBLY_SUMMARY } from '../modules/local/multiqc/mitogenome_assembly_summary'
+include { PUSH_ASSEMBLY_QC         } from '../modules/local/upload_results/assembly_qc/main'
 
 // Using local module SANITISE_FASTA (see modules/local/sanitise_fasta)
 
@@ -1413,6 +1414,16 @@ workflow OCEANGENOMESMITOGENOMES {
 
     ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_SUMMARY.out.table)
     ch_versions = ch_versions.mix(MITOGENOME_ASSEMBLY_SUMMARY.out.versions)
+
+    // The same verdicts, stored on each assembly's row (genomes_db_review migration 068).
+    // A database write, so it follows --skip_upload_results like the pushers above.
+    if (run_uploads) {
+        PUSH_ASSEMBLY_QC (
+            MITOGENOME_ASSEMBLY_SUMMARY.out.table,
+            params.sql_config
+        )
+        ch_versions = ch_versions.mix(PUSH_ASSEMBLY_QC.out.versions)
+    }
 
     //
     // Collect all MultiQC files from all subworkflows

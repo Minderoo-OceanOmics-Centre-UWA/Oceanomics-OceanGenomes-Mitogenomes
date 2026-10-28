@@ -53,6 +53,8 @@ ANNOTATION_COLUMNS = (
     "missing_expected_lineage_genes", "lineage_gene_advisories",
     "mitos_unmapped_features", "mitos_known_auxiliary_features", "duplicate_loci",
     "annotation_integrity_status", "annotation_integrity_issues",
+    # genomes_db_review migration 068: the gene-set standard `passed` was judged against.
+    "completeness_profile",
 )
 
 # Gene length parameters, by gene name (mito_gene.gene). A gene with translated_length has a
@@ -81,7 +83,7 @@ INSERT INTO mito_annotation (
     order_status, order_deviation_detail, expected_lineage_genes,
     missing_expected_lineage_genes, lineage_gene_advisories,
     mitos_unmapped_features, mitos_known_auxiliary_features, duplicate_loci,
-    annotation_integrity_status, annotation_integrity_issues,
+    annotation_integrity_status, annotation_integrity_issues, completeness_profile,
     annotation_stats_version, annotation_updated_at
 )
 VALUES (
@@ -91,7 +93,7 @@ VALUES (
     %(order_status)s, %(order_deviation_detail)s, %(expected_lineage_genes)s,
     %(missing_expected_lineage_genes)s, %(lineage_gene_advisories)s,
     %(mitos_unmapped_features)s, %(mitos_known_auxiliary_features)s, %(duplicate_loci)s,
-    %(annotation_integrity_status)s, %(annotation_integrity_issues)s,
+    %(annotation_integrity_status)s, %(annotation_integrity_issues)s, %(completeness_profile)s,
     %(annotation_stats_version)s, now()
 )
 ON CONFLICT (assembly_id, annotation)
@@ -119,6 +121,7 @@ DO UPDATE SET
     duplicate_loci = EXCLUDED.duplicate_loci,
     annotation_integrity_status = EXCLUDED.annotation_integrity_status,
     annotation_integrity_issues = EXCLUDED.annotation_integrity_issues,
+    completeness_profile = EXCLUDED.completeness_profile,
     annotation_stats_version = EXCLUDED.annotation_stats_version,
     annotation_updated_at = EXCLUDED.annotation_updated_at,
     updated_at = now()
@@ -302,6 +305,7 @@ if __name__ == "__main__":
                 "duplicate_loci": row_dict.get("duplicate_loci"),
                 "annotation_integrity_status": row_dict.get("annotation_integrity_status"),
                 "annotation_integrity_issues": row_dict.get("annotation_integrity_issues"),
+                "completeness_profile": row_dict.get("completeness_profile") or None,
                 # mitos_to_emma writes the internal key MTMUTS; the INSDC spelling
                 # mtMutS is restored at the submission boundary, not here, so the
                 # column name stays lowercase like every other gene column.
