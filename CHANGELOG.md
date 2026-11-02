@@ -524,6 +524,15 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Added`
 
+- **The assembly QC verdict and the completeness profile reach the database.**
+  `PUSH_ASSEMBLY_QC` (`bin/push_assembly_qc.py`, `modules/local/upload_results/assembly_qc`) runs
+  after `MITOGENOME_ASSEMBLY_SUMMARY` under the upload switch and writes each assembly's `status`,
+  `manual_review_reason`, `numt_flag`, `frameshift_flag` and reference onto its `mitogenome_data` row
+  (`qc_status` and friends, genomes_db_review migration 068). It only updates; an assembly with no
+  row is reported. `push_emma_annotation_results.py` now also writes `completeness_profile`. Both
+  were computed before and discarded. The NOVA_260925_LA verdicts (196 assemblies) and 289
+  archived completeness profiles were backfilled.
+
 - **BLAST + LCA can run on annotations this run did not produce.** `--skip_mitogenome_annotation`
   used to skip BLAST and LCA too, so existing (often hand-curated) annotations could not be
   species-checked, QC'd, uploaded or ENA-prepped without re-annotating over the curation. With

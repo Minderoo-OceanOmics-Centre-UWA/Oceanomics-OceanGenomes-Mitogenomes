@@ -214,6 +214,13 @@ assembly exists and no blocking QC reason survived), `manual_review` (a final as
 blocking reason stands, listed in `manual_review_reason`) and `failed` (the assembler errored or
 produced no final assembly). It says nothing about topology; read `circularised` for that.
 
+The verdict is uploaded per assembly by `PUSH_ASSEMBLY_QC` (`bin/push_assembly_qc.py`) onto the
+assembly's existing `mitogenome_data` row: `qc_status`, `manual_review_reason`, `numt_flag`,
+`frameshift_flag`, `reference_species`, `reference_accession` and `qc_updated_at`. It never creates a
+row; an assembly with no row is logged as `no_row`. A re-run replaces the verdict. Until
+genomes_db_review migration 068 (2026-10-28) the verdict lived only in this table, so assemblies run
+before then have no `qc_status`.
+
 **Blocking and advisory reasons.** An assembly that is circular, in the expected length range and
 carries all 13 protein-coding genes and both rRNAs is treated as a finished mitogenome (the
 "complete core"). On a complete-core assembly the soft reasons (`low_mean_coverage`,
@@ -313,7 +320,9 @@ another purpose.
     and `RNR2` (16S) are the BLAST inputs.
   - `proteins/MT-<GENE>.<assembly_prefix>.<annotation>.fa`: protein translations.
   - `<assembly_prefix>.annotation_stats.csv`: gene counts, missing genes, gene order and the PCG ORF
-    check (`EMMA Annotation Stats` in MultiQC). This is the annotation QC verdict.
+    check (`EMMA Annotation Stats` in MultiQC). This is the annotation QC verdict. Its
+    `completeness_profile` (`vertebrate` for genetic code 2, otherwise `core`) says which gene set
+    completeness was judged against, and is uploaded to `mitogenome_data.completeness_profile`.
   - `<assembly_prefix>.reference_relevance.txt`: the post-assembly reference-relevance check.
   - `mtdna_rescue/`: status of the vertebrate ND4L/ATP8 and tRNA rescue passes, when one ran.
   - MITOS2 (invertebrates) only:
@@ -422,6 +431,8 @@ counts, missing genes and a completeness verdict.
   - `<assembly_prefix>.species_validation.upload.txt`: `lca_validation` row.
   - `<full_seqid>.ena_validation.upload.txt`: `ena_validation_attempts` row.
   - `<full_seqid>.qc_validator.upload.txt`: the second-validator write ([below](#automatic-second-validator)).
+  - `assembly_qc.upload.txt`: the run's assembly QC verdicts written to `mitogenome_data`
+    ([above](#mitogenome-assembly-summary)), with any assembly that had no row.
   - `upload_results_summary_mqc.tsv`, `upload_results_appendix.txt`: run summary across all uploads
     (`SQL Upload Summary` in MultiQC).
 
