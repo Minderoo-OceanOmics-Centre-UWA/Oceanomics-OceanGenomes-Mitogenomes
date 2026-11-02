@@ -103,17 +103,20 @@ def upsert_lca_validation(
                         )
                         return True
 
+            # mito_lca_validation is keyed by annotation_id (genomes_db_review 076, Phase
+            # R.7b); the read above goes through the lca_validation view, which still shows
+            # the natural columns.
             upsert_query = """
-            INSERT INTO lca_validation (
-                og_id, tech, seq_date, code, annotation,
+            INSERT INTO mito_lca_validation (
+                annotation_id,
                 validated_species_name, validator, validated_rank, lca_genus
             )
             VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s,
+                mito_annotation_id(%(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s),
                 %(validated_species_name)s, %(validator)s, %(validated_rank)s,
                 %(lca_genus)s
             )
-            ON CONFLICT (og_id, tech, seq_date, code, annotation)
+            ON CONFLICT (annotation_id)
             DO UPDATE SET
                 validated_species_name = EXCLUDED.validated_species_name,
                 validator = EXCLUDED.validator,

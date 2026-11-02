@@ -66,22 +66,25 @@ def process_blast(blast_file, sample, db_params):
         cursor = conn.cursor()
         for _, row in df.iterrows():
             row_dict = row.to_dict()
+            # mito_blast_hit is keyed by annotation_id (genomes_db_review 076, Phase R.7b);
+            # mito_annotation_id() resolves it from the query_id parts and refuses a hit
+            # for an annotation the database does not hold.
             upsert_query = """
-            INSERT INTO blast_filtered_lca (
-                og_id, tech, seq_date, code, annotation, match_sequence_id, taxon_id,
+            INSERT INTO mito_blast_hit (
+                annotation_id, match_sequence_id, taxon_id,
                 scientific_name, common_name, kingdoms, percent_identity, alignment_length,
                 query_length, subject_length, mismatch, gap_open, gaps, query_start,
                 query_end, subject_start, subject_end, subject_title, evalue, bit_score,
                 query_coverage, subject_coverage, region, blast_run_date
             )
             VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s, %(match_sequence_id)s, %(taxon_id)s,
+                mito_annotation_id(%(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s), %(match_sequence_id)s, %(taxon_id)s,
                 %(scientific_name)s, %(common_name)s, %(kingdoms)s, %(percent_identity)s, %(alignment_length)s,
                 %(query_length)s, %(subject_length)s, %(mismatch)s, %(gap_open)s, %(gaps)s, %(query_start)s,
                 %(query_end)s, %(subject_start)s, %(subject_end)s, %(subject_title)s, %(evalue)s, %(bit_score)s,
                 %(query_coverage)s, %(subject_coverage)s, %(region)s, %(blast_run_date)s
             )
-            ON CONFLICT (og_id, tech, seq_date, code, annotation, match_sequence_id, region)
+            ON CONFLICT (annotation_id, match_sequence_id, region)
             DO UPDATE SET
                 blast_run_date = EXCLUDED.blast_run_date,
                 taxon_id = EXCLUDED.taxon_id,
@@ -175,10 +178,11 @@ def prune_superseded_lca(cursor, written):
     run wrote for it. A row whose content matched has just had its date refreshed
     to the current run's, so anything left on another date is a superseded result.
     """
-    where = " AND ".join(f'"{c}" = %s' for c in LCA_HISTORY_KEY)
+    # mito_lca is keyed by annotation_id (076); the history key's first five parts resolve to it.
     query = (
-        f"DELETE FROM lca WHERE {where} "
-        f'AND "lca_run_date"::text <> ALL(%s)'
+        "DELETE FROM mito_lca "
+        "WHERE annotation_id = mito_annotation_id(%s, %s, %s, %s, %s, false) "
+        'AND "region" = %s AND "lca_run_date"::text <> ALL(%s)'
     )
     deleted = 0
     for key, run_dates in written.items():
@@ -219,12 +223,8 @@ def process_lca(lca_file, sample, db_params, prune_history=False):
         for _, row in df.iterrows():
             row_dict = row.to_dict()
             upsert_query = """
-            INSERT INTO lca (
-                og_id,
-                tech,
-                seq_date,
-                code,
-                annotation,
+            INSERT INTO mito_lca (
+                annotation_id,
                 region,
                 lca_run_date,
                 species_in_lca,
@@ -253,11 +253,7 @@ def process_lca(lca_file, sample, db_params, prune_history=False):
                 top_confidence_score
             )
             VALUES (
-                %(og_id)s,
-                %(tech)s,
-                %(seq_date)s,
-                %(code)s,
-                %(annotation)s,
+                mito_annotation_id(%(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s),
                 %(region)s,
                 %(lca_run_date)s,
                 %(species_in_lca)s,
@@ -290,11 +286,10 @@ def process_lca(lca_file, sample, db_params, prune_history=False):
             -- an existing result exactly. The only thing left to record is that
             -- it was seen again; a differing result hashes differently and is
             -- inserted as a new row rather than overwriting the old one.
-            -- A column list, not ON CONSTRAINT lca_content_unique: the v2 schema keys the
-            -- same columns under its primary key, lca_pkey, so the name differs by schema
-            -- while the columns do not. BEFORE INSERT triggers run before the conflict
-            -- check either way, so content_hash is set when the target is matched.
-            ON CONFLICT (og_id, tech, seq_date, code, annotation, region, content_hash)
+            -- mito_lca is keyed by annotation_id (genomes_db_review 076, Phase R.7b), resolved
+            -- by mito_annotation_id(). BEFORE INSERT triggers run before the conflict check,
+            -- so content_hash is set when the target is matched.
+            ON CONFLICT (annotation_id, region, content_hash)
             DO UPDATE SET
                 lca_run_date = EXCLUDED.lca_run_date;
             """

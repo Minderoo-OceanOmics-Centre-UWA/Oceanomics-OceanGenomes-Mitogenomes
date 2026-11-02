@@ -48,14 +48,13 @@ VALIDATOR_2 = "QCd-nf-core"
 KEY_COLUMNS = ["og_id", "tech", "seq_date", "code", "annotation"]
 IDENTITY_COLUMNS = ["full_seqid"] + KEY_COLUMNS
 
+# mito_lca_validation is keyed by annotation_id (genomes_db_review 076, Phase R.7b). Non-strict
+# lookup: an unknown annotation matches no row, which reports as no_row below.
 UPDATE_QUERY = """
-    UPDATE lca_validation
+    UPDATE mito_lca_validation
        SET validator_2 = %(validator_2)s
-     WHERE og_id = %(og_id)s
-       AND tech = %(tech)s
-       AND seq_date = %(seq_date)s
-       AND code = %(code)s
-       AND annotation = %(annotation)s
+     WHERE annotation_id = mito_annotation_id(%(og_id)s, %(tech)s, %(seq_date)s, %(code)s,
+                                              %(annotation)s, false)
        AND (validator_2 IS NULL OR btrim(validator_2) = '')
     RETURNING validator_2
 """

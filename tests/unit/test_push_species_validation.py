@@ -91,7 +91,7 @@ class UpsertTests(unittest.TestCase):
         ok, conn, _out = self._run(validated_rank="species")
         self.assertTrue(ok)
         self.assertTrue(conn.committed)
-        inserts = [q for q in conn.cursor_obj.queries if "INSERT INTO lca_validation" in q]
+        inserts = [q for q in conn.cursor_obj.queries if "INSERT INTO mito_lca_validation" in q]
         self.assertEqual(len(inserts), 1)
         params = conn.cursor_obj.params[-1]
         self.assertEqual(params["og_id"], "OG470")
