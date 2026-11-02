@@ -81,7 +81,7 @@ Filename parsing and SQL matching rules:
   processed FASTA/GFF headers used for submission files.
 - If no row matches, species defaults to `unknown`.
 
-Nextflow ≥ 24.10.x is required. Always combine the pipeline with an execution profile (`-profile`)
+Nextflow ≥ 24.10.0 and < 25.10 is required (tested on 25.04.x; newer releases are refused until tested). Always combine the pipeline with an execution profile (`-profile`)
 that matches your container/conda environment.
 
 ## Essential parameters (main pipeline)

@@ -18,7 +18,9 @@ module load singularity/4.1.0-nompi
 # Get the absolute path to this repo
 RUN_DIR="${RUN_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)}"
 BASE="/scratch/pawsey1348/$USER"
-OUT_DIR="${OG_OUT_DIR:-$BASE/mitogenomes-missing-audit-3}"
+# Default: a generic mitogenomes dir under $BASE. --blast_db_dir and --taxonkit_db_dir
+# below resolve from the dir above it ($BASE), so keep it one level down.
+OUT_DIR="${OG_OUT_DIR:-$BASE/mitogenomes}"
 
 mkdir -p "$OUT_DIR"
 

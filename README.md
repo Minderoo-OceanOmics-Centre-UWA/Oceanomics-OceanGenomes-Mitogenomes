@@ -60,7 +60,7 @@ See [docs/output.md](docs/output.md) for a stage-by-stage file manifest.
 
 ## Quick start
 
-1. Install Nextflow >= 24.10.0 and a container backend (Singularity, Docker, Podman, or Conda/Mamba).
+1. Install Nextflow >= 24.10.0 and < 25.10 (tested on 25.04.x; newer releases are refused until tested) and a container backend (Singularity, Docker, Podman, or Conda/Mamba).
 2. Pull the pipeline or clone this repository: `nextflow pull Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes`.
 3. Launch a run with an execution profile and an input definition. Add `-r <branch or tag>` to pin a revision when
    running from GitHub; production runs on Setonix instead launch from a local checkout via the generated `run_*.sh` scripts.

@@ -205,6 +205,12 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 - **Supported data is stated up front.** README and `docs/usage.md` now say that invertebrate
   mitogenomes are supported from short reads only (Illumina/Hi-C, including draft-genome reads); the
   HiFi path (MitoHiFi and its Oatk fallback) is set up for vertebrates only.
+- **Nextflow is capped at `< 25.10`** (`!>=24.10.0, <25.10.0`): the pipeline is tested on 25.04.x, and
+  newer releases are refused until they have been tested.
+- **table2asn is pinned to `staphb/ncbi-table2asn:1.29.324`** instead of `:latest`; that is the
+  version production runs were already using.
+- **`nextflow_run.sh` defaults its output to `$BASE/mitogenomes`** instead of a leftover audit
+  directory. Triggered runs still set `OG_OUT_DIR`.
 
 - **The invertebrate BLAST search no longer filters its own results.** It ran with
   `-perc_identity 98 -max_target_seqs 500 -evalue 1e-10`, so the work-dir `blast.<gene>.<name>.tsv`
