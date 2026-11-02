@@ -211,6 +211,7 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   version production runs were already using.
 - **`nextflow_run.sh` defaults its output to `$BASE/mitogenomes`** instead of a leftover audit
   directory. Triggered runs still set `OG_OUT_DIR`.
+- **`CITATIONS.md` adds TaxonKit, HMMER (nhmmer) and table2asn**, which the pipeline uses.
 
 - **The invertebrate BLAST search no longer filters its own results.** It ran with
   `-perc_identity 98 -max_target_seqs 500 -evalue 1e-10`, so the work-dir `blast.<gene>.<name>.tsv`

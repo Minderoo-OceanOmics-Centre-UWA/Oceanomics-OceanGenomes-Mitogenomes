@@ -54,6 +54,18 @@
 
 > Schoch CL, Ciufo S, Domrachev M, Hotton CL, Kannan S, Khovanskaya R, Leipe D, Mcveigh R, O'Neill K, Robbertse B, Sharma S, Soussov V, Sullivan JP, Sun L, Turner S, Karsch-Mizrachi I. NCBI Taxonomy: a comprehensive update on curation, resources and tools. Database (Oxford). 2020;2020:baaa062. doi: 10.1093/database/baaa062. PubMed PMID: 32761142.
 
+- [TaxonKit](https://pubmed.ncbi.nlm.nih.gov/34001434/)
+
+> Shen W, Ren H. TaxonKit: A practical and efficient NCBI taxonomy toolkit. J Genet Genomics. 2021 Sep 20;48(9):844-850. doi: 10.1016/j.jgg.2021.03.006. PubMed PMID: 34001434.
+
+- [HMMER (nhmmer)](https://pubmed.ncbi.nlm.nih.gov/23842809/)
+
+> Wheeler TJ, Eddy SR. nhmmer: DNA homology search with profile HMMs. Bioinformatics. 2013 Oct 1;29(19):2487-9. doi: 10.1093/bioinformatics/btt403. PubMed PMID: 23842809.
+
+- [table2asn](https://www.ncbi.nlm.nih.gov/genbank/table2asn/)
+
+> National Center for Biotechnology Information. table2asn: command-line program for preparing GenBank submissions.
+
 - [Biopython](https://pubmed.ncbi.nlm.nih.gov/19304878/)
 
 > Cock PJ, Antao T, Chang JT, Chapman BA, Cox CJ, Dalke A, Friedberg I, Hamelryck T, Kauff F, Wilczynski B, de Hoon MJ. Biopython: freely available Python tools for computational molecular biology and bioinformatics. Bioinformatics. 2009 Jun 1;25(11):1422-3. doi: 10.1093/bioinformatics/btp163. PubMed PMID: 19304878.
