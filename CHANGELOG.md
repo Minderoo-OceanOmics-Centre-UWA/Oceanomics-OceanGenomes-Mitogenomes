@@ -19,8 +19,18 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   `nf-core/oceangenomesmitogenomes` or needed nf-core secrets, and none had ever run here.
 - **`bin/samplesheet.csv`**, a real run's samplesheet with `/scratch` paths, replaced by
   `assets/samplesheet.csv`, a template with dummy values.
+- **The stale template pipeline test `tests/main.nf.test`**, which fed the workflow an
+  `[id, single_end]` meta it no longer accepts.
 
 ### `Fixed`
+
+- **Five nf-test failures caused by the test setup, not the pipeline.** `nf-test.config` applied
+  `-profile test` to every test, so `conf/test.config`'s samplesheet and `skip_upload_results = true`
+  overrode each suite's own params: `qc_only_upload` could never see uploads on, and suites whose script
+  lives under `tests/` failed to parse the config at all. The default profile is now `singularity`
+  alone, the resource caps moved to `tests/nextflow.config`, and only `tests/default.nf.test` asks for
+  `test`. That test now runs `-stub` as `conf/test.config` documents, and its snapshot (previously
+  empty, recorded from a run that did nothing) no longer includes the `git describe` version.
 
 - **Linear contigs were rotated into a fake circle before annotation.** `ROTATE_ORIGIN` guarded only
   on "more than one record", so every single linear contig (including each `_concat`) was cut at
