@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The invertebrate generalisation, on top of v2.0.0. Not released.
 
+### `Removed`
+
+- **Database migrations.** `sql/`, `bin/apply_ena_migrations.py` and the opt-in
+  `tests/integration/test_ena_validation_database.py` (which built its schema from those files) are gone.
+  The schema and its migrations are maintained separately (`genomes_db_review`); `docs/usage.md` now says
+  so under "Database schema".
+
 ### `Fixed`
 
 - **Linear contigs were rotated into a fake circle before annotation.** `ROTATE_ORIGIN` guarded only

@@ -33,7 +33,7 @@ include { groupResultsByRegionCount     } from '../mitogenome_qc/main'
 // upload_rows is the raw PUSH_MTDNA_ASSM_RESULTS.out.upload, i.e. [ meta, receipt ].
 //
 // ONE CALL SITE PER PUSHER, and they are not all about depth. mitogenome_data carries three
-// inbound foreign keys (sql/018_mitogenome_data_og_num_first.sql:215-223): fk_mitogenome_lca
+// inbound foreign keys (database migration 018): fk_mitogenome_lca
 // on lca, fk_mitogenome_lca_raw_results on lca_raw_results, and fk_mitogenome_lca_validation
 // on lca_validation. Each is (og_id, tech, seq_date, code) -- exactly mt_assembly_prefix,
 // which is why the 4-part prefix is not a compromise key here but the constraint itself. None

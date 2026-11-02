@@ -155,10 +155,9 @@ Reference launch scripts are provided for both contexts:
 
 Comprehensive usage and output documentation is maintained under `docs/`:
 
-- [`docs/usage.md`](docs/usage.md): parameter descriptions, samplesheet schema, external resource requirements, database migrations, and execution advice.
+- [`docs/usage.md`](docs/usage.md): parameter descriptions, samplesheet schema, external resource requirements, the database schema, and execution advice.
 - [`docs/output.md`](docs/output.md): per-stage file inventories, MultiQC sections, and guidance on interpreting database/QC artefacts.
 - [`docs/ena_package.md`](docs/ena_package.md): the ENA submission package and the hand-over to the downstream submission pipeline.
-- [`sql/README.md`](sql/README.md): what each database migration does.
 - [`docs/README.md`](docs/README.md): entry point with links to the above.
 
 For general nf-core best practices (custom configs, resource tuning, module overrides), see <https://nf-co.re/docs>.

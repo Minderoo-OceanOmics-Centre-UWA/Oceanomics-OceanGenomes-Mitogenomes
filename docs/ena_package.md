@@ -258,7 +258,7 @@ not a submission ledger. That is `ena_submissions`.
 
 ## Recording submissions
 
-`ena_submissions` (`sql/015_ena_submissions.sql`) is the submission ledger. The submission pipeline
+`ena_submissions` is the submission ledger. The submission pipeline
 writes it and nothing else does. This pipeline never writes or reads it, deliberately: validation must
 not depend on submission state, or a rerun of the validator could contradict the archive.
 

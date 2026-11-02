@@ -262,8 +262,8 @@ nextflow run ena.nf \
 
 Add `--sql_config /path/to/postgres.cfg` to either standalone command to upload the normalized
 validation attempt to PostgreSQL after Webin finishes. Use `--skip_upload_results true` for an
-explicitly file-only run. Nextflow never creates the database schema: apply the migrations first
-(see [Database migrations](#database-migrations)).
+explicitly file-only run. Nextflow never creates the database schema (see
+[Database schema](#database-schema)).
 
 `ena_validation_attempts` keeps one row per `(full_seqid, ena_study, validation_attempt)`.
 Rerunning under the same attempt token overwrites that row rather than adding a new one, so retrying
@@ -325,7 +325,7 @@ This replaces three quantities that were never comparable with each other:
 
 `avg_coverage` and `avg_base_coverage` are left untouched for provenance. Use `mean_depth` for any
 cross-platform comparison, and `depth_method` to tell the two generations apart (`remap_full_v1`,
-`not_measured`, or a `legacy_*` label applied by `sql/003_mitogenome_data_uniform_depth.sql`).
+`not_measured`, or a `legacy_*` label applied by the uniform-depth database migration).
 
 Two details worth knowing when reading the numbers:
 
@@ -479,29 +479,12 @@ The pipeline orchestrates several helper modules that all require absolute file 
 Optional helpers include `--binddir` (Singularity bind mount root) and `--tempdir` (work directory
 for large temporary files).
 
-## Database migrations
+## Database schema
 
-Nextflow never creates or alters the database schema. The numbered migrations in `sql/` are applied
-deliberately, before a run that uploads, with the migration runner:
-
-```bash
-python bin/apply_ena_migrations.py --config /path/to/postgres.cfg --check-only   # report pending
-python bin/apply_ena_migrations.py --config /path/to/postgres.cfg                # apply pending
-```
-
-It applies the pending migrations from its list, in order, under an advisory lock, and audits the
-schema before and after. Each one is recorded in `public.schema_migrations` (filename, sha256,
-applied_at) and skipped once recorded, so a migration runs exactly once. `--baseline` records every
-listed migration as applied *without running any of it*, for onboarding a database they were already
-applied to; it refuses once the ledger is non-empty. Editing a migration after it has been applied
-is an error (the database no longer matches the file), so the runner fails on checksum drift unless
-you pass `--force`: write a new migration instead.
-
-On Setonix there is no `psql` or `psycopg2` on the login nodes, so run it inside the psycopg2
-container with `singularity exec <image> python bin/apply_ena_migrations.py ...`.
-
-[`sql/README.md`](../sql/README.md) describes what each migration does and the ones that need care
-(irreversible drops, table rebuilds, generated columns that must never be written).
+Nextflow never creates or alters the database schema, and this repository does not carry the
+migrations. The OceanOmics database schema and its migrations are maintained separately
+(`genomes_db_review`); bring the database up to date there before a run that uploads. The pushers
+here assume the tables and columns already exist and fail loudly if one is missing.
 
 ## Skipping stages and reusing results
 
