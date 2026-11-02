@@ -5,6 +5,12 @@ mitochondrial genomes from PacBio HiFi, Illumina, and Hi-C sequencing runs. This
 pipeline-specific input requirements and the parameters you must provide to execute a full run on
 OceanOmics data holdings.
 
+> **Supported data.** Vertebrate mitogenomes are supported from HiFi, Illumina and Hi-C reads.
+> Invertebrate mitogenomes are supported from short reads only (Illumina and Hi-C, including the
+> reads behind a draft genome), assembled with GetOrganelle and annotated with MITOS2. The HiFi path
+> (MitoHiFi and its optional Oatk fallback) is set up for vertebrates only, so invertebrate HiFi
+> samples are not a supported input.
+
 > For general guidance on Nextflow execution, configuration profiles, and infrastructure tuning,
 > refer to the nf-core documentation: <https://nf-co.re/docs/usage>
 
@@ -37,7 +43,9 @@ Runs two bundled invertebrate HiFi rows through samplesheet parsing and the asse
 wiring, in stub mode, with no external inputs. Annotation, ENA prep and the SQL
 upload/QC modules are skipped, because each needs a resource this repository cannot
 ship (`--taxonkit_db_dir`, `--nt_blast_db`, `--template_sbt`, Postgres credentials).
-Use it to check that a clone and its container engine work, not to produce data.
+Use it to check that a clone and its container engine work, not to produce data. The
+invertebrate HiFi rows exercise the routing only; invertebrate HiFi is not a supported data path
+(see the note at the top of this page).
 
 ## Standalone QC-only workflow (`qc_only_from_annotations.nf`)
 
@@ -168,6 +176,9 @@ true`) instead assembles the HiFi reads de novo and locates the mitogenome by pr
 species reference. It runs when no usable reference is found, a technical lookup still fails after three retries,
 the selected reference is cross-order, or MitoHiFi emits no assembly. These outcomes remain distinct in the status
 TSVs so a biological reference gap is not confused with an infrastructure failure.
+
+Like the rest of the HiFi path, the fallback is set up for vertebrates only: one database is passed for the whole run,
+and OceanOmics runs use `actinopterygii_mito`.
 
 When enabled, `--oatk_mito_db` is **required**: point it at the OatkDB `<clade>_mito.fam` profile-HMM for the sample's
 clade, with its `.h3f/.h3i/.h3m/.h3p` index files staged in the same directory. Fetch a database once with the bundled

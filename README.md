@@ -7,6 +7,12 @@ annotates, validates, and packages mitochondrial genomes from PacBio HiFi, Illum
 pipeline harmonises sample metadata, splits routing by sequencing mode, integrates with the OceanOmics PostgreSQL
 database, and produces submission-ready GenBank artefacts alongside consolidated QC reporting.
 
+> [!IMPORTANT]
+> **Supported data.** Vertebrate mitogenomes are supported from HiFi, Illumina and Hi-C reads. Invertebrate
+> mitogenomes are supported from short reads only (Illumina and Hi-C, including the reads behind a draft genome),
+> assembled with GetOrganelle and annotated with MITOS2. The HiFi path (MitoHiFi and its optional Oatk fallback) is set
+> up for vertebrates only, so invertebrate HiFi samples are not a supported input.
+
 ## Introduction
 
 OceanGenomes samples arrive from multiple sequencing modalities and require a consistent, auditable workflow to

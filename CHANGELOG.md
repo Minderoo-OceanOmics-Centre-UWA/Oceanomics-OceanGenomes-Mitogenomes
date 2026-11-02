@@ -190,6 +190,10 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Changed`
 
+- **Supported data is stated up front.** README and `docs/usage.md` now say that invertebrate
+  mitogenomes are supported from short reads only (Illumina/Hi-C, including draft-genome reads); the
+  HiFi path (MitoHiFi and its Oatk fallback) is set up for vertebrates only.
+
 - **The invertebrate BLAST search no longer filters its own results.** It ran with
   `-perc_identity 98 -max_target_seqs 500 -evalue 1e-10`, so the work-dir `blast.<gene>.<name>.tsv`
   was already cut to the 98% hits and there was no way to see what the failing samples did hit
