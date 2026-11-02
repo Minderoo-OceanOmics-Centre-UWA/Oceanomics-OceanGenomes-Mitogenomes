@@ -409,22 +409,25 @@ A valid CSV must match the schema in `assets/schema_input.json`:
 - When a sample has multiple libraries (e.g. several Illumina lanes), repeat the row with the same
   `sample` and `sequencing_type`. The pipeline concatenates the reads before downstream processing.
 
-Example:
+Example (a template with the same dummy values is in [`assets/samplesheet.csv`](../assets/samplesheet.csv)):
 
 ```csv title="oceanomics_samples.csv"
-sample,fastq_1,fastq_2,sequencing_type,invertebrates,nominal_species_id
-OG764,/data/OG764/OG764.ilmn.240716.R1.fastq.gz,/data/OG764/OG764.ilmn.240716.R2.fastq.gz,ilmn,false,Macruronus novaezelandiae
-OG764,/data/OG764/OG764.ilmn.240717.R1.fastq.gz,/data/OG764/OG764.ilmn.240717.R2.fastq.gz,ilmn,false,Macruronus novaezelandiae
-OG765_HICL,/data/OG765/OG765_HICL_S1_R1.fastq.gz,/data/OG765/OG765_HICL_S1_R2.fastq.gz,hic,false,Coelorinchus sp.
-OG765,/pacbio/OG765_m84012_250101_s1.hifi_reads.fastq.gz,,hifi,true,Invertebrata sp.
+sample,sequencing_type,single_end,nominal_species_id,class,family,order,invertebrates,fastq_1,fastq_2
+OG0001,ilmn,false,Macruronus novaezelandiae,Actinopteri,Merlucciidae,Gadiformes,false,/path/to/OG0001/OG0001.ilmn.240101.R1.fastq.gz,/path/to/OG0001/OG0001.ilmn.240101.R2.fastq.gz
+OG0001,ilmn,false,Macruronus novaezelandiae,Actinopteri,Merlucciidae,Gadiformes,false,/path/to/OG0001/OG0001.ilmn.240102.R1.fastq.gz,/path/to/OG0001/OG0001.ilmn.240102.R2.fastq.gz
+OG0002,hifi,true,Thunnus maccoyii,Actinopteri,Scombridae,Scombriformes,false,/path/to/OG0002/OG0002.hifi.240101.hifi_reads.fastq.gz,
+OG0003,ilmn,false,Acropora millepora,Anthozoa,Acroporidae,Scleractinia,true,/path/to/OG0003/OG0003.ilmn.240101.R1.fastq.gz,/path/to/OG0003/OG0003.ilmn.240101.R2.fastq.gz
 ```
+
+OG0001 has two Illumina lanes, concatenated before assembly. OG0003 is an invertebrate, so it
+must be short-read (see the note at the top of this page).
 
 When optional metadata fields such as `original_id` are present, they are propagated into `meta`
 alongside `sample` so downstream modules can retain provenance. Do not insert whitespace in any
 field.
 
-Example sheets are available at `test_data/samplesheet.csv` (minimal) and `bin/samplesheet.csv`
-(enriched real-world example).
+Example sheets are available at `test_data/samplesheet.csv` (minimal) and `assets/samplesheet.csv`
+(the enriched template above, with dummy values).
 
 ## Directory mode (`--input_dir`)
 

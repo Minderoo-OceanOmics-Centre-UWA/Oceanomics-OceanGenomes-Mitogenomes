@@ -17,6 +17,8 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   commented-out calls in `ENA_SUBMISSION_PREP`), and the unused standalone scripts in `bin/qc/`.
 - **nf-core template CI.** `.github/workflows/` and `.github/actions/`: every workflow was gated on
   `nf-core/oceangenomesmitogenomes` or needed nf-core secrets, and none had ever run here.
+- **`bin/samplesheet.csv`**, a real run's samplesheet with `/scratch` paths, replaced by
+  `assets/samplesheet.csv`, a template with dummy values.
 
 ### `Fixed`
 

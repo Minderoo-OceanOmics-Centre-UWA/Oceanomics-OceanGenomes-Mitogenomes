@@ -1,0 +1,5 @@
+sample,sequencing_type,single_end,nominal_species_id,class,family,order,invertebrates,fastq_1,fastq_2
+OG0001,ilmn,false,Macruronus novaezelandiae,Actinopteri,Merlucciidae,Gadiformes,false,/path/to/OG0001/OG0001.ilmn.240101.R1.fastq.gz,/path/to/OG0001/OG0001.ilmn.240101.R2.fastq.gz
+OG0001,ilmn,false,Macruronus novaezelandiae,Actinopteri,Merlucciidae,Gadiformes,false,/path/to/OG0001/OG0001.ilmn.240102.R1.fastq.gz,/path/to/OG0001/OG0001.ilmn.240102.R2.fastq.gz
+OG0002,hifi,true,Thunnus maccoyii,Actinopteri,Scombridae,Scombriformes,false,/path/to/OG0002/OG0002.hifi.240101.hifi_reads.fastq.gz,
+OG0003,ilmn,false,Acropora millepora,Anthozoa,Acroporidae,Scleractinia,true,/path/to/OG0003/OG0003.ilmn.240101.R1.fastq.gz,/path/to/OG0003/OG0003.ilmn.240101.R2.fastq.gz
