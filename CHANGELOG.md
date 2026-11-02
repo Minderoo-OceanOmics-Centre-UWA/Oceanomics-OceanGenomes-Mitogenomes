@@ -13,6 +13,8 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   `tests/integration/test_ena_validation_database.py` (which built its schema from those files) are gone.
   The schema and its migrations are maintained separately (`genomes_db_review`); `docs/usage.md` now says
   so under "Database schema".
+- **Dead code.** The never-wired `DIAGNOSTICS`, `GROUPER` and `SUBMITTER` modules (and their
+  commented-out calls in `ENA_SUBMISSION_PREP`), and the unused standalone scripts in `bin/qc/`.
 
 ### `Fixed`
 

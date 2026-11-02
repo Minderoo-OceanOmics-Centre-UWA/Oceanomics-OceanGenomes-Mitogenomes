@@ -21,9 +21,6 @@ include { BUILD_ENA_CANDIDATE_PACKAGE } from '../../../modules/local/genome_qc/b
 include { WEBIN_VALIDATE        } from '../../../modules/local/genome_qc/webin_validate'
 include { ENA_VALIDATION_RESULT } from '../../../modules/local/genome_qc/ena_validation_result'
 include { ENA_VALIDATION_SUMMARY} from '../../../modules/local/genome_qc/ena_validation_summary'
-// include { DIAGNOSTICS           } from '../../../modules/local/genome_qc/diagnostics'
-// include { GROUPER               } from '../../../modules/local/genome_qc/grouper'
-// include { SUBMITTER             } from '../../../modules/local/genome_qc/submitter'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -510,49 +507,6 @@ workflow ENA_SUBMISSION_PREP {
     ch_versions = ch_versions
         .mix(ENA_VALIDATION_RESULT.out.versions.first())
         .mix(ENA_VALIDATION_SUMMARY.out.versions)
-    
-    //
-    // MODULE: Interperate the translation diagnostics from table2asn output
-    //
-
-    // DIAGNOSTICS (
-
-    // )
-
-    //
-    // MODULE: Group similar mitogenomes
-    //
-    /* Need to write a module for here that will check the database for other mitogenomes
-        that have not been submitted or have an accession number in the SQL database.
-        It will then find other mitogenomes that have the same transflated protein
-        fingerprint and group them for submission.
-        Maybe the mitogenomes that are ready for submission need to be noted in the SQL
-        database so that they can be grouped together. Maybe there can be a ready directory
-        and mitogenomes are put into a directory with other ones that match them and at then
-        periodically they get sent, either when they hit 10 or at the start of each week. */
-
-
-    //
-    // MODULE: Genbank submitter
-    //
-
-    // SUBMITTER (
-
-    // )
-
-
-    //
-    // Subworkflow finishing steps.
-    //
-
-    // Collect MultiQC files
-    // Need to update this section to include everything
-    // ch_multiqc_files = ch_multiqc_files.mix(BLAST_BLASTN.out.summary.collect{it[1]})
-    // ch_versions = ch_versions.mix(EMMA.out.versions.first())
-    // ch_versions = ch_versions.mix(BLAST_BLASTN.out.versions.first())
-    // ch_versions = ch_versions.mix(LCA.out.versions.first())
-
-
 
     //
     // Emit outputs
