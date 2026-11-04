@@ -650,6 +650,10 @@ if __name__ == "__main__":
         if 'conn' in locals():
             conn.rollback()
         print(f"❌ Database error: {e}")
+        # Non-zero so the task fails: Nextflow's errorStrategy retries once, then ignores it,
+        # so the run carries on, the failure is listed in FAILED_UPLOADS.tsv, and -resume
+        # re-runs it. Exiting 0 here made Nextflow cache a failed upload as a success.
+        sys.exit(1)
 
     finally:
         if 'cursor' in locals():

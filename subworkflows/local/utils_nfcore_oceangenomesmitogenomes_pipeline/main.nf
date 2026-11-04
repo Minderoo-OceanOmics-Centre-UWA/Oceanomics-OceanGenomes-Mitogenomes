@@ -177,6 +177,44 @@ workflow PIPELINE_COMPLETION {
             log.warn "=================================================================="
         }
 
+        // Database uploads that failed for good. An upload script exits non-zero when the
+        // database refuses or errors, so the task fails, is retried once and then ignored:
+        // the run carries on. Ignored tasks publish nothing, so their *.upload.txt stays in
+        // the work dir; list each one here, with that work dir, so a failed upload is never
+        // mistaken for a success. Failed tasks are not cached, so -resume re-runs them.
+        def uploads_trace = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
+        if (uploads_trace.exists()) {
+            def lines = uploads_trace.readLines()
+            def header = lines ? lines[0].split('\t') as List : []
+            def col = { String name -> header.indexOf(name) }
+            if ([col('name'), col('status'), col('exit'), col('attempt'), col('workdir')].every { it >= 0 }) {
+                // Last attempt per task name: a retry that succeeded is not a failure.
+                def last = [:]
+                lines.drop(1).each { line ->
+                    def c = line.split('\t', -1)
+                    def name = c[col('name')]
+                    if (!(name ==~ /.*(PUSH_|UPLOAD_RESULTS).*/)) return
+                    def attempt = (c[col('attempt')] ?: '0') as int
+                    if (!last[name] || attempt >= last[name].attempt) {
+                        last[name] = [attempt: attempt, status: c[col('status')], exit: c[col('exit')], workdir: c[col('workdir')]]
+                    }
+                }
+                def failed = last.findAll { k, v -> v.status in ['FAILED', 'ABORTED'] }
+                if (failed) {
+                    def out = file("${outdir}/sql_uploaded_data/FAILED_UPLOADS.tsv")
+                    out.parent.mkdirs()
+                    out.text = "task\tattempt\texit\twork_dir\n" +
+                        failed.collect { k, v -> "${k}\t${v.attempt}\t${v.exit}\t${v.workdir}" }.sort().join('\n') + '\n'
+                    log.warn "=================================================================="
+                    log.warn "${failed.size()} database upload(s) FAILED and were not written (the run continued):"
+                    failed.keySet().sort().each { log.warn "  - ${it}" }
+                    log.warn "Listed with their work dirs (each holds the *.upload.txt log) in ${out}"
+                    log.warn "Fix the cause, then re-run with -resume: only these uploads run again."
+                    log.warn "=================================================================="
+                }
+            }
+        }
+
         // Memory hints: attempt-scaled processes (OATK, GETORGANELLE_RESEED,
         // GETORGANELLE_FROMREADS, see conf/base.config) request more memory on
         // each retry via task.attempt. task.attempt is scoped to this session,

@@ -189,6 +189,9 @@ if __name__ == "__main__":
     sample = args.sample
     annotation_stats = args.annotation_stats
     force_overwrite = args.force
+    # Set by a row that cannot be written; the script exits 1 at the end so the task fails
+    # (and is retried, then ignored, by Nextflow) instead of passing as a success.
+    upload_failed = False
 
     print(f"Importing data from {annotation_stats}")
     # Load and preprocess annotation data
@@ -319,6 +322,7 @@ if __name__ == "__main__":
             if not params["annotation"]:
                 print(f"❌ Database error: {og_id}.{tech}.{seq_date}.{code} has no annotation name; "
                       "an annotation is stored under its annotator, so nothing was written.")
+                upload_failed = True
                 continue
 
             # The assembly row is normally pre-created by the assembly upload. If it is
@@ -404,9 +408,13 @@ if __name__ == "__main__":
         if 'conn' in locals():
             conn.rollback()
         print(f"❌ Database error: {e}")
+        upload_failed = True
 
     finally:
         if 'cursor' in locals():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+    if upload_failed:
+        sys.exit(1)

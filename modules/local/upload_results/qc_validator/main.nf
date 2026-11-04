@@ -33,7 +33,11 @@ process PUSH_QC_VALIDATOR {
     printf '%s\n' '<tr><td>Push QC Validator</td><td><samp>push_qc_validator.py &lt;config&gt; &lt;record&gt;</samp></td><td>Records the pipeline as lca_validation.validator_2 for ${meta.id} when it cleared every QC gate.</td></tr>' > 16_push_qc_validator.tool_params_mqcrow.html
     printf '"%s":\n    python: "%s"\n    push_qc_validator: "1.0.0"\n' \\
         "${task.process}" "\$(python --version | awk '{print \$2}')" > versions.yml
-    exit 0
+    # Exit with the script's own code. A failed upload must fail the task: the upload
+    # label's errorStrategy retries it once, then ignores it and records it in
+    # FAILED_UPLOADS.tsv, so the run carries on and -resume re-runs it. The log above is
+    # written either way.
+    exit \${upload_rc}
     """
 
     stub:
