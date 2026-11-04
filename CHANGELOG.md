@@ -524,6 +524,15 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Added`
 
+- **Failed database uploads fail their task, without stopping the run.**
+  `push_mtdna_assm_results.py` and `push_emma_annotation_results.py` exit 1 on a database
+  error, and `PUSH_QC_VALIDATOR` / `PUSH_ENA_VALIDATION_RESULTS` exit with their script's code
+  instead of 0. The default errorStrategy retries once and ignores, so the run carries on, and
+  `-resume` re-runs only the failed uploads. The completion handler writes
+  `sql_uploaded_data/FAILED_UPLOADS.tsv` and warns; the trace gains a `workdir` field.
+  Before this, a refused write was cached as a success (RELEASE_TEST_261102 lost 20 uploads
+  that way). Tests: `tests/unit/test_upload_exit_codes.py`, harness `tests/upload_failure/`.
+
 - **LCA results are written by `annotation_id`.** `push_lca_blast_results.py`,
   `push_lca_raw_results.py`, `push_species_validation.py` and `push_qc_validator.py` write
   `mito_blast_hit`, `mito_lca`, `mito_lca_raw` and `mito_lca_validation` (genomes_db_review 076,
