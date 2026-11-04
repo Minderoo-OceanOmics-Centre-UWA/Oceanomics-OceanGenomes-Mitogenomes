@@ -524,6 +524,13 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Added`
 
+- **LCA results are written by `annotation_id`.** `push_lca_blast_results.py`,
+  `push_lca_raw_results.py`, `push_species_validation.py` and `push_qc_validator.py` write
+  `mito_blast_hit`, `mito_lca`, `mito_lca_raw` and `mito_lca_validation` (genomes_db_review 076,
+  Phase R.7b), resolving the key with the database function `mito_annotation_id()`. The old table
+  names are read-only views from 076; reads are unchanged, and the previous writers fail on
+  "cannot insert into view".
+
 - **The assembly QC verdict and the completeness profile reach the database.**
   `PUSH_ASSEMBLY_QC` (`bin/push_assembly_qc.py`, `modules/local/upload_results/assembly_qc`) runs
   after `MITOGENOME_ASSEMBLY_SUMMARY` under the upload switch and writes each assembly's `status`,

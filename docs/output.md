@@ -438,6 +438,13 @@ counts, missing genes and a completeness verdict.
 
 </details>
 
+The LCA, BLAST and species-validation results are stored in `mito_lca`, `mito_lca_raw`,
+`mito_blast_hit` and `mito_lca_validation`, keyed by the annotation's `annotation_id`
+(genomes_db_review migration 076, 2026-11-02). `lca`, `lca_raw_results`, `blast_filtered_lca` and
+`lca_validation` are read-only views over them that still show the `og_id`, `tech`, `seq_date`,
+`code` and `annotation` columns, so anything that reads those names is unchanged. A row for an
+annotation the database does not hold is refused, so the annotation upload must land first.
+
 Uploads need `--sql_config` and are turned off by `--skip_upload_results`. Each upload writes a
 readable log, so connectivity or data problems can be audited after the run. The ENA validation and
 second-validator writes are non-fatal: a failure is logged and the run continues.
