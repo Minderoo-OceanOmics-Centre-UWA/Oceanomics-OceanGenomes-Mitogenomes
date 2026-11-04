@@ -445,6 +445,16 @@ The LCA, BLAST and species-validation results are stored in `mito_lca`, `mito_lc
 `code` and `annotation` columns, so anything that reads those names is unchanged. A row for an
 annotation the database does not hold is refused, so the annotation upload must land first.
 
+**A failed upload fails its task, not the run.** When the database refuses or errors on a
+write, the upload script exits non-zero. The task is retried once and then ignored, so every
+other sample carries on. At the end of the run the failed uploads are listed in the log and in
+`sql_uploaded_data/FAILED_UPLOADS.tsv` (task, attempt, exit code, work dir). A failed task
+publishes nothing, so its `*.upload.txt` log is in that work dir. Failed tasks are not cached:
+fix the cause (for example, upload the missing annotation), then re-run with `-resume` and only
+those uploads run again. Before 2026-11-04 the assembly and annotation uploads, the QC
+validator and the ENA validation upload exited 0 on a database error, so a failed upload
+looked like a success and `-resume` skipped it.
+
 Uploads need `--sql_config` and are turned off by `--skip_upload_results`. Each upload writes a
 readable log, so connectivity or data problems can be audited after the run. The ENA validation and
 second-validator writes are non-fatal: a failure is logged and the run continues.
