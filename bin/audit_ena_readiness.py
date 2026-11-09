@@ -189,11 +189,22 @@ def main() -> int:
                         """
                         SELECT s.nominal_species_id, sp.class, sp.ordr
                         FROM sample s
-                        LEFT JOIN species sp
+                        -- master_species has no invertebrates, so their
+                        -- class/order print blank here; the pipeline itself
+                        -- resolves them from the NCBI taxdump.
+                        LEFT JOIN master_species sp
                           ON lower(sp.species) =
                              lower(trim(s.nominal_species_id))
+                          OR EXISTS (
+                              SELECT 1
+                              FROM unnest(string_to_array(sp.synonym, ','))
+                                   AS syn(name)
+                              WHERE lower(btrim(syn.name)) =
+                                    lower(trim(s.nominal_species_id)))
                         WHERE s.og_id = %s
-                        ORDER BY sp.ncbi_taxon_id NULLS LAST
+                        ORDER BY (lower(sp.species) =
+                                  lower(trim(s.nominal_species_id))) DESC,
+                                 sp.ncbi_taxon_id NULLS LAST
                         LIMIT 1
                         """,
                         (args.og_id,),

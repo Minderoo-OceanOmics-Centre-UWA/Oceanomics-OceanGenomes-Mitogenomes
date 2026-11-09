@@ -181,15 +181,33 @@ This happens when a samplesheet is corrected after a partial run: the class, gen
 // specimen, one of them silently stale.
 //
 // Rows whose values came from the samplesheet rather than from a fresh lookup
-// are marked source=manual, which is the honest label for a hand edit.
-def writeTaxonomyResolution(metas) {
+// are marked source=manual, which is the honest label for a hand edit. Otherwise
+// source and match_level are carried over from create_samplesheet.py's own
+// report (`lookup_report`), which is the only record of whether a class came
+// from master_species, from a congener's row, from a fuzzy match or from the
+// taxdump.
+def writeTaxonomyResolution(metas, lookup_report) {
     if (!params.outdir || !metas) return
+
+    def lookup = [:]
+    if (!params.input && lookup_report) {
+        def rows = file(lookup_report.toString()).readLines()
+        if (rows) {
+            def columns = rows[0].split('\t', -1) as List
+            rows.drop(1).each { line ->
+                def values = line.split('\t', -1) as List
+                def row = [columns, values].transpose().collectEntries { it }
+                if (row.sample && !lookup.containsKey(row.sample)) lookup[row.sample] = row
+            }
+        }
+    }
 
     def out = file("${params.outdir}/samplesheet/taxonomy_resolution.tsv")
     out.getParent().mkdirs()
 
     def header = ['sample', 'nominal_species_id', 'class', 'family', 'order',
-                  'reference_species_id', 'source', 'invertebrates', 'genetic_code']
+                  'reference_species_id', 'source', 'match_level', 'invertebrates',
+                  'genetic_code']
     def seen = [] as Set
     def lines = [header.join('\t')]
     metas.each { meta ->
@@ -201,7 +219,8 @@ def writeTaxonomyResolution(metas) {
             meta.family ?: '',
             meta.order ?: '',
             meta.reference_species_id ?: '',
-            params.input ? 'manual' : 'resolved',
+            params.input ? 'manual' : (lookup[meta.id]?.source ?: 'resolved'),
+            params.input ? '' : (lookup[meta.id]?.match_level ?: ''),
             (meta.invertebrates ?: false).toString(),
             meta.genetic_code ?: '',
         ].join('\t')
@@ -283,8 +302,8 @@ workflow PREPARE_SAMPLESHEET {
             .collect()
 
 
-        // The NCBI taxdump backs up the species table when it has no match for a
-        // sample's nominal name. storeDir makes this a cache hit whenever the
+        // The NCBI taxdump backs up master_species when it has no exact match for
+        // a sample's nominal name. storeDir makes this a cache hit whenever the
         // annotation subworkflow has already pulled the same dump.
         def taxdump_ch = Channel.value([])
         if (params.taxonkit_db_dir) {
@@ -292,7 +311,7 @@ workflow PREPARE_SAMPLESHEET {
             taxdump_ch = DOWNLOAD_TAXONKIT_DB_SAMPLESHEET.out.db_files
         }
         else {
-            log.warn "No --taxonkit_db_dir set: class/family/order come from the species table only, so unmatched samples will fail the taxonomy check."
+            log.warn "No --taxonkit_db_dir set: class/family/order come from master_species only, which has no invertebrates, so unmatched samples will fail the taxonomy check."
         }
 
         // Create enriched samplesheet from directory
@@ -304,10 +323,14 @@ workflow PREPARE_SAMPLESHEET {
             ch_genetic_codes
         )
 
+        // Paired with the script's own resolution report so writeTaxonomyResolution
+        // can keep its per-sample source and match_level.
         samplesheet_ch = CREATE_SAMPLESHEET_ENRICHED.out.samplesheet
+            .combine(CREATE_SAMPLESHEET_ENRICHED.out.taxonomy_resolution)
     }
     else if (input) {
         samplesheet_ch = Channel.fromPath(input, checkIfExists: true)
+            .map { sheet -> [ sheet, null ] }
     }
     else {
         error "No input provided: specify --input or --input_dir or provide reads downstream"
@@ -315,10 +338,11 @@ workflow PREPARE_SAMPLESHEET {
 
     // Parse samplesheet into channel of [meta, fastq_files]
     def ch_samplesheet = samplesheet_ch
-            .map { samplesheet_file ->
-                samplesheetToList(samplesheet_file, "${projectDir}/assets/schema_input.json")
+            .map { samplesheet_file, lookup_report ->
+                [ samplesheetToList(samplesheet_file, "${projectDir}/assets/schema_input.json"),
+                  lookup_report ]
             }
-            .flatMap { sample_list ->
+            .flatMap { sample_list, lookup_report ->
                 // Stop the run before any assembly work when a sample's class did
                 // not resolve. Checked on the whole list so one message names every
                 // offending sample. The enriched samplesheet has already been
@@ -423,7 +447,7 @@ workflow PREPARE_SAMPLESHEET {
                 // be picked up by -resume.
                 def resolved_metas = resolved.findAll { it != null }.collect { it[1] }
                 invalidateStaleRoutes(resolved_metas.collect { [ it ] })
-                writeTaxonomyResolution(resolved_metas)
+                writeTaxonomyResolution(resolved_metas, lookup_report)
                 resolved
             }
             .groupTuple()
@@ -458,7 +482,7 @@ workflow PREPARE_SAMPLESHEET {
     ch_getorg = ch_ilmn_with_meta.mix(ch_hic_with_files)
 
     emit:
-    samplesheet = samplesheet_ch
+    samplesheet = samplesheet_ch.map { sheet, _lookup_report -> sheet }
     getorg_input = ch_getorg
     mitohifi_input = ch_hifi_with_files
 }

@@ -27,6 +27,7 @@ params.skip_upload_results = params.skip_upload_results == null ? false : params
 include { ENA_SUBMISSION_PREP } from './subworkflows/local/ena_submission_prep/main'
 include { UPLOAD_ENA_RESULTS } from './subworkflows/local/upload_results_mito/main'
 include { VALIDATED_SPECIES_QUERY } from './modules/local/validated_species_query/main'
+include { DOWNLOAD_TAXONKIT_DB } from './modules/local/download_taxonkit_db'
 
 /*
 Expected annotation filename prefix:
@@ -106,10 +107,22 @@ workflow QC_ONLY_FROM_ANNOTATIONS {
             tuple(meta, annotation_files)
         }
 
+    // The class lookup reads master_species, which has no invertebrates; the NCBI
+    // taxdump fills the gap. storeDir makes this a cache hit after any full run.
+    def taxdump_ch = Channel.value([])
+    if (params.taxonkit_db_dir) {
+        DOWNLOAD_TAXONKIT_DB(Channel.value("taxdump"))
+        taxdump_ch = DOWNLOAD_TAXONKIT_DB.out.db_files
+    }
+    else {
+        log.warn "No --taxonkit_db_dir set: an invertebrate's class cannot be resolved, so it falls back to --translation_table."
+    }
+
     // Query validated species names from lca_validation.
     VALIDATED_SPECIES_QUERY(
         ch_annotations_grouped.map { meta, _files -> meta },
-        sql_config_file
+        sql_config_file,
+        taxdump_ch
     )
 
     ch_species = VALIDATED_SPECIES_QUERY.out.species

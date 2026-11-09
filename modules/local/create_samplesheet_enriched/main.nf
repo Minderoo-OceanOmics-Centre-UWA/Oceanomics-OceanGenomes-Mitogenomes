@@ -18,7 +18,7 @@ process CREATE_SAMPLESHEET_ENRICHED {
     path "versions.yml"               , emit: versions
 
     script:
-    // The species table only holds curated taxa. Without the taxdump fallback a
+    // master_species carries no invertebrates. Without the taxdump fallback a
     // miss leaves class='unknown', which downstream reads as "vertebrate".
     def taxdump_arg = taxdump ? "--taxdump-dir ${taxdump}" : ''
     """
@@ -41,7 +41,7 @@ process CREATE_SAMPLESHEET_ENRICHED {
     // downstream, which needs a header row to parse at all.
     """
     printf 'sample,sequencing_type,single_end,original_id,completion_date,date,assembly_prefix,nominal_species_id,reference_species_id,class,family,order,invertebrates,genetic_code,fastq_1,fastq_2\\n' > ${output_name}
-    printf 'sample\\tnominal_species_id\\tclass\\tfamily\\torder\\treference_species_id\\tsource\\n' > taxonomy_resolution.tsv
+    printf 'sample\\tnominal_species_id\\tclass\\tfamily\\torder\\treference_species_id\\tsource\\tmatch_level\\tinvertebrates\\tgenetic_code\\n' > taxonomy_resolution.tsv
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: "stub"

@@ -48,7 +48,7 @@
                 "STUB_multiqc_report.html:md5,d41d8cd98f00b204e9800998ecf8427e",
                 "mitogenome_assembly_summary_mqc.tsv:md5,40d50f3c7bf7fca17b36ff1f610850ba",
                 "run_completeness.txt:md5,be119e344bb23b86285a3de03a2c3753",
-                "taxonomy_resolution.tsv:md5,d71cbcde0bb21ac7845cab38323ad2f1"
+                "taxonomy_resolution.tsv:md5,7e1a8d8eded8cf30800ca72c2c7e8a9a"
             ]
         ],
         "timestamp": "2026-10-30T15:44:45.535692634",
