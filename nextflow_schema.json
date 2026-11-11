@@ -489,7 +489,8 @@
                 "force_db_overwrite": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Overwrite existing mitogenome_data rows on SQL upload. Set false for insert-only uploads, where a row already holding a real result is preserved. Neither mode ever replaces a successful assembly row with 'failed to assemble'."
+                    "description": "Overwrite existing assembly rows on SQL upload. Set false to keep an assembly row that already holds a real result. Neither mode ever replaces a successful assembly row with 'failed to assemble'.",
+                    "help_text": "false only protects assembly rows. A complete annotation still replaces the stored annotation from the same annotator, and only an incomplete one is held back. The assembly QC verdict (mito_assembly_qc) is always replaced. A run with false can therefore leave a kept assembly row next to this run's annotation and QC verdict."
                 },
                 "lca_prune_history": {
                     "type": "boolean",

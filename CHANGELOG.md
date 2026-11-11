@@ -24,6 +24,17 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **The completion handler crashed on an empty `memory_hints.json`.** A 0-byte hints file (left by a write
+  that failed at close()) made `JsonSlurper` throw, which aborted the rest of `workflow.onComplete`,
+  including the hook notification (release test, `Failed to invoke workflow.onComplete`). An empty or
+  unreadable file is now ignored with a warning and rewritten, the new file is written beside the old one
+  and moved over it, and any failure in the hints update is a warning rather than a crash.
+- **The failed-task warning counted one thing and listed another.** It printed Nextflow's ignored count
+  ("2 process(es) failed") above every FAILED row in the trace, so tasks that had recovered on retry were
+  listed as failures (12 in the release test). Both the count and the list now come from each task's last
+  attempt, with one extra line for how many tasks recovered on retry. The upload-failure report shares
+  the same per-task reading (`lastAttemptByTask`).
+
 - **Coral introns blocked ENA prep.** Since MITOS gpI/gpII calls started being exported, each one was
   written to the submission `.tbl` as a bare `intron`. table2asn fails an intron that sits outside a gene
   with `FATAL: MISSING_GENES`, which quarantined OG2303 and OG2375 in the release test, though both had
@@ -220,6 +231,12 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   Fixed and all three pass.
 
 ### `Changed`
+
+- **`force_db_overwrite` is documented as protecting assembly rows only.** With it false, a complete
+  annotation still replaces the stored annotation of the same annotator, and the assembly QC verdict is
+  always replaced. The release test ran with it false and replaced the annotation and QC columns of all
+  97 assembly rows while keeping every assembly row. This is unchanged; the param help text and the
+  `nextflow.config` comment now say so.
 
 - **Supported data is stated up front.** README and `docs/usage.md` now say that invertebrate
   mitogenomes are supported from short reads only (Illumina/Hi-C, including draft-genome reads); the
