@@ -167,9 +167,9 @@ def logSaysCircular(logFile) {
 // copy of them would drift. See that file for the ordered rule list. This function
 // stays as the reseed-vs-first-pass entry point: it supplies the live path's
 // circularity source (the GetOrganelle log) and the measured extents.
-def preferReseed(rs_fasta, rs_log, fp_fasta, fp_log, tolerance) {
-    def candidate = AssemblySelection.measure(rs_fasta, logSaysCircular(rs_log))
-    def incumbent = AssemblySelection.measure(fp_fasta, logSaysCircular(fp_log))
+def preferReseed(rs_fasta, rs_log, fp_fasta, fp_log, tolerance, minCircularBp) {
+    def candidate = AssemblySelection.measure(rs_fasta, logSaysCircular(rs_log), null, minCircularBp as int)
+    def incumbent = AssemblySelection.measure(fp_fasta, logSaysCircular(fp_log), null, minCircularBp as int)
     return AssemblySelection.prefer(candidate, incumbent, tolerance as double)
 }
 
@@ -738,7 +738,8 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             .join(ch_reseed_firstpass, by: 0)                        // [meta, rs_fasta, rs_log, fp_fasta, fp_log]
             .map { meta, rs_fasta, rs_log, fp_fasta, fp_log ->
                 def useReseed = preferReseed(rs_fasta, rs_log, fp_fasta, fp_log,
-                                             params.reseed_length_tolerance as double)
+                                             params.reseed_length_tolerance as double,
+                                             (params.min_circular_mito_bp ?: 0) as int)
                 if (!useReseed) {
                     log.info "GETORGANELLE_RESEED: ${meta.id} keeping the first-pass assembly; " +
                              "the reseed did not improve on it"

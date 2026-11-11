@@ -24,6 +24,17 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **A GetOrganelle side graph could replace the mitogenome.** When GetOrganelle finds several graph
+  sets, the FROMREADS and RESEED modules copied whichever path it numbered `graph1.1`, and that
+  numbering is not stable between runs. OG3000's reseed found a 16,262 bp mitogenome and a 155 bp side
+  graph both times; in the release test the side graph was numbered first, won the reseed-vs-first-pass
+  choice as a "circular genome", and nothing reached annotation. Three changes:
+  - `bin/select_getorganelle_path.py` takes path 1 of the largest graph set and records every
+    candidate in `<prefix>.path_select.tsv`. With one graph set the FASTA is byte-identical to before.
+  - `lib/AssemblySelection.groovy` treats a "circle" shorter than the new `min_circular_mito_bp`
+    (default 10,000) as not circular, so size decides instead of circularity.
+  - `bin/check_getorganelle.py` calls a GetOrganelle circle a fragment (`final_verdict_circular` False,
+    note `circular_fragment`) when it covers under half the reference and is under half its length.
 - **Five nf-test failures caused by the test setup, not the pipeline.** `nf-test.config` applied
   `-profile test` to every test, so `conf/test.config`'s samplesheet and `skip_upload_results = true`
   overrode each suite's own params: `qc_only_upload` could never see uploads on, and suites whose script

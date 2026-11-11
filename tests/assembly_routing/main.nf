@@ -110,7 +110,8 @@ workflow PREFER_RESEED {
 
     main:
     results = cases.map { label, rs_fasta, rs_log, fp_fasta, fp_log, tolerance ->
-        [ label, preferReseed(rs_fasta, rs_log, fp_fasta, fp_log, tolerance as double).toString() ]
+        [ label, preferReseed(rs_fasta, rs_log, fp_fasta, fp_log, tolerance as double,
+                              params.min_circular_mito_bp as int).toString() ]
     }
 
     emit:

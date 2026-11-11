@@ -197,6 +197,9 @@ def main():
     p.add_argument("--out-evidence", required=True)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--min-ref-coverage", type=float, default=0.95, help="Reference coverage to call a scaffold a complete circle.")
+    p.add_argument("--min-fragment-ref-coverage", type=float, default=0.5,
+                   help="A GetOrganelle circle below this reference coverage and under half the "
+                        "reference length is called a fragment, not circular.")
     p.add_argument("--max-length-ratio", type=float, default=1.10)
     p.add_argument("--min-repeat-length", type=int, default=200)
     p.add_argument("--min-repeat-identity", type=float, default=70.0)
@@ -242,9 +245,21 @@ def main():
     elif not have_ref:
         note = "no_reference"
 
-    # Final circular verdict: keep GetOrganelle's True; otherwise adopt the
-    # reference-confirmed circle. None stays None (unknown).
-    if getorg_circ is True:
+    # A GetOrganelle "circle" that covers a small part of the reference and is a small
+    # fraction of its length is a side graph, not the mitogenome. OG3000's reseed wrote
+    # a 155 bp "circular genome" at 2.1% reference coverage, ratio 0.01, and this check
+    # passed it through as circular because it never questioned GetOrganelle's True.
+    circular_fragment = bool(
+        getorg_circ is True and ref_len and ref_cov is not None
+        and ref_cov < args.min_fragment_ref_coverage and (L / ref_len) < 0.5
+    )
+
+    # Final circular verdict: keep GetOrganelle's True unless it is a fragment;
+    # otherwise adopt the reference-confirmed circle. None stays None (unknown).
+    if circular_fragment:
+        final_circular = False
+        note = "circular_fragment"
+    elif getorg_circ is True:
         final_circular = True
     elif circular_by_reference is True:
         final_circular = True
@@ -252,7 +267,11 @@ def main():
         final_circular = False
     else:
         final_circular = None
-    circular_corrected = bool(getorg_circ is not True and final_circular is True)
+    # True whenever the final verdict overrides GetOrganelle's: a scaffold the reference
+    # confirms circular, or a GetOrganelle circle demoted as a fragment.
+    circular_corrected = bool(
+        (getorg_circ is not True and final_circular is True) or circular_fragment
+    )
 
     # Length / tandem-repeat anomaly screen.
     length_ratio = excess = length_anomaly = None

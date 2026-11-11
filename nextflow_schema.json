@@ -463,6 +463,12 @@
                     "minimum": 1.0,
                     "description": "Minimum fold difference in total assembly length required before length overrides contiguity when choosing between the first-pass and reseed GetOrganelle assemblies."
                 },
+                "min_circular_mito_bp": {
+                    "type": "integer",
+                    "default": 10000,
+                    "minimum": 0,
+                    "description": "Assemblies reported circular but shorter than this many bp are treated as not circular when choosing which assembly goes forward, so a small side graph cannot displace a real mitogenome on circularity alone."
+                },
                 "reseed_fallback_read_subsample": {
                     "type": "integer",
                     "default": 50000,

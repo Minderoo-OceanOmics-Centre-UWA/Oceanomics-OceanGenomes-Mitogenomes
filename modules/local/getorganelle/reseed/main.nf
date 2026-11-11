@@ -39,6 +39,8 @@ process GETORGANELLE_RESEED {
     path("mtdna/*extended_K*.assembly_graph.fastg.extend-*.csv")                      , emit: contig_label,    optional: true
     // Which scaffold ends were joined on graph evidence (bin/join_scaffolds_by_graph.py); only for multi-scaffold results.
     path("mtdna/*.graph_join.tsv")                                                    , emit: graph_join,       optional: true
+    // Which GetOrganelle graph set became the assembly (bin/select_getorganelle_path.py).
+    path("mtdna/*.path_select.tsv")                                                   , emit: path_select,      optional: true
     tuple val(meta), path("02b_getorganelle_reseed.tool_params_mqcrow.html")         , emit: tool_params
     path "versions.yml"                                                              , emit: versions
 
@@ -92,19 +94,14 @@ process GETORGANELLE_RESEED {
     for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-*.fastg; do cp "\$f" mtdna/; done
     for f in $output_dir/*extended_K*.assembly_graph.fastg.extend-*.csv; do cp "\$f" mtdna/; done
 
-    # The assembled organelle FASTA (`*1.1.*.fasta`) is only produced when
-    # GetOrganelle successfully assembled a contig. When the run finishes
-    # without producing one, emit an empty placeholder so downstream stages can
-    # detect the "failed to assemble" state instead of crashing on the missing
-    # output.
-    fasta_files=( $output_dir/${prefix}.*1.1.*.fasta )
-    if [ \${#fasta_files[@]} -gt 0 ]; then
-        cp "\${fasta_files[@]}" mtdna/
-        mv mtdna/${prefix}.*1.1.*.fasta mtdna/${prefix}.fasta
-        sed -i "/^>/s/.*/>${prefix}/g" mtdna/${prefix}.fasta
-    else
-        touch mtdna/${prefix}.fasta
-    fi
+    # Path FASTAs are only produced when GetOrganelle assembled something. When it
+    # found several graph sets, take the largest rather than whichever it numbered
+    # graph 1 (bin/select_getorganelle_path.py; OG3000). When there is none, emit an
+    # empty placeholder so downstream stages can detect the "failed to assemble"
+    # state instead of crashing on the missing output.
+    select_getorganelle_path.py --dir $output_dir --prefix ${prefix} --name ${prefix} \\
+        --out mtdna/${prefix}.fasta --evidence mtdna/${prefix}.path_select.tsv
+    [ -f mtdna/${prefix}.fasta ] || touch mtdna/${prefix}.fasta
 
     # Join scaffolds only where GetOrganelle's own graph proves the link: a direct,
     # unique edge between two scaffold ends (bin/join_scaffolds_by_graph.py). The

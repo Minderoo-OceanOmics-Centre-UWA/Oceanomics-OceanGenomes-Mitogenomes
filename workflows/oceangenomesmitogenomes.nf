@@ -255,9 +255,10 @@ def attachPrecomputedCircularity(fasta_ch, evidence_ch, placeholder) {
 def selectPrecomputedBest(rows, double tolerance) {
     def sorted = rows.sort { a, b -> a[0].mt_assembly_prefix <=> b[0].mt_assembly_prefix }
     def best = sorted[0]
+    def minCirc = (params.min_circular_mito_bp ?: 0) as int
     sorted.drop(1).each { candidate ->
-        def c = AssemblySelection.measure(candidate[1], candidate[0].circular, candidate[0].length_anomaly)
-        def b = AssemblySelection.measure(best[1], best[0].circular, best[0].length_anomaly)
+        def c = AssemblySelection.measure(candidate[1], candidate[0].circular, candidate[0].length_anomaly, minCirc)
+        def b = AssemblySelection.measure(best[1], best[0].circular, best[0].length_anomaly, minCirc)
         if (AssemblySelection.prefer(c, b, tolerance)) best = candidate
     }
     return best

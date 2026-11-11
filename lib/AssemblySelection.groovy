@@ -12,7 +12,11 @@
  * Rules, in order:
  *   1. an empty candidate never wins;
  *   2. an empty incumbent always loses;
- *   3. circular beats non-circular -- the only outright success available here;
+ *   3. circular beats non-circular -- the only outright success available here. A
+ *      "circle" shorter than min_circular_mito_bp is measured as NOT circular: OG3000's
+ *      reseed published a 155 bp "circular genome" (a 270 bp side graph GetOrganelle
+ *      happened to number first) over a 16,364 bp single-scaffold first pass on this rule
+ *      alone, and neither reached annotation. Below the floor the size rule decides;
  *   4. a molecule the circularity check called LENGTH-ANOMALOUS loses to one it did not.
  *      This sits ahead of size on purpose: the size rule rewards the bigger molecule, and a
  *      length anomaly is the finding that the molecule is bigger than it should be. OG2936's
@@ -43,8 +47,10 @@ class AssemblySelection {
      *
      * Unreadable or absent is reported as empty rather than thrown, because a
      * selection must still resolve when one candidate's file is missing.
+     *
+     * A circular verdict on fewer than `minCircularBp` bases is recorded as false (rule 3).
      */
-    static Map measure(fasta, Boolean circular = null, Boolean lengthAnomaly = null) {
+    static Map measure(fasta, Boolean circular = null, Boolean lengthAnomaly = null, int minCircularBp = 0) {
         int bp = 0, records = 0, ns = 0
         try {
             fasta.text.readLines().each { line ->
@@ -59,6 +65,7 @@ class AssemblySelection {
         } catch (ignored) {
             return [bp: 0, records: 0, ns: 0, circular: circular, length_anomaly: lengthAnomaly]
         }
+        if (circular == true && bp < minCircularBp) circular = false
         return [bp: bp, records: records, ns: ns, circular: circular, length_anomaly: lengthAnomaly]
     }
 

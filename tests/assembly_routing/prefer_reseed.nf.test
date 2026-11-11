@@ -49,6 +49,11 @@ nextflow_workflow {
                     // way, so the rule is a property of the spacers and not of the side.
                     ['unwelded_reseed_wins',      file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/frag_reseed.fa"),   file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
                                                   file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/welded_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
+                    // OG3000: GetOrganelle called a 155 bp side graph a "circular genome".
+                    // Below min_circular_mito_bp that is not circularity, so the size rule
+                    // keeps the 4 kb first pass. Without the floor rule 3 handed it the win.
+                    ['tiny_circular_reseed_loses', file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/og3000_tiny_circular_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/circular.log"),
+                                                  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/frag_first.fa"),  file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5],
                     // ...and an empty first pass cannot be kept over a real reseed.
                     ['empty_firstpass_loses',     file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/inv04_reseed.fa"), file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"),
                                                   file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/empty.fa"),        file("${projectDir}/tests/assembly_routing/fixtures/prefer_reseed/scaffold.log"), 1.5]
@@ -62,7 +67,8 @@ nextflow_workflow {
                 .collectEntries { [(it[0]): it[1]] }
             assertAll(
                 { assert workflow.success },
-                { assert verdicts.size() == 9 },
+                { assert verdicts.size() == 10 },
+                { assert verdicts['tiny_circular_reseed_loses'] == 'false' },
                 { assert verdicts['inv04_recovered_much_more'] == 'true' },
                 { assert verdicts['inv01_recovered_more'] == 'true' },
                 { assert verdicts['fragmented_reseed_loses'] == 'false' },
