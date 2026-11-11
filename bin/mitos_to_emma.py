@@ -111,6 +111,16 @@ NON_GENE_MAP = {
 # Feature types that are not genes: no gene line, no product, no CDS extraction.
 NON_GENE_FTYPES = {"rep_origin", "intron", "misc_feature"}
 
+# Non-gene features written to the GFF but NOT to the submission .tbl. MITOS's
+# gpI/gpII calls are short motif hits (~120-160 bp), not the real intron: in
+# coral nad5 the intron is the multi-kb gap between the two exons, and the gpI
+# call sits outside it, sometimes overlapping an exon or a neighbouring gene.
+# table2asn requires an intron inside a gene and fails the record with
+# FATAL MISSING_GENES (OG2303, OG2375 in the 2026-11 release test, both of which
+# validated before introns were exported). The split CDS join already encodes
+# the intron, so nothing is lost from the submission.
+TBL_EXCLUDED_FTYPES = {"intron"}
+
 # Largest gap (nt) between two rows of the same gene that still reads as one
 # locus with an intron rather than two separate copies of the gene. Coral nad5
 # group I introns run to a few kb; 10 kb is comfortably above any real
@@ -479,6 +489,11 @@ def write_tbl(tbl_path, features, chrom, seq_len, prefix, genetic_code):
                     out.write(f"{s}\t{e}\n")
                 for q in qual_lines:
                     out.write(f"\t\t\t{q[0]}\t{q[1]}\n")
+
+            if ftype in TBL_EXCLUDED_FTYPES:
+                # Kept in the GFF, left out of the submission table (see
+                # TBL_EXCLUDED_FTYPES).
+                continue
 
             if ftype in NON_GENE_FTYPES:
                 # No gene / mRNA wrapper, no /product, no transl_table -- just the

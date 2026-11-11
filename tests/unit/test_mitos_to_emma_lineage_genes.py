@@ -131,5 +131,43 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(by_disposition["unmapped"], ["wibble"])
 
 
+class SubmissionTableTests(unittest.TestCase):
+    """MITOS gpI/gpII calls stay in the GFF but never reach the .tbl: table2asn
+    fails an intron outside a gene with FATAL MISSING_GENES (OG2303, OG2375).
+    Origins and the LAGLIDADG ORF must still be written."""
+
+    def _convert(self, tmp):
+        bed = write_bed(tmp, [
+            ["c", 0, 60, "cox1", 0, "+"],
+            ["c", 100, 160, "OH", 0, "+"],
+            ["c", 200, 260, "gpI", 0, "+"],
+            ["c", 300, 360, "lagli", 0, "+"],
+            ["c", 400, 460, "gpII", 0, "+"],
+        ])
+        features, _audit = m.parse_bed(bed)
+        tbl = Path(tmp) / "s.tbl"
+        gff = Path(tmp) / "s.gff"
+        m.write_tbl(tbl, features, "c", 500, "s", 4)
+        m.write_gff(gff, features, "c", 500, "Sp", True)
+        return tbl.read_text(), gff.read_text()
+
+    def test_introns_left_out_of_tbl_other_non_genes_kept(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tbl, _gff = self._convert(tmp)
+        keys = [line.split("\t")[2] for line in tbl.splitlines()
+                if line and line[0].isdigit() and len(line.split("\t")) > 2]
+        self.assertNotIn("intron", keys)
+        self.assertIn("rep_origin", keys)
+        self.assertIn("misc_feature", keys)
+        self.assertIn("CDS", keys)
+
+    def test_introns_still_in_gff(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            _tbl, gff = self._convert(tmp)
+        self.assertEqual(sum(1 for l in gff.splitlines() if "\tintron\t" in l), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

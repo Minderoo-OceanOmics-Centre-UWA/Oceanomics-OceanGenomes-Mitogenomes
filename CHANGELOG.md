@@ -24,6 +24,14 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **Coral introns blocked ENA prep.** Since MITOS gpI/gpII calls started being exported, each one was
+  written to the submission `.tbl` as a bare `intron`. table2asn fails an intron that sits outside a gene
+  with `FATAL: MISSING_GENES`, which quarantined OG2303 and OG2375 in the release test, though both had
+  validated in Aug/Sep. The calls are short motif hits, not the real nad5 intron (the gap between the
+  exons, already encoded by the split CDS join), and one overlaps an exon and ND1. `bin/mitos_to_emma.py`
+  now leaves introns out of the `.tbl` and keeps them in the GFF. Replication origins, the LAGLIDADG ORF
+  `misc_feature`, ATP9 and mtMutS are still written. Re-running table2asn on both corals leaves only the
+  advisory `MISSING_PROTEIN_ID` and `NO_LOCUS_TAGS`.
 - **A GetOrganelle side graph could replace the mitogenome.** When GetOrganelle finds several graph
   sets, the FROMREADS and RESEED modules copied whichever path it numbered `graph1.1`, and that
   numbering is not stable between runs. OG3000's reseed found a 16,262 bp mitogenome and a 155 bp side
