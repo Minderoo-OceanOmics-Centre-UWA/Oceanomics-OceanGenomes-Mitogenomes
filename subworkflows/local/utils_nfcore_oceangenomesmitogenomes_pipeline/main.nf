@@ -149,28 +149,20 @@ workflow PIPELINE_COMPLETION {
         // WHICH samples failed, so silently-dropped tasks (e.g. a reseed whose
         // output was not collected) are easy to miss. Re-surface them loudly
         // here by reading the per-run execution trace, without aborting the run.
-        if (workflow_metadata.stats.ignoredCount > 0 || !workflow_metadata.success) {
-            def trace_file = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
-            def errored = []
-            if (trace_file.exists()) {
-                def lines = trace_file.readLines()
-                def header = lines ? lines[0].split('\t') : []
-                def name_idx = header.findIndexOf { it == 'name' }
-                def status_idx = header.findIndexOf { it == 'status' }
-                if (name_idx >= 0 && status_idx >= 0) {
-                    lines.drop(1).each { line ->
-                        def cols = line.split('\t')
-                        if (cols.size() > status_idx && cols[status_idx] in ['FAILED', 'ABORTED']) {
-                            errored << cols[name_idx]
-                        }
-                    }
-                }
-            }
+        //
+        // Counted per task from its LAST attempt: a task that failed and then
+        // succeeded on retry is not a failure. Listing every FAILED trace row
+        // instead made the warning say "2 failed" above a list of 12.
+        def trace_file = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
+        def last_attempts = lastAttemptByTask(trace_file)
+        def failed_for_good = last_attempts.findAll { k, v -> v.status in ['FAILED', 'ABORTED'] }
+        if (failed_for_good || workflow_metadata.stats.ignoredCount > 0 || !workflow_metadata.success) {
+            def recovered = last_attempts.count { k, v -> v.status == 'COMPLETED' && v.failed_attempts > 0 }
             log.warn "=================================================================="
-            log.warn "${workflow_metadata.stats.ignoredCount} process(es) failed and were ignored (run was not aborted)."
-            if (errored) {
-                log.warn "Failed/ignored tasks:"
-                errored.unique().sort().each { log.warn "  - ${it}" }
+            log.warn "${failed_for_good.size()} task(s) failed on their last attempt (run was not aborted)."
+            failed_for_good.keySet().sort().each { log.warn "  - ${it}" }
+            if (recovered) {
+                log.warn "${recovered} other task(s) failed and then succeeded on retry (not listed)."
             }
             log.warn "Review these before trusting downstream results."
             log.warn "Full per-task detail: ${trace_file}"
@@ -182,37 +174,18 @@ workflow PIPELINE_COMPLETION {
         // the run carries on. Ignored tasks publish nothing, so their *.upload.txt stays in
         // the work dir; list each one here, with that work dir, so a failed upload is never
         // mistaken for a success. Failed tasks are not cached, so -resume re-runs them.
-        def uploads_trace = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
-        if (uploads_trace.exists()) {
-            def lines = uploads_trace.readLines()
-            def header = lines ? lines[0].split('\t') as List : []
-            def col = { String name -> header.indexOf(name) }
-            if ([col('name'), col('status'), col('exit'), col('attempt'), col('workdir')].every { it >= 0 }) {
-                // Last attempt per task name: a retry that succeeded is not a failure.
-                def last = [:]
-                lines.drop(1).each { line ->
-                    def c = line.split('\t', -1)
-                    def name = c[col('name')]
-                    if (!(name ==~ /.*(PUSH_|UPLOAD_RESULTS).*/)) return
-                    def attempt = (c[col('attempt')] ?: '0') as int
-                    if (!last[name] || attempt >= last[name].attempt) {
-                        last[name] = [attempt: attempt, status: c[col('status')], exit: c[col('exit')], workdir: c[col('workdir')]]
-                    }
-                }
-                def failed = last.findAll { k, v -> v.status in ['FAILED', 'ABORTED'] }
-                if (failed) {
-                    def out = file("${outdir}/sql_uploaded_data/FAILED_UPLOADS.tsv")
-                    out.parent.mkdirs()
-                    out.text = "task\tattempt\texit\twork_dir\n" +
-                        failed.collect { k, v -> "${k}\t${v.attempt}\t${v.exit}\t${v.workdir}" }.sort().join('\n') + '\n'
-                    log.warn "=================================================================="
-                    log.warn "${failed.size()} database upload(s) FAILED and were not written (the run continued):"
-                    failed.keySet().sort().each { log.warn "  - ${it}" }
-                    log.warn "Listed with their work dirs (each holds the *.upload.txt log) in ${out}"
-                    log.warn "Fix the cause, then re-run with -resume: only these uploads run again."
-                    log.warn "=================================================================="
-                }
-            }
+        def failed_uploads = failed_for_good.findAll { k, v -> k ==~ /.*(PUSH_|UPLOAD_RESULTS).*/ }
+        if (failed_uploads) {
+            def out = file("${outdir}/sql_uploaded_data/FAILED_UPLOADS.tsv")
+            out.parent.mkdirs()
+            out.text = "task\tattempt\texit\twork_dir\n" +
+                failed_uploads.collect { k, v -> "${k}\t${v.attempt}\t${v.exit}\t${v.workdir}" }.sort().join('\n') + '\n'
+            log.warn "=================================================================="
+            log.warn "${failed_uploads.size()} database upload(s) FAILED and were not written (the run continued):"
+            failed_uploads.keySet().sort().each { log.warn "  - ${it}" }
+            log.warn "Listed with their work dirs (each holds the *.upload.txt log) in ${out}"
+            log.warn "Fix the cause, then re-run with -resume: only these uploads run again."
+            log.warn "=================================================================="
         }
 
         // Memory hints: attempt-scaled processes (OATK, GETORGANELLE_RESEED,
@@ -223,44 +196,13 @@ workflow PIPELINE_COMPLETION {
         // time -- its hash never matches the cached success. Record which
         // tier actually succeeded per sample here, from this run's own trace,
         // so conf/base.config's hintedMemory() can request it directly next
-        // time. Purely additive: a missing/unreadable trace is a no-op.
-        def hinted_processes = ['OATK', 'GETORGANELLE_RESEED', 'GETORGANELLE_FROMREADS']
-        def hints_trace_file = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
-        if (hints_trace_file.exists()) {
-            def trace_lines  = hints_trace_file.readLines()
-            def trace_header = trace_lines ? trace_lines[0].split('\t') : []
-            def name_idx     = trace_header.findIndexOf { it == 'name' }
-            def status_idx   = trace_header.findIndexOf { it == 'status' }
-            def attempt_idx  = trace_header.findIndexOf { it == 'attempt' }
-            def memory_idx   = trace_header.findIndexOf { it == 'memory' }
-            if ([name_idx, status_idx, attempt_idx, memory_idx].every { it >= 0 }) {
-                def hints_file = file("${outdir}/pipeline_info/memory_hints.json")
-                def hints = hints_file.exists() ? new groovy.json.JsonSlurper().parse(hints_file) : [:]
-                def hints_updated = false
-                trace_lines.drop(1).each { line ->
-                    def cols = line.split('\t')
-                    if (cols.size() <= memory_idx) { return }
-                    if (cols[status_idx] != 'COMPLETED') { return }
-                    def attempt = cols[attempt_idx].isInteger() ? cols[attempt_idx].toInteger() : 1
-                    if (attempt <= 1) { return }
-                    def name_matcher = (cols[name_idx] =~ /:(\w+) \(([^)]+)\)\s*$/)
-                    if (!name_matcher.find()) { return }
-                    def process_name = name_matcher.group(1)
-                    if (!(process_name in hinted_processes)) { return }
-                    def sample_id = name_matcher.group(2)
-                    def memory_gb = parseTraceMemoryToGb(cols[memory_idx])
-                    if (memory_gb == null) { return }
-                    if (!hints.containsKey(process_name)) { hints[process_name] = [:] }
-                    if (hints[process_name][sample_id] != memory_gb) {
-                        hints[process_name][sample_id] = memory_gb
-                        hints_updated = true
-                    }
-                }
-                if (hints_updated) {
-                    hints_file.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(hints))
-                    log.info "Updated memory hints for -resume: ${hints_file}"
-                }
-            }
+        // time. Purely additive, so nothing in here may throw: a missing,
+        // empty or corrupt hints file is replaced, and any other failure is a
+        // warning, never a crash that skips the rest of this handler.
+        try {
+            updateMemoryHints(trace_file, file("${outdir}/pipeline_info/memory_hints.json"))
+        } catch (Exception e) {
+            log.warn "Could not update memory hints (non-fatal): ${e.class.simpleName}: ${e.message}"
         }
 
         if (hook_url) {
@@ -278,6 +220,108 @@ workflow PIPELINE_COMPLETION {
     FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
+//
+// Last attempt of every task in a Nextflow execution trace, keyed by task name:
+// [attempt, status, exit, workdir, failed_attempts]. failed_attempts counts the
+// FAILED/ABORTED rows before the last one, so a task that recovered on retry can
+// be told apart from one that never failed. A missing or unreadable trace, or one
+// without the needed columns, gives an empty map.
+//
+def lastAttemptByTask(trace_file) {
+    def last = [:]
+    if (!trace_file.exists()) { return last }
+    def lines = trace_file.readLines()
+    def header = lines ? lines[0].split('\t') as List : []
+    def col = { String name -> header.indexOf(name) }
+    if (![col('name'), col('status'), col('attempt')].every { it >= 0 }) { return last }
+    def failures = [:].withDefault { 0 }
+    lines.drop(1).each { line ->
+        def c = line.split('\t', -1)
+        if (c.size() <= Math.max(col('name'), Math.max(col('status'), col('attempt')))) { return }
+        def name = c[col('name')]
+        def status = c[col('status')]
+        def attempt = c[col('attempt')].isInteger() ? c[col('attempt')].toInteger() : 0
+        if (status in ['FAILED', 'ABORTED']) { failures[name] += 1 }
+        if (!last[name] || attempt >= last[name].attempt) {
+            last[name] = [
+                attempt: attempt,
+                status : status,
+                exit   : col('exit') >= 0 && c.size() > col('exit') ? c[col('exit')] : '',
+                workdir: col('workdir') >= 0 && c.size() > col('workdir') ? c[col('workdir')] : '',
+            ]
+        }
+    }
+    last.each { name, v ->
+        v.failed_attempts = failures[name] - (v.status in ['FAILED', 'ABORTED'] ? 1 : 0)
+    }
+    return last
+}
+
+//
+// Record, per attempt-scaled process and sample, the memory of the attempt that
+// succeeded after a retry (see the onComplete comment). An empty or unparseable
+// hints file (a write that died at close() on a full /software quota left a 0-byte
+// one) is treated as empty and rewritten. The new file is written beside the old
+// one and moved over it, so a failed write can never leave a truncated file again.
+//
+def updateMemoryHints(trace_file, hints_file) {
+    if (!trace_file.exists()) { return }
+    def hinted_processes = ['OATK', 'GETORGANELLE_RESEED', 'GETORGANELLE_FROMREADS']
+    def trace_lines  = trace_file.readLines()
+    def trace_header = trace_lines ? trace_lines[0].split('\t') : []
+    def name_idx     = trace_header.findIndexOf { it == 'name' }
+    def status_idx   = trace_header.findIndexOf { it == 'status' }
+    def attempt_idx  = trace_header.findIndexOf { it == 'attempt' }
+    def memory_idx   = trace_header.findIndexOf { it == 'memory' }
+    if (![name_idx, status_idx, attempt_idx, memory_idx].every { it >= 0 }) { return }
+
+    def hints = [:]
+    def hints_unreadable = false
+    if (hints_file.exists()) {
+        try {
+            def parsed = hints_file.size() > 0 ? new groovy.json.JsonSlurper().parse(hints_file) : null
+            if (parsed instanceof Map) {
+                hints = parsed
+            } else {
+                hints_unreadable = true
+            }
+        } catch (Exception e) {
+            hints_unreadable = true
+        }
+        if (hints_unreadable) {
+            log.warn "Ignoring empty or unreadable ${hints_file}; it will be rewritten from this run's trace."
+        }
+    }
+
+    def hints_updated = false
+    trace_lines.drop(1).each { line ->
+        def cols = line.split('\t')
+        if (cols.size() <= memory_idx) { return }
+        if (cols[status_idx] != 'COMPLETED') { return }
+        def attempt = cols[attempt_idx].isInteger() ? cols[attempt_idx].toInteger() : 1
+        if (attempt <= 1) { return }
+        def name_matcher = (cols[name_idx] =~ /:(\w+) \(([^)]+)\)\s*$/)
+        if (!name_matcher.find()) { return }
+        def process_name = name_matcher.group(1)
+        if (!(process_name in hinted_processes)) { return }
+        def sample_id = name_matcher.group(2)
+        def memory_gb = parseTraceMemoryToGb(cols[memory_idx])
+        if (memory_gb == null) { return }
+        if (!hints.containsKey(process_name)) { hints[process_name] = [:] }
+        if (hints[process_name][sample_id] != memory_gb) {
+            hints[process_name][sample_id] = memory_gb
+            hints_updated = true
+        }
+    }
+    // An unreadable file is rewritten even with no new hints, so it stops warning.
+    if (hints_updated || hints_unreadable) {
+        def tmp = file("${hints_file}.tmp")
+        tmp.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(hints))
+        java.nio.file.Files.move(tmp, hints_file, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        log.info "Updated memory hints for -resume: ${hints_file}"
+    }
+}
+
 //
 // Parse a Nextflow trace `memory` field value (e.g. "200 GB", "6144 MB") into
 // whole gigabytes, rounding up so a recorded memory hint never under-provisions
