@@ -282,6 +282,11 @@ def refresh_package(
         for retired in ("biosample_accession", "biosample_source", "run_accessions"):
             metadata.pop(retired, None)
         metadata["schema_version"] = 3
+    if int(metadata.get("schema_version") or 0) < 4:
+        # A package built before coverage had a provenance cannot have one
+        # reconstructed: it predates the distinction.
+        metadata.setdefault("mean_depth_source", "unknown")
+        metadata["schema_version"] = 4
     if embl.exists():
         metadata["specimen"] = source_qualifiers(embl)
     metadata["manifest"] = manifest_fields(
@@ -382,13 +387,16 @@ def build_package(args: argparse.Namespace) -> int:
         # so biosample_accession and run_accessions went with them.  "study" is
         # "validation_study": it is the study sequence-context validation ran
         # against, never a submission target.
-        "schema_version": 3,
+        # 4: added mean_depth_source, so a package records whether its COVERAGE
+        # came from the run that built it or from a previously stored value.
+        "schema_version": 4,
         "full_seqid": full_seqid,
         "og_id": og_id,
         "assembly_prefix": args.assembly_prefix,
         "annotation_version": args.annotation_version,
         "validation_study": args.study,
         "mean_depth": args.coverage,
+        "mean_depth_source": str(supplied_metadata.get("mean_depth_source") or "unknown"),
         "program": args.program,
         "platform": args.platform,
         "scientific_name": args.scientific_name,

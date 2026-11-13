@@ -146,16 +146,37 @@ def find_tandem_repeat(seq, workdir, min_len, min_pident):
         hits.append((qs, qe, ss, se, ln, pid))
     if not hits:
         return None
-    start = min(min(h[0], h[2]) for h in hits)
-    end = max(max(h[1], h[3]) for h in hits)
-    unit = min(h[2] - h[0] for h in hits)
+    # Cluster the HSPs on the offset each implies (sstart - qstart). A genuine tandem
+    # array repeats ONE unit, so its HSPs all share one offset; unrelated repeats
+    # elsewhere in the molecule each contribute their own. Taking min/max over every
+    # hit instead let two short repeats near opposite ends report an "array" spanning
+    # the whole assembly (NOVA_260909_LA OG3004: 1-30956 of 30972 bp), and
+    # unit_bp = min(offset) was then an arbitrary small number rather than a period,
+    # which made `copies` meaningless and drove a false concatemer call.
+    tol = max(min_len // 10, 20)
+    clusters = {}
+    for h in sorted(hits, key=lambda x: x[2] - x[0]):
+        off = h[2] - h[0]
+        for key in clusters:
+            if abs(off - key) <= tol:
+                clusters[key].append(h)
+                break
+        else:
+            clusters[off] = [h]
+    # The array that explains the excess length is the one covering the most bases.
+    best = max(clusters.values(), key=lambda g: sum(x[4] for x in g))
+    start = min(min(h[0], h[2]) for h in best)
+    end = max(max(h[1], h[3]) for h in best)
+    offsets = sorted(h[2] - h[0] for h in best)
+    unit = offsets[len(offsets) // 2]
     array_len = end - start + 1
     if unit <= 0 or array_len < max(2 * unit, min_len):
         return None
-    tw = sum(h[4] for h in hits)
-    ident = sum(h[4] * h[5] for h in hits) / tw if tw else 0.0
+    tw = sum(h[4] for h in best)
+    ident = sum(h[4] * h[5] for h in best) / tw if tw else 0.0
     return {"array_start": start, "array_end": end, "array_len": array_len,
-            "unit_bp": unit, "copies": round(array_len / unit, 1), "identity": round(ident, 1)}
+            "unit_bp": unit, "copies": round(array_len / unit, 1),
+            "identity": round(ident, 1), "n_hsps": len(best)}
 
 
 def coerce_bool(v):
@@ -176,12 +197,24 @@ def main():
     p.add_argument("--out-evidence", required=True)
     p.add_argument("--threads", type=int, default=4)
     p.add_argument("--min-ref-coverage", type=float, default=0.95, help="Reference coverage to call a scaffold a complete circle.")
+    p.add_argument("--min-fragment-ref-coverage", type=float, default=0.5,
+                   help="A GetOrganelle circle below this reference coverage and under half the "
+                        "reference length is called a fragment, not circular.")
     p.add_argument("--max-length-ratio", type=float, default=1.10)
     p.add_argument("--min-repeat-length", type=int, default=200)
     p.add_argument("--min-repeat-identity", type=float, default=70.0)
     args = p.parse_args()
 
     getorg_circ = coerce_bool(args.getorg_circular)
+    # `seq` / L is the FIRST record: the reference-coverage, length-ratio and
+    # tandem-repeat tests below all describe one molecule, so they must not be fed
+    # a concatenation of unrelated scaffolds. `total_len` is every record summed,
+    # and is what `assembly_length` reports -- a fragmented GetOrganelle result is
+    # the normal case here (it is exactly what needsReseed branches on), so
+    # reporting the first contig as the assembly's length understated it badly:
+    # INV04_BOLOCERA's 12-scaffold, 14,745 bp reseed was recorded as 268 bp.
+    # bin/check_circularity.py (OATK) keeps first-record semantics on purpose --
+    # there a second record is an anomaly it warns about, not the expected shape.
     nrec, seq, total_len = read_records(args.fasta)
     L = len(seq)
     note = "ok"
@@ -212,9 +245,21 @@ def main():
     elif not have_ref:
         note = "no_reference"
 
-    # Final circular verdict: keep GetOrganelle's True; otherwise adopt the
-    # reference-confirmed circle. None stays None (unknown).
-    if getorg_circ is True:
+    # A GetOrganelle "circle" that covers a small part of the reference and is a small
+    # fraction of its length is a side graph, not the mitogenome. OG3000's reseed wrote
+    # a 155 bp "circular genome" at 2.1% reference coverage, ratio 0.01, and this check
+    # passed it through as circular because it never questioned GetOrganelle's True.
+    circular_fragment = bool(
+        getorg_circ is True and ref_len and ref_cov is not None
+        and ref_cov < args.min_fragment_ref_coverage and (L / ref_len) < 0.5
+    )
+
+    # Final circular verdict: keep GetOrganelle's True unless it is a fragment;
+    # otherwise adopt the reference-confirmed circle. None stays None (unknown).
+    if circular_fragment:
+        final_circular = False
+        note = "circular_fragment"
+    elif getorg_circ is True:
         final_circular = True
     elif circular_by_reference is True:
         final_circular = True
@@ -222,7 +267,11 @@ def main():
         final_circular = False
     else:
         final_circular = None
-    circular_corrected = bool(getorg_circ is not True and final_circular is True)
+    # True whenever the final verdict overrides GetOrganelle's: a scaffold the reference
+    # confirms circular, or a GetOrganelle circle demoted as a fragment.
+    circular_corrected = bool(
+        (getorg_circ is not True and final_circular is True) or circular_fragment
+    )
 
     # Length / tandem-repeat anomaly screen.
     length_ratio = excess = length_anomaly = None
@@ -246,18 +295,43 @@ def main():
     curation = "none"
     if repeat:
         repeat_region = f"{repeat['array_start']}-{repeat['array_end']}"
-    if length_anomaly and repeat and frac >= 0.8 and ref_len and L / ref_len >= 1.6:
+    # A tandem GENOME duplication has a period at the genome scale: the repeat unit is
+    # about the reference length, and about L/round(ratio). Without that test any
+    # over-length assembly carrying an incidental repeat was called a concatemer and
+    # handed a trim of "everything past ref_len", computed from the reference alone. On
+    # NOVA_260909_LA that mislabelled OG3004, a 2.04x Munidopsis whose 13 CDS are spread
+    # across all 30,972 bp, against a 15,182 bp Shinkaia reference at 75% identity; the
+    # suggested trim would have deleted about half its gene set.
+    ratio = (L / ref_len) if ref_len else None
+    monomer_period = False
+    if repeat and ref_len and ratio:
+        expected = L / max(2, round(ratio))
+        monomer_period = (
+            abs(repeat["unit_bp"] - ref_len) <= 0.20 * ref_len
+            and abs(repeat["unit_bp"] - expected) <= 0.20 * expected
+        )
+
+    if length_anomaly and repeat and frac >= 0.8 and ratio and ratio >= 1.6 and monomer_period:
         anomaly_type = "concatemer"
-        suggested_trim = f"{ref_len + 1}-{L}"
-        curation = (f"Assembly is {round(L / ref_len, 2)}x the reference (tandem genome duplication / "
-                    f"concatemer). Collapse to a single monomer (~{ref_len} bp), removing {suggested_trim}.")
+        # Period-derived, not reference-derived: the measured unit is the monomer.
+        suggested_trim = f"{repeat['unit_bp'] + 1}-{L}"
+        curation = (f"Assembly is {round(ratio, 2)}x the reference and self-aligns with a "
+                    f"genome-scale period of {repeat['unit_bp']} bp (tandem genome duplication / "
+                    f"concatemer). Collapse to a single monomer, removing {suggested_trim}. "
+                    f"COLLAPSE_CONCATEMER re-verifies before acting.")
     elif length_anomaly and repeat:
         anomaly_type = "tandem_repeat"
-        trim_bp = min(excess, repeat["array_len"] - repeat["unit_bp"])
-        if trim_bp > 0:
-            suggested_trim = f"{repeat['array_end'] - trim_bp + 1}-{repeat['array_end']}"
+        # Deliberately NO suggested_trim_region. This script runs at assembly time, so it
+        # has no annotation and cannot tell whether the array carries genes (see the module
+        # docstring on repeat_in_control_region). check_circularity.py can, via --gb, which
+        # is why only the HiFi path may classify control_region_repeat. Emitting a trim here
+        # asserted gene-level safety this script has no evidence for: on NOVA_260909_LA it
+        # proposed multi-kb mid-molecule deletions for OG2940/OG2942/OG2982/OG3037/OG3038,
+        # every one of which overlapped annotated genes.
         curation = (f"Assembly {excess} bp longer than reference; tandem repeat (~{repeat['unit_bp']} bp unit "
-                    f"x ~{repeat['copies']} copies) at {repeat_region}. Review for length heteroplasmy.")
+                    f"x ~{repeat['copies']} copies) at {repeat_region}. Review for length heteroplasmy. "
+                    f"No trim proposed: qualifying the array against gene coordinates needs the "
+                    f"assembly's own annotation, which does not exist yet at this stage.")
     elif length_anomaly:
         anomaly_type = "unresolved"
         curation = f"Assembly {excess} bp longer than reference with no clear tandem repeat; review for duplication / NUMT."
@@ -265,18 +339,22 @@ def main():
     def fmt(v):
         return "NA" if v is None else ("True" if v is True else ("False" if v is False else str(v)))
 
+    # first_record_length is appended at the end, never inserted: readers key on the
+    # header (pandas in push_mtdna_assm_results.try_parse_getorg_check,
+    # mitogenome_assembly_summary), but appending keeps positional readers working too.
     cols = ["sample", "getorg_circular", "num_records", "reference_coverage", "reference_max_gap",
             "circular_by_reference", "final_verdict_circular", "circular_corrected",
             "assembly_length", "reference_length", "length_ratio", "excess_bp", "length_anomaly",
             "tandem_repeat", "repeat_region", "anomaly_type", "suggested_trim_region",
-            "curation_suggestion", "note"]
+            "curation_suggestion", "note", "first_record_length"]
     vals = [args.sample, fmt(getorg_circ), nrec,
             (f"{ref_cov*100:.1f}%" if ref_cov is not None else "NA"),
             (ref_gap if ref_gap is not None else "NA"),
             fmt(circular_by_reference), fmt(final_circular), ("yes" if circular_corrected else "no"),
-            L, (ref_len if ref_len else "NA"), fmt(length_ratio), fmt(excess),
+            total_len, (ref_len if ref_len else "NA"), fmt(length_ratio), fmt(excess),
             ("yes" if length_anomaly else ("no" if length_anomaly is False else "NA")),
-            ("yes" if repeat else "no"), repeat_region, anomaly_type, suggested_trim, curation, note]
+            ("yes" if repeat else "no"), repeat_region, anomaly_type, suggested_trim, curation, note,
+            L]
 
     os.makedirs(os.path.dirname(args.out_evidence) or ".", exist_ok=True)
     with open(args.out_evidence, "w") as out:

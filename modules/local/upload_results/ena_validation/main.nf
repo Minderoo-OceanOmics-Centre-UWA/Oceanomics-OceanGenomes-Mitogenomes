@@ -33,7 +33,11 @@ process PUSH_ENA_VALIDATION_RESULTS {
     printf '%s\n' '<tr><td>Push ENA Validation Results</td><td><samp>push_ena_validation_results.py &lt;config&gt; &lt;record&gt;</samp></td><td>Uploads normalized ENA validation history for ${meta.id}.</td></tr>' > 15_push_ena_validation_results.tool_params_mqcrow.html
     printf '"%s":\n    python: "%s"\n    push_ena_validation_results: "1.0.0"\n' \\
         "${task.process}" "\$(python --version | awk '{print \$2}')" > versions.yml
-    exit 0
+    # Exit with the script's own code. A failed upload must fail the task: the upload
+    # label's errorStrategy retries it once, then ignores it and records it in
+    # FAILED_UPLOADS.tsv, so the run carries on and -resume re-runs it. The log above is
+    # written either way.
+    exit \${upload_rc}
     """
 
     stub:

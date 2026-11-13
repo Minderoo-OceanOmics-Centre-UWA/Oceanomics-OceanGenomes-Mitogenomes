@@ -31,7 +31,7 @@ process GETORGANELLE_CHECK {
     // GetOrganelle log verdict carried on meta.circular (true/false/null). The
     // script only relabels false/unknown scaffolds the reference confirms circular.
     def circ = (meta.circular == null) ? 'null' : meta.circular.toString()
-    // An empty placeholder GenBank (assets/NO_REFERENCE.gb) is passed for samples
+    // An empty placeholder GenBank (assets/placeholders/NO_REFERENCE.gb) is passed for samples
     // with no findMitoReference; the script treats a zero-length reference as absent.
     """
     check_getorganelle.py \\

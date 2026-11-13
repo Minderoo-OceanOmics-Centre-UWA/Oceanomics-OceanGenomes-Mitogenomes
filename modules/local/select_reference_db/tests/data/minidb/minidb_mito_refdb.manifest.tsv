@@ -1,0 +1,4 @@
+group	accession	organism	family	length_bp	n_cds	n_rrna	source	lineage
+minidb	NC_083272.1	Acropora cervicornis	Acroporidae	18259	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Refertina;Acroporidae;Acropora
+minidb	NC_088089.1	Madrepora piresae	Oculinidae	15841	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Scleractinia;Vacatina;Oculinidae;Madrepora
+minidb	NC_086801.1	Parazoanthus axinellae	Parazoanthidae	20979	13	2	refseq	Eukaryota;Metazoa;Cnidaria;Anthozoa;Hexacorallia;Zoantharia;Parazoanthidae;Parazoanthus

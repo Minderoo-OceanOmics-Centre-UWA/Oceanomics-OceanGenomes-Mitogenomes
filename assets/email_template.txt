@@ -4,15 +4,15 @@
   |\\ | |__  __ /  ` /  \\ |__) |__         }  {
   | \\| |       \\__, \\__/ |  \\ |___     \\`-._,-`-,
                                         `._,._,'
-  nf-core/oceangenomesmitogenomes ${version}
+  OceanOmics OceanGenomes Mitogenomes ${version}
 ----------------------------------------------------
 Run Name: $runName
 
 <% if (success){
-    out << "## nf-core/oceangenomesmitogenomes execution completed successfully! ##"
+    out << "## OceanOmics OceanGenomes Mitogenomes execution completed successfully! ##"
 } else {
     out << """####################################################
-## nf-core/oceangenomesmitogenomes execution completed unsuccessfully! ##
+## OceanOmics OceanGenomes Mitogenomes execution completed unsuccessfully! ##
 ####################################################
 The exit status of the task that caused the workflow execution to fail was: $exitStatus.
 The full error message was:
@@ -35,5 +35,5 @@ Pipeline Configuration:
 <% out << summary.collect{ k,v -> " - $k: $v" }.join("\n") %>
 
 --
-nf-core/oceangenomesmitogenomes
-https://github.com/nf-core/oceangenomesmitogenomes
+OceanOmics OceanGenomes Mitogenomes
+https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes

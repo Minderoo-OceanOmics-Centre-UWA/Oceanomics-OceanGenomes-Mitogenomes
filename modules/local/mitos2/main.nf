@@ -9,7 +9,13 @@ process MITOS2 {
         'quay.io/biocontainers/mitos:2.1.10--pyhdfd78af_0' }"
 
     input:
-    tuple val(meta), path(fasta)
+    // `origin_gene` is the MITOS feature key this sample's PUBLISHED genome is
+    // re-origined to, resolved per taxon in mitogenome_annotation_lca from
+    // assets/taxonomy/mito_origin_anchors.json. Passed in rather than looked up here
+    // because every other taxon decision in this pipeline is made in a subworkflow and
+    // handed to the module (cox1PanelGroup, seedDbGroup, isCoralFixEligible), which
+    // also keeps the module testable with a literal.
+    tuple val(meta), path(fasta), val(origin_gene)
     path refdb
 
     output:
@@ -30,9 +36,14 @@ process MITOS2 {
 
     script:
         def prefix   = task.ext.prefix ?: meta.mt_assembly_prefix
-        // meta.genetic_code is resolved once in prepare_samplesheet and asserted
-        // before annotation in mitogenome_annotation_lca, so it is always set for
-        // a pipeline run. task.ext.code still overrides (e.g. qc-only entrypoints).
+        // MITOS2 annotates invertebrates across several phyla (see
+        // InvertTaxonGroups in lib/). meta.genetic_code is resolved once in
+        // prepare_samplesheet -- which aborts rather than guessing a code for an
+        // unrecognised invertebrate class -- and asserted before annotation in
+        // mitogenome_annotation_lca, so it is always set for a pipeline run.
+        // There is deliberately no fallback code here: silently annotating with
+        // the wrong table is the failure mode the upstream abort exists to
+        // prevent. task.ext.code still overrides (e.g. qc-only entrypoints).
         def gcode    = task.ext.code ?: meta.genetic_code
         def refver   = params.mitos_refseq_ver
         def species  = meta.species ?: ''
@@ -46,8 +57,12 @@ process MITOS2 {
         // topology, run MITOS circular so a gene straddling the linearisation point
         // is annotated as one wrap-around feature instead of being split/dropped.
         def topology_arg = (meta.circular == false) ? '--linear' : ''
+        // Surfaced in the MultiQC tool-params row on purpose: "why does this genome
+        // start where it does?" is the first question an operator asks of a published
+        // mitogenome, and this is where they will look for the answer.
+        def origin_arg = "--origin-gene ${origin_gene}"
         def effective_args = ["runmitos -i ${fasta} -c ${gcode} -r ${refver} -R ${refdb} ${topology_arg} --noplots --best ${base_args}".replaceAll(/ +/, ' ').trim(),
-                              "mitos_to_emma.py --bed result.bed --genome ${fasta} --code ${gcode} ${topology_arg}".replaceAll(/ +/, ' ').trim()].join('; ')
+                              "mitos_to_emma.py --bed result.bed --genome ${fasta} --code ${gcode} ${topology_arg} ${origin_arg}".replaceAll(/ +/, ' ').trim()].join('; ')
 
         """
         mkdir -p mitos_raw annotation
@@ -82,6 +97,7 @@ process MITOS2 {
             --outdir annotation \\
             --code ${gcode} \\
             --species "${species}" \\
+            ${origin_arg} \\
             ${topology_arg}
 
         # Preserve raw MITOS outputs for provenance, but in a subdir so the
@@ -102,10 +118,11 @@ process MITOS2 {
 
     stub:
         def prefix = task.ext.prefix ?: meta.mt_assembly_prefix
-        def gcode  = task.ext.code ?: meta.genetic_code ?: params.translation_table ?: 2
+        def gcode  = task.ext.code ?: meta.genetic_code
         def base_args = (task.ext.args ?: '').toString().trim()
         def topology_arg = (meta.circular == false) ? '--linear' : ''
-        def effective_args = "runmitos -i ${fasta} -c ${gcode} -r ${params.mitos_refseq_ver} -R <refdb> ${topology_arg} --noplots --best ${base_args}".replaceAll(/ +/, ' ').trim()
+        def origin_arg = "--origin-gene ${origin_gene}"
+        def effective_args = "runmitos -i ${fasta} -c ${gcode} -r ${params.mitos_refseq_ver} -R <refdb> ${topology_arg} --noplots --best ${base_args}; mitos_to_emma.py ${origin_arg}".replaceAll(/ +/, ' ').trim()
         """
         mitos_prefix="${prefix}.mitos2110"
 

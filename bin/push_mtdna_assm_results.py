@@ -175,7 +175,7 @@ def parse_depth_tsv(path):
     """Read the single data row of a <prefix>.mito_depth.tsv.
 
     Returns a dict keyed by DEPTH_COLUMNS, or None when there is no usable
-    measurement -- which covers the header-only assets/empty_mito_depth.tsv
+    measurement -- which covers the header-only assets/placeholders/empty_mito_depth.tsv
     placeholder, a missing file, and a fail-open run of mito_depth.py. Callers
     treat None as "this row was never measured", never as "depth is zero".
     """
@@ -227,6 +227,48 @@ def parse_depth_tsv(path):
     }
 
 
+# Skip reasons emitted when an existing mitogenome_data row is preserved. Their
+# exact text is parsed by compile_upload_report.py, so do not reword them without
+# updating classify_status() there.
+SKIP_ALREADY_FAILED = "row already records 'failed to assemble' (no change needed)"
+SKIP_WOULD_DOWNGRADE = (
+    "existing successful row found — refusing to overwrite with "
+    "'failed to assemble'"
+)
+SKIP_ROW_EXISTS = "row already exists; pass --force to overwrite"
+
+
+def decide_write(existing_stats, failed_to_assemble, force_overwrite):
+    """Decide whether this run may write over an existing mitogenome_data row.
+
+    Returns ``(should_write, skip_reason)``, with ``skip_reason`` None when the
+    write goes ahead. ``existing_stats`` is the stored `stats` value, or None
+    both for "no row at all" (handled by the caller) and for an incomplete row.
+
+    Two of the three refusals hold regardless of ``force_overwrite``: replacing a
+    successful assembly with 'failed to assemble' is data loss rather than a
+    policy choice, and re-writing an already-failed row changes nothing. Only the
+    plain "a real result is already here" case is what ``--force`` unlocks.
+    """
+    existing_is_failed = (
+        existing_stats is not None
+        and str(existing_stats).strip().lower() == "failed to assemble"
+    )
+    if existing_stats is None:
+        # Incomplete prior row; overwriting is strictly an improvement.
+        return True, None
+    if existing_is_failed and not failed_to_assemble:
+        # New run upgrades a prior failure to a success — always allow.
+        return True, None
+    if existing_is_failed:
+        return False, SKIP_ALREADY_FAILED
+    if failed_to_assemble:
+        return False, SKIP_WOULD_DOWNGRADE
+    if not force_overwrite:
+        return False, SKIP_ROW_EXISTS
+    return True, None
+
+
 def parse_log_for_stats_and_cov(log_text: str):
     """Parse GetOrganelle-style log for stats, avg_coverage, avg_base_coverage."""
     match_stats = re.findall(r"Result status of animal_mt:\s*(.+)", log_text)
@@ -256,9 +298,10 @@ if __name__ == "__main__":
         action="store_true",
         help=(
             "Overwrite an existing mitogenome_data row even when it already "
-            "holds a real result. Off by default: existing successful rows "
-            "are preserved and only NULL / 'failed to assemble' rows get "
-            "updated automatically."
+            "holds a successful result. Without it, such a row is preserved and "
+            "only NULL / 'failed to assemble' rows get updated automatically. "
+            "Never overrides the refusal to replace a successful row with "
+            "'failed to assemble'."
         ),
     )
     parser.add_argument(
@@ -433,15 +476,27 @@ if __name__ == "__main__":
         params.update(depth_values)
 
         # Look up the current row (if any) and decide whether to write.
-        # Default policy is insert-only: existing rows are preserved unless
-        #   - the new run is a successful assembly and the prior row holds
-        #     NULL or 'failed to assemble' (a strict upgrade — never
-        #     destructive), or
-        #   - --force was passed.
+        # Default policy is overwrite: an existing row is replaced by this run's
+        # result. Two refusals hold regardless of --force, because neither is a
+        # policy choice, they are the cases where writing would destroy data:
+        #   - the prior row is a successful assembly and this run failed to
+        #     assemble (never downgrade a result to 'failed to assemble');
+        #   - the prior row already records 'failed to assemble' and so does this
+        #     run (nothing to change).
+        # Without --force one further case is preserved: a prior successful row
+        # is kept when this run also succeeded, which is the insert-only
+        # behaviour. A prior row with NULL stats is always overwritten, since
+        # completing it is strictly an improvement.
+        #
+        # Phase R (docs/assembly_relations_plan.md §3): the assembly result lives in
+        # mito_assembly and the depth verdict in mito_assembly_depth, each keyed on
+        # assembly_id. Table names are unqualified on purpose: before the R.6 merge a test
+        # session reaches the v3 tables with search_path = v3, public; after it they are in
+        # public. The policy below is unchanged; only where each value lands has changed.
         cursor.execute(
             """
-            SELECT stats, length, avg_coverage, avg_base_coverage
-            FROM mitogenome_data
+            SELECT stats, length, avg_coverage, avg_base_coverage, assembly_id
+            FROM mito_assembly
             WHERE og_id = %(og_id)s
               AND tech = %(tech)s
               AND seq_date = %(seq_date)s
@@ -449,72 +504,53 @@ if __name__ == "__main__":
             """,
             {"og_id": og_id, "tech": tech, "seq_date": seq_date, "code": code},
         )
-        existing = cursor.fetchone()
+        existing_row = cursor.fetchone()
+        existing = existing_row[:4] if existing_row is not None else None
 
         should_write = True
         skip_reason = None
-        if existing is not None and not force_overwrite:
-            existing_stats = existing[0]
-            existing_is_failed = (
-                existing_stats is not None
-                and str(existing_stats).strip().lower() == "failed to assemble"
+        if existing is not None:
+            should_write, skip_reason = decide_write(
+                existing[0], failed_to_assemble, force_overwrite
             )
-            if existing_stats is None:
-                # Incomplete prior row; overwriting is strictly an improvement.
-                pass
-            elif existing_is_failed and not failed_to_assemble:
-                # New run upgrades a prior failure to a success — always allow.
-                pass
-            elif existing_is_failed and failed_to_assemble:
-                should_write = False
-                skip_reason = "row already records 'failed to assemble' (no change needed)"
-            else:
-                should_write = False
-                if failed_to_assemble:
-                    skip_reason = (
-                        "existing successful row found — refusing to overwrite with "
-                        "'failed to assemble'"
-                    )
-                else:
-                    skip_reason = "row already exists; pass --force to overwrite"
+
+        depth_columns_sql = ", ".join(DEPTH_COLUMNS)
+        depth_values_sql = ", ".join("%({0})s".format(c) for c in DEPTH_COLUMNS)
 
         if not should_write:
             existing_dict = dict(zip(field_names, existing))
             print(f"⚠️ Existing values preserved for {assembly_prefix}: {skip_reason}.")
             print(f"📌 Preserved stored values: {existing_dict}")
 
-            # Narrow, additive exception to the preserve-everything rule: a row
-            # written before the uniform depth measurement existed has a perfectly
-            # good assembly result but no mean_depth, and the guard above keys only
-            # on `stats`, so it would otherwise never gain one without --force.
+            # Narrow, additive exception to the preserve-everything rule: an assembly
+            # written before the uniform depth measurement existed has a perfectly good
+            # assembly result but no mean_depth, and the guard above keys only on
+            # `stats`, so it would otherwise never gain one without --force.
             #
-            # This can only ever ADD a depth to a row that has none:
-            #   1. the SET list is DEPTH_COLUMNS, a module-level constant naming no
-            #      assembly column, so stats/length/avg_coverage/avg_base_coverage
-            #      cannot be touched from here;
-            #   2. the WHERE clause is `mean_depth IS NULL`, so a row that already
-            #      carries any measured depth is untouchable from here. Deliberately
-            #      NOT ORed with the depth_method states: a row with a real
+            # This can only ever ADD a depth to an assembly that has none:
+            #   1. it writes mito_assembly_depth only, so stats/length/avg_coverage/
+            #      avg_base_coverage (in mito_assembly) cannot be touched from here;
+            #   2. an existing depth row is replaced only WHERE its mean_depth IS NULL,
+            #      so an assembly that already carries a measured depth is untouchable
+            #      from here. Not ORed with the depth_method states: a row with a real
             #      mean_depth but a NULL / stale label would then have been eligible
-            #      and its measurement overwritten. Legacy and not_measured rows all
-            #      have mean_depth NULL, so this single predicate already covers them;
+            #      and its measurement overwritten. not_measured rows have mean_depth
+            #      NULL, so this single predicate already covers them;
             #   3. it runs only when this run HAS a depth, so it can never null one out.
             if depth is not None:
                 assignments = ", ".join(
-                    "{0} = %({0})s".format(column) for column in DEPTH_COLUMNS
+                    "{0} = EXCLUDED.{0}".format(column) for column in DEPTH_COLUMNS
                 )
                 cursor.execute(
                     f"""
-                    UPDATE mitogenome_data
+                    INSERT INTO mito_assembly_depth (assembly_id, {depth_columns_sql}, depth_measured_at)
+                    VALUES (%(assembly_id)s, {depth_values_sql}, now())
+                    ON CONFLICT (assembly_id) DO UPDATE
                     SET {assignments}, depth_measured_at = now()
-                    WHERE og_id = %(og_id)s
-                      AND tech = %(tech)s
-                      AND seq_date = %(seq_date)s
-                      AND code = %(code)s
-                      AND mean_depth IS NULL
+                    WHERE mito_assembly_depth.mean_depth IS NULL
                     RETURNING mean_depth, depth_cv, depth_method
                     """,
-                    params,
+                    {**params, "assembly_id": existing_row[4]},
                 )
                 depth_returned = cursor.fetchone()
                 conn.commit()
@@ -534,45 +570,70 @@ if __name__ == "__main__":
                         "left untouched."
                     )
         else:
-            depth_columns_sql = ", ".join(DEPTH_COLUMNS)
-            depth_values_sql = ", ".join("%({0})s".format(c) for c in DEPTH_COLUMNS)
-            # On conflict, replace the depth ONLY when this run actually measured one.
-            # Without this guard a --force rerun that skipped the depth step (or whose
-            # assembly never reached annotation) would null out a perfectly good
-            # existing measurement, which is data loss rather than an overwrite.
-            depth_updates_sql = ", ".join(
-                "{0} = CASE WHEN EXCLUDED.mean_depth IS NOT NULL "
-                "THEN EXCLUDED.{0} ELSE mitogenome_data.{0} END".format(c)
-                for c in DEPTH_COLUMNS
+            cursor.execute(
+                """
+                -- og_num is not stored on mito_assembly; the compatibility view derives it.
+                INSERT INTO mito_assembly (
+                    og_id, tech, seq_date, code, stats, length, avg_coverage, avg_base_coverage
+                )
+                VALUES (
+                    %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(stats)s, %(length)s,
+                    %(avg_coverage)s, %(avg_base_coverage)s
+                )
+                ON CONFLICT (og_id, tech, seq_date, code)
+                DO UPDATE SET
+                    stats = EXCLUDED.stats,
+                    length = EXCLUDED.length,
+                    avg_coverage = EXCLUDED.avg_coverage,
+                    avg_base_coverage = EXCLUDED.avg_base_coverage,
+                    updated_at = now()
+                RETURNING assembly_id, stats, length, avg_coverage, avg_base_coverage
+                """,
+                params,
             )
-            upsert_query = f"""
-            -- og_num is a generated column maintained by the DB (SUBSTRING(og_id FROM 3)).
-            -- It is intentionally absent from this column list: naming it here would error.
-            INSERT INTO mitogenome_data (
-                og_id, tech, seq_date, code, stats, length, avg_coverage, avg_base_coverage,
-                {depth_columns_sql}, depth_measured_at
-            )
-            VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(stats)s, %(length)s, %(avg_coverage)s, %(avg_base_coverage)s,
-                {depth_values_sql}, now()
-            )
-            ON CONFLICT (og_id, tech, seq_date, code)
-            DO UPDATE SET
-                stats = EXCLUDED.stats,
-                length = EXCLUDED.length,
-                avg_coverage = EXCLUDED.avg_coverage,
-                avg_base_coverage = EXCLUDED.avg_base_coverage,
-                {depth_updates_sql},
-                depth_measured_at = CASE WHEN EXCLUDED.mean_depth IS NOT NULL
-                    THEN EXCLUDED.depth_measured_at ELSE mitogenome_data.depth_measured_at END
-            RETURNING stats, length, avg_coverage, avg_base_coverage, mean_depth, depth_method
-            """
-            cursor.execute(upsert_query, params)
             returned = cursor.fetchone()
+            assembly_id = returned[0]
+
+            # Replace the depth ONLY when this run actually measured one. Without this
+            # guard a --force rerun that skipped the depth step (or whose assembly never
+            # reached annotation) would null out a perfectly good existing measurement,
+            # which is data loss rather than an overwrite. A new assembly with nothing
+            # measured records not_measured, so the depth step's verdict is never
+            # missing for an assembly this script wrote.
+            if depth is not None:
+                assignments = ", ".join(
+                    "{0} = EXCLUDED.{0}".format(column) for column in DEPTH_COLUMNS
+                )
+                cursor.execute(
+                    f"""
+                    INSERT INTO mito_assembly_depth (assembly_id, {depth_columns_sql}, depth_measured_at)
+                    VALUES (%(assembly_id)s, {depth_values_sql}, now())
+                    ON CONFLICT (assembly_id) DO UPDATE
+                    SET {assignments}, depth_measured_at = now()
+                    """,
+                    {**params, "assembly_id": assembly_id},
+                )
+            elif existing is None:
+                cursor.execute(
+                    """
+                    INSERT INTO mito_assembly_depth (assembly_id, depth_method, depth_measured_at)
+                    VALUES (%(assembly_id)s, %(depth_method)s, now())
+                    ON CONFLICT (assembly_id) DO NOTHING
+                    """,
+                    {"assembly_id": assembly_id, "depth_method": DEPTH_METHOD_NOT_MEASURED},
+                )
+            cursor.execute(
+                "SELECT mean_depth, depth_method FROM mito_assembly_depth WHERE assembly_id = %s",
+                (assembly_id,),
+            )
+            depth_row = cursor.fetchone() or (None, None)
             conn.commit()
 
-            final_dict = dict(zip(field_names + ["mean_depth", "depth_method"], returned))
+            final_dict = dict(zip(field_names + ["mean_depth", "depth_method"],
+                                  tuple(returned[1:]) + tuple(depth_row)))
             print(f"📌 Final stored values: {final_dict}")
+            # The status lines below are parsed by bin/compile_upload_report.py, which
+            # is why they still say mitogenome_data. Change them together or not at all.
             if stats_unresolved:
                 # A contig was assembled but its topology never resolved, so this
                 # is not a success no matter how the write went. Say so, and make
@@ -589,6 +650,10 @@ if __name__ == "__main__":
         if 'conn' in locals():
             conn.rollback()
         print(f"❌ Database error: {e}")
+        # Non-zero so the task fails: Nextflow's errorStrategy retries once, then ignores it,
+        # so the run carries on, the failure is listed in FAILED_UPLOADS.tsv, and -resume
+        # re-runs it. Exiting 0 here made Nextflow cache a failed upload as a success.
+        sys.exit(1)
 
     finally:
         if 'cursor' in locals():

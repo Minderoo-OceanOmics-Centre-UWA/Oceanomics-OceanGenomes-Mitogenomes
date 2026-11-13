@@ -14,6 +14,9 @@ process BLAST_BLASTN {
     output:
     tuple val(meta), path("blast.${gene_type}.${annotation_name}.filtered.tsv"), val(gene_type), val(annotation_name), emit: filtered
     tuple val(meta), path("blast.${gene_type}.${annotation_name}.filtered.tsv"), emit: validation
+    // Hits just below the identity gate, published for inspection only; nothing
+    // downstream consumes it, so LCA / species validation / the DB are unaffected.
+    tuple val(meta), path("blast.${gene_type}.${annotation_name}.near.tsv"), emit: near
     path "filtered_summary.${gene_type}.txt"   , emit: summary
     tuple val(meta), path("08_blast_blastn.${gene_type}.${annotation_name}.tool_params_mqcrow.html"), emit: tool_params
     path "versions.yml"           , emit: versions
@@ -25,28 +28,93 @@ process BLAST_BLASTN {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "blast.${gene_type}.${annotation_name}"
     def effective_args = ["-num_threads ${task.cpus}", "-db ${blast_db}", "-query ${fasta}", args, "-out ${prefix}.tsv"].findAll { it?.toString()?.trim() }.join(' ')
+    def stderr_log = "blastn.${gene_type}.${annotation_name}.stderr"
+    // Identity gate for .filtered.tsv (the LCA / species validation / DB input), and the
+    // floor of the .near.tsv band below it. Set per branch in conf/modules.config.
+    def min_pident = task.ext.min_pident ?: 98
+    def near_floor = task.ext.near_floor ?: 90
+    // Keyed on the resolved args string rather than on meta.invertebrates, so it stays
+    // correct if conf/modules.config re-keys which branch passes -taxids.
+    def taxid_preflight = args.contains('-taxids') ? """
+    if [ ! -s taxonomy4blast.sqlite3 ]; then
+        echo "ERROR: ext.args requests -taxids but taxonomy4blast.sqlite3 was not staged." >&2
+        echo "       BLAST resolves taxonomy from the CWD because taxdb.* is staged here," >&2
+        echo "       so the taxid filter would be silently disabled: blastn prints a" >&2
+        echo "       warning, writes an empty result table, and still exits 0." >&2
+        echo "       Check DOWNLOAD_BLAST_DB.out.taxdb_file is mixed into ch_blast_db" >&2
+        echo "       (subworkflows/local/mitogenome_annotation_lca)." >&2
+        exit 1
+    fi
+""" : ''
 
     """
     mkdir -p lca
-    
+
+    # Make the CWD taxonomy lookup explicit rather than incidental. Safe because every
+    # -db value this module is passed is an absolute path.
+    export BLASTDB="\$PWD"
+${taxid_preflight}
+    # blastn is run unguarded so its native exit code can be inspected: the process
+    # shell is `bash -C -e -u -o pipefail` (see process.shell in nextflow.config), and
+    # under -e a non-zero blastn would abort before the diagnostics below.
+    set +e
     blastn \\
         -num_threads ${task.cpus} \\
         -db ${blast_db} \\
         -query ${fasta} \\
         ${args} \\
-        -out ${prefix}.tsv
+        -out ${prefix}.tsv 2> ${stderr_log}
+    blastn_exit=\$?
+    set -e
+    cat ${stderr_log} >&2
+
+    # Preserve the native exit code so conf/base.config's errorStrategy can classify a
+    # resource kill (137/140) apart from a tool error.
+    if [ "\$blastn_exit" -ne 0 ]; then
+        echo "ERROR: blastn exited \$blastn_exit for ${gene_type} / ${annotation_name}" >&2
+        exit "\$blastn_exit"
+    fi
+
+    # blastn can report a fatal condition on stderr and STILL EXIT 0. That is how the
+    # missing taxonomy4blast.sqlite3 escaped an entire run despite -e being armed: 184
+    # of 211 searches returned an empty table with exit 0 and were read downstream as
+    # "no hits". Treat a known-fatal signature as the failure it is.
+    if grep -Eq 'requires additional data files|BLAST Database error|BLAST engine error|Taxonomy.*not found' ${stderr_log}; then
+        echo "ERROR: blastn reported a fatal condition but exited 0; treating as a failure." >&2
+        echo "       See ${stderr_log} in the task work dir." >&2
+        exit 1
+    fi
+
+    # An empty table is a LEGITIMATE result for a query with no hits in the restricted
+    # search space, so this is a warning and never an assertion.
+    if [ ! -s ${prefix}.tsv ]; then
+        echo "WARN: blastn returned no hits for ${gene_type} / ${annotation_name}" >&2
+    fi
 
     cat <<-END_TOOL_PARAMS > 08_blast_blastn.${gene_type}.${annotation_name}.tool_params_mqcrow.html
-    <tr><td>BLAST BLASTN</td><td><samp>${effective_args}</samp></td><td>Searches ${gene_type} sequence ${annotation_name} against the selected BLAST database for ${meta.id}; output is filtered for length and identity.</td></tr>
+    <tr><td>BLAST BLASTN</td><td><samp>${effective_args}</samp></td><td>Searches ${gene_type} sequence ${annotation_name} against the selected BLAST database for ${meta.id}; output is filtered to query span &gt; 200 and identity &gt; ${min_pident}% (hits from ${near_floor}% up to that are kept in .near.tsv).</td></tr>
     END_TOOL_PARAMS
 
     # Filter the results
-    awk -F '\t' '{if ((\$15 - \$14 > 200) && (\$7 > 98)) print}' ${prefix}.tsv > ${prefix}.filtered.tsv
-    
+    awk -F '\t' '{if ((\$15 - \$14 > 200) && (\$7 > ${min_pident})) print}' ${prefix}.tsv > ${prefix}.filtered.tsv
+
+    # The band just below the gate, so a query with no passing hits still has something
+    # published to look at. If the band is empty too, fall back to the 10 best hits by
+    # bitscore at any identity/span: the file is then empty only when blastn found nothing.
+    awk -F '\t' '{if ((\$15 - \$14 > 200) && (\$7 > ${near_floor}) && (\$7 <= ${min_pident})) print}' ${prefix}.tsv > ${prefix}.near.tsv
+    if [ ! -s ${prefix}.near.tsv ] && [ -s ${prefix}.tsv ]; then
+        echo "WARN: no hits between ${near_floor}% and ${min_pident}% for ${gene_type} / ${annotation_name}; near.tsv holds the top 10 hits by bitscore instead" >&2
+        # awk, not head: head closing the pipe early would SIGPIPE sort under pipefail.
+        # '>|' because the process shell runs with -C (noclobber) and the band filter
+        # above has already created the (empty) file.
+        LC_ALL=C sort -t "\$(printf '\\t')" -k20,20gr ${prefix}.tsv | awk 'NR <= 10' >| ${prefix}.near.tsv
+    fi
+
     # Add in a column for the days date and the gene type
-    sed -i "s/\$/\\t\$(date +%y%m%d)/" ${prefix}.filtered.tsv
-    wait
-    sed -i "s/\$/\\t${gene_type}/" ${prefix}.filtered.tsv
+    run_date=\$(date +%y%m%d)
+    for f in ${prefix}.filtered.tsv ${prefix}.near.tsv; do
+        sed -i "s/\$/\\t\${run_date}\\t${gene_type}/" \$f
+    done
 
     # Create a summary for multiqc
     awk -F '\t' '{combo[\$1"\t"\$4]++} END {print "Sample\tSpecies\tHits"; for (c in combo) print c, combo[c]}' ${prefix}.filtered.tsv > filtered_summary.${gene_type}.txt
@@ -59,11 +127,17 @@ process BLAST_BLASTN {
     """
 
     stub:
-    def prefix = task.ext.prefix ?: "${meta.id}"
+    // prefix must match the script block's default, and the stub must create every
+    // declared output: it previously touched only "${meta.id}.txt", so -stub runs of
+    // this module failed on missing outputs and no test could use them.
+    def prefix = task.ext.prefix ?: "blast.${gene_type}.${annotation_name}"
     def args = task.ext.args ?: ''
     def effective_args = ["-num_threads ${task.cpus}", "-db ${blast_db}", "-query ${fasta}", args, "-out ${prefix}.tsv"].findAll { it?.toString()?.trim() }.join(' ')
     """
-    touch ${prefix}.txt
+    touch ${prefix}.tsv
+    touch ${prefix}.filtered.tsv
+    touch ${prefix}.near.tsv
+    printf 'Sample\\tSpecies\\tHits\\n' > filtered_summary.${gene_type}.txt
 
     cat <<-END_TOOL_PARAMS > 08_blast_blastn.${gene_type}.${annotation_name}.tool_params_mqcrow.html
     <tr><td>BLAST BLASTN</td><td><samp>${effective_args}</samp></td><td>Searches ${gene_type} sequence ${annotation_name} against the selected BLAST database for ${meta.id}; output is filtered for length and identity.</td></tr>

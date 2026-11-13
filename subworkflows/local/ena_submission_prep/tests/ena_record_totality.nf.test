@@ -1,0 +1,49 @@
+nextflow_workflow {
+
+    name "Test ENA validation-record fixed-totality grouping (ENA_SUBMISSION_PREP)"
+    script "./ena_record_totality.nf"
+    workflow "ENA_RECORD_TOTALITY"
+    tag "subworkflows"
+    tag "mitogenome_qc"
+    tag "ena"
+
+    // Guards the Plan 2e streaming end state: each sample category contributes a FIXED
+    // number of files so groupKey releases every record independently -- no close-time
+    // remainder, no lost quarantined/conversion-failed sample, no duplicate.
+
+    test("every sample category yields exactly 5 files without Webin") {
+
+        when {
+            params {
+                ena_webin_validate = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Exactly one group per input sample (E, F, Q) -- no loss, no duplication.
+                { assert workflow.out.group_sizes.size() == 3 },
+                // Every group is the fixed size (5), so groupKey emitted it on its own.
+                { assert workflow.out.group_sizes.every { it[1] == 5 } }
+            )
+        }
+    }
+
+    test("every sample category yields exactly 7 files with Webin") {
+
+        when {
+            params {
+                ena_webin_validate = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.group_sizes.size() == 3 },
+                { assert workflow.out.group_sizes.every { it[1] == 7 } }
+            )
+        }
+    }
+}

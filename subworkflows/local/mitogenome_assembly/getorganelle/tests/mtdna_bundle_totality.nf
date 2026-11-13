@@ -14,7 +14,7 @@
 workflow MTDNA_BUNDLE_TOTALITY {
 
     main:
-    def f = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)   // arbitrary stand-in file
+    def f = file("${projectDir}/assets/placeholders/NO_REFERENCE.gb", checkIfExists: true)   // arbitrary stand-in file
 
     // --- GetOrganelle bundle: fasta + log + evidence, keyed by lineage prefix, size 3 ---
     def gmeta = (1..5).collect { [ id: "OG${it}", mt_assembly_run_prefix: "G${it}" ] }

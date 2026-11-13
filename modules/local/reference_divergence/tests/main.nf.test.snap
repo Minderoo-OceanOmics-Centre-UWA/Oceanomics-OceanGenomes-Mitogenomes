@@ -1,0 +1,39 @@
+{
+    "stub": {
+        "content": [
+            {
+                "0": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub",
+                            "nominal_species_id": "Testus reefus"
+                        },
+                        "test_stub.reference_divergence.txt:md5,621ab6320d1b0c5b6250c133d79edb36"
+                    ]
+                ],
+                "1": [
+                    "versions.yml:md5,f058fa33046934d283ce4ad79b443e1a"
+                ],
+                "flag": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub",
+                            "nominal_species_id": "Testus reefus"
+                        },
+                        "test_stub.reference_divergence.txt:md5,621ab6320d1b0c5b6250c133d79edb36"
+                    ]
+                ],
+                "versions": [
+                    "versions.yml:md5,f058fa33046934d283ce4ad79b443e1a"
+                ]
+            }
+        ],
+        "timestamp": "2026-09-07T16:02:14.966423697",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

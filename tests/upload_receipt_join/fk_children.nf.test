@@ -1,0 +1,127 @@
+nextflow_workflow {
+    name "The FK children of mitogenome_data are gated on the parent's upload receipt"
+    script "./main.nf"
+    workflow "GATE_TUPLE_SHAPES"
+
+    // mitogenome_data carries three inbound foreign keys, all on
+    // (og_id, tech, seq_date, code) == mt_assembly_prefix:
+    //   fk_mitogenome_lca              on lca              <- PUSH_LCA_BLAST_RESULTS
+    //   fk_mitogenome_lca_raw_results  on lca_raw_results  <- PUSH_LCA_RAW_RESULTS
+    //   fk_mitogenome_lca_validation   on lca_validation   <- SPECIES_VALIDATION
+    // None of the three writers depended on the parent push, so Nextflow scheduled them
+    // first and the child insert failed on the foreign key while the run reported success.
+
+    test("both tuple shapes survive the gate unchanged") {
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(
+                    [[id: 'OG1842', mt_assembly_prefix: 'OG1842.ilmn.260114.getorg1770'],
+                     'blast_combined.tsv', 'lca_combined.tsv']
+                )
+                input[1] = Channel.of(
+                    [[id: 'OG1842', mt_assembly_prefix: 'OG1842.ilmn.260114.getorg1770'],
+                     'lca_raw.12s.tsv']
+                )
+                input[2] = Channel.of(
+                    [[id: 'OG1842', mt_assembly_prefix: 'OG1842.ilmn.260114.getorg1770'], 0]
+                )
+                """
+            }
+        }
+
+        then {
+            def triple = workflow.out.triples[0] instanceof String
+                            ? evaluate(workflow.out.triples[0]) : workflow.out.triples[0]
+            def pair = workflow.out.pairs[0] instanceof String
+                            ? evaluate(workflow.out.pairs[0]) : workflow.out.pairs[0]
+            assertAll(
+                { assert workflow.success },
+                // Arity is restored: the join key we prepend and the receipt the join
+                // appends are both stripped. A regression here feeds a process the wrong
+                // number of inputs rather than announcing itself.
+                { assert triple.size() == 3 },
+                { assert pair.size() == 2 },
+                { assert triple[0].id == 'OG1842' },
+                { assert triple[1] == 'blast_combined.tsv' },
+                { assert triple[2] == 'lca_combined.tsv' },
+                { assert pair[1] == 'lca_raw.12s.tsv' }
+            )
+        }
+    }
+
+    test("totality: every gated row arrives, including a reseed prefix and a zero-region sample") {
+        when {
+            workflow {
+                """
+                // OG1824 is the instructive case from batch 15: a sample with two assemblies,
+                // whose FK child failed on the RESEED prefix because a second assembly always
+                // pushes its parent later while its own BLAST/LCA can start immediately.
+                //
+                // OG_ZERO stands in for the zero-region stand-in rows, which are mixed into
+                // grouped_blast_lca from region_counts rather than from the grouped channels.
+                // They still get an lca_validation row, so they must be gated too -- and they
+                // are the shape most likely to be dropped by a new join.
+                input[0] = Channel.of(
+                    [[id: 'OG1824', mt_assembly_prefix: 'OG1824.ilmn.260114.getorg1770'],       'b', 'l'],
+                    [[id: 'OG1824', mt_assembly_prefix: 'OG1824.ilmn.260114.getorg1770reseed'], 'b', 'l'],
+                    [[id: 'OGZERO', mt_assembly_prefix: 'OGZERO.ilmn.260114.getorg1770'],       'empty_blast_filtered.tsv', 'empty_lca.tsv']
+                )
+                input[1] = Channel.of(
+                    [[id: 'OG1824', mt_assembly_prefix: 'OG1824.ilmn.260114.getorg1770'],       'r'],
+                    [[id: 'OG1824', mt_assembly_prefix: 'OG1824.ilmn.260114.getorg1770reseed'], 'r']
+                )
+                // The reseed parent commits LAST, which is the race as observed.
+                input[2] = Channel.of(
+                    [[id: 'OG1824', mt_assembly_prefix: 'OG1824.ilmn.260114.getorg1770'],       0],
+                    [[id: 'OG1824', mt_assembly_prefix: 'OG1824.ilmn.260114.getorg1770reseed'], 3],
+                    [[id: 'OGZERO', mt_assembly_prefix: 'OGZERO.ilmn.260114.getorg1770'],       0]
+                )
+                """
+            }
+        }
+
+        then {
+            def prefixes = workflow.out.triples.collect { row ->
+                (row instanceof String ? evaluate(row) : row)[0].mt_assembly_prefix
+            }
+            assertAll(
+                { assert workflow.success },
+                // Totality. This is the regression that matters: a new join is a new
+                // silent-drop risk, and this codebase has had that exact failure at least
+                // three times, each time with no error and no empty output.
+                { assert workflow.out.triples.size() == 3 },
+                { assert workflow.out.pairs.size() == 2 },
+                { assert prefixes.contains('OG1824.ilmn.260114.getorg1770reseed') },
+                { assert prefixes.contains('OGZERO.ilmn.260114.getorg1770') }
+            )
+        }
+    }
+
+    test("one SPECIES_VALIDATION per assembly prefix: the gate does not fan out") {
+        when {
+            workflow {
+                """
+                // The 4-part join rests on an invariant that is not a database constraint:
+                // one annotation per assembly, so the join is 1:1. A second annotator would
+                // put two lca_validation rows under one prefix. Assert it here so that fails
+                // the suite rather than being discovered in production.
+                input[0] = Channel.of(
+                    [[id: 'OG1842', mt_assembly_prefix: 'OG1842.ilmn.260114.getorg1770'], 'b', 'l']
+                )
+                input[1] = Channel.empty()
+                input[2] = Channel.of(
+                    [[id: 'OG1842', mt_assembly_prefix: 'OG1842.ilmn.260114.getorg1770'], 0]
+                )
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.triples.size() == 1 }
+            )
+        }
+    }
+}

@@ -24,12 +24,28 @@ process TRNA_RESCUE_GATE {
     task.ext.when == null || task.ext.when
 
     script:
+    // Taxonomy for the curated gene-order variant lookup. Without it a clade whose
+    // real gene order is non-canonical is judged out-of-order by the gate and
+    // silently declined for rescue, so an assembly missing a rescuable gene stays
+    // held for a reason this gate could have fixed. Same derivation as the emma
+    // upload module and modules/local/reference_divergence.
+    def klass       = (meta.class ?: '').toString().trim()
+    def family      = (meta.family ?: '').toString().trim()
+    def taxon_order = (meta.order ?: '').toString().trim()
+    def genus       = (meta.nominal_species_id ?: '').toString().trim().split(/\s+/)[0] ?: ''
+    def taxon_args  = [
+        klass       ? "--class '${klass}'"       : '',
+        family      ? "--family '${family}'"     : '',
+        taxon_order ? "--order '${taxon_order}'" : '',
+        genus       ? "--genus '${genus}'"       : '',
+    ].findAll { it }.join(' ')
     """
     gff=\$(find emma_in -maxdepth 1 -name '*.gff' | head -n1)
     if [ -z "\$gff" ]; then
         printf 'PASS\\t-\\n' > ${meta.mt_assembly_prefix}.trna_rescue_qc.txt
     else
-        trna_rescue_gate.py --gff "\$gff" --out ${meta.mt_assembly_prefix}.trna_rescue_qc.txt
+        trna_rescue_gate.py --gff "\$gff" ${taxon_args} \\
+            --out ${meta.mt_assembly_prefix}.trna_rescue_qc.txt
     fi
 
     cat <<-END_VERSIONS > versions.yml

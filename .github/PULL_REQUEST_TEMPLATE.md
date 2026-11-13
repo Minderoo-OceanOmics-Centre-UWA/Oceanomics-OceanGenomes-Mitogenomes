@@ -1,26 +1,27 @@
 <!--
-# nf-core/oceangenomesmitogenomes pull request
+# OceanOmics OceanGenomes Mitogenomes pull request
 
-Many thanks for contributing to nf-core/oceangenomesmitogenomes!
+Many thanks for contributing to OceanOmics OceanGenomes Mitogenomes!
 
 Please fill in the appropriate checklist below (delete whatever is not relevant).
 These are the most common things requested on pull requests (PRs).
 
 Remember that PRs should be made against the dev branch, unless you're preparing a pipeline release.
 
-Learn more about contributing: [CONTRIBUTING.md](https://github.com/nf-core/oceangenomesmitogenomes/tree/master/.github/CONTRIBUTING.md)
+Learn more about contributing: [CONTRIBUTING.md](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/tree/master/.github/CONTRIBUTING.md)
 -->
 
 ## PR checklist
 
 - [ ] This comment contains a description of changes (with reason).
 - [ ] If you've fixed a bug or added code that should be tested, add tests!
-- [ ] If you've added a new tool - have you followed the pipeline conventions in the [contribution docs](https://github.com/nf-core/oceangenomesmitogenomes/tree/master/.github/CONTRIBUTING.md)
-- [ ] If necessary, also make a PR on the nf-core/oceangenomesmitogenomes _branch_ on the [nf-core/test-datasets](https://github.com/nf-core/test-datasets) repository.
+- [ ] If you've added a new tool - have you followed the pipeline conventions in the [contribution docs](https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/tree/master/.github/CONTRIBUTING.md)
+- [ ] If necessary, also make a PR on the OceanOmics OceanGenomes Mitogenomes _branch_ on the [nf-core/test-datasets](https://github.com/nf-core/test-datasets) repository.
 - [ ] Make sure your code lints (`nf-core pipelines lint`).
 - [ ] Ensure the test suite passes (`nextflow run . -profile test,docker --outdir <OUTDIR>`).
 - [ ] Check for unexpected warnings in debug mode (`nextflow run . -profile debug,test,docker --outdir <OUTDIR>`).
 - [ ] Usage Documentation in `docs/usage.md` is updated.
 - [ ] Output Documentation in `docs/output.md` is updated.
+- [ ] Nothing added to `docs/` is a plan, status report or hand-off note: `docs/` describes how the pipeline works now. Plans belong in the PR description or an issue.
 - [ ] `CHANGELOG.md` is updated.
 - [ ] `README.md` is updated (including new tool citations and authors/contributors).

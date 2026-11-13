@@ -44,24 +44,36 @@ def load_create_samplesheet():
 cs = load_create_samplesheet()
 
 
-# A miniature taxdump: Anthozoa > Scleractinia > Acroporidae > Acropora >
-# Acropora tenuis, plus a cross-kingdom homonym at genus rank ('Morus').
+# A miniature taxdump: Metazoa > Cnidaria > Anthozoa > Scleractinia >
+# Acroporidae > Acropora > Acropora tenuis, a vertebrate branch under
+# Vertebrata, a plant branch outside Metazoa, and two homonyms -- 'Morus'
+# (gannet vs mulberry, one animal candidate) and 'Vertebrata' itself (the clade
+# vs a plant genus), which is why the ancestry anchors are picked by lineage
+# rather than by taking the first match.
 NODES = [
     (1, 1, "no rank"),
-    (2, 1, "class"),
+    (100, 1, "kingdom"),      # Metazoa
+    (101, 100, "clade"),      # Vertebrata
+    (30, 100, "phylum"),      # Cnidaria
+    (2, 30, "class"),         # Anthozoa
     (3, 2, "order"),
     (4, 3, "family"),
     (5, 4, "genus"),
     (6, 5, "species"),
     (7, 5, "species"),
-    (10, 1, "class"),
-    (11, 10, "genus"),
-    (20, 1, "class"),
-    (21, 20, "genus"),
+    (40, 100, "phylum"),      # Porifera -- a phylum with no class below it here
+    (10, 101, "class"),       # Aves
+    (11, 10, "genus"),        # Morus, the gannet
+    (20, 1, "class"),         # Magnoliopsida, outside Metazoa
+    (21, 20, "genus"),        # Morus, the mulberry
+    (22, 20, "genus"),        # Vertebrata, the red alga
 ]
 
 NAMES = [
     (1, "root", "scientific name"),
+    (100, "Metazoa", "scientific name"),
+    (101, "Vertebrata", "scientific name"),
+    (30, "Cnidaria", "scientific name"),
     (2, "Anthozoa", "scientific name"),
     (3, "Scleractinia", "scientific name"),
     (4, "Acroporidae", "scientific name"),
@@ -69,10 +81,12 @@ NAMES = [
     (6, "Acropora tenuis", "scientific name"),
     (6, "Madrepora tenuis", "synonym"),
     (7, "Acropora sp.", "scientific name"),
+    (40, "Porifera", "scientific name"),
     (10, "Aves", "scientific name"),
     (11, "Morus", "scientific name"),
     (20, "Magnoliopsida", "scientific name"),
     (21, "Morus", "scientific name"),
+    (22, "Vertebrata", "scientific name"),
 ]
 
 
@@ -126,9 +140,32 @@ class TaxdumpLineageTests(unittest.TestCase):
         self.assertEqual(lineage["class"], "Anthozoa")
         self.assertEqual(lineage["family"], "Acroporidae")
 
-    def test_cross_kingdom_homonym_resolves_to_nothing(self):
-        # 'Morus' is both a gannet and a mulberry. No lineage beats the wrong one.
-        self.assertEqual(self.resolver.lineage_for_name("Morus"), {})
+    def test_cross_kingdom_homonym_resolves_to_the_animal(self):
+        # 'Morus' is both a gannet and a mulberry. This pipeline sequences animals
+        # and never plants, so the animal candidate is the answer -- dropping the
+        # name outright cost real samples their lineage (the sponge genus
+        # Acanthella and the barnacle genus Calantica are both plant homonyms).
+        lineage = self.resolver.lineage_for_name("Morus")
+        self.assertEqual(lineage["class"], "Aves")
+        self.assertTrue(lineage["is_animal"])
+        self.assertTrue(lineage["is_vertebrate"])
+
+    def test_the_vertebrata_anchor_is_the_animal_one(self):
+        # 'Vertebrata' is itself a homonym (a red algal genus), so an anchor taken
+        # by first match would classify every vertebrate as an invertebrate.
+        self.assertTrue(self.resolver.lineage_for_name("Acropora tenuis")["is_animal"])
+        self.assertFalse(self.resolver.lineage_for_name("Acropora tenuis")["is_vertebrate"])
+        self.assertTrue(self.resolver.lineage_for_name("Morus")["is_vertebrate"])
+
+    def test_a_phylum_only_name_still_resolves(self):
+        # 'Porifera' pins no class, but the phylum is enough to choose the genetic
+        # code and the annotation route, and is what the operator has when the
+        # sponge has not been identified further.
+        lineage = self.resolver.lineage_for_name("Porifera")
+        self.assertEqual(lineage["phylum"], "Porifera")
+        self.assertNotIn("class", lineage)
+        self.assertTrue(lineage["is_animal"])
+        self.assertFalse(lineage["is_vertebrate"])
 
     def test_absent_name_resolves_to_nothing(self):
         self.assertEqual(self.resolver.lineage_for_name("Nothing here"), {})
@@ -160,9 +197,10 @@ class ResolveSpeciesInfoTests(unittest.TestCase):
             return cs.resolve_species_info(None, "OG1", resolver)
 
     def test_curated_database_answer_is_left_alone(self):
-        # The species table is authoritative; the taxdump is only a backstop.
+        # An exact master_species hit is authoritative; the taxdump only fills blanks.
         result = self.resolve(
-            ("Acropora tenuis", "Anthozoa", "Acroporidae", "Scleractinia", "Acropora tenuis"),
+            ("Acropora tenuis", "Anthozoa", "Acroporidae", "Scleractinia", "Acropora tenuis",
+             "species_exact"),
             self.resolver,
         )
         self.assertEqual(result[1:5],
@@ -171,7 +209,7 @@ class ResolveSpeciesInfoTests(unittest.TestCase):
 
     def test_unknown_class_is_filled_from_the_taxdump(self):
         result = self.resolve(
-            ("Acropora tenuis", "unknown", "", "", "Acropora tenuis"), self.resolver
+            ("Acropora tenuis", "unknown", "", "", "Acropora tenuis", ""), self.resolver
         )
         self.assertEqual(result[1], "Anthozoa")
         self.assertEqual(result[2], "Acroporidae")
@@ -182,7 +220,7 @@ class ResolveSpeciesInfoTests(unittest.TestCase):
         # family/order drive the CROSS_ORDER tier in reference_divergence_check;
         # blank ones collapse every reference to NON_CONGENERIC.
         result = self.resolve(
-            ("Acropora tenuis", "Anthozoa", "", "", "Acropora tenuis"), self.resolver
+            ("Acropora tenuis", "Anthozoa", "", "", "Acropora tenuis", "species_exact"), self.resolver
         )
         self.assertEqual(result[1], "Anthozoa")
         self.assertEqual(result[2], "Acroporidae")
@@ -191,27 +229,170 @@ class ResolveSpeciesInfoTests(unittest.TestCase):
 
     def test_blank_reference_species_id_gains_the_ncbi_name(self):
         result = self.resolve(
-            ("Acropora tenuis", "unknown", "", "", ""), self.resolver
+            ("Acropora tenuis", "unknown", "", "", "", ""), self.resolver
         )
         self.assertEqual(result[4], "Acropora tenuis")
 
     def test_unresolvable_sample_stays_unknown_and_is_flagged(self):
-        result = self.resolve(("Nothing here", "unknown", "", "", ""), self.resolver)
+        result = self.resolve(("Nothing here", "unknown", "", "", "", ""), self.resolver)
         self.assertEqual(result[1], "unknown")
         self.assertEqual(result[5], "unresolved")
 
     def test_no_taxdump_still_returns_the_database_answer(self):
         result = self.resolve(
-            ("Acropora tenuis", "unknown", "", "", "Acropora tenuis"), None
+            ("Acropora tenuis", "unknown", "", "", "Acropora tenuis", ""), None
         )
         self.assertEqual(result[1], "unknown")
         self.assertEqual(result[5], "unresolved")
+
+    def test_a_congener_row_keeps_its_class_but_not_its_reference(self):
+        # The genus tier returns some Acropora row: its class/family/order are
+        # right, but the sample's own species is the better reference query.
+        result = self.resolve(
+            ("Acropora tenuis", "Curated", "Acroporidae", "Scleractinia", "Acropora",
+             "genus_exact"),
+            self.resolver,
+        )
+        self.assertEqual(result[1:5],
+                         ("Curated", "Acroporidae", "Scleractinia", "Acropora tenuis"))
+        self.assertEqual(result[5], "db+taxdump")
+        self.assertEqual(result[6]["matched_rank"], "species",
+                         "the species lineage must reach the genetic-code lookup")
+        self.assertEqual(result[7], "genus_exact")
+
+    def test_a_genus_level_row_is_left_alone_when_ncbi_knows_no_more(self):
+        result = self.resolve(
+            ("Acropora sp", "Curated", "Acroporidae", "Scleractinia", "Acropora",
+             "genus_exact"),
+            self.resolver,
+        )
+        self.assertEqual(result[4:6], ("Acropora", "db"))
+        self.assertEqual(result[6], {})
+
+    def test_without_a_taxdump_a_congener_row_is_kept_and_flagged(self):
+        result = self.resolve(
+            ("Acropora tenuis", "Curated", "Acroporidae", "Scleractinia", "Acropora",
+             "genus_exact"),
+            None,
+        )
+        self.assertEqual(result[4:6], ("Acropora", "db"))
+        self.assertEqual(result[7], "genus_exact")
+
+    def test_the_taxdump_replaces_a_fuzzy_match(self):
+        result = self.resolve(
+            ("Acropora tenuis", "Wrong", "Wrongidae", "Wrongales", "Wrongidae",
+             "family_fuzzy"),
+            self.resolver,
+        )
+        self.assertEqual(result[1:5],
+                         ("Anthozoa", "Acroporidae", "Scleractinia", "Acropora tenuis"))
+        self.assertEqual(result[5], "taxdump")
+        self.assertEqual(result[7], "family_fuzzy")
+
+    def test_a_fuzzy_match_is_the_last_resort(self):
+        # 'Chrysogorgidae' for 'Chrysogorgiidae': NCBI has no such name.
+        result = self.resolve(
+            ("Chrysogorgidae", "Anthozoa", "Chrysogorgiidae", "Scleralcyonacea",
+             "Chrysogorgiidae", "family_fuzzy"),
+            self.resolver,
+        )
+        self.assertEqual(result[1], "Anthozoa")
+        self.assertEqual(result[5], "db")
+
+    def test_a_coral_missing_from_the_table_resolves_through_the_taxdump(self):
+        # master_species has no invertebrates at all.
+        result = self.resolve(("Acropora tenuis", "unknown", "", "", "Acropora tenuis", ""),
+                              self.resolver)
+        self.assertEqual(result[1], "Anthozoa")
+        self.assertEqual(result[5], "taxdump")
+        self.assertEqual(cs.is_invertebrate(result[1], result[6]), "true")
 
     def test_unknown_class_is_never_treated_as_an_invertebrate(self):
         # The bug this whole guard exists for: 'unknown' is not 'vertebrate', but
         # is_invertebrate() cannot say so, which is why the run must abort.
         self.assertEqual(cs.is_invertebrate("unknown"), "false")
         self.assertEqual(cs.is_invertebrate("Anthozoa"), "true")
+
+    def test_ancestry_beats_the_class_allow_list(self):
+        # A class nobody has added to INVERT_CLASSES is still an invertebrate when
+        # the taxdump says it is an animal outside Vertebrata. Without this, a
+        # missing class silently takes the vertebrate path -- how barnacles
+        # (Thecostraca) were being annotated as fish.
+        self.assertNotIn("Nothingoidea", cs.INVERT_CLASSES)
+        self.assertEqual(
+            cs.is_invertebrate("Nothingoidea",
+                               {"is_animal": True, "is_vertebrate": False}),
+            "true")
+        self.assertEqual(
+            cs.is_invertebrate("Anthozoa",
+                               {"is_animal": True, "is_vertebrate": True}),
+            "false")
+
+    def test_the_class_list_is_still_the_fallback_without_a_lineage(self):
+        # A class straight from the species table has no taxdump lineage behind it.
+        self.assertEqual(cs.is_invertebrate("Anthozoa", {}), "true")
+        self.assertEqual(cs.is_invertebrate("Actinopteri", None), "false")
+
+    def test_a_phylum_only_sample_gets_the_phylum_as_its_class(self):
+        result = self.resolve(("Porifera", "unknown", "", "", "", ""), self.resolver)
+        self.assertEqual(result[1], "Porifera")
+        self.assertEqual(result[5], "taxdump-phylum")
+        self.assertEqual(cs.is_invertebrate(result[1], result[6]), "true")
+
+class MatchQueryTests(unittest.TestCase):
+    """The lookup reads master_species and matches the cleaned name too."""
+
+    def test_the_maintained_table_is_read_not_species(self):
+        self.assertIn("FROM master_species sp", cs.MATCH_QUERY)
+        self.assertNotRegex(cs.MATCH_QUERY, r"FROM species\b")
+
+    def test_the_dead_same_genus_fuzzy_tier_is_gone(self):
+        self.assertEqual(cs.MATCH_QUERY.count("'genus_exact'"), 1)
+        self.assertNotIn("species_fuzzy", cs.MATCH_QUERY)
+
+    def test_the_cleaned_name_and_its_genus_are_passed(self):
+        self.assertEqual(cs.match_params("Cynoglossidae (Family)"),
+                         {"raw": "Cynoglossidae (Family)", "clean": "Cynoglossidae",
+                          "genus": "Cynoglossidae"})
+
+    def test_the_tiers_match_the_draft_pipeline(self):
+        order = [cs.MATCH_QUERY.index(f"'{tier}'") for tier in (
+            "species_exact", "synonym_exact", "genus_exact", "family_exact",
+            "order_exact", "family_fuzzy", "order_fuzzy")]
+        self.assertEqual(order, sorted(order))
+
+
+class SuggestNearMissesTests(unittest.TestCase):
+    """A one-character typo in a specimen label is silently catastrophic: an
+    unresolved class reads as invertebrates=false, i.e. as a vertebrate. The
+    abort already names the sample; this offers the correction."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.taxdump = str(write_taxdump(Path(cls._tmp.name) / "taxonkit_dbs"))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
+    def test_one_character_typo_is_offered(self):
+        resolver = TaxdumpLineage(self.taxdump)
+        self.assertIn("acropora", resolver.suggest_near_misses("Acropoa sp."))
+
+    def test_an_exact_name_is_not_offered_as_its_own_near_miss(self):
+        resolver = TaxdumpLineage(self.taxdump)
+        self.assertNotIn("acropora", resolver.suggest_near_misses("Acropora"))
+
+    def test_a_non_taxonomic_placeholder_yields_nothing(self):
+        resolver = TaxdumpLineage(self.taxdump)
+        self.assertEqual(resolver.suggest_near_misses("Larval fish"), [])
+
+    def test_a_missing_taxdump_returns_empty_rather_than_raising(self):
+        resolver = TaxdumpLineage(str(Path(self._tmp.name) / "absent"))
+        self.assertEqual(resolver.suggest_near_misses("Acropoa"), [])
 
 
 if __name__ == "__main__":

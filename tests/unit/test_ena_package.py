@@ -196,7 +196,7 @@ class EnaPackageTests(unittest.TestCase):
                 "study",
             ):
                 self.assertNotIn(absent, metadata)
-            self.assertEqual(metadata["schema_version"], 3)
+            self.assertEqual(metadata["schema_version"], 4)
             self.assertEqual(metadata["validation_study"], "PRJEB123419")
             self.assertEqual(list(package.glob("*.manifest.txt")), [])
             self.assertEqual(list(package.glob("*.local_validation.tsv")), [])
@@ -315,6 +315,62 @@ class EnaPackageTests(unittest.TestCase):
                 f"{seqid}.manifest.txt", (package / "checksums.sha256").read_text()
             )
 
+    def test_the_coverage_provenance_reaches_the_package(self):
+        """mean_depth_source travels from ena_input_metadata.json into the package.
+
+        Without it a package built in a --skip_upload_results run is
+        indistinguishable from one whose coverage came off the database row, and
+        the two are answers to different questions.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fasta = root / "input.fa"
+            fasta.write_text(">internal\nAACCGT\n")
+            seqid = "OG910.hifi.241127.v3mitohifi.emma102"
+            embl = root / "input.embl"
+            embl.write_text(
+                f"ID   {seqid}; SV 1; circular; genomic DNA; STD; UNC; 6 BP.\n"
+                f"AC * _{seqid}\n"
+                "XX\nSQ   Sequence 6 BP;\n     aaccgt 6\n//\n"
+            )
+            metadata_input = root / "input_metadata.json"
+            metadata_input.write_text(json.dumps({
+                "schema_version": 3,
+                "og_id": "OG910",
+                "assembly_prefix": "OG910.hifi.241127.v3mitohifi",
+                "annotation_version": "emma102",
+                "full_seqid": seqid,
+                "validation_study": "PRJEB123419",
+                "mean_depth": 812.5,
+                "mean_depth_source": "pipeline",
+                "program": "MitoHiFi 3.2.3",
+                "platform": "PACBIO_SMRT",
+                "scientific_name": "Choerodon rubescens",
+            }))
+            package = root / "package"
+            args = Namespace(
+                og_id=None,
+                assembly_prefix=None,
+                annotation_version=None,
+                full_seqid=None,
+                fasta=str(fasta),
+                embl=str(embl),
+                study=None,
+                coverage=None,
+                program=None,
+                platform=None,
+                scientific_name=None,
+                metadata_input=str(metadata_input),
+                outdir=str(package),
+            )
+            self.assertEqual(MODULE.build_package(args), 0)
+            metadata = json.loads(
+                (package / f"{seqid}.package_metadata.json").read_text()
+            )
+            self.assertEqual(metadata["mean_depth_source"], "pipeline")
+            self.assertEqual(metadata["mean_depth"], 812.5)
+            self.assertEqual(metadata["manifest"]["COVERAGE"], "812.5")
+
     def test_refresh_carries_an_older_package_forward(self):
         """An on-disk schema 2 package gains the new shape rather than a hybrid."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -343,6 +399,7 @@ class EnaPackageTests(unittest.TestCase):
             metadata_path = package / f"{seqid}.package_metadata.json"
             stale = json.loads(metadata_path.read_text())
             stale["schema_version"] = 2
+            stale.pop("mean_depth_source", None)
             stale["study"] = stale.pop("validation_study")
             stale["biosample_accession"] = "SAMN40589646"
             stale["biosample_source"] = "sample.ncbi_biosample_id"
@@ -351,8 +408,10 @@ class EnaPackageTests(unittest.TestCase):
             metadata_path.write_text(json.dumps(stale, indent=2, sort_keys=True))
 
             refreshed = MODULE.refresh_package(package)
-            self.assertEqual(refreshed["schema_version"], 3)
+            self.assertEqual(refreshed["schema_version"], 4)
             self.assertEqual(refreshed["validation_study"], "PRJEB123419")
+            # A package predating coverage provenance cannot have one invented.
+            self.assertEqual(refreshed["mean_depth_source"], "unknown")
             for retired in (
                 "study",
                 "biosample_accession",

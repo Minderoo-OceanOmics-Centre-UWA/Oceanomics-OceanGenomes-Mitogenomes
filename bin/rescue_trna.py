@@ -54,6 +54,9 @@ from mito_gene_order import (
     TRNA_AA,
     TRNA_ANTICODON,
     TRNA_PRODUCT as PRODUCT,
+    add_taxon_arguments,
+    ref_order_for,
+    taxon_from_args,
 )
 
 TRNA_SPEC = {
@@ -158,12 +161,23 @@ def run_trnascan(genome_fa, model):
 
 # ---------------------------------------------------------------------- placement
 
-def neighbour_gap(target, genes):
-    """Genomic (lo, hi) between target's nearest present REF-order neighbours,
-    or None if a neighbour is missing on either side or the gap wraps the origin."""
-    i = REF_GENES.index(target)
-    left = next((g for g in reversed(REF_GENES[:i]) if g in genes), None)
-    right = next((g for g in REF_GENES[i + 1:] if g in genes), None)
+def neighbour_gap(target, genes, order_ref=None):
+    """Genomic (lo, hi) between target's nearest present neighbours in the accepted
+    gene order, or None if a neighbour is missing on either side or the gap wraps
+    the origin.
+
+    `order_ref` is the order this taxon is judged by -- canonical unless a curated
+    variant rule applies. It matters because the search window for a rescued tRNA
+    is defined by its NEIGHBOURS: in a clade where the order is genuinely different,
+    the canonical neighbours bracket the wrong stretch of sequence, so the rescue
+    would look for the tRNA in the wrong place.
+    """
+    order_ref = list(order_ref or REF_GENES)
+    if target not in order_ref:
+        return None
+    i = order_ref.index(target)
+    left = next((g for g in reversed(order_ref[:i]) if g in genes), None)
+    right = next((g for g in order_ref[i + 1:] if g in genes), None)
     if left is None or right is None:
         return None
     left_hi = max(genes[left][0], genes[left][1])
@@ -205,7 +219,7 @@ def rescue_one(target, hits, genes, features, args):
         return ("SKIP", target, "already annotated")
 
     aa, anticodons = TRNA_SPEC[target]
-    gap = neighbour_gap(target, genes)
+    gap = neighbour_gap(target, genes, getattr(args, "order_ref", None))
     if gap is None:
         return ("SKIP", target, "neighbour missing or origin-spanning gap")
     gap_lo, gap_hi = gap
@@ -277,8 +291,14 @@ def main():
                     help="accepted for call-site symmetry; -M vert is code-independent. "
                          "Only the vertebrate (code 2) EMMA path reaches this rescue, so "
                          "2 is the path's only value, not a guess.")
+    # FUTURE: see emma_rescue_gate.main -- this runs before SPECIES_VALIDATION
+    # produces any LCA, so taxonomy matching here is meta-only by necessity.
+    add_taxon_arguments(ap)
     args = ap.parse_args()
 
+    # The accepted order for this taxon, used to pick each rescued tRNA's flanking
+    # search window.
+    args.order_ref, _rule = ref_order_for(taxon_from_args(args))
     args.ann_dir = args.annotation_dir
     lines = []
 

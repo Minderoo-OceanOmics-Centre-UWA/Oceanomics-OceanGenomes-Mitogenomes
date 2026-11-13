@@ -13,7 +13,7 @@ process OATK_CHECK {
     // gfa    : oatk's assembly graph. A link line joining a segment to itself
     //          (L <seg> + <seg> +) is a closed loop -> circular; this is oatk's own
     //          circularity signal, fed to the check as --getorg-circular.
-    // ref_gb : related-species reference GenBank, or assets/NO_REFERENCE.gb when the
+    // ref_gb : related-species reference GenBank, or assets/placeholders/NO_REFERENCE.gb when the
     //          sample reached oatk via the no-reference path (check treats a zero-length
     //          reference as absent, so the length/repeat/concatemer screen still runs).
     tuple val(meta), path(fasta), path(gfa), path(reference_gb)

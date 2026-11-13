@@ -1,0 +1,61 @@
+nextflow_workflow {
+    name "An empty first pass is routed to the bounded fallback seed"
+    script "./main.nf"
+    config "./nextflow.config"
+    workflow "FIRST_PASS_EMPTY"
+
+    // The reseed's seed is chosen by BLASTing the FIRST-PASS assembly against the
+    // sample's curated group database. That makes a total first-pass failure the one
+    // case the ordinary selector cannot serve: select_reference_db.py bails with
+    // "empty assembly" before it even locates the database, readiness comes back
+    // false, and the sample routes straight back to the empty assembly it already
+    // has. INV10_CHITON and INV12_ANOMURA both left the invert panel exactly that way,
+    // despite the curated databases holding 20 Polyplacophora and 20 Anomura records.
+    //
+    // SELECT_FALLBACK_SEED is what breaks that loop -- it bounds the group by the
+    // sample's taxonomy and ranks the survivors with its reads, instead of seeding
+    // from the whole database. firstPassEmpty() is the branch that reaches it, so it
+    // has to be exactly right about what "empty" means. Wrong in the permissive
+    // direction and a perfectly good assembly is ranked against its reads rather than
+    // against the assembly it already has, discarding the better evidence; wrong in
+    // the strict direction and the original closed loop is back.
+
+    test("zero-byte, missing and unreadable assemblies are empty; anything with bytes is not") {
+        when {
+            workflow {
+                """
+                def fixtures = "${projectDir}/tests/assembly_routing/fixtures/empty_first_pass"
+                input[0] = Channel.of(
+                    ['zero',    file("\${fixtures}/zero.fa")],
+                    ['contig',  file("\${fixtures}/contig.fa")],
+                    ['header',  file("\${fixtures}/header_only.fa")],
+                    ['missing', file("\${fixtures}/does_not_exist.fa")],
+                    ['null',    null]
+                )
+                """
+            }
+        }
+
+        then {
+            def verdict = { label -> workflow.out.verdict.find { it[0] == label }[1] }
+            assertAll(
+                { assert workflow.success },
+                // The observed failure mode: GetOrganelle touched a 0-byte placeholder
+                // because slimming found no target organelle contigs.
+                { assert verdict('zero') == true },
+                // A real assembly must NOT take the fallback path: it has better
+                // evidence for ranking than a read subsample.
+                { assert verdict('contig') == false },
+                // A header with no sequence still has bytes. GetOrganelle does not
+                // produce this, and letting the selector report NONE on its own merits
+                // is the honest answer to "did the assembler write anything?".
+                { assert verdict('header') == false },
+                // Unreadable is treated as empty: if we cannot read it we cannot select
+                // a subset from it either, so the fallback path is right and a thrown
+                // exception (which would abort the whole reseed fork) is not.
+                { assert verdict('missing') == true },
+                { assert verdict('null') == true }
+            )
+        }
+    }
+}

@@ -9,7 +9,7 @@ process PUSH_MTDNA_ASSM_RESULTS {
 
     input:
     // depth_tsv is the uniform remap-based depth from MITOGENOME_COVERAGE, or the
-    // header-only assets/empty_mito_depth.tsv placeholder for a row that never
+    // header-only assets/placeholders/empty_mito_depth.tsv placeholder for a row that never
     // reached annotation (failed, under-length, or a discarded assembly variant).
     tuple val(meta), path(fasta), path(out_log), path(depth_tsv)
     path config

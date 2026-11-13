@@ -62,7 +62,7 @@ workflow LCA_STREAMING {
     // than joined -- mirroring ch_zero_region_blast_lca in the real subworkflow.
     zero_region = region_counts
         .filter { _meta, n_regions -> n_regions == 0 }
-        .map { meta, _n -> [ meta, [ file("${projectDir}/assets/empty_lca.tsv", checkIfExists: true) ] ] }
+        .map { meta, _n -> [ meta, [ file("${projectDir}/assets/placeholders/empty_lca.tsv", checkIfExists: true) ] ] }
 
     CONSUME_GROUP(grouped.mix(zero_region))
 

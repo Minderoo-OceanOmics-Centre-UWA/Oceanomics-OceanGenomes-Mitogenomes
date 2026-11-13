@@ -1,5 +1,5 @@
 //
-// Subworkflow with functionality specific to the nf-core/oceangenomesmitogenomes pipeline
+// Subworkflow with functionality specific to the OceanOmics OceanGenomes Mitogenomes pipeline
 //
 
 /*
@@ -149,31 +149,42 @@ workflow PIPELINE_COMPLETION {
         // WHICH samples failed, so silently-dropped tasks (e.g. a reseed whose
         // output was not collected) are easy to miss. Re-surface them loudly
         // here by reading the per-run execution trace, without aborting the run.
-        if (workflow_metadata.stats.ignoredCount > 0 || !workflow_metadata.success) {
-            def trace_file = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
-            def errored = []
-            if (trace_file.exists()) {
-                def lines = trace_file.readLines()
-                def header = lines ? lines[0].split('\t') : []
-                def name_idx = header.findIndexOf { it == 'name' }
-                def status_idx = header.findIndexOf { it == 'status' }
-                if (name_idx >= 0 && status_idx >= 0) {
-                    lines.drop(1).each { line ->
-                        def cols = line.split('\t')
-                        if (cols.size() > status_idx && cols[status_idx] in ['FAILED', 'ABORTED']) {
-                            errored << cols[name_idx]
-                        }
-                    }
-                }
-            }
+        //
+        // Counted per task from its LAST attempt: a task that failed and then
+        // succeeded on retry is not a failure. Listing every FAILED trace row
+        // instead made the warning say "2 failed" above a list of 12.
+        def trace_file = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
+        def last_attempts = lastAttemptByTask(trace_file)
+        def failed_for_good = last_attempts.findAll { k, v -> v.status in ['FAILED', 'ABORTED'] }
+        if (failed_for_good || workflow_metadata.stats.ignoredCount > 0 || !workflow_metadata.success) {
+            def recovered = last_attempts.count { k, v -> v.status == 'COMPLETED' && v.failed_attempts > 0 }
             log.warn "=================================================================="
-            log.warn "${workflow_metadata.stats.ignoredCount} process(es) failed and were ignored (run was not aborted)."
-            if (errored) {
-                log.warn "Failed/ignored tasks:"
-                errored.unique().sort().each { log.warn "  - ${it}" }
+            log.warn "${failed_for_good.size()} task(s) failed on their last attempt (run was not aborted)."
+            failed_for_good.keySet().sort().each { log.warn "  - ${it}" }
+            if (recovered) {
+                log.warn "${recovered} other task(s) failed and then succeeded on retry (not listed)."
             }
             log.warn "Review these before trusting downstream results."
             log.warn "Full per-task detail: ${trace_file}"
+            log.warn "=================================================================="
+        }
+
+        // Database uploads that failed for good. An upload script exits non-zero when the
+        // database refuses or errors, so the task fails, is retried once and then ignored:
+        // the run carries on. Ignored tasks publish nothing, so their *.upload.txt stays in
+        // the work dir; list each one here, with that work dir, so a failed upload is never
+        // mistaken for a success. Failed tasks are not cached, so -resume re-runs them.
+        def failed_uploads = failed_for_good.findAll { k, v -> k ==~ /.*(PUSH_|UPLOAD_RESULTS).*/ }
+        if (failed_uploads) {
+            def out = file("${outdir}/sql_uploaded_data/FAILED_UPLOADS.tsv")
+            out.parent.mkdirs()
+            out.text = "task\tattempt\texit\twork_dir\n" +
+                failed_uploads.collect { k, v -> "${k}\t${v.attempt}\t${v.exit}\t${v.workdir}" }.sort().join('\n') + '\n'
+            log.warn "=================================================================="
+            log.warn "${failed_uploads.size()} database upload(s) FAILED and were not written (the run continued):"
+            failed_uploads.keySet().sort().each { log.warn "  - ${it}" }
+            log.warn "Listed with their work dirs (each holds the *.upload.txt log) in ${out}"
+            log.warn "Fix the cause, then re-run with -resume: only these uploads run again."
             log.warn "=================================================================="
         }
 
@@ -185,44 +196,13 @@ workflow PIPELINE_COMPLETION {
         // time -- its hash never matches the cached success. Record which
         // tier actually succeeded per sample here, from this run's own trace,
         // so conf/base.config's hintedMemory() can request it directly next
-        // time. Purely additive: a missing/unreadable trace is a no-op.
-        def hinted_processes = ['OATK', 'GETORGANELLE_RESEED', 'GETORGANELLE_FROMREADS']
-        def hints_trace_file = file("${outdir}/pipeline_info/execution_trace_${trace_report_suffix}.txt")
-        if (hints_trace_file.exists()) {
-            def trace_lines  = hints_trace_file.readLines()
-            def trace_header = trace_lines ? trace_lines[0].split('\t') : []
-            def name_idx     = trace_header.findIndexOf { it == 'name' }
-            def status_idx   = trace_header.findIndexOf { it == 'status' }
-            def attempt_idx  = trace_header.findIndexOf { it == 'attempt' }
-            def memory_idx   = trace_header.findIndexOf { it == 'memory' }
-            if ([name_idx, status_idx, attempt_idx, memory_idx].every { it >= 0 }) {
-                def hints_file = file("${outdir}/pipeline_info/memory_hints.json")
-                def hints = hints_file.exists() ? new groovy.json.JsonSlurper().parse(hints_file) : [:]
-                def hints_updated = false
-                trace_lines.drop(1).each { line ->
-                    def cols = line.split('\t')
-                    if (cols.size() <= memory_idx) { return }
-                    if (cols[status_idx] != 'COMPLETED') { return }
-                    def attempt = cols[attempt_idx].isInteger() ? cols[attempt_idx].toInteger() : 1
-                    if (attempt <= 1) { return }
-                    def name_matcher = (cols[name_idx] =~ /:(\w+) \(([^)]+)\)\s*$/)
-                    if (!name_matcher.find()) { return }
-                    def process_name = name_matcher.group(1)
-                    if (!(process_name in hinted_processes)) { return }
-                    def sample_id = name_matcher.group(2)
-                    def memory_gb = parseTraceMemoryToGb(cols[memory_idx])
-                    if (memory_gb == null) { return }
-                    if (!hints.containsKey(process_name)) { hints[process_name] = [:] }
-                    if (hints[process_name][sample_id] != memory_gb) {
-                        hints[process_name][sample_id] = memory_gb
-                        hints_updated = true
-                    }
-                }
-                if (hints_updated) {
-                    hints_file.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(hints))
-                    log.info "Updated memory hints for -resume: ${hints_file}"
-                }
-            }
+        // time. Purely additive, so nothing in here may throw: a missing,
+        // empty or corrupt hints file is replaced, and any other failure is a
+        // warning, never a crash that skips the rest of this handler.
+        try {
+            updateMemoryHints(trace_file, file("${outdir}/pipeline_info/memory_hints.json"))
+        } catch (Exception e) {
+            log.warn "Could not update memory hints (non-fatal): ${e.class.simpleName}: ${e.message}"
         }
 
         if (hook_url) {
@@ -240,6 +220,108 @@ workflow PIPELINE_COMPLETION {
     FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
+//
+// Last attempt of every task in a Nextflow execution trace, keyed by task name:
+// [attempt, status, exit, workdir, failed_attempts]. failed_attempts counts the
+// FAILED/ABORTED rows before the last one, so a task that recovered on retry can
+// be told apart from one that never failed. A missing or unreadable trace, or one
+// without the needed columns, gives an empty map.
+//
+def lastAttemptByTask(trace_file) {
+    def last = [:]
+    if (!trace_file.exists()) { return last }
+    def lines = trace_file.readLines()
+    def header = lines ? lines[0].split('\t') as List : []
+    def col = { String name -> header.indexOf(name) }
+    if (![col('name'), col('status'), col('attempt')].every { it >= 0 }) { return last }
+    def failures = [:].withDefault { 0 }
+    lines.drop(1).each { line ->
+        def c = line.split('\t', -1)
+        if (c.size() <= Math.max(col('name'), Math.max(col('status'), col('attempt')))) { return }
+        def name = c[col('name')]
+        def status = c[col('status')]
+        def attempt = c[col('attempt')].isInteger() ? c[col('attempt')].toInteger() : 0
+        if (status in ['FAILED', 'ABORTED']) { failures[name] += 1 }
+        if (!last[name] || attempt >= last[name].attempt) {
+            last[name] = [
+                attempt: attempt,
+                status : status,
+                exit   : col('exit') >= 0 && c.size() > col('exit') ? c[col('exit')] : '',
+                workdir: col('workdir') >= 0 && c.size() > col('workdir') ? c[col('workdir')] : '',
+            ]
+        }
+    }
+    last.each { name, v ->
+        v.failed_attempts = failures[name] - (v.status in ['FAILED', 'ABORTED'] ? 1 : 0)
+    }
+    return last
+}
+
+//
+// Record, per attempt-scaled process and sample, the memory of the attempt that
+// succeeded after a retry (see the onComplete comment). An empty or unparseable
+// hints file (a write that died at close() on a full /software quota left a 0-byte
+// one) is treated as empty and rewritten. The new file is written beside the old
+// one and moved over it, so a failed write can never leave a truncated file again.
+//
+def updateMemoryHints(trace_file, hints_file) {
+    if (!trace_file.exists()) { return }
+    def hinted_processes = ['OATK', 'GETORGANELLE_RESEED', 'GETORGANELLE_FROMREADS']
+    def trace_lines  = trace_file.readLines()
+    def trace_header = trace_lines ? trace_lines[0].split('\t') : []
+    def name_idx     = trace_header.findIndexOf { it == 'name' }
+    def status_idx   = trace_header.findIndexOf { it == 'status' }
+    def attempt_idx  = trace_header.findIndexOf { it == 'attempt' }
+    def memory_idx   = trace_header.findIndexOf { it == 'memory' }
+    if (![name_idx, status_idx, attempt_idx, memory_idx].every { it >= 0 }) { return }
+
+    def hints = [:]
+    def hints_unreadable = false
+    if (hints_file.exists()) {
+        try {
+            def parsed = hints_file.size() > 0 ? new groovy.json.JsonSlurper().parse(hints_file) : null
+            if (parsed instanceof Map) {
+                hints = parsed
+            } else {
+                hints_unreadable = true
+            }
+        } catch (Exception e) {
+            hints_unreadable = true
+        }
+        if (hints_unreadable) {
+            log.warn "Ignoring empty or unreadable ${hints_file}; it will be rewritten from this run's trace."
+        }
+    }
+
+    def hints_updated = false
+    trace_lines.drop(1).each { line ->
+        def cols = line.split('\t')
+        if (cols.size() <= memory_idx) { return }
+        if (cols[status_idx] != 'COMPLETED') { return }
+        def attempt = cols[attempt_idx].isInteger() ? cols[attempt_idx].toInteger() : 1
+        if (attempt <= 1) { return }
+        def name_matcher = (cols[name_idx] =~ /:(\w+) \(([^)]+)\)\s*$/)
+        if (!name_matcher.find()) { return }
+        def process_name = name_matcher.group(1)
+        if (!(process_name in hinted_processes)) { return }
+        def sample_id = name_matcher.group(2)
+        def memory_gb = parseTraceMemoryToGb(cols[memory_idx])
+        if (memory_gb == null) { return }
+        if (!hints.containsKey(process_name)) { hints[process_name] = [:] }
+        if (hints[process_name][sample_id] != memory_gb) {
+            hints[process_name][sample_id] = memory_gb
+            hints_updated = true
+        }
+    }
+    // An unreadable file is rewritten even with no new hints, so it stops warning.
+    if (hints_updated || hints_unreadable) {
+        def tmp = file("${hints_file}.tmp")
+        tmp.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(hints))
+        java.nio.file.Files.move(tmp, hints_file, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        log.info "Updated memory hints for -resume: ${hints_file}"
+    }
+}
+
 //
 // Parse a Nextflow trace `memory` field value (e.g. "200 GB", "6144 MB") into
 // whole gigabytes, rounding up so a recorded memory hint never under-provisions
@@ -282,30 +364,57 @@ def validateInputSamplesheet(input) {
 //
 // Generate methods description for MultiQC
 //
-def toolCitationText() {
-    // TODO nf-core: Optionally add in-text citation tools to this list.
-    // Can use ternary operators to dynamically construct based conditions, e.g. params["run_xyz"] ? "Tool (Foo et al. 2023)" : "",
-    // Uncomment function in methodsDescriptionText to render in MultiQC report
-    def citation_text = [
-            "Tools used in the workflow included:",
-            "FastQC (Andrews 2010),",
-            "MultiQC (Ewels et al. 2016)",
-            "."
-        ].join(' ').trim()
+// One entry per tool: [enabled, in-text citation, bibliography entry]. Kept as a
+// single list so the citation sentence and the reference list can't drift apart.
+// `enabled` mirrors the params that gate each branch, so a run only cites the
+// tools it could actually have used. EMMA (vertebrates) and MITOS2 (inverts) are
+// routed per sample on meta.invertebrates, so both are cited whenever
+// annotation is on.
+def toolReferences() {
+    def assembly_getorg = !params.skip_mitogenome_assembly_getorg
+    def assembly_hifi   = !params.skip_mitogenome_assembly_hifi
+    def annotation      = !params.skip_mitogenome_annotation
+    def ena_prep        = !params.skip_ena_submission_prep
+    return [
+        [assembly_getorg, "fastp (Chen et al. 2018)",
+            "<li>Chen, S., Zhou, Y., Chen, Y., & Gu, J. (2018). fastp: an ultra-fast all-in-one FASTQ preprocessor. Bioinformatics, 34(17), i884-i890. doi: <a href=\"https://doi.org/10.1093/bioinformatics/bty560\">10.1093/bioinformatics/bty560</a></li>"],
+        [assembly_getorg, "GetOrganelle (Jin et al. 2020)",
+            "<li>Jin, J.-J., Yu, W.-B., Yang, J.-B., Song, Y., dePamphilis, C. W., Yi, T.-S., & Li, D.-Z. (2020). GetOrganelle: a fast and versatile toolkit for accurate de novo assembly of organelle genomes. Genome Biology, 21, 241. doi: <a href=\"https://doi.org/10.1186/s13059-020-02154-5\">10.1186/s13059-020-02154-5</a></li>"],
+        [assembly_hifi, "MitoHiFi (Uliano-Silva et al. 2023)",
+            "<li>Uliano-Silva, M., Ferreira, J. G. R. N., Krasheninnikova, K., Darwin Tree of Life Consortium, Formenti, G., Abueg, L., Torrance, J., Myers, E. W., Durbin, R., Blaxter, M., & McCarthy, S. A. (2023). MitoHiFi: a python pipeline for mitochondrial genome assembly from PacBio high fidelity reads. BMC Bioinformatics, 24, 288. doi: <a href=\"https://doi.org/10.1186/s12859-023-05385-y\">10.1186/s12859-023-05385-y</a></li>"],
+        [assembly_hifi && params.enable_oatk_fallback, "oatk (Zhou et al. 2025)",
+            "<li>Zhou, C., Brown, M., Blaxter, M., Darwin Tree of Life Consortium, McCarthy, S. A., & Durbin, R. (2025). Oatk: a de novo assembly tool for complex plant organelle genomes. Genome Biology, 26, 235. doi: <a href=\"https://doi.org/10.1186/s13059-025-03676-6\">10.1186/s13059-025-03676-6</a></li>"],
+        [!params.skip_mitogenome_depth || assembly_hifi, "minimap2 (Li 2018)",
+            "<li>Li, H. (2018). Minimap2: pairwise alignment for nucleotide sequences. Bioinformatics, 34(18), 3094-3100. doi: <a href=\"https://doi.org/10.1093/bioinformatics/bty191\">10.1093/bioinformatics/bty191</a></li>"],
+        [assembly_hifi, "SAMtools (Danecek et al. 2021)",
+            "<li>Danecek, P., Bonfield, J. K., Liddle, J., Marshall, J., Ohan, V., Pollard, M. O., Whitwham, A., Keane, T., McCarthy, S. A., Davies, R. M., & Li, H. (2021). Twelve years of SAMtools and BCFtools. GigaScience, 10(2), giab008. doi: <a href=\"https://doi.org/10.1093/gigascience/giab008\">10.1093/gigascience/giab008</a></li>"],
+        [annotation, "EMMA (Al Arab et al. 2017)",
+            "<li>Al Arab, M., Höner zu Siederdissen, C., Tout, K., Sahyoun, A. H., Stadler, P. F., & Bernt, M. (2017). Accurate annotation of protein-coding genes in mitochondrial genomes. Molecular Phylogenetics and Evolution, 106, 209-216. doi: <a href=\"https://doi.org/10.1016/j.ympev.2016.09.024\">10.1016/j.ympev.2016.09.024</a></li>"],
+        [annotation, "MITOS2 (Donath et al. 2019)",
+            "<li>Donath, A., Jühling, F., Al-Arab, M., Bernhart, S. H., Reinhardt, F., Stadler, P. F., Middendorf, M., & Bernt, M. (2019). Improved annotation of protein-coding genes boundaries in metazoan mitochondrial genomes. Nucleic Acids Research, 47(20), 10543-10552. doi: <a href=\"https://doi.org/10.1093/nar/gkz833\">10.1093/nar/gkz833</a></li>"],
+        [annotation, "tRNAscan-SE (Chan et al. 2021)",
+            "<li>Chan, P. P., Lin, B. Y., Mak, A. J., & Lowe, T. M. (2021). tRNAscan-SE 2.0: improved detection and functional classification of transfer RNA genes. Nucleic Acids Research, 49(16), 9077-9096. doi: <a href=\"https://doi.org/10.1093/nar/gkab688\">10.1093/nar/gkab688</a></li>"],
+        [annotation, "BLAST+ (Camacho et al. 2009)",
+            "<li>Camacho, C., Coulouris, G., Avagyan, V., Ma, N., Papadopoulos, J., Bealer, K., & Madden, T. L. (2009). BLAST+: architecture and applications. BMC Bioinformatics, 10, 421. doi: <a href=\"https://doi.org/10.1186/1471-2105-10-421\">10.1186/1471-2105-10-421</a></li>"],
+        [annotation, "the NCBI Taxonomy database (Schoch et al. 2020)",
+            "<li>Schoch, C. L., et al. (2020). NCBI Taxonomy: a comprehensive update on curation, resources and tools. Database, 2020, baaa062. doi: <a href=\"https://doi.org/10.1093/database/baaa062\">10.1093/database/baaa062</a></li>"],
+        [true, "Biopython (Cock et al. 2009)",
+            "<li>Cock, P. J. A., Antao, T., Chang, J. T., Chapman, B. A., Cox, C. J., Dalke, A., Friedberg, I., Hamelryck, T., Kauff, F., Wilczynski, B., & de Hoon, M. J. L. (2009). Biopython: freely available Python tools for computational molecular biology and bioinformatics. Bioinformatics, 25(11), 1422-1423. doi: <a href=\"https://doi.org/10.1093/bioinformatics/btp163\">10.1093/bioinformatics/btp163</a></li>"],
+        [ena_prep, "EMBOSS seqret (Rice et al. 2000)",
+            "<li>Rice, P., Longden, I., & Bleasby, A. (2000). EMBOSS: the European Molecular Biology Open Software Suite. Trends in Genetics, 16(6), 276-277. doi: <a href=\"https://doi.org/10.1016/S0168-9525(00)02024-2\">10.1016/S0168-9525(00)02024-2</a></li>"],
+        [ena_prep, "ENA Webin-CLI",
+            "<li>European Nucleotide Archive. Webin-CLI. <a href=\"https://github.com/enasequence/webin-cli\">https://github.com/enasequence/webin-cli</a></li>"],
+        [true, "MultiQC (Ewels et al. 2016)",
+            "<li>Ewels, P., Magnusson, M., Lundin, S., & Käller, M. (2016). MultiQC: summarize analysis results for multiple tools and samples in a single report. Bioinformatics, 32(19), 3047-3048. doi: <a href=\"https://doi.org/10.1093/bioinformatics/btw354\">10.1093/bioinformatics/btw354</a></li>"],
+    ].findAll { it[0] }
+}
 
-    return citation_text
+def toolCitationText() {
+    return "Tools used in the workflow included: " + toolReferences().collect { it[1] }.join(', ') + "."
 }
 
 def toolBibliographyText() {
-    // TODO nf-core: Optionally add bibliographic entries to this list.
-    // Can use ternary operators to dynamically construct based conditions, e.g. params["run_xyz"] ? "<li>Author (2023) Pub name, Journal, DOI</li>" : "",
-    // Uncomment function in methodsDescriptionText to render in MultiQC report
-    def reference_text = [
-            "<li>Andrews S, (2010) FastQC, URL: https://www.bioinformatics.babraham.ac.uk/projects/fastqc/).</li>",
-            "<li>Ewels, P., Magnusson, M., Lundin, S., & Käller, M. (2016). MultiQC: summarize analysis results for multiple tools and samples in a single report. Bioinformatics , 32(19), 3047–3048. doi: /10.1093/bioinformatics/btw354</li>"
-        ].join(' ').trim()
-
-    return reference_text
+    return toolReferences().collect { it[2] }.join(' ')
 }
 
 def methodsDescriptionText(mqc_methods_yaml) {
@@ -329,12 +438,8 @@ def methodsDescriptionText(mqc_methods_yaml) {
     meta["nodoi_text"] = meta.manifest_map.doi ? "" : "<li>If available, make sure to update the text to include the Zenodo DOI of version of the pipeline used. </li>"
 
     // Tool references
-    meta["tool_citations"] = ""
-    meta["tool_bibliography"] = ""
-
-    // TODO nf-core: Only uncomment below if logic in toolCitationText/toolBibliographyText has been filled!
-    // meta["tool_citations"] = toolCitationText().replaceAll(", \\.", ".").replaceAll("\\. \\.", ".").replaceAll(", \\.", ".")
-    // meta["tool_bibliography"] = toolBibliographyText()
+    meta["tool_citations"] = toolCitationText()
+    meta["tool_bibliography"] = toolBibliographyText()
 
 
     def methods_text = mqc_methods_yaml.text

@@ -3,6 +3,1360 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v3.0.0 - [2026-11-13]
+
+The invertebrate generalisation, on top of v2.0.0.
+
+### Breaking changes
+
+Upgrading from v2.0.0 needs action on these. Details are in the entries below.
+
+- **Database schema.** Uploads need the OceanOmics database at genomes_db_review migration 076 or later.
+  068 adds the `mito_assembly_qc` table for the assembly QC verdict. 076 moves the LCA, BLAST and
+  species-validation results into `mito_lca`, `mito_lca_raw`, `mito_blast_hit` and `mito_lca_validation`,
+  keyed by `annotation_id`, and turns the old table names into read-only views: v2.0.0's writers fail
+  against it with "cannot insert into view". This repository no longer ships the schema (`sql/` and
+  `bin/apply_ena_migrations.py` are gone); migrate in genomes_db_review first.
+- **`--force_db_overwrite` defaults to `true`** (was `false`). A re-run now replaces existing rows. `false`
+  protects assembly rows only: complete annotations and the QC verdict are still replaced.
+- **The reference-guided join is off by default** (`--skip_getorganelle_join true`), so `_rgj` assemblies
+  are no longer produced unless asked for. Multi-contig assemblies are concatenated as `_concat`.
+- **ENA prep has its own switch and needs a study.** `--skip_upload_results` no longer turns ENA prep off;
+  use `--skip_ena_submission_prep`. Prep runs only with `--ena_study` set (no default; without it prep is
+  skipped with a warning).
+- **Nextflow is capped at `< 25.10`** (tested on 25.04.x).
+- **`nextflow_run.sh` writes to `$BASE/mitogenomes` by default.** Triggered runs still set `OG_OUT_DIR`.
+- **Merged reads are no longer published to `<outdir>/cat/`.**
+- **Invertebrate HiFi is not a supported input.** Invertebrates are supported from short reads only.
+
+### `Added`
+
+- **Failed database uploads fail their task, without stopping the run.**
+  `push_mtdna_assm_results.py` and `push_emma_annotation_results.py` exit 1 on a database
+  error, and `PUSH_QC_VALIDATOR` / `PUSH_ENA_VALIDATION_RESULTS` exit with their script's code
+  instead of 0. The default errorStrategy retries once and ignores, so the run carries on, and
+  `-resume` re-runs only the failed uploads. The completion handler writes
+  `sql_uploaded_data/FAILED_UPLOADS.tsv` and warns; the trace gains a `workdir` field.
+  Before this, a refused write was cached as a success (RELEASE_TEST_261102 lost 20 uploads
+  that way). Tests: `tests/unit/test_upload_exit_codes.py`, harness `tests/upload_failure/`.
+
+- **LCA results are written by `annotation_id`.** `push_lca_blast_results.py`,
+  `push_lca_raw_results.py`, `push_species_validation.py` and `push_qc_validator.py` write
+  `mito_blast_hit`, `mito_lca`, `mito_lca_raw` and `mito_lca_validation` (genomes_db_review 076,
+  Phase R.7b), resolving the key with the database function `mito_annotation_id()`. The old table
+  names are read-only views from 076; reads are unchanged, and the previous writers fail on
+  "cannot insert into view".
+
+- **The assembly QC verdict and the completeness profile reach the database.**
+  `PUSH_ASSEMBLY_QC` (`bin/push_assembly_qc.py`, `modules/local/upload_results/assembly_qc`) runs
+  after `MITOGENOME_ASSEMBLY_SUMMARY` under the upload switch and writes each assembly's `status`,
+  `manual_review_reason`, `numt_flag`, `frameshift_flag` and reference onto its `mitogenome_data` row
+  (`qc_status` and friends, genomes_db_review migration 068). It only updates; an assembly with no
+  row is reported. `push_emma_annotation_results.py` now also writes `completeness_profile`. Both
+  were computed before and discarded. The NOVA_260925_LA verdicts (196 assemblies) and 289
+  archived completeness profiles were backfilled.
+
+- **BLAST + LCA can run on annotations this run did not produce.** `--skip_mitogenome_annotation`
+  used to skip BLAST and LCA too, so existing (often hand-curated) annotations could not be
+  species-checked, QC'd, uploaded or ENA-prepped without re-annotating over the curation. With
+  `--blast_precomputed_annotations true`, the bundles in `--precomputed_mitogenome_annotation_results`
+  go through the same BLAST, LCA, QC, upload and submission prep as a normal run. The new
+  `REBUILD_ANNOTATION_BUNDLE` (`bin/rebuild_annotation_bundle.py`) first rebuilds each bundle's
+  `cds/` and `proteins/` and the CO1/12S/16S BLAST inputs from its GFF + FASTA. A file glob cannot
+  carry those directories, and without them `ANNOTATION_STATS` records the PCG ORF check as
+  `not_evaluated`: NOVA_260925_LA OG3104, held for `CO1:no_stop(AAA)` in its original run, passed the
+  gate when re-run from a globbed bundle. The GFF is the source of truth, so a curated GFF wins over
+  a `cds/` that was never regenerated (`cds_check=stale` in
+  `annotation_rebuild/<annotation>.bundle_rebuild.tsv`, protein re-translated the way
+  `mitos_to_emma.py` does). Where `cds/` agrees with the GFF (identical, or EMMA's convention of
+  dropping the stop codon / last rRNA base or two, `trimmed`), the bundle's own `cds/` and
+  `proteins/` are reused, so re-running an untouched bundle reproduces the original run's stats and
+  BLAST input exactly. BLAST and LCA now live in their own `MITOGENOME_BLAST_LCA` subworkflow, called
+  by `MITOGENOME_ANNOTATION` and by this path. Because the process names changed, the first
+  `-resume` of an in-flight run re-runs its BLAST and LCA tasks once.
+- **`blast.<gene>.<annotation>.near.tsv`, the hits just below the identity gate.** A query with no
+  passing hits used to publish an empty `.filtered.tsv` and nothing else, so seeing what it did hit
+  meant digging through the work dir. The BLAST module now also publishes hits with span > 200 and
+  identity from `ext.near_floor` (90) up to the gate, in the same format as `.filtered.tsv`. If that
+  band is empty it holds the 10 best hits by bitscore at any identity, so the file is empty only when
+  BLAST found nothing; across NOVA_260909_LA's 187 invertebrate queries 44 use that fallback and none
+  is empty. Nothing downstream reads it: LCA, species validation and the DB upload are unchanged.
+- The published origin of an invertebrate mitogenome is now measured per taxon instead
+  of being tRNA-Met for everything.
+
+  `mitos_to_emma.py` re-origined every invertebrate to trnM, under a docstring claiming
+  that matched "how coral mitogenomes are deposited in NCBI". Measured against this
+  repo's own curated RefSeq databases, trnM is the deposited origin for Porifera 0%,
+  Annelida 0%, Ctenophora 0%, Echinodermata 0.7%, Mollusca 0.8% and Arthropoda 1.9%.
+  Every one of the 12 annotated invertebrates in the 20-sample panel was published
+  starting at `MT-TM`.
+
+  The claim was true of exactly one lineage, the one it came from: **Scleractinia, at
+  63.8% (37/58 records)**. That is also why the new table is keyed on taxonomic ORDER
+  first, not class. Anthozoa as a class has no majority (rrnL 33.9%, cox1 28.5%, trnM
+  17.6%) and that aggregate hides four orders with four different conventions:
+
+  | order | n | anchor | share |
+  |---|---|---|---|
+  | Scleractinia | 58 | `TM` | 63.8% |
+  | Malacalcyonacea | 75 | `RNR2` | 69.3% |
+  | Zoantharia | 29 | `CO1` | 58.6% |
+  | Scleralcyonacea | 31 | `CO1` | 51.6% |
+
+  A class-level table would have rotated every already-submitted stony coral off its
+  deposited origin and changed its ENA sequence checksum for no reason. Under the order
+  level they are byte-identical: verified by re-running the adapter on OG2368's real
+  MITOS output, which reproduces the published 17,842 bp sequence exactly.
+
+  `bin/build_origin_anchor_table.py` generates `assets/taxonomy/mito_origin_anchors.json`
+  by tallying which gene sits at position 1 across all 2,101 tracked reference records,
+  resolving order/class via the taxdump. A taxon's own plurality wins when it clears both
+  `min_fraction` (0.50) and `min_records` (20); otherwise it inherits order -> class ->
+  group -> cox1. `InvertTaxonGroups.originAnchor(order, class)` reads it and never returns
+  null: a wrong anchor rotates a circle, a missing one is a hard failure. The lookup is
+  passed to MITOS2 and CORAL_ANNOTATION_FIX as `--origin-gene`, which is **required** in
+  `mitos_to_emma.py` -- there is one rotation implementation with two call sites, and a
+  default would let one be updated without the other, silently publishing FIX and PASS
+  anthozoans of the same species on different origins.
+
+  Notable non-cox1 results the phylum aggregates hid: Porifera `RNR2` 89.7% (Demospongiae
+  92.7% at class level, Hexactinellida and Homoscleromorpha inheriting it), Echinoidea
+  `TF` 75.6%, Cephalopoda `CO3` 73.8% (corroborated at order level by Sepiida 93.5% and
+  Oegopsida 90.5%), Sabellida `TH` 68.0%.
+
+  The pre-annotation cox1 rotation (`ROTATE_ORIGIN`) is unchanged and does a different
+  job: it moves the *linearisation point* off an intron-split gene so MITOS annotates
+  cleanly. The two cannot be merged, because tRNA-Met and rrnL are not findable by the
+  tblastn protein search that step uses -- they need MITOS's annotation to exist first.
+
+  **Operational constraint.** Changing an anchor changes the published sequence's
+  checksum, so ENA treats a re-run sample as a different sequence even though the
+  molecule is unchanged. Scleractinia keeps `TM`, so already-submitted stony corals are
+  unaffected; the exposure is limited to submitted invertebrates whose anchor actually
+  moves (octocorals, now `RNR2`, and sponges). Do not re-run those. If one genuinely
+  needs resubmitting on its old origin, `originAnchorFor()` already prefers a per-sample
+  `meta.origin_gene`, so pinning it needs only an `origin_gene` samplesheet column and no
+  code change. There is deliberately no global "keep the old behaviour" flag: it would be
+  the wrong default for every new sample and would persist silently.
+
+- A GetOrganelle first pass that produces no contig at all can now be reseeded.
+
+  `INV10_CHITON` and `INV12_ANOMURA` both recruited reads and built a graph, then logged
+  `Slimming ... finished with no target organelle contigs found!` / `No sequence hit our
+  LabelDatabase!` and published a zero-byte assembly. That is a *labelling* miss, not a
+  recruitment miss: the stock `animal_mt` LabelDatabase cannot label a divergent
+  invertebrate contig. Representation was never the problem -- the curated databases hold
+  20 Polyplacophora records (6 of them Chitonidae) and 20 Anomura across 9 families.
+
+  Two changes. First, the first pass is now labelled with the sample's curated group gene
+  database (`--genes`), resolved from `meta.class` alone via
+  `InvertTaxonGroups.seedDbGroup()` with no assembly involved, which is what makes it
+  available on the first pass at all. The stock seed (`-F animal_mt`) still recruits the
+  reads, so recruitment is unchanged by construction. A vertebrate, or a class with no
+  curated database, passes `[]` and emits a byte-identical command line. Revert with
+  `--getorganelle_firstpass_group_genes false`.
+
+  Second, an empty first pass is reseeded from the WHOLE group database. Until now the
+  reseed's seed was chosen by BLASTing the first-pass assembly against the group, so a
+  total first-pass failure -- the case that most needs a better seed -- could never
+  select one: `select_reference_db.py` reported `NONE  empty assembly`, readiness came
+  back false, and the sample was routed straight back to the empty assembly it already
+  had. Coarse whole-group seeding is what the top-n subset exists to avoid, so it fires
+  only on a zero-byte assembly, where `preferReseed()` cannot make the outcome worse.
+  Revert with `--getorganelle_empty_first_pass_rescue false`.
+
+- Samples that leave during ENA preparation are now reported as held instead of vanishing.
+
+  Four QC-passing invertebrates (INV03_ZOANTHUS, INV11_EUCRATE, INV13_SEMIBALANUS,
+  INV15_ACANTHASTER) appeared in neither `held_samples.tsv` nor the submission-ready set,
+  and `run_completeness.txt` could only report them as unaccounted. `BUILD_SOURCE_MODIFIERS`
+  had exited 1; it has no explicit `errorStrategy`, so it inherited the global `ignore`,
+  emitted no `.src`, and the inner join at `ch_processed_files` dropped the sample silently.
+
+  `ENA_SUBMISSION_PREP` now emits a `PRE_SUBMISSION` held fragment for the remainder of its
+  own input that never reached the table2asn verdict, naming the stage that produced no
+  output. A remainder join rather than an `errorStrategy` change on that one process:
+  catching only `BUILD_SOURCE_MODIFIERS` would leave every sibling step with the same hole.
+
+- Invertebrate reseeds now narrow the group database down to the records the sample's
+  own assembly matches, instead of seeding from the whole thing.
+
+  Resolving a seed is two narrowing stages. `InvertTaxonGroups.seedDbGroup()` (above) added
+  the first, by taxonomy: class -> one of the eight group databases. The second, by
+  sequence, existed only for vertebrates, where `findMitoReference` resolves a single
+  relative and `REFERENCE_RANK` re-picks it from the reads. Invertebrates stopped after
+  stage 1 and handed GetOrganelle the entire group -- 221 anthozoan genomes across 87
+  families, and their 3,776 gene sequences, as `-s` and `--genes`. That recruits reads from
+  across the phylum: INV04_BOLOCERA's reseed converged on 46,142 accepted words against its
+  first pass's 16,192, average base-coverage fell from 26.0 to 11.7, and a 2-scaffold first
+  pass came back as 12 scaffolds. Anthozoa is the *mildest* case that can break this way --
+  mollusca is 850 genomes and 31,718 label sequences, arthropoda 647 and 23,991.
+
+  `SELECT_REFERENCE_DB` (was `SELECT_CORAL_REFERENCE`, and now group-agnostic) BLASTs the
+  first-pass assembly against the group and hands the reseed only the top
+  `params.reseed_seed_top_n` records, with just their genes: 88 label sequences rather than
+  3,776 for INV04_BOLOCERA. Top-n rather than the single best, because from a small
+  fragmented first pass the pick is reliable at order/subclass level but not at species --
+  INV01_ACANTHOGORGIA's own family is in the database and does not win from 1,194 bp, while
+  the top 5 are all Octocorallia. A sample nothing aligns to is **not** reseeded: that is
+  the honest signal that the group does not represent its lineage, and falling back to the
+  whole group is the failure being removed.
+
+- Invertebrates now carry a real reference through `GETORGANELLE_CHECK`.
+
+  Every invertebrate previously reached the check with the `NO_REFERENCE.gb` placeholder, so
+  its evidence row recorded `note=no_reference` with `NA` reference coverage and length
+  ratio -- INV04_BOLOCERA's 12-scaffold reseed produced no length or coverage signal at all.
+  The seed-mode selector emits the single best record alongside the top-n seed, off the same
+  ranking and at no extra BLAST, and that becomes the reference. It also lets
+  `REFERENCE_RELEVANCE` reach the invertebrate branch it already had (`min_pid` 88 vs 82) and
+  which no sample could previously satisfy.
+
+- Invertebrates whose first GetOrganelle pass produced no contig are now reseeded from a
+  taxonomy-bounded, read-ranked panel instead of the whole group database
+  (`SELECT_FALLBACK_SEED`, `bin/select_fallback_seed.py`).
+
+  An empty first pass has no sequence for `SELECT_REFERENCE_DB` to rank a group database
+  against, so the rescue handed GetOrganelle the entire group. That is defensible for a
+  4-record database and indefensible for a 647-record one: `INV12_ANOMURA` was seeded from
+  all of Arthropoda while **20 Anomura records sat in the same manifest**. Whole-phylum
+  seeding recruits conserved and off-target reads, which is exactly what stage 2 exists to
+  prevent.
+
+  The new selector walks the manifest lineage nominal → family → order → class and stops at
+  the most specific rank that returns records, then ranks that shortlist by mapping a fixed
+  read subsample. Against the tracked databases: Anomura resolves 20 of 647 at tier `order`,
+  Chitonida 17 of 850, and `Tjalfiella sp.` resolves 2 records at tier `nominal`. When no
+  rank matches it still falls back to the group, but names every rank that missed
+  (`reference_gap=nominal:…,family:…,order:…`) so a genuine reference gap is auditable
+  rather than indistinguishable from an ordinary selection. `INV05_FARREA` is the live
+  example: *Farrea* has no complete mitogenome in GenBank at all, so no amount of ranking
+  can help it and the run should say so.
+
+  Bounded rather than best-only for the same reason the seed selector is top-n: from no
+  assembly at all, the pick is trustworthy at order level and not at species. `balanced_cap`
+  spreads a large tier across families so the panel stays broad within its bound.
+
+- The reference-database builder takes `refseq_only` per group, and ctenophora is the first
+  group to lift it: **4 records → 16, 3 families → 7**.
+
+  `SEARCH_TEMPLATE` applied `AND refseq[filter]` to every group. RefSeq is a curated subset,
+  not a completeness bar — the records it excludes are ordinary INSDC submissions that pass
+  the identical `record_is_complete()` check. For seven groups the restriction is a harmless
+  de-duplicator. For ctenophora it was the binding constraint and it hid most of the phylum:
+  4 records out of 35 matching, **and no Platyctenida whatsoever**.
+
+  That is what made `INV08_TJALFIELLA` look like an unfixable reference gap. It was not. Two
+  *Tjalfiella* mitogenomes — its own genus — were sitting in GenBank behind the filter, and
+  both clear the group's own bar of 10 CDS:
+
+  | accession | bp | CDS | rRNA | organism |
+  |---|---|---|---|---|
+  | PP327218 | 11,397 | 11 | 2 | *Tjalfiella* sp. |
+  | PP331237 | 11,020 | 11 | 2 | *Tjalfiella* sp. |
+
+  The rebuild adds Tjalfiellidae, Lyroctenidae, Benthoplanidae and Euplokamidae. `min_cds`
+  is untouched at 10 — the platyctenids clear it, and the two 9-CDS *Pleurobrachia* records
+  are still correctly dropped.
+
+  It was lifted for ctenophora alone at first, on the belief that widening the other seven
+  would re-pick the `SELECT_REFERENCE_DB` reference for samples already submitted. That
+  belief was wrong and the remaining seven were lifted immediately after — see the next
+  entry. Two dedup stages exist only because of this and are no-ops while the filter is on: `drop_insdc_twins()` removes the INSDC
+  submission a RefSeq record was derived from (`NC_038065` + `MG655622`), and
+  `--max-per-organism` (default 2) stops one heavily-resequenced species filling the panel —
+  the widened ctenophore search returns **nine** *Vallicula multiformis* isolates, all in one
+  family, where neither a top-n panel nor family balancing could dilute them.
+
+  `assets/taxonomy/mito_origin_anchors.json` is regenerated with it. Only ctenophore tallies
+  move and every one stays below `min_records=20`, so no anchor is gained or lost and no
+  submitted sequence is re-origined. The staleness warning now fires for a single-group
+  rebuild too, not only `--all`, which is how this was nearly missed.
+
+- Every remaining group now searches all of INSDC as well, at one record per organism.
+  **2,101 records → 3,926 across the eight, 617 families → 815, and 1,308 genera → 2,105.**
+
+  | group | records | families | genera |
+  |---|---|---|---|
+  | anthozoa | 221 → 638 | 87 → 124 | 148 → 308 |
+  | mollusca | 850 → 1391 | 208 → 258 | 525 → 767 |
+  | arthropoda | 647 → 1078 | 169 → 231 | 358 → 561 |
+  | annelida | 167 → 420 | 50 → 63 | 108 → 208 |
+  | echinodermata | 135 → 263 | 56 → 80 | 104 → 171 |
+  | porifera | 58 → 87 | 33 → 41 | 45 → 60 |
+  | tunicata | 19 → 33 | 7 → 11 | 11 → 21 |
+
+  The reason the other seven were held back does not exist. `git ls-tree v2.0.0` has no
+  `assets/refdb/`, no `select_reference_db.py` and no `mito_origin_anchors.json`: the
+  corals already in ENA were assembled by the v2 path, which resolved a reference from the
+  species *label* through `findMitoReference`. No deposited mitogenome was ever built from
+  these databases, and every sample that has been through them is a test run.
+
+  Measured rather than assumed, with the new `bin/audit_reference_selection_diff.py` over
+  50 published assemblies from the invert panel, batch-20 and NOVA_260724_JP: **3 samples
+  moved to a closer reference and 0 moved further**, 13 changed record inside the same
+  taxonomic tier and 34 kept the same record.
+
+  | sample | before | after |
+  |---|---|---|
+  | INV02_UMBELLULA | NC_044086.1 *Anthoptilum grandiflorum* (same order) | MK919668.1 *Umbellula huxleyi* (**congeneric**) |
+  | INV04_BOLOCERA | NC_066448.1 *Heteractis doreensis* (same order) | NC_022470.1 *Bolocera tuediae* (**congeneric**) |
+  | INV14_AMPHIOPHIURA | NC_085502.1 *Stegophiura sladeni* (same family) | LC698982.1 *Amphiophiura penichra* (**congeneric**) |
+
+  Every rebuild is a **strict superset**, checked by accession: no record that shipped in
+  the RefSeq-only build is absent from the new one, anthozoa's deliberately frozen 221
+  included. Anthozoa's 638 also absorbs the plain RefSeq refresh that was being deferred
+  (221 → 278 on RefSeq alone), so the freeze is retired rather than merely overtaken.
+
+  `max_per_organism` joins `refseq_only` in `GROUPS` and is 1 for the seven, so a rebuild
+  is reproducible from `--group X` with no flag to remember. That and `drop_insdc_twins()`
+  are what keep the cost down: mollusca matches 3,169 records unfiltered but ships 1,391
+  (795 INSDC twins and 904 over-cap records removed), and the tracked databases grow
+  72 MiB → 133 MiB rather than the ~260 MiB the raw counts imply. Ctenophora keeps its cap
+  of 2 and its 16 records are untouched. `--retmax` had to rise from 2000 to 6000, since
+  `fetch_records()` aborts rather than silently shipping an arbitrary slice of a group.
+
+  `assets/taxonomy/mito_origin_anchors.json` is regenerated with the rebuild and **no order
+  moved off its anchor**. The coral orders that carry the deposited population only gain
+  evidence: Scleractinia stays on `TM` at n=58 → 181 (63.8% → 65.2%), Malacalcyonacea on
+  `RNR2`, Zoantharia and Scleralcyonacea on `CO1`. Two resolutions do change, both toward the
+  measured answer: Actiniaria now clears the bar in its own right (`ND5`, n=54, 79.6%)
+  instead of taking `CO1` from the Anthozoa class aggregate, and Sabellida falls below it
+  and resolves to its class (Polychaeta, `CO1`) rather than its old order-level `TH`.
+
+  Timing was checked before assuming a cost: `SELECT_REFERENCE_DB` runs `blastn -subject`
+  with no formatted database, and a mollusc selection takes 3 s against both the 13 MiB and
+  the 22 MiB subject, so no `makeblastdb` step or resource-label change is warranted.
+
+
+- Invertebrate GetOrganelle reseeds now seed from a curated database for the sample's own
+  phylum instead of the coral one.
+
+  A failed first pass was reseeded from `coral_mito_refdb.*` for *every* invertebrate, and
+  that database is Anthozoa-only (`txid6101`). A mollusc or a sea star was therefore re-run
+  against a seed far too divergent to assemble from: a guaranteed second failure that still
+  cost the full GetOrganelle walltime. Seven new databases are built alongside it, one per
+  group we run -- porifera, mollusca, arthropoda, echinodermata, ctenophora, tunicata,
+  annelida -- and `InvertTaxonGroups.seedDbGroup()` resolves each sample's class to one of
+  them. A class no database covers now returns null and is **not** reseeded at all: it keeps
+  its first-pass assembly and is named in the log, because not reseeding is strictly better
+  than reseeding from the wrong phylum. This is deliberately the opposite of
+  `cox1PanelGroup()`'s catch-all -- a mismatched rotation panel is a safe no-op, a
+  mismatched seed is a wasted run.
+
+  `ARTHROPODA_CLASSES` gains Thecostraca, Copepoda, Ichthyostraca and Mystacocarida (the
+  classes the old Maxillopoda was split into, all of which NCBI returns), and each phylum set
+  gains its own phylum name for samples whose taxonomy only resolved to phylum rank. Without
+  them a barnacle got no seed database and the *coral* cox1 rotation panel. New
+  `tests/invert_seed_db` resolves every class we run and asserts the files are on disk, since
+  the group name is also the directory name -- the drift that hid the barnacle gap.
+
+  `bin/build_coral_reference_db.py` becomes `bin/build_invert_reference_db.py`, taking
+  `--group`/`--all` over a registry of Entrez organism expressions and per-group completeness
+  bars. The bar cannot be one number: coral references must carry what `CORAL_ANNOTATION_FIX`
+  transfers (both rRNAs, a nad5 CDS) plus the 13-PCG cnidarian set, while ctenophore
+  mitogenomes are genuinely reduced (no atp6, no tRNAs, ~10 PCGs), so the coral bar rejects
+  every valid ctenophore record. The rRNA matcher also learns the `l-rRNA`/`rnl`/`MT-RNR2`
+  spellings other phyla use, where the coral-era `16S|RRNL|LARGE` test silently dropped
+  correctly annotated records; Arthropoda subtracts Hexapoda, Arachnida and Myriapoda, which
+  are >95% of arthropod RefSeq mitogenomes, none of them anything OceanOmics sequences, and
+  enough to truncate the search at `--retmax`. The builder now aborts on such a truncation
+  rather than shipping an arbitrary slice of a group.
+
+  The anthozoa database is kept at its existing 221-record build. Rebuilding it today yields
+  278 -- a strict superset, no record lost -- but those extra records also change which
+  reference `SELECT_CORAL_REFERENCE` picks for every coral, so that refresh belongs in its
+  own change.
+
+- `assets/` is reorganised from 35 flat files into `refdb/<group>/`, `panels/`, `taxonomy/`
+  and `placeholders/`, with nf-core boilerplate left at the root. Only the files the pipeline
+  reads are tracked: the per-group `.gb` files (85 MB, read by nothing today) and the
+  `.nucl.*` BLAST databases are gitignored and rebuilt on demand. `assets/refdb/README.md`
+  records each database's taxon, completeness bar, record count and rebuild command -- the
+  provenance that previously existed only in the builder's docstring.
+
+- Invertebrate annotation now generalises beyond Cnidaria to Mollusca, Echinodermata,
+  Arthropoda (Crustacea, Pycnogonida) and Porifera, instead of running every invertebrate
+  through coral-tuned machinery. `mitoGeneticCode()` gains an explicit allow-list of the
+  invertebrate classes confirmed to use the standard Invertebrate code (NCBI 5, previously
+  everything invertebrate took the Coelenterate code 4) and a Porifera Coelenterate-code (4)
+  entry alongside Cnidaria; there is no catch-all code-5 default -- an invertebrate class in
+  none of the code-4, code-9 or code-5 groups aborts the run so its code is resolved before
+  annotation rather than guessed, since not every invertebrate is code 5 (Bivalvia among
+  others) and a wrong table mistranslates every CDS and fails table2asn terminally. The
+  per-sample `genetic_code` samplesheet column overrides the map;
+  `ROTATE_ORIGIN` re-origins each sample against its own phylum-appropriate curated cox1 panel
+  (`assets/panels/cox1/{mollusca,arthropoda,echinodermata}.faa`, new) instead of the coral-only
+  `panels/cox1/anthozoa.faa` for every invertebrate; `REFERENCE_RELEVANCE`'s 88.0 identity floor is now
+  Cnidaria-only, with everything else defaulting to the vertebrate 82.0 as an untuned starting
+  point. `ANNOTATION_QC_GATE`/`CORAL_ANNOTATION_FIX` stay Cnidaria-only rather than guessing an
+  equivalent for other phyla -- the nad5 group I intron they repair is a Hexacorallia-specific
+  trait, absent in Octocorallia and not the same failure mode Porifera's own (cox1, lineage-
+  specific) group I introns present; non-Cnidarian invertebrate MITOS2 output now merges straight
+  through untouched. New `InvertTaxonGroups` (`lib/`) centralises the class groupings both the
+  samplesheet and annotation subworkflow read.
+
+- The generated samplesheet now carries a resolved `genetic_code` per row, and the class ->
+  code map lives in one place.
+
+  `bin/create_samplesheet.py` emitted the `genetic_code` column but always wrote it blank,
+  leaving `mitoGeneticCode()` to derive the code from the class. That was harmless while
+  `mitoGeneticCode()` had a catch-all code-5 default for invertebrates; once it aborted on an
+  unmapped class instead, a blank column meant the run died at samplesheet parse for any class
+  the map did not know. It knew 25 of the 76 classes `INVERT_CLASSES` marks as invertebrate:
+  Bivalvia, Cephalopoda, Polychaeta, Ascidiacea and 47 others would have stopped the run.
+
+  New `assets/taxonomy/mito_genetic_codes.json` is the single source of truth, read by both
+  `bin/create_samplesheet.py` and `lib/InvertTaxonGroups.groovy` -- the same fix
+  `bin/mito_gene_order.py` applied to `REF_GENES` after four copies drifted. Every entry
+  records its `basis` and whether the code is NCBI-documented (`ncbi`) or the conventional
+  choice for the group (`convention`), and an `ambiguous` block documents the classes that are
+  deliberately left to abort: Pterobranchia and Hemichordata (Rhabdopleuridae is code 24,
+  Cephalodiscidae 33, unresolvable at class rank), Trematoda/Cestoda/Monogenea/Platyhelminthes
+  (NCBI table 21 is trematode-specific and 14 is the alternative flatworm code, so table 9's
+  stated Rhabditophora scope does not cover them -- these were previously mapped to 9) and
+  Placozoa. Ctenophora joins Cnidaria on code 4, which is NCBI table 4's stated metazoan scope
+  verbatim; tunicates take the Ascidian code 13.
+
+  The generator resolves each row against that map and writes the code, so the sheet shows
+  which table a sample will be annotated under and can be corrected before launching.
+  Unresolved invertebrate rows are still written, and are now named on stderr at generation
+  time (`report_unresolved_genetic_code()`, mirroring the existing `report_unresolved()`),
+  with the ambiguity reason where there is one, instead of surfacing as an abort mid-run.
+  `taxonomy_resolution.tsv` records the code alongside the taxonomy provenance.
+
+- The genetic code now comes from NCBI's own per-taxon assignment, not from a class map.
+
+  `nodes.dmp` field 8 holds the mitochondrial genetic code NCBI assigns each taxon, and it is
+  what ENA and table2asn validate a submission against. `TaxdumpLineage` now parses it and
+  `resolve_genetic_code()` prefers it whenever the taxdump resolved the sample, with
+  `assets/taxonomy/mito_genetic_codes.json` demoted to the fallback for a class that came from the
+  species table with no lineage behind it.
+
+  Per-taxon beats per-class because the code varies *below* class rank: `Cephalodiscidae` is
+  code 33 while its parent class `Pterobranchia` is 5, so no table keyed on class can hold
+  both. A `Cephalodiscus` sample now gets 33 and a `Rhabdopleura` 5, from the same class.
+
+  Checking the hand-written map against that field found two errors in it: `Appendicularia`
+  (larvaceans, e.g. `Oikopleura`) and the `Tunicata` subphylum node are **code 5, not 13**.
+  NCBI's prose page scopes table 13 as "Urochordata (tunicates)", but its taxonomy applies 13
+  only to Ascidiacea and Thaliacea. The remaining 70 entries agree with NCBI exactly, and a
+  new test asserts that agreement so the map cannot drift from it again.
+
+  With per-taxon codes available, the `ambiguous` block shrinks to the pterobranchs, the only
+  group whose code genuinely varies below class. `Trematoda`, `Cestoda`, `Monogenea`,
+  `Platyhelminthes` (all 9) and `Placozoa` (4) are mapped rather than left to abort -- NCBI is
+  unambiguous on them, and the earlier caution was based on the prose page's table 14/21
+  scoping rather than on what NCBI assigns.
+
+- Samples identified only to phylum are now called out at samplesheet-generation time.
+  `report_phylum_only()` names them on stderr with the phylum, alongside the existing
+  unresolved-taxonomy and unresolved-code reports, so a phylum sitting in a column called
+  `class` is stated rather than left to be discovered by whoever reads the sheet next.
+
+- Invertebrate status is now decided by NCBI ancestry, not by a hand-maintained class list.
+
+  `INVERT_CLASSES` is an allow-list, and anything missing from it read as a vertebrate:
+  genetic code 2, EMMA instead of MITOS2 and the curated fish BLAST database, with nothing
+  raised to notice. Checking the first invertebrate run against the taxdump found stalked
+  barnacles going through as fish -- they resolve to class `Thecostraca`, which was absent --
+  and a sweep of every class-rank node under Metazoa but outside Vertebrata put **41 of NCBI's
+  92 invertebrate classes** outside the list, Insecta, Arachnida, Copepoda and Merostomata
+  among them. `Maxillopoda` and `Hexanauplia`, which were in the list, are retired names the
+  taxdump no longer carries at all.
+
+  `TaxdumpLineage` now reports `is_animal` / `is_vertebrate` from the lineage walk, and
+  `is_invertebrate()` uses them whenever the taxdump resolved the sample, falling back to
+  `INVERT_CLASSES` only for a class that came from the species table with no lineage behind it.
+  A class nobody has added can no longer misroute a sample. The ancestry anchors are picked by
+  lineage rather than by first match, because `Vertebrata` is itself a homonym (a red algal
+  genus) and taking the wrong one would classify every vertebrate as an invertebrate.
+
+- A cross-kingdom homonym now resolves to the animal rather than to nothing. Dropping the name
+  outright was too blunt for a pipeline that sequences animals and never plants: it cost the
+  sponge genus `Acanthella` and the barnacle genus `Calantica` their whole lineage, both being
+  homonyms of flowering-plant genera. When exactly one candidate is an animal it is the answer;
+  two animal candidates (the phylum `Ctenophora` and the crane-fly genus `Ctenophora`) stay
+  genuinely ambiguous and still resolve to nothing.
+
+- A sample identified no further than its phylum now resolves. `phylum` joins `INDEXED_RANKS`
+  and `WANTED_RANKS`, and a lineage with no class rank falls back to the phylum name as the
+  sample's `class`. A sponge recorded only as `Porifera` pins no class, but the phylum still
+  selects the genetic code (4), the reduced-tRNA expectation and the cox1 rotation panel --
+  `INVERT_CLASSES` and `mito_genetic_codes.json` already carry the phylum names for exactly
+  this case. These rows are marked `taxdump-phylum` in `taxonomy_resolution.tsv` rather than
+  being hidden under `taxdump`.
+
+- Barnacles are no longer annotated as vertebrates: `Thecostraca` and `Copepoda` (plus
+  `Ichthyostraca` and `Mystacocarida`) join the crustacean classes, all on code 5.
+
+- `Craniata` is no longer treated as an invertebrate class. It is a brachiopod class, but it is
+  also the vertebrate clade name, so a fish whose class resolved to `Craniata` was marked
+  `invertebrates=true` and routed to the invertebrate BLAST DB and MITOS2. Craniate brachiopods
+  use `Rhynchonellata`/`Lingulata`/`Brachiopoda`, or the `genetic_code` column.
+
+- `MITOS2`'s stub block no longer falls back to genetic code 5 when `meta.genetic_code` is
+  unset, matching the script block. Both now rely on the upstream abort and the
+  `SUPPORTED_GENETIC_CODES` assertion rather than guessing a table.
+
+### `Changed`
+
+- **Documentation brought up to date with the pipeline.** usage.md gains "How invertebrates are annotated",
+  replacing the note that the invertebrate path was tuned for corals: which steps run for every phylum (cox1
+  rotation, the gate, the assembly-only repair, the per-taxon origin, the core completeness profile) and which
+  are cnidarian-only (the reference transfer). Also: Webin secrets are required by default, a missing
+  `--ena_study` skips ENA prep in the main pipeline, the quick starts include `--mitos_refdb` and
+  `--ena_study`, `status` can be `superseded`, the QC verdict lives in `mito_assembly_qc`, the EMMA stop repair
+  and the fixer status files are listed, MITOS introns are GFF-only, the cost files are listed, the reseed and
+  reference-selection params are documented, and a `-profile setonix` that never existed is gone.
+
+- **`force_db_overwrite` is documented as protecting assembly rows only.** With it false, a complete
+  annotation still replaces the stored annotation of the same annotator, and the assembly QC verdict is
+  always replaced. The release test ran with it false and replaced the annotation and QC columns of all
+  97 assembly rows while keeping every assembly row. This is unchanged; the param help text and the
+  `nextflow.config` comment now say so.
+
+- **Supported data is stated up front.** README and `docs/usage.md` now say that invertebrate
+  mitogenomes are supported from short reads only (Illumina/Hi-C, including draft-genome reads); the
+  HiFi path (MitoHiFi and its Oatk fallback) is set up for vertebrates only.
+- **Nextflow is capped at `< 25.10`** (`!>=24.10.0, <25.10.0`): the pipeline is tested on 25.04.x, and
+  newer releases are refused until they have been tested.
+- **table2asn is pinned to `staphb/ncbi-table2asn:1.29.324`** instead of `:latest`; that is the
+  version production runs were already using.
+- **`nextflow_run.sh` defaults its output to `$BASE/mitogenomes`** instead of a leftover audit
+  directory. Triggered runs still set `OG_OUT_DIR`.
+- **`CITATIONS.md` adds TaxonKit, HMMER (nhmmer) and table2asn**, which the pipeline uses.
+
+- **The invertebrate BLAST search no longer filters its own results.** It ran with
+  `-perc_identity 98 -max_target_seqs 500 -evalue 1e-10`, so the work-dir `blast.<gene>.<name>.tsv`
+  was already cut to the 98% hits and there was no way to see what the failing samples did hit
+  (NOVA_260909_LA's ~11 blocked samples all have core_nt evidence at 81-97%). It now runs like the
+  vertebrate search, `-num_alignments 999999 -evalue 1`, keeping only megablast and the Metazoa
+  `-taxids 33208` search-space restriction. The module's awk (span>200, pident>gate) is now the only
+  filter. Measured on all 187 invertebrate queries of NOVA_260909_LA: at the old 98% gate the LCA
+  output is identical to the capped search, runtime is unchanged (median 25 min per search, max
+  78 min), and the raw tables are large (2.5 GB in total, ~97k rows per CO1 query).
+- **The invertebrate identity gate is 97%, not 98%.** It is set as `ext.min_pident` on
+  `BLAST_BLASTN` (the awk) and `--pident 97` on `LCA` (calculateLCA.py drops rows below it before
+  anything else), so the two cannot disagree. Vertebrates stay at 98%. Swept on NOVA_260909_LA's 64
+  invertebrate samples with the overlap cover rule below: 98% gives 37 samples an LCA call, 97% gives
+  41, with no new family-level conflicts against the nominal label; 95% and 90% add only family/order
+  calls while conflicts rise from 5 to 12. There is no identity cap on LCA rank, so a 97-98% top hit
+  can still produce a species-level LCA call.
+- **LCA's coverage gate measures overlap, not query cover.** `calculateLCA.py` came from eDNA, where
+  the query is a short ASV inside a longer reference and `qcovhsp >= 40` only removed junk. Here the
+  query is a whole gene (CO1 ~1.6 kb) and most references are barcode fragments (median ~600 bp), so
+  an exact end-to-end match to a 293 bp 12S record covered 36% of the query and was dropped (OG3037).
+  New `--coverage_mode overlap` gates on aligned length / min(qlen, slen); the pipeline passes
+  `--coverage_mode overlap --min_coverage 80` for every sample, and the script's default stays
+  `qcovhsp` so eDNA use is unchanged. Inverts at 98%: 28 -> 37 samples with a call, no species call
+  below 98%, and the 6 calls that changed all became coarser (more references fell in the 2% window;
+  OG2617 went from a label-conflicting Kulamanamana species to order Zoantharia). Vertebrates (297
+  queries, NOVA_260909_LA + NOVA_260925_LA): 4 calls change, all coarser, and species validation is
+  unchanged sample for sample. The cover values reported in the LCA outputs are still BLAST's.
+- **Species validation reads the LCA window, not the whole filtered table.** A binomial used to
+  validate if its name appeared anywhere in `blast_combined`, i.e. on any hit over the identity gate,
+  even one several points below a different species' best hit. Each LCA row's evidence is now its
+  `species_in_LCA` taxa plus the names the BLAST rows for the same query and region carry within 2
+  points of its top hit, so BOLD synonyms and in-house `[organism=...]` tags still count. The genus
+  check needs the genus in that same window. `blast_combined` is still built and uploaded unchanged.
+- **The reference-guided join is off by default** (`--skip_getorganelle_join`, default `true`).
+  `GETORGANELLE_JOIN` welds a multi-scaffold assembly into one record with 100bp N spacers so the
+  scaffolds sit in reference order; multi-scaffold assemblies now become a plain `_concat` instead.
+  Across the 12 NOVA_260909_LA samples where a joined and a concatenated form of the SAME contigs
+  were both annotated, the join won none: 10 ties and 2 losses, each loss a gene landing on a weld.
+  OG2998 is decisive: same CYTB, same 189 bp, no Ns in either published CDS, but the concatenation
+  reads `ATT..TAA` (a real terminator) while the join reads `ACT..TCT`, because the join placed that
+  gene across its spacer at 12044-12143. OG3058's ND2 is clean in the concatenation and `no_stop`
+  in the join. Neither form is submittable -- both exist only so a partial mitogenome can be
+  annotated and get a species ID -- so an inferred scaffold ORDER buys nothing a concatenation does
+  not, while the welds cost real gene models. The module, script, naming contracts, DB plumbing and
+  the four `_rgj` test fixtures are all left in place, so it is one flag to re-enable, and
+  `lib/AssemblySelection.groovy` now penalises spacer Ns so a re-enabled join cannot win on
+  contiguity alone. `_rgj` is also documented in `docs/output.md` for the first time.
+
+
+- **The skip-assembly path lost circularity, and stopped selecting an assembly at all.** Both faults were
+  exposed by re-running NOVA_260909_LA with `skip_mitogenome_assembly_getorg` and `precomputed_*` globs.
+  - `meta.circular` was never stamped on the precomputed path. The block already reloaded the original run's
+    `*_check.tsv` and its own comment said the point was that "meta.circular doesn't silently regress to
+    unknown", but the verdict was never written into meta. Combined with a FASTA glob pointing at the source
+    run while the evidence glob pointed at the new run's own empty outdir, every assembly took
+    `empty_circularity_check.tsv` (`final_verdict_circular=NA`). Consequences: `[topology=linear]` at
+    table2asn for genuinely circular genomes, so OG3000 was rejected on `SEQ_FEAT.SeqLocOrder` for its
+    origin-spanning tRNA-Trp `join(16207..16262,1..12)` while its own GFF said `Is_circular=True`; and because
+    unknown circularity does not block QC, `proceed_qc=true` inflated from 5 to 15 and every `not_circular`
+    hold disappeared. `attachPrecomputedCircularity()` now stamps the verdict through the existing
+    `evidenceFinalVerdictCircular()`, and unknown stays unknown rather than becoming a fabricated `false`.
+  - `requirePrecomputedCircularityEvidence()` refuses at launch when a precomputed run has assemblies but no
+    circularity evidence, naming both globs and the consequence. Every `precomputed_*` glob now logs how many
+    files it matched, and the run reports how many assemblies got a real verdict versus the placeholder, so a
+    glob that is right in shape but wrong in its keys is visible too.
+  - Oatk gains `precomputed_mitogenome_circularity_evidence_oatk`. Oatk records topology in a getorg-style
+    check TSV, which the MitoHiFi glob (`*circularity_check.tsv`) has never matched, so **every** precomputed
+    oatk assembly took the NA placeholder however the params were set, and was submitted as linear.
+  - `mt_assembly_run_prefix` was being set to the per-variant prefix, violating the documented contract that
+    it is written once and is identical across variants. Nothing then grouped the variants of a run, so the
+    selection that normally picks one assembly never ran and **all** of them were annotated, BLASTed and
+    QC'd: 110 assemblies for 80 samples, ~1.5x the compute, and `_rgj`/`_concat` rescue molecules reaching
+    ENA submission. `assemblyRunPrefixOf()` restores the contract and the variants reduce to one assembly.
+- **The reseed-vs-first-pass rules moved to `lib/AssemblySelection.groovy`** so the precomputed path uses them
+  instead of a second copy. `preferReseed()` delegates; all seven existing scenarios pass unchanged. A new
+  rule sits between size and contiguity: **fewer spacer Ns wins.** A reference-guided join manufactures one
+  record by welding contigs with 100bp N runs, and any gene crossing a weld is corrupted (OG2998's CYTB reads
+  `ATT..TAA` in the plain concatenation and `ACT..TCT` across the join), so contiguity must not reward it.
+  The rule is a no-op on the live decision, where both sides are raw GetOrganelle output with no spacers.
+
+
+- **`bin/mito_run_snapshot.py` manufactured two regressions that did not exist.** The snapshot is the tool a
+  remediation is judged against, so a false finding in it costs a round of work on a healthy pipeline. Both
+  defects were live at once when NOVA_260909_LA was reviewed:
+  - It searched the published GFF for the RAW MITOS feature name, so every feature the conversion renames read
+    as dropped. `msh1` is published as `MTMUTS` and `OH` as `REP_ORIGIN_H`, so 3 mtMutS, 61 OH, 11 OL, 5 gpI
+    and 1 gpII were reported lost while all 81 were present. Only names the rename preserves
+    case-insensitively (`atp9` -> `ATP9`, `lagli` -> `LAGLI`) ever looked right, which is why the bug hid.
+    The raw name is now mapped through `EXTRA_PCG_MAP` and `NON_GENE_MAP`, imported from `bin/mitos_to_emma.py`
+    rather than copied, and `raw_features.tsv` gains a `published_name` column so the lookup is auditable.
+    The run now reports zero lost features, which is the truth.
+  - It re-implemented the CDS loop without the terminator-convention detection that
+    `bin/annotation_stats.py` has had all along. EMMA publishes per-gene CDS with the stop codon removed, so
+    every EMMA CDS was flagged `no_stop`: 136 findings across 9 fish, 13 of 13 PCGs each. That scoring is now
+    `score_cds_dir()`, split out of `check_cds_integrity()` and shared, so the convention cannot be re-derived
+    wrongly by a second caller. Re-scoring all 110 assemblies of that run reproduces the published
+    `annotation_integrity_status` and `annotation_integrity_issues` byte for byte, and the fish findings fall
+    from 136 to 1, a genuine `alternative_start(TTG)`; every invertebrate class is unchanged.
+
+  Neither defect was ever in the pipeline: the gate already read `advisory | cds_convention:stop_codon_excluded`
+  for all 9 fish, and the `passed=no` rows were failing on gene order, not CDS scoring.
+
+
+- **Invertebrate annotation remediation (NOVA_260909_LA).** The batch produced 72 assemblies from 80 samples
+  and cleared 3. Seven changes, each traced to a measured cause in that run:
+  - `bin/orf_snap.py`: the reference-free ORF boundary snap, lifted out of `bin/coral_fix_bed.py` so it is no
+    longer reachable only down the coral branch. `nad5` joins the snap set; the coral fixer now declares its
+    own exclusion via `snap_pcg_rows(skip=...)` instead of the set being a module constant.
+  - `bin/invert_fix_bed.py` + `modules/local/invert_annotation_fix/`: stage 1 of annotation repair, run for
+    every invertebrate the QC gate flags FIX. 17 assemblies in this batch carried a genuinely broken CDS
+    (13 Porifera, plus Malacostraca and Asteroidea) and not one was a coral, so none could reach the only
+    repair code in the pipeline. Five Demospongiae shared one systematic MITOS boundary miscall.
+  - `bin/gene_names.py`: internal gene key to INSDC `/gene` spelling. `MTMUTS` is uppercase internally so it
+    can index features, filenames and columns, but INSDC requires mixed-case `mtMutS`; the case is restored
+    at the submission boundary, from a map rather than a special case.
+  - `bin/lineage_expectations.py` + `assets/lineage_gene_expectations.json`: rank-keyed expectations for genes
+    outside the vertebrate set. mtMutS is required for the octocoral orders and NOT for Anthozoa as a whole
+    (300/302 Octocorallia reference records carry it, 0/335 Hexacorallia); ATP9 is advisory for Porifera.
+  - `bin/nominal_rank.py` + `bin/taxonomic_evidence.py`: a non-validating evidence view. All 68 validation
+    records in this batch gave the identical reason, "not validated (no Found_in_blast_YN=Yes)", for three
+    situations needing three different actions. 61 of 68 assemblies simply had no species-level claim to test.
+  - `bin/mito_run_snapshot.py`: records a completed run so a later run is comparable mechanically.
+  - `sql/026_mitogenome_data_annotation_integrity.sql`: additive columns for the integrity verdict, lineage
+    expectations, conversion audit, graded gene order, and ATP9/mtMutS.
+
+- **`START_CODONS_BY_CODE[9]` listed only ATG/GTG.** Across this batch's echinoderms the observed initiators
+  are ND3 `ATT` x7, ND4L `ATC` x5, ND1 `GTG` x6: `ATT`/`ATC`/`TTG` are the majority of real starts and were
+  all rejected, failing 8 otherwise-complete assemblies. `PLAUSIBLE_MITO_STARTS` also moved into
+  `bin/orf_utils.py` so the QC layer and the submission layer can no longer disagree about what a valid start
+  is, which is exactly how the code-9 starts came to be rejected by one and handled correctly by the other.
+- **Documented lineage-specific initiators** (`LINEAGE_ALT_STARTS`): decapod CO1 opens on `CGA` in roughly
+  half this batch's crustaceans, which no translation table lists, so 9 samples were destined to fail
+  table2asn by hand. Entries require published evidence named in a comment.
+- **`bin/mitos_to_emma.py` silently dropped every feature it could not map.** 22 `atp9`, 3 `msh1`, 31 `OH`,
+  5 `OL`, 4 `gpI`/`gpII` and 2 `lagli` were destroyed across 24 samples, with the only signal an aggregate
+  warning that fires when zero features survive. Now: `atp9`/`msh1` map to real CDS, origins and introns are
+  exported as INSDC `rep_origin`/`intron` features with no gene wrapper, `lagli` as a `misc_feature`, and
+  every raw feature is accounted for in a new `mitos_conversion_audit.tsv`. `PRODUCT` lookup fails loudly
+  rather than shipping the bare gene name as a product.
+- **Separate loci of one gene merged into one impossible feature.** `features` is now keyed on
+  `(gene, locus_index)` with gap-and-strand clustering; MITOS part suffixes still force one locus. A split
+  origin is written as two `rep_origin` features rather than one span across the gap (the two rows can even
+  sit on opposite strands).
+- **`order_correct` was one boolean over 37 genes,** so a single displaced tRNA and a real block
+  rearrangement were indistinguishable and equally fatal; it held three complete fish mitogenomes here with
+  nothing to tell them apart. `order_status` and `order_deviation_detail` now grade the deviation via a
+  tRNA-weighted longest common subsequence, against the closest accepted order: OG2647 reads
+  `trna_displacement` naming TM;TV, OG2965's ND6/CYTB move reads `rearranged_block`.
+
+  **Reporting only: it does not change who passes.** The curated `ORDER_VARIANTS` rules are themselves tRNA
+  transpositions (scarine IQM->IMQ, TD/TS2), so treating a tRNA displacement as advisory would accept every
+  one of them for every taxon and neuter the rule system. OG2647 is still held; what changed is that it is
+  now held with its deviation named, which is what a curated rule gets written from.
+- **Nothing re-checked the published annotation.** `annotation_qc_gate.py` runs on raw MITOS2 output before
+  any repair, covers only the fixed 13-PCG list, and always exits 0 with exceptions degrading to PASS: it is
+  a router, not a verdict. `bin/annotation_stats.py` now inspects every exported CDS post-merge, detects
+  whether the annotator exports stop codons (EMMA does not; assuming otherwise reports a missing stop on
+  every vertebrate CDS), and emits `annotation_integrity_status`/`annotation_integrity_issues`.
+- **Stale database rows after a rerun.** `push_emma_annotation_results.py` refused to update any row that
+  already held annotation data unless `--force`, so a rerun that fixed an annotation left the old values in
+  place. A complete incoming row now supersedes the whole annotation block atomically, with
+  `annotation_stats_version` and `annotation_updated_at` recorded, and a test asserts the INSERT and
+  `DO UPDATE` column lists agree except for the conflict key.
+- **Stale published output after a route change.** The taxonomy guard fired correctly for OG2618
+  (`Actinaria sp.`, a typo for Actiniaria) but the pre-fix output was never invalidated, so a sea anemone
+  stayed published as an EMMA-annotated vertebrate under a corrected samplesheet. A `route.json` is now
+  recorded beside each assembly and mismatched output is quarantined rather than reused;
+  `taxonomy_resolution.tsv` is refreshed from the samplesheet actually in use, and unresolved labels get
+  edit-distance near-miss suggestions.
+- **The annotation QC gate was Cnidaria-only,** so the 17 assemblies here with a genuinely broken CDS -- 13
+  Porifera, five Demospongiae sharing the identical `ND4L:no_start(TTT);no_stop(AGA,rem0)` -- passed straight
+  through with no repair path. It now covers every invertebrate. That is safe because what it routes to is
+  `INVERT_ANNOTATION_FIX`, which reads only the assembly and cannot import a gene the sample does not carry.
+- **Cross-phylum reference transfer guard.** `CORAL_ANNOTATION_FIX` now runs only for samples
+  `SELECT_REFERENCE_DB` matched by sequence. The bundled-anthozoan fallback fired precisely when nothing
+  matched, i.e. when there was no evidence the sample was an anthozoan at all -- which with a phylum-wide
+  gate would be a standing cross-phylum transfer risk rather than a rare one.
+
+- Invertebrate BLAST/LCA searched the RefSeq mitochondrion database, not nt.
+
+  `--nt_blast_db` was pointed at `/scratch/references/blastdb_update/blast-*/db/mito` in
+  every launch script since the flag was introduced in `ad9fd35`. That is the NCBI
+  "Genomic Mitochondrial Reference Sequences" database: 18,058 sequences, 595 Mbase. The
+  invertebrate barcode space (partial COI/16S GenBank and BOLD submissions) is
+  essentially absent from it.
+
+  Nothing caught this because every comment and document in the repo said the opposite.
+  `conf/modules.config` read "invertebrates -> full 256 GB core_nt (slow)", and the
+  megablast + `-perc_identity 98` tuning in `cbf8427` was justified by core_nt's cost --
+  so the pipeline paid that sensitivity penalty for a database it was not searching. A
+  wrong-but-readable BLAST database produces empty output and no error.
+
+  Measured on NOVA_260909_LA: 26 of 41 completed BLAST tasks produced a zero-byte raw
+  output, and the whole run published 5 LCA rows. Benchmarking the 74 CO1/12S/16S
+  queries of that run (23 invertebrate samples), counting samples with at least one
+  region passing both the blastn module's awk and `calculateLCA`'s `qcov>=40`:
+
+  | database / task / cutoff | samples reaching the LCA |
+  |---|---|
+  | `mito` / megablast / pident 98 (old) | 4 / 23 |
+  | `core_nt` +Metazoa / megablast / pident 98 (**new**) | 12 / 23 |
+  | `core_nt` +Metazoa / dc-megablast / pident 98 | 12 / 23 |
+  | `core_nt` +Metazoa / dc-megablast / no cutoff | 13 / 23 |
+
+  `--nt_blast_db` now points at `blast-2026-08-01/db/core_nt` (the old path was also a
+  symlink to a February snapshot), and the invertebrate arm gains `-taxids 33208` to
+  keep a 1.09 Tbase search affordable. Metazoa rather than the sample's own phylum, so a
+  contaminated or mislabelled sample can still hit outside its nominal group.
+
+  `dc-megablast` was evaluated and deliberately **not** adopted: under the `pident > 98`
+  gate it returns strictly fewer hits than megablast (895 vs 1851), because the hits that
+  survive that gate are the near-identical ones megablast's exact 28-mer seeds find best.
+
+  The annotation subworkflow now asserts the database exists before running. This cannot
+  be a schema `"exists": true` check the way `curated_blast_db` is, because
+  `--nt_blast_db` is a database PREFIX with no file at the bare path -- multi-volume
+  `core_nt` has `.nal` + `.00.nin`, single-volume `mito` has `.nin` -- so it looks for
+  the index instead.
+
+  `BLAST_BLASTN` goes from 4 to 12 cpus and 2 h to 4 h. The cpus are free (Setonix bills
+  `max(cpus, memory/230*256)`, already 13 at the 12 GB first rung); the time is because a
+  single 1.5 kb query against core_nt took ~56 min on a cold Lustre page cache, versus
+  37-66 s once warm.
+
+  Not addressed here, and still limiting invertebrate results: the three independent
+  98%-identity gates (`-perc_identity 98`, the blastn module's `awk ... $7 > 98`, and
+  `calculateLCA.py`'s `DEFAULT_PIDENT_CUTOFF`). Every one of the ~11 samples still
+  missing an LCA has core_nt evidence at 81-97%.
+
+  The rank half of that note is now handled, see "Nominal labels above family" below,
+  though deliberately without releasing anything new through the gate.
+
+- **An over-length GetOrganelle assembly was handed a trim that would delete genes.**
+
+  `check_getorganelle.py` flagged seven assemblies in NOVA_260909_LA and proposed a
+  `suggested_trim_region` for six of them. Genes span the full length of every one
+  (about half the annotated features sit past the midpoint), so each of those six
+  trims overlapped real genes. OG3004 was the worst case: called `concatemer` at
+  2.04x against a 15,182 bp *Shinkaia crosnieri* reference at 75% identity, with
+  `curation_suggestion` reading "Collapse to a single monomer (~15182 bp), removing
+  15183-30972" for a molecule whose 13 CDS occupy all 30,972 bp.
+
+  Nothing was corrupted: `COLLAPSE_CONCATEMER` re-verifies the monomer by
+  self-alignment and passed all seven through, so the published lengths are
+  unchanged. The exposure was a person acting on the suggestion by hand.
+
+  Two causes, both fixed:
+  - `find_tandem_repeat` reduced over EVERY off-diagonal self-hit: `min`/`max` for the
+    array bounds and the smallest offset as the period. Two short unrelated repeats
+    near opposite ends therefore reported an array spanning the whole molecule
+    (OG3004: `repeat_region=1-30956` of 30,972 bp) with an arbitrarily small period,
+    which made `copies` meaningless. HSPs are now clustered on the offset each implies
+    and the largest cluster is reported, its representative offset being the period.
+    A tandem array of unit U self-aligns at U, 2U, 3U..., so a real array agrees on one
+    offset and scattered repeats do not.
+  - The `concatemer` branch tested only the array fraction and the length ratio. It now
+    also requires a period at the genome scale: the measured unit within 20% of both the
+    reference length and `L/round(ratio)`. The trim it emits is derived from that
+    measured period rather than from the reference length, which is what encoded the
+    assumption that the monomer is the first `ref_len` bases.
+
+  The `tandem_repeat` branch now proposes **no trim at all**. This script runs at
+  assembly time and its own docstring says why that matters: control-region location
+  needs the assembly's annotation, which does not exist yet, which is why only
+  `check_circularity.py` (given `--gb`) may classify `control_region_repeat`. Emitting
+  a trim here asserted gene-level safety the script has no evidence for.
+
+  `check_circularity.py` keeps the same detector and the same genome-period test, so
+  one assembly cannot be a concatemer on one path and not the other. Its
+  `control_region_repeat` branch is untouched. New regression cover in
+  `tests/unit/test_tandem_repeat_clustering.py`, including that a real 2x and 3x
+  concatemer are still called and trimmed at the monomer boundary.
+
+- **Nominal labels above family were unmatchable, and read as a failed species test.**
+
+  `species_validation.py` classified the label with `species_name_utils.parse_nominal`,
+  whose vocabulary stops at family, so a class or order label became a genus claim:
+  `Asteroidea sp.` resolved to `('genus', 'Asteroidea')`, a genus that does not exist.
+  It could never match, and the sample was reported as having failed species validation
+  rather than as a specimen never identified to species. 39 of the 80 labels in this
+  samplesheet were affected (26 class, 11 order, plus 2 re-ranked otherwise).
+
+  The label is now resolved with `nominal_rank.parse_rank`, against the sample's own
+  resolved lineage rather than a Latin suffix, because no suffix separates the ranks
+  here: Asteroidea and Scleralcyonacea are both -acea/-oidea, Hexactinellida and
+  Tetractinellida both -ida. `SPECIES_VALIDATION` passes `--lineage` from
+  `meta.class`/`meta.order`/`meta.family`; without it such a label stays `higher`, which
+  still reports but never asserts a rank it cannot prove. `parse_nominal` remains the
+  authority for the species, genus and family claims it already handled, so those paths
+  are byte-identical.
+
+  **This releases nothing new.** `match_at_rank` gained order/class/phylum/higher
+  branches that check the evidence and record the agreeing rank as
+  `<rank>_unvalidated`, with `Found_in_blast_YN` still `No`. That is the principle
+  `bin/nominal_rank.py` already states: knowing the rank "does not let anything new
+  through", it lets the pipeline say the specimen was never identified to species
+  instead of that it failed species validation. What changes is that a class-level
+  label with agreeing class-level evidence now reads `class_unvalidated` instead of a
+  bare `unmatched` indistinguishable from a sample whose evidence CONTRADICTS its
+  label. Whether a class-level ID is publishable is a policy decision and is not made
+  here.
+
+  One subtlety the two classifiers disagreed on: `parse_rank` returns the whole label
+  for a tentative species, `parse_nominal` the genus, and `match_at_rank` compares that
+  value against the LCA genus. Passing it through unchanged would have stopped OG2982
+  (`Munidopsis cf, aries`) matching at all, so the genus is extracted. Verified against
+  the real batch: of the 12 samples that reached `Found_in_blast_YN=Yes`, none regress.
+  Cover in `tests/unit/test_species_validation_higher_ranks.py`.
+
+
+- SQL uploads overwrite by default: `params.force_db_overwrite` is now `true`.
+
+  Insert-only was the safer-sounding default and the worse one in practice. A re-run
+  finished green while every `PUSH_*` module quietly preserved the stale row, and the
+  only trace was a `preserved` line buried in the upload report. Re-running a sample
+  to correct its record is the normal reason to re-run it, so that is now what
+  happens.
+
+  Flipping the flag was only safe after two things that were riding on `--force` were
+  taken off it:
+
+  1. `push_mtdna_assm_results.py` gated its whole decision block on
+     `not force_overwrite`, and that block held the refusal to replace a successful
+     `mitogenome_data` row with `failed to assemble`. Under the new default, any
+     re-run where a sample happened to fail would have clobbered a good production
+     result. That refusal is now evaluated unconditionally, along with the
+     already-failed no-op case; only the plain "row already exists" skip still
+     depends on `--force`. The skip strings are unchanged, so
+     `compile_upload_report.py` still classifies them as before.
+  2. In the two LCA pushers `--force` never meant overwrite at all. Those tables are
+     content-keyed upserts that a re-run refreshes correctly on their own; `--force`
+     meant *delete the superseded history* for the sample/region. That is now its own
+     flag, `--prune-history` on the scripts and `params.lca_prune_history` (default
+     `false`) in the pipeline, so turning on overwrite does not silently start
+     deleting history. `--force` remains a deprecated argparse alias for manual runs.
+
+  `PUSH_QC_VALIDATOR` and `PUSH_ENA_VALIDATION_RESULTS` are unaffected: neither takes
+  `--force`. `nextflow_run.sh` passed `--force_db_overwrite false` explicitly, which
+  overrode the config default, and now passes `true`.
+
+- `GETORGANELLE_FROMREADS`/`GETORGANELLE_RESEED`/`OATK` request 64 GB on their first
+  attempt instead of 100 GB (`params.hinted_memory_base_gb`).
+
+  Setonix bills `max(cpus/128, memory/230) * 128` core-equivalents, so the memory request
+  is what is charged: 100 GB costs 55.7 cores against the 16 these processes actually ask
+  for. That is why `GETORGANELLE_FROMREADS` alone was 548.63 of the 20-sample invert
+  panel's 651.26 SU (84%), at 3.14% median CPU and 13.02% median memory efficiency. 64 GB
+  charges 35.6 cores, a 36% cut, and is the lowest round tier above the 51.9 GB peak RSS
+  observed across those 19 assemblies (min 6.9 GB, median ~13 GB); the retry ladder
+  (128, 192 GB) covers outliers. `cpus` is deliberately unchanged -- 3.14% is real, but
+  cpus and walltime interact with GetOrganelle's own threading and need a benchmark first.
+
+  Resource directives are not hashed, so this does not invalidate `-resume`. It does not
+  reach a sample that already has a per-sample hint in `pipeline_info/memory_hints.json`,
+  though: hints are only recorded on a retry, so every existing one is the old 200 GB tier
+  and will replay verbatim. **Operational step:** drop the `GETORGANELLE_FROMREADS` and
+  `GETORGANELLE_RESEED` blocks from that file in each production `outdir` so the new ladder
+  re-derives them. Not automated on purpose -- that file is evidence of what actually
+  succeeded.
+
+- The reseed replaces the first-pass assembly only when it is actually better.
+
+  The resolution was `rs_fasta.size() > 0` under a comment claiming it kept "the better of"
+  the two, so any non-empty reseed won -- which is how INV04_BOLOCERA published a 12-scaffold
+  reseed over its own 2-scaffold first pass. `preferReseed()` now ranks them: an empty reseed
+  still never wins; circularity decides first, on the same log evidence `needsReseed` uses;
+  then a length difference beyond `params.reseed_length_tolerance` (1.5x), because a reseed
+  that recovered several times more sequence in more pieces is not a regression; then
+  contiguity. The loser is unaffected in the database -- `selectProvenanceVariants()` already
+  emits every superseded attempt as its own row.
+
+- `assembly_length` in `*.getorg_check.tsv` is the whole assembly, not its first record.
+
+  `check_getorganelle.py` computed the total and then reported `len(first_record)`, so
+  INV04_BOLOCERA's 12-scaffold, 14,745 bp reseed was recorded as 268 bp. The first record is
+  still what the reference-coverage, length-ratio and tandem-repeat tests run on -- they
+  describe one molecule and must not be fed a concatenation -- and is now reported as its own
+  `first_record_length` column, appended at the end. `bin/check_circularity.py` (OATK) keeps
+  first-record semantics deliberately: there a second record is an anomaly it warns about,
+  not the expected shape.
+
+- The per-group `.gb` files are no longer tracked, for any group.
+
+  They were 84 MB raw / 26 MB compressed across the eight, plain git blobs with no LFS, and
+  every rebuild rewrote all of them into history -- which is why only anthozoa's was tracked,
+  and therefore why sequence-based reference selection was confined to corals. Everything the
+  pipeline reads out of a reference GenBank is now in four small tracked files: sequence and
+  length from `.fasta`, organism and taxonomy from a new `lineage` column on
+  `.manifest.tsv`, and feature types with their exon coordinates from a new
+  `.features.tsv` (3.6 MB raw / 0.7 MB compressed for all eight). `bin/refdb_record.py`
+  rebuilds an equivalent record on demand, so no downstream consumer changed: they still take
+  a `--ref-gb`/`--reference-gb` path, which is also what keeps them working for vertebrates,
+  whose reference really is a GenBank downloaded by `findMitoReference`.
+
+  `.features.tsv` cannot be replaced by `.label.fasta`: the label database stores each
+  feature's *spliced* sequence (`feat.extract`), while `coral_fix_bed.py` needs one entry per
+  exon of the group-I-intron-split nad5. `build_invert_reference_db.py --refresh-derived`
+  regenerates the derived files from an existing `.gb` without contacting NCBI, so a schema
+  change cannot smuggle in a content change -- used here, and `.fasta`/`.label.fasta` came
+  back byte-identical for all eight groups, with all 2,101 records round-tripping to
+  identical `ref_features()` and `parse_reference()` output.
+
+### `Removed`
+
+- **Database migrations.** `sql/`, `bin/apply_ena_migrations.py` and the opt-in
+  `tests/integration/test_ena_validation_database.py` (which built its schema from those files) are gone.
+  The schema and its migrations are maintained separately (`genomes_db_review`); `docs/usage.md` now says
+  so under "Database schema".
+- **Dead code.** The never-wired `DIAGNOSTICS`, `GROUPER` and `SUBMITTER` modules (and their
+  commented-out calls in `ENA_SUBMISSION_PREP`), and the unused standalone scripts in `bin/qc/`.
+- **nf-core template CI.** `.github/workflows/` and `.github/actions/`: every workflow was gated on
+  `nf-core/oceangenomesmitogenomes` or needed nf-core secrets, and none had ever run here.
+- **`bin/samplesheet.csv`**, a real run's samplesheet with `/scratch` paths, replaced by
+  `assets/samplesheet.csv`, a template with dummy values.
+- **The stale template pipeline test `tests/main.nf.test`**, which fed the workflow an
+  `[id, single_end]` meta it no longer accepts.
+
+### `Fixed`
+
+- **Merged reads were copied into `<outdir>/cat/`.** `CAT_FASTQ` had no publishing rule, so it fell through
+  to the default `publishDir` and copied every merged lane-level FASTQ into the results (690 GB in the release
+  test). Nothing read them and no document listed them. Its publishing is now off.
+
+- **The completion handler crashed on an empty `memory_hints.json`.** A 0-byte hints file (left by a write
+  that failed at close()) made `JsonSlurper` throw, which aborted the rest of `workflow.onComplete`,
+  including the hook notification (release test, `Failed to invoke workflow.onComplete`). An empty or
+  unreadable file is now ignored with a warning and rewritten, the new file is written beside the old one
+  and moved over it, and any failure in the hints update is a warning rather than a crash.
+- **The failed-task warning counted one thing and listed another.** It printed Nextflow's ignored count
+  ("2 process(es) failed") above every FAILED row in the trace, so tasks that had recovered on retry were
+  listed as failures (12 in the release test). Both the count and the list now come from each task's last
+  attempt, with one extra line for how many tasks recovered on retry. The upload-failure report shares
+  the same per-task reading (`lastAttemptByTask`).
+
+- **Coral introns blocked ENA prep.** Since MITOS gpI/gpII calls started being exported, each one was
+  written to the submission `.tbl` as a bare `intron`. table2asn fails an intron that sits outside a gene
+  with `FATAL: MISSING_GENES`, which quarantined OG2303 and OG2375 in the release test, though both had
+  validated in Aug/Sep. The calls are short motif hits, not the real nad5 intron (the gap between the
+  exons, already encoded by the split CDS join), and one overlaps an exon and ND1. `bin/mitos_to_emma.py`
+  now leaves introns out of the `.tbl` and keeps them in the GFF. Replication origins, the LAGLIDADG ORF
+  `misc_feature`, ATP9 and mtMutS are still written. Re-running table2asn on both corals leaves only the
+  advisory `MISSING_PROTEIN_ID` and `NO_LOCUS_TAGS`.
+- **A GetOrganelle side graph could replace the mitogenome.** When GetOrganelle finds several graph
+  sets, the FROMREADS and RESEED modules copied whichever path it numbered `graph1.1`, and that
+  numbering is not stable between runs. OG3000's reseed found a 16,262 bp mitogenome and a 155 bp side
+  graph both times; in the release test the side graph was numbered first, won the reseed-vs-first-pass
+  choice as a "circular genome", and nothing reached annotation. Three changes:
+  - `bin/select_getorganelle_path.py` takes path 1 of the largest graph set and records every
+    candidate in `<prefix>.path_select.tsv`. With one graph set the FASTA is byte-identical to before.
+  - `lib/AssemblySelection.groovy` treats a "circle" shorter than the new `min_circular_mito_bp`
+    (default 10,000) as not circular, so size decides instead of circularity.
+  - `bin/check_getorganelle.py` calls a GetOrganelle circle a fragment (`final_verdict_circular` False,
+    note `circular_fragment`) when it covers under half the reference and is under half its length.
+- **Five nf-test failures caused by the test setup, not the pipeline.** `nf-test.config` applied
+  `-profile test` to every test, so `conf/test.config`'s samplesheet and `skip_upload_results = true`
+  overrode each suite's own params: `qc_only_upload` could never see uploads on, and suites whose script
+  lives under `tests/` failed to parse the config at all. The default profile is now `singularity`
+  alone, the resource caps moved to `tests/nextflow.config`, and only `tests/default.nf.test` asks for
+  `test`. That test now runs `-stub` as `conf/test.config` documents, and its snapshot (previously
+  empty, recorded from a run that did nothing) no longer includes the `git describe` version.
+
+- **Linear contigs were rotated into a fake circle before annotation.** `ROTATE_ORIGIN` guarded only
+  on "more than one record", so every single linear contig (including each `_concat`) was cut at
+  cox1 and its two assembly breaks glued together; MITOS2 was then told `--linear` about a sequence
+  that already carried the false junction. NOVA_260909_LA OG3043 reached MITOS rotated by 1300 bp.
+  `rotate_to_cox1.py --linear` now writes the input through, set from `meta.circular == false` (the
+  rule MITOS2 already uses; unknown topology still rotates). The same rule drops EMMA's
+  `--rotate MT-TF` for linear vertebrate contigs, and `orf_snap.snap_pcg_rows(circular=False)` stops
+  the boundary snap in both fixers from borrowing a stop codon from the other end of a linear contig.
+- **Multi-scaffold assemblies were glued in file order, whatever their orientation.** In
+  NOVA_260909_LA OG2629 the `_concat` put a 2.7 kb repeat-unit scaffold in backwards (ND6 on the
+  wrong strand, gate FAIL), although GetOrganelle's own graph has a single direct edge giving the
+  correct molecule. New `bin/join_scaffolds_by_graph.py` runs at the end of the GetOrganelle
+  first-pass and reseed tasks and joins two scaffold ends only across a direct, reciprocal, unique
+  edge of the full `extended_K*.assembly_graph.fastg`, trimming the exact k-mer overlap and inserting
+  nothing. Sequence overlap alone was rejected as evidence: OG2636 has a unique 114 bp overlap in the
+  wrong orientation (a fold-back repeat), which the graph correctly leaves unjoined. Unproven
+  scaffolds stay separate for `SANITISE_FASTA` exactly as before; evidence in `*.graph_join.tsv`.
+- **Glass sponges (Hexactinellida) failed annotation on three systematic MITOS calls.** nad2 dropped
+  where it overlaps nad5 (the overlap is real in every RefSeq glass sponge), atp9 started 54 nt late,
+  atp8 stopped short of its stop. The generic snap cannot fix these: its 36 nt window is too narrow,
+  atp9 is not in its gene set, and it never adds a gene. New `bin/hexactinellid_repair.py`, called by
+  `invert_fix_bed.py` when the class is Hexactinellida, rebuilds all three from the sample's own ORFs
+  (plus a partial T/TA stop against the next feature, OG2983 nad1). On the five NOVA_260909_LA glass
+  sponges it reproduces the reference-checked hand repairs exactly and all five pass the gate.
+- **Selection preferred an oversized molecule the circularity check had already flagged.** Found in
+  NOVA_260909_LA_mitogenomes-4. OG2936's welded first pass is 31,154 bp against a 20,312 bp
+  reference -- `length_ratio=1.534`, `length_anomaly=yes`, "10,842 bp longer than reference with no
+  clear tandem repeat; review for duplication / NUMT" -- and it beat a clean 19,791 bp single-contig
+  reseed, because `19791/31154 = 0.635` falls below the `1/1.5` tolerance and the size rule fires
+  first. It cost the one sample in that batch with a submittable genome, and a fresh run from
+  assembly would have made the same choice: this is the size rule, not the join.
+  `AssemblySelection.prefer` now demotes a molecule KNOWN to be length-anomalous ahead of the size
+  rule, reading `length_anomaly` from the check evidence. Only an explicit `yes` demotes, so an
+  unchecked molecule is never promoted by the absence of a verdict. Inert on the live path, where
+  `GETORGANELLE_CHECK` runs after selection and no verdict exists yet.
+- **A fragmented assembly with no verdict is now recorded as non-circular, not unknown.** Several
+  contigs cannot be one closed genome, so this is derivable from the file rather than a guess. It
+  matters because unknown does not block the QC gate while known-false does: 8 assemblies of 2 to 5
+  contigs went through NOVA_260909_LA as unknown and were never held on `not_circular`. A
+  single-record assembly with no verdict stays unknown, because nothing has established either way.
+- **With the join off, welded molecules are no longer offered to selection.** A precomputed glob still
+  matches the `_rgj` FASTAs an earlier run left on disk, and 7 of them won selection in
+  NOVA_260909_LA_mitogenomes-4 -- publishing welded molecules from a run configured not to weld, and
+  ones that Stage 3 then correctly refuses to submit. `selectPrecomputedAssemblies` drops them when
+  `skip_getorganelle_join` is set.
+
+
+- **The precomputed-evidence guard counted a mistyped param as a match, and let the run through.**
+  Found by the guard's own first real use. `precomputedGlobCount` measured the size of what
+  `file(pattern, glob: true, checkIfExists: false)` returned, and that call has two shapes: a
+  Collection for a pattern containing a wildcard (empty when nothing matches, which is the case the
+  guard was written for), but a **single Path** for a value with no wildcard -- existing or not,
+  because `checkIfExists` is false. So writing
+  `--precomputed_mitogenome_circularity_evidence_getorg = '<path>'` with a space-separated `=` passes
+  `=` as the value, which counted as 1 match, cleared the guard, and let the run proceed to take the
+  NA placeholder for every assembly: precisely the failure the guard exists to stop. A real glob
+  matching nothing was caught; a typo was not, and the typo is the likelier mistake. It now counts
+  only paths that **exist**, and warns when a resolved path does not (naming the missing wildcard as
+  the likely cause). A single concrete existing file still counts, so a legitimate non-glob input is
+  not rejected.
+- **The "N of M assemblies had a real check TSV" count never reached `.nextflow.log`.** It used
+  `view`, which prints to stdout only, so the single most useful number for working out after the
+  fact why a run had no circularity was absent from the log. It is now `log.info`, and `log.warn`
+  when any assembly fell back to the placeholder.
+
+
+- **The terminator check was suspended entirely on the EMMA path, hiding real defects.** EMMA publishes
+  `annotation/cds/*.fa` with the stop codon removed, so scoring those files reports `no_stop` on every
+  CDS. `check_cds_integrity` detected that convention and switched the terminator check OFF -- the safe
+  response at the time, but it meant a genuinely broken fish CDS could not be reported at all. All 9
+  EMMA samples in NOVA_260909_LA read `advisory | cds_convention:stop_codon_excluded`, and nothing
+  about their terminators had been checked.
+  - The GFF span is the annotation as declared and does carry the terminator, so `cds_from_gff()` reads
+    each CDS from it against the annotation's own reoriented `<name>.fa` sibling -- NOT the
+    pre-annotation assembly, which EMMA reorients into a different sequence of the same length.
+  - No note parsing is needed for EMMA's other convention: `classify_cds` already accepts a span whose
+    length is not a multiple of three as a poly-A-completed truncated stop. Of OG2647's 13 PCGs, the 7
+    with a real terminator are multiples of 3 ending in a stop and the 6 carrying the
+    `putative TAA stop codon` note have spans of 691/1141/785/1046/349/1381, none divisible by 3.
+  - Fallbacks are per gene, so nothing goes unchecked by accident: a gene with more than one CDS row is
+    skipped rather than assembled (an origin-spanning gene's pieces are high-coordinate first, which is
+    the opposite of sorting by start), and a missing GFF or missing sibling FASTA returns to the old
+    suspension.
+  - The advisory now says which: `cds_convention:stop_codon_excluded(checked_from_gff)` when every gene
+    was scored from the GFF. The bare string used to mean "the terminator was not checked", and leaving
+    it would have been a false reassurance.
+  - `score_cds_dir` returns that note as a third value rather than hanging it on the first gene's
+    advisories, because a per-gene consumer reported it as a CDS defect on whichever gene sorted first
+    (10 phantom ATP6 findings in the run snapshot).
+
+  **Measured on NOVA_260909_LA_mitogenomes-4, all 110 assemblies: 0 `annotation_integrity_status`
+  flips**, so no `passed` and no `proceed_qc` change, and the 99 invertebrate assemblies are untouched.
+  The only difference is the advisory suffix on the 11 EMMA assemblies. The fish in that batch genuinely
+  have clean CDS; what changed is that a broken one would now be caught, which unit tests pin directly
+  (a missing terminator and an internal stop both report `broken` where they previously could not).
+
+
+- **ENA prep: wrong-named source files, a false held reason, two missing held reasons, and an
+  unsubmittable organism.** Four faults that between them lost samples silently or lied about why.
+  - `BUILD_SOURCE_MODIFIERS` wrote `.src` files under OTHER assemblies' names and exited 0. When no
+    database SeqID matched `--assembly-id` it printed a warning and wrote every sibling variant
+    unfiltered, so OG2936's `_concat` produced `OG2936.ilmn.260909.getorg1770..src` and
+    `...getorg1770_rgj.mitos2110.src` -- correct files under names nothing looks for. The module's
+    optional glob matched none, the task "succeeded" with no output, and the sample was dropped by the
+    inner join in `ena_submission_prep`. Now: no match is a hard `SystemExit` naming every SeqID the
+    database did return (seeing the siblings next to the request is the diagnosis), the `.src` is
+    named from `meta.full_seqid` rather than from the database, and the module's output is that exact
+    name and no longer `optional`, so an empty result is a task failure instead of a silent drop.
+    The SQL also uses `CONCAT_WS` + `NULLIF(m.annotation, '')`, so a NULL annotation no longer builds
+    a trailing-dot SeqID that could never match.
+  - The pre-submission held reason claimed `(task failed and was ignored)`, which was untrue for the
+    case that produced it: both `_concat` tasks exited 0. The reason now states what the channel can
+    actually observe (`BUILD_SOURCE_MODIFIERS emitted no <full_seqid>.src`). It is also keyed on
+    `full_seqid` rather than `meta.id`, which is the SPECIMEN -- several variants of one specimen
+    enter prep together, so the remainder join fanned out and a specimen with three variants produced
+    one row instead of three.
+  - A `FAIL_WEBIN` or `FAIL_CONVERSION` flat file emitted no held fragment at all, which is why
+    OG2943 and OG3015 came out of NOVA_260909_LA "unaccounted": in the samplesheet but in neither
+    `held_samples.tsv` nor the submission-ready set. Both now produce one, and `WEBIN_VALIDATE`
+    appends a trailing `blocking_errors` column carrying the real ERROR text, so the row says
+    `Organism is not Submittable: "Exocoetidae"` rather than `validation_failed`. Appended as a
+    trailing column deliberately: `collate_ena_validation.py` reads the TSV with `DictReader`
+    against a fixed `RECORD_COLUMNS`, so the `ena_validation` table is unchanged.
+    `FAIL_WEBIN` and `FAIL_INFRASTRUCTURE` stay distinct -- one needs the record fixed, the other a
+    rerun.
+  - ENA rejects a bare rank name above genus outright, which is what those two failed on.
+    `to_submittable_organism()` appends `sp.` when `nominal_rank.parse_rank` puts the name at family
+    or above, giving the known-good `Exocoetidae sp.` (which raises only the non-blocking
+    `SEQ_DESCR.OrganismIsUndefinedSpecies`, exactly as `Glyptelasma sp.` already did). It is the
+    caller `normalise_open_nomenclature` defers to, so that function still refuses the family case
+    and a test pins that the layering stays put. Applied in `process_files.py` (so `/organism=` and
+    `##organism` cannot disagree) and `prepare_ena_metadata.py`.
+
+
+- **An `_rgj` / `_concat` could be marked `submission_ready` and sent to ENA.** Nothing in the pipeline
+  distinguished a scaffolding artefact from a molecule: the QC gate is content-based
+  (`bin/evaluate_qc_conditions.py`) and readiness is pure gate arithmetic
+  (`bin/collate_ena_validation.py`), so `OG2936.ilmn.260909.getorg1770_rgj.mitos2110` passed table2asn,
+  conversion and webin in NOVA_260909_LA and came back `submission_ready=true`. Both forms exist only so
+  a partial mitogenome can be annotated and get a species ID; their junctions are inferred, and the
+  sequence across them is not in the organism. `<prefix>_collapsed` is deliberately NOT in this set,
+  because a collapse yields the real monomer.
+  - The webin call is withheld: `ENA_FLATFILE.out.embl_file` is branched, not filtered, so a rescue
+    variant keeps its candidate package and its validation record. Filtering would have left it with no
+    webin status and the package join would have dropped the row silently.
+  - The two `NOT_RUN` webin placeholders it now contributes are load-bearing, not tidiness.
+    `ena_record_slots` is a fixed 7 with webin on, and a rescue variant converts successfully so it is in
+    neither `WEBIN_VALIDATE.out` nor `ch_ena_no_embl`; without them it contributed 5 of 7, its groupKey
+    never filled, and the assembly vanished from the validation record entirely.
+  - `submission_ready` is forced `false` with `webin_reason=not_submittable:rescue_variant` as a second
+    lock, so an entry point that reaches webin another way still cannot produce a readiness claim.
+  - They still run table2asn: that output is a free read on annotation quality and is how the OG2951 /
+    OG3090 start-stop defects surfaced. Only the submission is withheld.
+  - The rule lives in `bin/assembly_variant.py` and as `isRescueMolecule()` in
+    `subworkflows/local/ena_submission_prep/main.nf`, with `tests/unit/test_assembly_variant.py`
+    comparing the two suffix lists so they cannot drift. It is a file-scope `def` rather than a `lib/`
+    class because `lib/*.groovy` resolves against the launched script's directory, so a
+    `nextflow_pipeline` test whose script lives under `tests/` cannot see one.
+
+
+- **`tests/qc_gate_streaming` had not run since 06a9d95.** That commit moved
+  `attachCircularityEvidence` from `upload_results_mito` to `mitogenome_qc`, and the test's import was
+  never updated, so all three tests failed on "Cannot find a component" and the QC-gate streaming
+  contract went unchecked: that a sample is released as soon as its OWN evidence is in, that an
+  assembly with no circularity check still reaches the gate, and that the collapse rename still
+  matches its evidence. An import naming a real file but a missing component is a silent hole.
+  Fixed and all three pass.
+
+
+- `DOWNLOAD_BLAST_DB` uses the shared taxdb cache again, instead of re-downloading
+  62 MB over unguarded FTP on every single run.
+
+  Three faults had stacked up. The `storeDir` cache at `--blast_db_dir` was
+  permanently unsatisfiable: `taxonomy4blast.sqlite3` was added as a required output
+  without seeding the existing cache, so Nextflow logged `unable to find ...
+  taxonomy4blast.sqlite3` and re-submitted the task every run. Nothing consumes that
+  output, and blastn only ever receives `taxdb.btd`/`taxdb.bti`, so it is now
+  `optional: true` and a two-file cache is a hit.
+
+  The in-script guard that was meant to short-circuit the download had been dead since
+  the cache base moved from `${launchDir}/blast_dbs` to `params.blast_db_dir`: the
+  literal `/blast_dbs` suffix stayed behind, so it tested
+  `<blast_db_dir>/blast_dbs/taxdb.btd`, a path that never existed. The suffix is gone,
+  and on a hit the guard now *copies* the cached files into the work dir rather than
+  echoing "skipping" -- a bare skip would leave the declared `taxdb*` outputs
+  unresolvable, because `storeDir` runs the task in a clean work dir.
+
+  Finally the download itself was unverified. A dropped FTP control connection resumed
+  via `REST`, reported all 65,261,809 bytes saved, and produced a corrupt archive;
+  `tar` exited 2, which is deliberately outside the transient set in `base.config`, so
+  the whole cohort terminated. The fetch is now https (no control/data channel to
+  drop), retries, and checks NCBI's `taxdb.tar.gz.md5` before unpacking, deleting the
+  partial file on mismatch so a retry cannot resume onto known-bad bytes.
+
+  `MITOGENOME_ANNOTATION` now also errors up front when `--blast_db_dir` is unset,
+  mirroring the existing `--taxonkit_db_dir` assert, rather than silently disabling the
+  cache via `storeDir null`.
+
+- BLAST summaries reach MultiQC again, instead of 48 copies of a directory name.
+
+  `BLAST_BLASTN` emits `summary` as a plain path and `tool_params` as a `[meta, path]`
+  tuple, on adjacent lines of the same module. The MultiQC collection applied the tuple
+  idiom to the plain one:
+
+  ```groovy
+  ch_multiqc_files.mix(BLAST_BLASTN.out.summary.collect { it[1] })
+  ```
+
+  Indexing a `Path` does not fail — it returns the name element at that index. For a summary
+  under `/scratch/pawsey1348/…` element 1 is the literal string `pawsey1348`, so Nextflow
+  tried to hash and stage a directory component as a MultiQC input, once per summary:
+
+  ```
+  WARN: [HashBuilder] Unable to get file attributes file: /<outdir>/pawsey1348
+  ```
+
+  Every real `filtered_summary.*.txt` was dropped in the process, and the run reported only
+  a warning. Now mixed directly. `tests/multiqc_inputs/` runs both idioms over one channel,
+  so the fix is pinned by what it produces rather than by the shape of the source line.
+
+- `-profile test` runs. It had never run since the repository was scaffolded.
+
+  `conf/test.config` still carried the nf-core template placeholders, `// TODO nf-core:
+  Specify the paths to your test data` included: `input` pointed at an nf-core *viralrecon*
+  amplicon samplesheet and `genome` at the yeast assembly `R64-1-1`. That samplesheet has no
+  `sequencing_type` column, which `assets/schema_input.json` marks required, so every
+  invocation died in parameter validation before a single task was scheduled:
+
+  ```
+  * --input (.../viralrecon/samplesheet/samplesheet_test_illumina_amplicon.csv):
+      Entry 1: Missing required field(s): sequencing_type
+  ```
+
+  The profile now uses `tests/test_data/samplesheet_test.csv`, two invertebrate HiFi rows
+  carrying the full taxonomy columns, and sets `organelle_type = 'animal_mt'` (null by
+  default, and `GETORGANELLE_CONFIG` takes it as a plain `val`, so the run aborted at
+  channel construction once the samplesheet was fixed). The annotation, ENA prep and upload
+  stages are skipped: each hard-requires an external resource this repository cannot ship
+  (`--taxonkit_db_dir`, `--nt_blast_db`, `--template_sbt`, Postgres credentials). What
+  remains is a stub smoke test of samplesheet parsing and the assembly wiring.
+
+  The reads are bundled, but nf-schema resolves a relative `fastq_1` cell against
+  `launchDir`, not against the samplesheet, so a committed relative path would only work
+  when launched from the clone root. The tracked sheet keeps the `__PROJECT_DIR__`
+  placeholder that the nf-tests under `tests/samplesheet_meta/` already substitute, and the
+  profile absolutises it into a run-local temp copy. Verified from both the clone root and
+  an unrelated working directory.
+
+- `reseed_seed_top_n` and `reseed_length_tolerance` are declared in `nextflow_schema.json`.
+
+  Both had `nextflow.config` defaults but no schema entry, so every run opened by reporting
+  its own defaults as invalid. Declared with bounds (`top_n` 1–20, `tolerance` ≥ 1.0)
+  alongside the two new `reseed_fallback_*` parameters.
+
+
+- ENA submission prep no longer requires the database *writes*, only a database. It now
+  runs whenever `--sql_config` is supplied, including under `--skip_upload_results`.
+
+  Narrowing `--skip_upload_results` to mean "skip the PostgreSQL writes" (below) freed local
+  QC but deliberately left `ENA_SUBMISSION_PREP` inside the write guard, on the grounds that
+  it needs the database. It does -- but only to read: `BUILD_SOURCE_MODIFIERS` and
+  `PREPARE_ENA_METADATA` want collection date, country, coordinates and coverage. Supplying
+  `--sql_config` was therefore not enough to make it run, which is not what the flag says.
+
+  One thing actually coupled it to the writes. `PREPARE_ENA_METADATA` read `mean_depth` back
+  out of the `mitogenome_data` row that this same run had just written, so submission prep
+  had to be ordered behind the committed row with `gateOnAssemblyReceipt`, and with the
+  writes off there were no receipts for the gate to join against. That round trip bought
+  nothing: `MITOGENOME_COVERAGE` measures the depth, `push_mtdna_assm_results.py` writes that
+  number to the row, and this script read the same number back. It also had a quieter cost --
+  on a re-run that skipped the write it returned the *previous* assembly's depth for a
+  molecule that had just been reassembled.
+
+  Coverage now travels to submission prep as the depth TSV itself, carried on the QC tuple
+  and attached with the same remainder-join-plus-placeholder pattern as the assembly upload
+  rows. `bin/depth_tsv.py` reads it without pandas (the metadata container has psycopg2 and
+  not much else); the database `SELECT` survives as the fallback for runs that measured no
+  depth, and `mean_depth_source` in the package metadata records which one answered.
+  `gateOnAssemblyReceipt` is untouched and still guards the four pushers in `UPLOAD_RESULTS`.
+
+  `--skip_ena_submission_prep` is the new off switch for the stage, since
+  `--skip_upload_results` no longer doubles as one. Prep also now requires `--ena_study`,
+  which has no default: it hard-errors without one, and that error was unreachable while
+  prep sat behind the upload guard. Rather than abort every upload-only run that never
+  intended to submit, the study gates prep -- absent, it is skipped with a warning; present,
+  prep keeps its strict PRJEB accession check. `nextflow_run_external.sh` passes
+  `--skip_upload_results true`, so it will now run submission prep whenever it is also given
+  a `--sql_config`.
+
+  One related silent failure closed on the way: `build_source_modifiers.py` SELECTs from
+  `sample` but filters on `mitogenome_data` (`WHERE m.og_id`/`m.tech`), and an empty result
+  wrote two empty CSVs and exited 0. That was survivable only while the receipt gate
+  guaranteed the parent row existed. Prep now runs in modes where a sample genuinely has no
+  row, and an empty `.src` would reach a submitter looking exactly like a specimen with
+  nothing recorded about it, so it fails loudly instead.
+
+- QC no longer requires a database. `--skip_upload_results` now means "skip the PostgreSQL
+  writes" and nothing else.
+
+  Everything that answers "is this mitogenome any good?" lived inside
+  `if (!params.skip_upload_results && params.sql_config)`. A run with `--skip_upload_results`,
+  or with no `--sql_config` at all -- which is how the invertebrate work is developed --
+  therefore produced no gene counts, no missing-gene set, no completeness verdict, no
+  held-samples report, and a `mitogenome_assembly_summary_mqc.tsv` whose `num_genes`,
+  `num_cds`, `missing_genes` and `frameshift_flag` columns were empty for every sample. The
+  five-sample invert regression panel ran green and reported nothing.
+
+  The cause was two processes that were each both a QC step and a database writer, so the
+  only way to reach the verdict was through the uploader. Both are split:
+
+  - `annotation_stats.py` moves out of `PUSH_MTDNA_ANNOTATION_RESULTS` into a new
+    `ANNOTATION_STATS`. The pusher keeps only `push_emma_annotation_results.py`.
+  - `species_validation.py` no longer reads the nominal species from the DB (it comes from
+    the samplesheet's `nominal_species_id`, already on meta) and no longer writes
+    `lca_validation`. It emits a validation record that the new `PUSH_SPECIES_VALIDATION`
+    upserts, following the existing `PUSH_ENA_VALIDATION_RESULTS` pattern.
+
+  The DB-free chain -- `SPECIES_VALIDATION`, `ANNOTATION_STATS`, `EVALUATE_QC_CONDITIONS`,
+  `QC_SUMMARY` -- becomes a new `MITOGENOME_QC` subworkflow that always runs, and
+  `COMPILE_HELD_SAMPLES` moves out of the guard with it. `subworkflows/local/upload_results_mito`
+  is now nothing but pushers. The rule the split enforces: a process either produces a verdict
+  or writes to the database, never both.
+
+  **Receipt gating.** `PUSH_LCA_BLAST_RESULTS` and `PUSH_MTDNA_ANNOTATION_RESULTS` used to
+  inherit `gateOnAssemblyReceipt` transitively, by consuming channels derived from a
+  `SPECIES_VALIDATION` whose input was gated. That inheritance is gone now that species
+  validation is DB-free QC running upstream, so both take an explicit gate; without it the
+  split would silently have reintroduced the foreign-key write-ordering race the helper
+  exists to prevent. Every pusher is now gated at its own call site.
+
+  **Ordering.** The receipt gate on the QC verdict itself is gone, because the verdict no
+  longer writes anything. The one consumer that genuinely needs the ordering --
+  `ENA_SUBMISSION_PREP`, whose `PREPARE_ENA_METADATA` reads `mean_depth` from
+  `mitogenome_data` -- is now gated on `UPLOAD_RESULTS.out.assembly_receipts` at its call
+  site in the main workflow.
+
+  All seven database writers and all six tables they touch are unchanged.
+
+  `nextflow_run_external.sh` passes `--skip_upload_results true` and will now get QC output
+  it did not get before.
+
+- The old `MITOGENOME_QC` subworkflow is renamed `ENA_SUBMISSION_PREP`, which is what it does:
+  table2asn, flatfile conversion, candidate packaging and Webin validation. It runs downstream
+  of the QC verdict and only ever sees samples the gate released, so it could not host the
+  steps that produce that verdict. The name is now free for the subworkflow that does.
+
+
+- Invertebrate runs no longer abort the entire session the moment the first `MITOS2` sample
+  finishes annotating.
+
+  `MITOS2.out.gff_proteins` gained a fourth element (`annotation/cds`, which the QC gate needs
+  for its PCG ORF check) when the gate was hardened, but the filter feeding
+  `ANNOTATION_QC_GATE` still destructured three. Groovy cannot spread a four-element list into
+  a three-parameter closure, so it passed the whole list as one argument and threw a
+  `MissingMethodException` from inside the `filter` operator. That is an operator failure, not
+  a task failure, so `errorStrategy` did not apply: Nextflow aborted the session and killed
+  every queued and running task. Both invertebrate test panels died that way with every task
+  green (18/18 and 55/55, all `exit 0`), which is why the logs named no failing process.
+
+  The closure now destructures all four elements and names the tuple shape at the call site.
+  Every other 3+ element emit in the repo was audited against its consumers; this was the only
+  mismatch.
+
+  New `tests/coral_annotation_gate` runs the real `MITOGENOME_ANNOTATION` subworkflow fully
+  stubbed over a coral, a non-coral invertebrate and a vertebrate, so every channel is bound
+  and any future arity drift between a module's emit and the closure consuming it fails here
+  instead of mid-run. The module tests could not catch this: they build the gate's input by
+  hand and never exercise the wiring.
+
 ## v2.0.0 - [2026-09-03]
 
 Second major release, and the first to carry the ENA submission path. Everything ENA-related is new since
@@ -130,7 +1484,7 @@ first drafted on 2026-08-18; the second is that original entry, kept intact. Bot
   untouched, and a rescue that recovers nothing re-emits EMMA's original bundle and the sample is
   held exactly as before.
 
-  The reference set is `assets/rescue_pcg_refs.faa` with `assets/rescue_pcg_refs.manifest.tsv`,
+  The reference set is `assets/panels/rescue_pcg_refs.faa` with `assets/panels/rescue_pcg_refs.manifest.tsv`,
   built by `bin/build_rescue_pcg_refs.py` from RefSeq mitochondrion CDS translations for
   Actinopterygii and Chondrichthyes plus a small tetrapod outgroup. The committed copy is the
   artifact the pipeline ships; the script is a stdlib-only refresher, not a runtime dependency.
@@ -437,7 +1791,7 @@ first drafted on 2026-08-18; the second is that original entry, kept intact. Bot
   `submission_ready` is always `false` under `--ena_webin_validate false`, so the second
   validator is not recorded in runs with the format check switched off.
 
-- `assets/ena_not_run/`, the six NOT_RUN placeholder files the fixed-totality ENA record grouping
+- `assets/placeholders/ena_not_run/`, the six NOT_RUN placeholder files the fixed-totality ENA record grouping
   resolves with `checkIfExists: true`. They were referenced but never created, which aborted every
   run during workflow construction. Their contents are inert: `collate_ena_validation.py` reads
   only the real status-file suffixes and infers NOT_RUN from a stage's absence, so the placeholders
@@ -779,7 +2133,7 @@ contents matter.
   summary's `manual_review_reason` (the `<prefix>.circularity_check.tsv` is read as a per-run sidecar), and the QC gate
   (`EVALUATE_QC_CONDITIONS`) blocks any sample with an anomaly from progressing to the submission-prep QC subworkflow
   (`proceed_qc = false`). Samples without a check (precomputed) get a `no anomaly` placeholder
-  (`assets/empty_circularity_check.tsv`) so they are never dropped or blocked on this condition.
+  (`assets/placeholders/empty_circularity_check.tsv`) so they are never dropped or blocked on this condition.
 - GetOrganelle circularity re-test + anomaly screen (`GETORGANELLE_CHECK` + `bin/check_getorganelle.py`). GetOrganelle
   reports a single non-circularised scaffold for assemblies it cannot formally close, but these are frequently complete
   circles linearised at a different origin (per the GetOrganelle docs). The check BLASTs the scaffold against the related
@@ -789,7 +2143,7 @@ contents matter.
   same module screens length / tandem-repeat anomalies (concatemer / tandem_repeat / unresolved) like the HiFi check. The
   corrected verdict + evidence flow to the assembly summary (`circularised` override, anomaly in `manual_review_reason`) and
   the QC gate (anomaly block; circular condition via `meta.circular`). Samples with no findMitoReference get an empty
-  placeholder (`assets/NO_REFERENCE.gb`) and are recorded as `no_reference` rather than dropped.
+  placeholder (`assets/placeholders/NO_REFERENCE.gb`) and are recorded as `no_reference` rather than dropped.
 - GetOrganelle reseed now builds a custom gene (label) database from the reseed reference and passes it via `--genes`,
   improving recovery of divergent mitogenomes. New `GETORGANELLE_GENEDB` module + `bin/extract_getorganelle_genedb.py`,
   gated by `--getorganelle_genedb_min_genes` (default `10`).
@@ -805,7 +2159,7 @@ contents matter.
   Correctly annotated corals pass through MITOS2 untouched. The fixer is fail-safe (BLAST coverage/identity + a nad5
   ORF check guard every edit; a poor reference reproduces the original output). Reference is resolved per sample in
   priority order: the assembly stage's findMitoReference download → a fresh `MITOHIFI_FINDMITOREFERENCE` lookup →
-  the bundled `assets/anthozoa_reference.gb`; the reference used is published into the sample's annotation dir.
+  the bundled `assets/refdb/anthozoa/anthozoa_reference.gb`; the reference used is published into the sample's annotation dir.
 
 #### `Fixed`
 

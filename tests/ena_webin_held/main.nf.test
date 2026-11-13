@@ -1,0 +1,59 @@
+nextflow_workflow {
+
+    name "A Webin or conversion failure produces an actionable held reason"
+    script "tests/ena_webin_held/main.nf"
+    workflow "HELD_REASONS"
+
+    // Neither failure emitted a held fragment at all. OG2943 and OG3015 passed table2asn in
+    // NOVA_260909_LA, failed Webin on 'Organism is not Submittable', and left the run
+    // "unaccounted": in the samplesheet but in neither held_samples.tsv nor the
+    // submission-ready set, with nothing anywhere saying why.
+
+    test("the real ERROR text reaches the reason, and PASS is not held") {
+        when {
+            workflow {
+                """
+                def fx = "\${projectDir}/tests/ena_webin_held/fixtures"
+                input[0] = Channel.of(
+                    [ 'fail',   file("\${fx}/webin_fail.tsv") ],
+                    [ 'infra',  file("\${fx}/webin_infra.tsv") ],
+                    [ 'pass',   file("\${fx}/webin_pass.tsv") ],
+                    [ 'broken', file("\${fx}/header_only.tsv") ]
+                )
+                input[1] = Channel.of(
+                    [ 'conv',   file("\${fx}/flatfile_fail.tsv") ],
+                    [ 'broken', file("\${fx}/header_only.tsv") ]
+                )
+                """
+            }
+        }
+        then {
+            def webin = workflow.out.webin.collectEntries { [(it[0]): [it[1], it[2]]] }
+            def flatfile = workflow.out.flatfile.collectEntries { [(it[0]): it[1]] }
+            assertAll(
+                { assert workflow.success },
+
+                // blocking_errors, not "validation_failed": the one line that names the fix.
+                { assert webin['fail'][0] == 'FAIL_WEBIN' },
+                { assert webin['fail'][1].contains('Organism is not Submittable') },
+                { assert webin['fail'][1].contains('Exocoetidae') },
+
+                // An infrastructure failure has no blocking_errors, so it falls back to the
+                // reason -- and must stay DISTINCT from FAIL_WEBIN, because one needs the
+                // record fixed and the other needs a rerun.
+                { assert webin['infra'][0] == 'FAIL_INFRASTRUCTURE' },
+                { assert webin['infra'][1] == 'webin_or_network_failure' },
+
+                // PASS still parses; the filter that drops it lives in the subworkflow.
+                { assert webin['pass'][0] == 'PASS' },
+
+                // A truncated status file must not throw, or one malformed file takes the run
+                // down instead of holding one assembly.
+                { assert webin['broken'][0] == 'unknown' },
+                { assert flatfile['broken'] == 'unknown' },
+
+                { assert flatfile['conv'] == 'qualifier_demoted_by_seqret:lat_lon' }
+            )
+        }
+    }
+}

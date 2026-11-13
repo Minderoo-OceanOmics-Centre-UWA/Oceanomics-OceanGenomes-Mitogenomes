@@ -37,8 +37,14 @@ process REFERENCE_RELEVANCE {
     // Taxon-aware identity floor. The 88.0 default was calibrated on corals, whose
     // mtDNA evolves far more slowly than vertebrate mtDNA; teleost *congeners*
     // routinely align at 78-88%, so keeping 88.0 for fish flags good assemblies.
-    // Invertebrates (in practice cnidarians) keep the validated coral number.
-    def min_pid = meta.invertebrates ? 88.0 : 82.0
+    // Only Cnidaria keeps that validated coral number -- Porifera has no evidence
+    // of sharing Cnidaria's unusually slow substitution rate, and other invert
+    // phyla (Mollusca, Arthropoda, Echinodermata) default to the vertebrate floor
+    // as an untuned starting point; bilaterian invertebrate mtDNA (especially
+    // arthropod/mollusc) often evolves *faster* than vertebrate mtDNA, so 82.0 may
+    // still be too strict -- revisit once real divergence data from this batch is
+    // available.
+    def min_pid = InvertTaxonGroups.isCoralFixEligible(meta.class) ? 88.0 : 82.0
     """
     reference_relevance_check.py \\
         --assembly ${assembly} \\

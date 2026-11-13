@@ -1,0 +1,104 @@
+{
+  "_comment": [
+    "Taxonomic class -> NCBI mitochondrial genetic code (translation table).",
+    "",
+    "Single source of truth, read by BOTH lib/InvertTaxonGroups.groovy (which",
+    "prepare_samplesheet uses to resolve meta.genetic_code) and",
+    "bin/create_samplesheet.py (which writes the resolved code into the",
+    "samplesheet's genetic_code column). It exists because those two are a Groovy",
+    "set and a Python set that would otherwise drift -- the same failure that had",
+    "four copies of REF_GENES disagreeing before bin/mito_gene_order.py.",
+    "",
+    "Class names are lowercase; both readers normalise before lookup.",
+    "",
+    "A class that is NOT here and NOT in 'ambiguous' aborts the run rather than",
+    "taking a default. A wrong translation table mistranslates every CDS in the",
+    "annotation and surfaces as a terminal table2asn failure far from its cause,",
+    "so an unconfirmed class is worth stopping for. Add a class here once its code",
+    "is confirmed, or set the per-sample genetic_code samplesheet column, which",
+    "overrides this file.",
+    "",
+    "'confidence' records how the code was established:",
+    "  ncbi       - the group is named explicitly on NCBI's genetic code table,",
+    "               https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi",
+    "  convention - the code is the standard one used for the group in published",
+    "               mitogenomes, but NCBI's table does not name the group. Review",
+    "               these before trusting them on a new lineage; moving one into",
+    "               'ambiguous' is the safe direction."
+  ],
+
+  "codes": [
+    {
+      "code": 4,
+      "confidence": "ncbi",
+      "basis": "NCBI table 4 (Mold, Protozoan, and Coelenterate Mitochondrial Code) gives its metazoan scope verbatim as 'Coelenterata (Ctenophora and Cnidaria)'.",
+      "classes": [
+        "anthozoa", "hydrozoa", "scyphozoa", "cubozoa", "staurozoa", "myxozoa",
+        "polypodiozoa", "cnidaria",
+        "tentaculata", "nuda", "ctenophora"
+      ]
+    },
+    {
+      "code": 4,
+      "confidence": "convention",
+      "basis": "Porifera is not named on NCBI's table 4 page, but NCBI's taxonomy assigns sponges mitochondrial code 4 and sponge mitogenomes are annotated under it. Sponges also share the reduced/atypical tRNA complement that puts them with Cnidaria in InvertTaxonGroups.REDUCED_TRNA_CLASSES.",
+      "classes": [
+        "demospongiae", "calcarea", "hexactinellida", "homoscleromorpha", "porifera",
+        "placozoa"
+      ]
+    },
+    {
+      "code": 5,
+      "confidence": "ncbi",
+      "basis": "NCBI table 5 (Invertebrate Mitochondrial Code) names Mollusca (Bivalvia; Polyplacophora), Arthropoda (Crustacea, Insecta) and Nematoda (Ascaris, Caenorhabditis). Annelida is the standard code-5 lophotrochozoan alongside them.",
+      "classes": [
+        "bivalvia", "gastropoda", "cephalopoda", "polyplacophora", "scaphopoda",
+        "monoplacophora", "caudofoveata", "solenogastres", "mollusca",
+        "malacostraca", "thecostraca", "copepoda", "ichthyostraca",
+        "mystacocarida", "branchiopoda", "ostracoda", "cephalocarida",
+        "remipedia", "pycnogonida", "arthropoda",
+        "hexanauplia", "maxillopoda",
+        "chromadorea", "enoplea", "secernentea", "nematoda",
+        "polychaeta", "clitellata", "annelida"
+      ]
+    },
+    {
+      "code": 5,
+      "confidence": "convention",
+      "basis": "Minor invertebrate phyla not named on NCBI's table page. Published mitogenomes for each use the standard Invertebrate code, but none of these has been checked against a sample in this pipeline. Enteropneusta is listed here and NOT with the rest of Hemichordata: its sister class Pterobranchia is genuinely ambiguous (see below).",
+      "classes": [
+        "gymnolaemata", "stenolaemata", "phylactolaemata", "bryozoa",
+        "lingulata", "craniata", "rhynchonellata", "brachiopoda",
+        "nemertea", "sipuncula", "echiura", "onychophora", "tardigrada",
+        "rotifera",
+        "sagittoidea", "chaetognatha",
+        "enteropneusta",
+        "appendicularia", "tunicata"
+      ]
+    },
+    {
+      "code": 9,
+      "confidence": "ncbi",
+      "basis": "NCBI table 9 (Echinoderm and Flatworm) names 'Asterozoa (starfishes); Echinozoa (sea urchins); Rhabditophora among the Platyhelminthes'. Ophiuroidea is Asterozoa and Holothuroidea is Echinozoa. Crinoidea is neither, but published crinoid mitogenomes use the same code. Turbellaria is the old free-living-flatworm grouping, effectively Rhabditophora.",
+      "classes": [
+        "asteroidea", "ophiuroidea", "echinoidea", "holothuroidea", "crinoidea",
+        "echinodermata",
+        "rhabditophora", "turbellaria",
+        "trematoda", "cestoda", "monogenea", "platyhelminthes"
+      ]
+    },
+    {
+      "code": 13,
+      "confidence": "ncbi",
+      "basis": "NCBI table 13 (Ascidian Mitochondrial Code) is scoped 'Urochordata (tunicates)' on the prose page, but NCBI's taxonomy applies it only to Ascidiacea and Thaliacea -- nodes.dmp gives class Appendicularia (larvaceans, e.g. Oikopleura) and the Tunicata subphylum node code 5, so those are listed with the code-5 group instead. Tunicates sit inside Chordata but do not use the vertebrate code.",
+      "classes": [
+        "ascidiacea", "thaliacea"
+      ]
+    }
+  ],
+
+  "ambiguous": {
+    "pterobranchia": "The code varies below class rank: nodes.dmp gives Rhabdopleuridae 5 but Cephalodiscidae 33, so the class alone does not determine it. A sample the taxdump resolves gets its own taxon's code and never reaches this map; this entry only guards a class-only row from the species table. Set the genetic_code column from the family.",
+    "hemichordata": "Phylum rank spans Enteropneusta (5) and Pterobranchia (5 or 33). Resolve the sample to a class, or set the genetic_code column."
+  }
+}

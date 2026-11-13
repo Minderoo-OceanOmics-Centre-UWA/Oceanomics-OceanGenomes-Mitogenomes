@@ -15,14 +15,18 @@ include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_ocea
 include { MITOGENOME_ASSEMBLY_GETORG       } from '../subworkflows/local/mitogenome_assembly/getorganelle'
 include { MITOGENOME_ASSEMBLY_MITOHIFI     } from '../subworkflows/local/mitogenome_assembly/mitohifi'
 include { MITOGENOME_ANNOTATION     } from '../subworkflows/local/mitogenome_annotation_lca'
+include { MITOGENOME_BLAST_LCA      } from '../subworkflows/local/mitogenome_blast_lca'
+include { REBUILD_ANNOTATION_BUNDLE } from '../modules/local/rebuild_annotation_bundle'
 include { COLLAPSE_CONCATEMER       } from '../modules/local/collapse_concatemer'
 include { MIRROR_MTDNA_TO_COLLAPSED } from '../modules/local/mirror_mtdna_to_collapsed'
 include { UPLOAD_RESULTS; UPLOAD_ENA_RESULTS } from '../subworkflows/local/upload_results_mito'
-include { MITOGENOME_QC             } from '../subworkflows/local/mitogenome_qc'
+include { MITOGENOME_QC            } from '../subworkflows/local/mitogenome_qc'
+include { ENA_SUBMISSION_PREP             } from '../subworkflows/local/ena_submission_prep'
 include { COMPILE_HELD_SAMPLES      } from '../modules/local/compile_held_samples'
 include { SANITISE_FASTA           } from '../modules/local/sanitise_fasta/main'
 include { MITOGENOME_COVERAGE      } from '../modules/local/mitogenome_coverage/main'
 include { MITOGENOME_ASSEMBLY_SUMMARY } from '../modules/local/multiqc/mitogenome_assembly_summary'
+include { PUSH_ASSEMBLY_QC         } from '../modules/local/upload_results/assembly_qc/main'
 
 // Using local module SANITISE_FASTA (see modules/local/sanitise_fasta)
 
@@ -89,6 +93,37 @@ def buildAssemblyUploadRows(canonical_rows, variant_rows, mito_depth, no_depth_f
     return measured.mix(unmeasured)
 }
 
+// Read the 'length_anomaly' column from a circularity-check evidence TSV.
+//
+// Selection needs it: the size rule prefers the bigger molecule, and this is the finding that
+// says the molecule is bigger than it should be. OG2936's welded first pass carried
+// length_anomaly=yes with a 10,842 bp excess over its reference and still won on size.
+// Written by bin/check_getorganelle.py / check_circularity.py as yes/no/NA.
+def evidenceLengthAnomaly(tsv) {
+    try {
+        def rows = tsv.text.readLines()
+        if (rows.size() < 2) return null
+        def header = rows[0].split('\\t', -1)
+        def idx = header.findIndexOf { it.trim() == 'length_anomaly' }
+        def values = rows[1].split('\\t', -1)
+        if (idx < 0 || idx >= values.size()) return null
+        def value = values[idx].trim().toLowerCase()
+        return value in ['yes', 'true'] ? true : (value in ['no', 'false'] ? false : null)
+    } catch (ignored) {
+        return null
+    }
+}
+
+// How many records a FASTA holds. A multi-record assembly cannot be one circular molecule,
+// which is a fact about the file rather than a verdict needing a check.
+def fastaRecordCount(fasta) {
+    try {
+        return fasta.text.readLines().count { it.startsWith('>') }
+    } catch (ignored) {
+        return 0
+    }
+}
+
 def evidenceFinalVerdictCircular(tsv) {
     try {
         def rows = tsv.text.readLines()
@@ -102,6 +137,207 @@ def evidenceFinalVerdictCircular(tsv) {
     } catch (ignored) {
         return null
     }
+}
+
+// How many files a precomputed_* glob actually matches, logged so the count is in
+// the run log rather than inferred from downstream damage.
+//
+// These globs use checkIfExists: false because several are genuinely optional, which
+// means a wrong path is silently indistinguishable from "not supplied". In
+// NOVA_260909_LA_mitogenomes-4 the circularity-evidence glob pointed at the run's own
+// (empty) outdir while the FASTA glob pointed at the source run, so every assembly
+// received the NA placeholder: table2asn was told [topology=linear] for genuinely
+// circular genomes, and the QC gate stopped holding on not_circular. Nothing in the
+// run said so. file(..., glob: true) resolves synchronously in the workflow body, so
+// the count is available before a single task is submitted.
+def precomputedGlobCount(String paramName, pattern) {
+    if (!pattern) return 0
+    def matches
+    try {
+        matches = file(pattern.toString(), glob: true, checkIfExists: false)
+    } catch (ignored) {
+        matches = []
+    }
+    if (matches == null) matches = []
+    if (!(matches instanceof Collection)) matches = [matches]
+
+    // Count only paths that EXIST, never the size of what file() handed back.
+    //
+    // file(..., glob: true) returns a Collection for a pattern containing a wildcard -- empty
+    // when it matches nothing, which is the case this guard was written for. But for a value
+    // with NO wildcard it returns a single Path, and with checkIfExists: false it does that
+    // whether or not the path exists. Counting the return shape therefore scored a typo as one
+    // match: writing
+    //     --precomputed_mitogenome_circularity_evidence_getorg = '<path>'
+    // with a space-separated '=' makes the value '=', which counted 1, slipped through this
+    // guard, and let a run proceed to take the NA placeholder for every assembly -- the exact
+    // failure the guard exists to stop. A real glob matching nothing was caught; a mistyped
+    // value was not, and the mistyped value is the likelier mistake.
+    def present = matches.findAll { it != null && it.exists() }
+    if (present.size() != matches.size()) {
+        log.warn "precomputed ${paramName}: ${matches.size() - present.size()} of " +
+                 "${matches.size()} resolved path(s) do not exist -- is '${pattern}' a typo, " +
+                 "or is it missing its wildcard?"
+    }
+    log.info "precomputed ${paramName}: ${present.size()} existing file(s) matched ${pattern}"
+    return present.size()
+}
+
+// The GetOrganelle RUN a variant belongs to, i.e. mt_assembly_prefix with the curation
+// suffixes removed. On the live path mt_assembly_run_prefix is written once and is
+// identical across every variant of a run (see the contract in the getorganelle
+// subworkflow); the precomputed path used to set it to the per-variant prefix, which
+// made each variant its own run. Nothing then grouped them, so the selection that
+// normally picks one assembly never happened and ALL of them reached annotation: 110
+// assemblies for 80 samples in NOVA_260909_LA_mitogenomes-4, at ~1.5x the compute.
+def assemblyRunPrefixOf(mt_assembly_prefix) {
+    def parts = mt_assembly_prefix.toString().split('\\.')
+    if (parts.length < 4) return mt_assembly_prefix
+    def code = parts[3]
+    def previous = null
+    // Loop because the suffixes stack: getorg1770reseed_rgj is reseed plus _rgj.
+    while (code != previous) {
+        previous = code
+        ['_rgj', '_concat', '_collapsed'].each { suffix ->
+            if (code.endsWith(suffix)) code = code[0..<(code.length() - suffix.length())]
+        }
+        if (code.endsWith('reseed')) code = code[0..<(code.length() - 'reseed'.length())]
+    }
+    return (parts[0..2] + [code]).join('.')
+}
+
+// Pair each precomputed assembly with its circularity evidence, and stamp the verdict
+// onto meta in the same pass.
+//
+// The precomputed block already reloaded the original run's *_check.tsv, and its own
+// comment said the point was that "meta.circular doesn't silently regress to unknown"
+// -- but it never wrote the value into meta, so it regressed anyway. The stamp has to
+// happen AT the join, because that is where the evidence for a given assembly is known.
+// Rebuilding the FASTA channel from the join's output is safe here (and only here)
+// because nothing on this path joins the FASTA and log channels by whole meta.
+//
+// Returns [ meta(+circular, +run prefix), fasta, evidence, real_evidence ].
+def attachPrecomputedCircularity(fasta_ch, evidence_ch, placeholder) {
+    return fasta_ch
+        .map { meta, fasta -> [ meta.mt_assembly_prefix, meta, fasta ] }
+        .join(
+            evidence_ch.map { meta, ev -> [ meta.mt_assembly_prefix, ev ] },
+            by: 0, remainder: true
+        )
+        // Keep assembly rows; drop evidence that matched no assembly.
+        .filter { items -> items[1] != null }
+        .map { items ->
+            def meta = items[1]
+            def fasta = items[2]
+            def ev = (items.size() > 3 && items[3] != null) ? items[3] : placeholder
+            def real = (items.size() > 3 && items[3] != null)
+            def circ = real ? evidenceFinalVerdictCircular(ev) : null
+            def anomaly = real ? evidenceLengthAnomaly(ev) : null
+
+            // With no verdict of its own, a MULTI-RECORD assembly is still known not to be a
+            // circular molecule: several contigs cannot be one closed genome. Deriving that is
+            // not a guess, and it matters because unknown does NOT block the QC gate while
+            // known-false does -- 8 fragmented assemblies (2 to 5 contigs) went through as
+            // unknown in NOVA_260909_LA and so were never held on not_circular. A SINGLE-record
+            // assembly with no verdict stays unknown, because nothing has established either way.
+            if (circ == null && fastaRecordCount(fasta) > 1) circ = false
+
+            def meta_ext = meta + [ mt_assembly_run_prefix: assemblyRunPrefixOf(meta.mt_assembly_prefix) ]
+            if (circ != null) meta_ext = meta_ext + [ circular: circ ]
+            if (anomaly != null) meta_ext = meta_ext + [ length_anomaly: anomaly ]
+            [ meta_ext, fasta, ev, real ]
+        }
+}
+
+// Reduce the variants of one GetOrganelle run to the single assembly that goes forward,
+// using the same rules as the live reseed-vs-first-pass decision
+// (lib/AssemblySelection.groovy). Sorted first so the fold is deterministic.
+def selectPrecomputedBest(rows, double tolerance) {
+    def sorted = rows.sort { a, b -> a[0].mt_assembly_prefix <=> b[0].mt_assembly_prefix }
+    def best = sorted[0]
+    def minCirc = (params.min_circular_mito_bp ?: 0) as int
+    sorted.drop(1).each { candidate ->
+        def c = AssemblySelection.measure(candidate[1], candidate[0].circular, candidate[0].length_anomaly, minCirc)
+        def b = AssemblySelection.measure(best[1], best[0].circular, best[0].length_anomaly, minCirc)
+        if (AssemblySelection.prefer(c, b, tolerance)) best = candidate
+    }
+    return best
+}
+
+// Refuse a precomputed run that has assemblies but no circularity evidence.
+//
+// These globs use checkIfExists: false because several are genuinely optional, so a
+// wrong path is indistinguishable from "not supplied" -- and the fallback is an NA
+// placeholder, which reads as "not circular". In NOVA_260909_LA_mitogenomes-4 the
+// evidence glob pointed at the run's own (empty) outdir while the FASTA glob pointed at
+// the source run, so EVERY assembly took the placeholder: table2asn was told
+// [topology=linear] for genuinely circular genomes (OG3000 was then rejected with
+// SEQ_FEAT.SeqLocOrder on its origin-spanning tRNA-Trp), and the QC gate stopped holding
+// on not_circular, which inflated proceed_qc from 5 to 15. Nothing in the run said so.
+//
+// Hard error, not a warning: there is no useful run to be had from this state.
+def requirePrecomputedCircularityEvidence(String label, String fastaParam, fastaPattern,
+                                          String evidenceParam, evidencePattern) {
+    def n_fasta = precomputedGlobCount(fastaParam, fastaPattern)
+    def n_evidence = precomputedGlobCount(evidenceParam, evidencePattern)
+    if (n_fasta > 0 && n_evidence == 0) {
+        error "Precomputed ${label} assemblies were found but no circularity evidence was.\n" +
+              "  --${fastaParam}\n      ${fastaPattern}\n      matched ${n_fasta} file(s)\n" +
+              "  --${evidenceParam}\n      ${evidencePattern}\n      matched 0 files\n" +
+              "Both globs must point at the run that PRODUCED the assemblies. Pointing the evidence\n" +
+              "glob at this run's own --outdir matches nothing, because no check is re-run on this\n" +
+              "path. Every assembly would take assets/placeholders/empty_circularity_check.tsv\n" +
+              "(final_verdict_circular=NA), which means [topology=linear] at table2asn even for a\n" +
+              "circular genome, and no not_circular hold at the QC gate."
+    }
+}
+
+// Oatk records its topology in a getorg-style check TSV rather than a
+// *circularity_check.tsv, so the MitoHiFi evidence glob has never matched it and every
+// precomputed oatk assembly silently took the NA placeholder. Keyed on the assembly
+// prefix, like every other evidence channel on this path.
+def precomputedOatkEvidence(pattern) {
+    return Channel.fromPath(pattern, checkIfExists: false)
+        .filter { f -> f.parent.parent.name == f.baseName.replaceAll(/\.[^.]+$/, '') }
+        .map { f ->
+            def parts = f.baseName.split('\\.')
+            def prefix = parts.length > 3 ? parts[0..3].join('.') : f.baseName
+            [ [ mt_assembly_prefix: prefix ], f ]
+        }
+}
+
+// Pair precomputed assemblies with their circularity evidence, stamp meta.circular, and
+// reduce each GetOrganelle run's variants to the one assembly that goes forward.
+//
+// Reports how many assemblies got a real verdict, because a glob that is right in shape
+// but wrong in its keys passes requirePrecomputedCircularityEvidence and still leaves most
+// assemblies on the placeholder -- the quiet half of the same bug.
+//
+// Returns [ meta, fasta, evidence ].
+def selectPrecomputedAssemblies(String label, fasta_ch, evidence_ch, placeholder, double tolerance) {
+    // With the reference-guided join off, a welded molecule is not something this pipeline
+    // produces, so it must not be offered one either. A precomputed glob still matches the
+    // _rgj FASTAs a previous run left on disk, and 7 of them won selection in
+    // NOVA_260909_LA_mitogenomes-4 -- publishing welded molecules from a run configured not to
+    // weld, and (being rescue variants) ones that cannot be submitted.
+    def candidates = params.skip_getorganelle_join
+        ? fasta_ch.filter { _meta, fasta -> !fasta.name.contains('_rgj') }
+        : fasta_ch
+    def paired = attachPrecomputedCircularity(candidates, evidence_ch, placeholder)
+    // log.info, not view: view prints to stdout only, so this count was absent from
+    // .nextflow.log and unavailable when working out after the fact why a run had no
+    // circularity. It is the single most useful number for that question.
+    paired.map { _meta, _fasta, _ev, real -> real ? 1 : 0 }
+        .reduce([0, 0]) { acc, real -> [ acc[0] + real, acc[1] + 1 ] }
+        .subscribe { c ->
+            def message = "precomputed ${label} circularity: ${c[0]} of ${c[1]} assemblies had a real check TSV (rest took the NA placeholder)"
+            if (c[0] < c[1]) log.warn message else log.info message
+        }
+    return paired
+        .map { meta, fasta, ev, real -> [ meta.mt_assembly_run_prefix, [ meta, fasta, ev, real ] ] }
+        .groupTuple()
+        .map { _run_prefix, rows -> selectPrecomputedBest(rows, tolerance) }
+        .map { meta, fasta, ev, _real -> [ meta, fasta, ev ] }
 }
 
 // Read the 'action' column from a COLLAPSE_CONCATEMER report (concatemer_collapse.tsv).
@@ -120,12 +356,117 @@ def collapseAction(tsv) {
     }
 }
 
+// Precomputed annotation bundles (--precomputed_mitogenome_annotation_results), one
+// [meta, files] row per assembly. Kept at file scope because the main workflow body sits
+// at Groovy's 64KB method limit; these are pure channel operations, like
+// buildAssemblyUploadRows.
+def loadPrecomputedAnnotation(pattern, samplesheet_meta) {
+    return Channel.fromPath(pattern)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[0]
+            def sequencing_type = parts.length > 1 ? parts[1] : null
+            def date = parts.length > 2 ? parts[2] : null
+            // Reconstruct the assembly prefix (id.tech.date.assembler) from the
+            // annotation filename so downstream naming (e.g. <prefix>.annotation_stats.csv)
+            // stays per-assembly. Without this, meta.mt_assembly_prefix is null
+            // on the upload-only path and CSVs collide as null.annotation_stats.csv.
+            def mt_assembly_prefix = parts.length > 3 ? parts[0..3].join('.') : filename
+            return [ mt_assembly_prefix, [meta_id, sequencing_type, date], file ]
+        }
+        // FORMAT_FILES needs the whole per-assembly annotation bundle (fasta, gff,
+        // tbl/gb) staged together -- glob matches every one of those files
+        // individually, so group them back into one list per assembly prefix,
+        // mirroring the path("annotation/*") bundle that
+        // MITOGENOME_ANNOTATION.out.annotation_results emits when annotation isn't
+        // skipped. Without this, only the last-matched file (e.g. the GFF) reaches
+        // FORMAT_FILES and it fails with "Missing in .: FASTA".
+        .groupTuple(by: 0)
+        .map { mt_assembly_prefix, sample_keys, files -> [ sample_keys[0], mt_assembly_prefix, files ] }
+        .combine(samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, files, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, files)
+        }
+}
+
+// Precomputed per-region BLAST / LCA / LCA-raw results, one [meta, file] row per file.
+// All three share the naming <kind>.<region>.<og_id>.<tech>.<date>.<assembler>[.<annot>],
+// so the assembly prefix is parts[2..5]. Reconstructing it keeps downstream naming
+// (e.g. <prefix>.lca_blast.upload.txt) per-assembly; without it, meta.mt_assembly_prefix
+// is null on the upload-only path and several assembly attempts for one OG collide.
+def loadPrecomputedRegionResult(pattern, samplesheet_meta) {
+    return Channel.fromPath(pattern)
+        .map { file ->
+            def filename = file.baseName
+            def parts = filename.split('\\.')
+            def meta_id = parts[2]
+            def sequencing_type = parts.length > 3 ? parts[3] : null
+            def date = parts.length > 4 ? parts[4] : null
+            def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
+            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
+        }
+        .combine(samplesheet_meta, by: 0)
+        .map { sample_key, mt_assembly_prefix, file, meta ->
+            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
+                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+            return tuple(meta_ext, file)
+        }
+}
+
+// Region count per assembly from precomputed BLAST files, for the downstream group sizing.
+// On this path the results are already on disk, so counting the precomputed BLAST
+// files per assembly is exact and costs nothing: the fromPath channel
+// closes at startup, long before anything it gates.
+//
+// Derived from the ANNOTATION results, not from the BLAST results, so it
+// is TOTAL over the assemblies that reach UPLOAD_RESULTS -- an assembly
+// with annotation files but no BLAST files gets a count of 0 rather than
+// no row at all. Built the other way round it was total only by accident:
+// such an assembly appeared in neither region_counts nor the
+// zero-region stand-in that UPLOAD_RESULTS derives BY FILTERING
+// region_counts, so it never reached SPECIES_VALIDATION. That was survivable
+// only while nothing downstream joined on species validation; the main
+// annotation path has been total by construction all along, and this makes
+// the precomputed path match it.
+def precomputedRegionCounts(annotation_results, blast_results) {
+    def blast_counts = blast_results
+        .map { meta, _file -> [ meta.mt_assembly_prefix, 1 ] }
+        .groupTuple(by: 0)
+        .map { prefix, ones -> [ prefix, ones.size() ] }
+    return annotation_results
+        .map { meta, _files -> [ meta.mt_assembly_prefix, meta ] }
+        .unique { keyed -> keyed[0] }
+        .join(blast_counts, by: 0, remainder: true)
+        .filter { items -> items[1] != null }   // keep annotation rows only
+        .map { items -> [ items[1], (items.size() > 2 && items[2]) ? items[2] : 0 ] }
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MAIN WORKFLOW
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+    /* The if and else statements in this workflow are for when steps are skipped in the nextflow_run script.
+        What it is doing is 'if' this processes isnt skipped then run the subworkflow and provide the standard outputs.
+        
+        Then 'else if' is if the process has been skipped then we will create the required input for the following
+        subworkflows using the predefined file paths for the output in the nextflow.config, the "precomputed_*" file
+        paths. 
+            The relevant information is extracted to create the meta map from the parts of the file name. This is
+            assuming that files are named with the sample id, then the type of sequencing, the date and then the other
+            information in the file name, all seperated by a '.'
+            The mitogenome sections assume that the files are named as above, $sample_id.$sequencing_technology.$date with
+            additional information added to this with each proccess. The assembly process will add a .getorganelle${version}
+            after the inital prefix and befor the file extension. Then the annotation process will add a .emma${version} to 
+            the previous prefix.
+        
+        The 'else' statement is then just creating and empty channel if neither of the previous steps worked.
+    */
+    
 workflow OCEANGENOMESMITOGENOMES {
 
     take:
@@ -146,7 +487,7 @@ workflow OCEANGENOMESMITOGENOMES {
     // Stand-in for an assembly with no circularity check on disk. The assembly subworkflows
     // guarantee one evidence row per assembly they emit; the precomputed paths below have to
     // reconstruct that guarantee from whatever *_check.tsv files happen to be present.
-    def no_circularity_evidence = file("${projectDir}/assets/empty_circularity_check.tsv", checkIfExists: true)
+    def no_circularity_evidence = file("${projectDir}/assets/placeholders/empty_circularity_check.tsv", checkIfExists: true)
 
     // Map samplesheet meta by sample id + sequencing type + date for reuse with precomputed files
     ch_samplesheet_meta = getorg_input
@@ -155,24 +496,19 @@ workflow OCEANGENOMESMITOGENOMES {
         .groupTuple()
         .map { sample_key, metas -> [ sample_key, metas[0] ] }
 
-    /* The if and else statements in this workflow are for when steps are skipped in the nextflow_run script.
-        What it is doing is 'if' this processes isnt skipped then run the subworkflow and provide the standard outputs.
-        
-        Then 'else if' is if the process has been skipped then we will create the required input for the following
-        subworkflows using the predefined file paths for the output in the nextflow.config, the "precomputed_*" file
-        paths. 
-            The relevant information is extracted to create the meta map from the parts of the file name. This is
-            assuming that files are named with the sample id, then the type of sequencing, the date and then the other
-            information in the file name, all seperated by a '.'
-            The mitogenome sections assume that the files are named as above, $sample_id.$sequencing_technology.$date with
-            additional information added to this with each proccess. The assembly process will add a .getorganelle${version}
-            after the inital prefix and befor the file extension. Then the annotation process will add a .emma${version} to 
-            the previous prefix.
-        
-        The 'else' statement is then just creating and empty channel if neither of the previous steps worked.
-    */
-
-    
+    // What a COMPLETE run looks like: every OG the samplesheet asked for. This is the
+    // reference set for the end-of-run completeness check in COMPILE_HELD_SAMPLES.
+    //
+    // It is derived from the SAMPLESHEET CHANNELS and deliberately not from the database or
+    // from mitogenome_assembly_summary_mqc.tsv. A sample lost to an ignored task failure
+    // upstream of PUSH_MTDNA_ASSM_RESULTS has no mitogenome_data row at all, so a DB-derived
+    // expected set would omit it and the check would pass while the sample was still missing.
+    // That is the specific regression this file is here to catch.
+    ch_samplesheet_ogs = ch_samplesheet_meta
+        .map { _sample_key, meta -> meta.id }
+        .unique()
+        .collectFile(name: 'samplesheet_ogs.txt', newLine: true, sort: true)
+   
     // Per-sample reference GenBanks (findMitoReference, from the assembly stage)
     // reused by the anthozoan annotation fixer. Partial / empty on precomputed or
     // skip paths; the annotation subworkflow re-resolves any sample missing one.
@@ -203,7 +539,9 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_mitogenome_getorg_circularity_evidence = MITOGENOME_ASSEMBLY_GETORG.out.circularity_evidence
         ch_mitogenome_getorg_mtdna_files = MITOGENOME_ASSEMBLY_GETORG.out.mtdna_files
     } else if (params.precomputed_mitogenome_assembly_fasta_getorg) {
-        // Use precomputed results if analysis is skipped
+        requirePrecomputedCircularityEvidence('GetOrganelle',
+            'precomputed_mitogenome_assembly_fasta_getorg', params.precomputed_mitogenome_assembly_fasta_getorg,
+            'precomputed_mitogenome_circularity_evidence_getorg', params.precomputed_mitogenome_circularity_evidence_getorg)
         ch_mitogenome_getorg_assembly_fasta = Channel.fromPath(params.precomputed_mitogenome_assembly_fasta_getorg, checkIfExists: false)
         // Keep each assembly FASTA only from the variant directory it belongs to
         // (<prefix>/mtdna/<prefix>.fasta). A genuinely collapsed sample also publishes
@@ -223,7 +561,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_getorg_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_getorg, checkIfExists: false)
@@ -239,7 +577,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         // No check is re-run for precomputed assemblies, but the original run's
@@ -264,30 +602,22 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
-        // Restore the one-row-per-assembly contract the assembly subworkflows guarantee:
-        // a precomputed run may have no *_check.tsv for some assemblies (the glob uses
-        // checkIfExists: false), and downstream now attaches evidence with a plain per-key
-        // join, so an absent row would drop the sample at the QC gate rather than delay it.
-        // remainder: true is safe HERE, unlike the collapse join below, because both sides are
-        // Channel.fromPath globs that close immediately -- there is no running task to wait on.
-        ch_mitogenome_getorg_circularity_evidence = ch_mitogenome_getorg_assembly_fasta
-            .map { meta, _fasta -> [ meta.mt_assembly_run_prefix, meta ] }
-            .join(
-                ch_mitogenome_getorg_circularity_evidence.map { meta, ev -> [ meta.mt_assembly_run_prefix, ev ] },
-                by: 0, remainder: true
-            )
-            .filter { items -> items[1] != null }   // keep assembly rows; drop evidence-only remainder
-            .map { items -> [ items[1], (items.size() > 2 && items[2] != null) ? items[2] : no_circularity_evidence ] }
+        // oatk check files this glob also matches are excluded: see the helper.
+        ch_getorg_sel = selectPrecomputedAssemblies('getorg',
+            ch_mitogenome_getorg_assembly_fasta,
+            ch_mitogenome_getorg_circularity_evidence.filter { _m, ev -> !ev.name.contains('oatk') },
+            no_circularity_evidence, params.reseed_length_tolerance as double)
+        ch_mitogenome_getorg_assembly_fasta = ch_getorg_sel.map { meta, fasta, _ev -> [ meta, fasta ] }
+        ch_mitogenome_getorg_circularity_evidence = ch_getorg_sel.map { meta, _fasta, ev -> [ meta, ev ] }
 
-        // Precomputed inputs expose only the final assembly, so there are no provenance
-        // variants to record: the one row a precomputed sample could produce carries the
-        // same mt_assembly_prefix as its canonical row below, which supersedes it. This
-        // channel therefore contributes nothing on this path -- it was already discarded
-        // by the selection that used to run in the parent, and the plain mix that replaced
-        // that selection has no way to discard it, so leave it empty.
+        // Superseded variants are deliberately NOT filed as provenance rows here. Selection
+        // now runs on this path, so losers exist, but the live path's DB push reads each
+        // loser's own GetOrganelle log for topology and on the precomputed path that log is
+        // optional and usually absent. Better empty than written with no evidence; the
+        // losers still carry their rows from the run that produced them.
         ch_mitogenome_getorg_db_results = Channel.empty()
     } else {
 
@@ -344,7 +674,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_hifi_assembly_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_hifi, checkIfExists: false)
@@ -360,7 +690,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         // No circularity check is re-run for precomputed assemblies, but the
@@ -382,7 +712,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         // Oatk fallback assemblies are published beside the MitoHiFi results, so a
@@ -406,7 +736,7 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
         ch_mitogenome_hifi_oatk_log = Channel.fromPath(params.precomputed_mitogenome_assembly_log_oatk, checkIfExists: false)
@@ -422,23 +752,26 @@ workflow OCEANGENOMESMITOGENOMES {
         .combine(ch_samplesheet_meta, by: 0)
         .map { sample_key, mt_assembly_prefix, file, meta ->
             def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
+                                    mt_assembly_run_prefix: assemblyRunPrefixOf(mt_assembly_prefix) ]
             return tuple(meta_ext, file)
         }
 
-        // Restore the one-row-per-assembly contract the assembly subworkflows guarantee, for
-        // the MitoHiFi and oatk assemblies alike -- both feed ch_all_assembly_fasta below, so
-        // both need evidence. See the GetOrganelle equivalent above for why remainder: true is
-        // safe on the precomputed path and not downstream.
-        ch_mitogenome_hifi_circularity_evidence = ch_mitogenome_hifi_assembly_fasta
-            .mix(ch_mitogenome_hifi_oatk_fasta)
-            .map { meta, _fasta -> [ meta.mt_assembly_run_prefix, meta ] }
-            .join(
-                ch_mitogenome_hifi_circularity_evidence.map { meta, ev -> [ meta.mt_assembly_run_prefix, ev ] },
-                by: 0, remainder: true
-            )
-            .filter { items -> items[1] != null }   // keep assembly rows; drop evidence-only remainder
-            .map { items -> [ items[1], (items.size() > 2 && items[2] != null) ? items[2] : no_circularity_evidence ] }
+        //
+        // hifi and oatk pair separately: they write different evidence files.
+        requirePrecomputedCircularityEvidence('MitoHiFi',
+            'precomputed_mitogenome_assembly_fasta_hifi', params.precomputed_mitogenome_assembly_fasta_hifi,
+            'precomputed_mitogenome_circularity_evidence_hifi', params.precomputed_mitogenome_circularity_evidence_hifi)
+
+        ch_hifi_sel = selectPrecomputedAssemblies('hifi', ch_mitogenome_hifi_assembly_fasta,
+            ch_mitogenome_hifi_circularity_evidence, no_circularity_evidence,
+            params.reseed_length_tolerance as double)
+        ch_oatk_sel = selectPrecomputedAssemblies('oatk', ch_mitogenome_hifi_oatk_fasta,
+            precomputedOatkEvidence(params.precomputed_mitogenome_circularity_evidence_oatk),
+            no_circularity_evidence, params.reseed_length_tolerance as double)
+
+        ch_mitogenome_hifi_assembly_fasta = ch_hifi_sel.map { meta, fasta, _ev -> [ meta, fasta ] }
+        ch_mitogenome_hifi_oatk_fasta = ch_oatk_sel.map { meta, fasta, _ev -> [ meta, fasta ] }
+        ch_mitogenome_hifi_circularity_evidence = ch_hifi_sel.mix(ch_oatk_sel).map { meta, _fasta, ev -> [ meta, ev ] }
     } else {
 
         ch_mitogenome_hifi_assembly_fasta = Channel.empty()
@@ -474,6 +807,16 @@ workflow OCEANGENOMESMITOGENOMES {
         .filter { _meta, fasta -> fasta.size() == 0 }
     ch_annotation_input = ch_all_assembly_fasta
         .filter { _meta, fasta -> fasta.size() > 0 }
+
+    // An assembly filtered out here leaves the annotation path for good, so it never reaches
+    // EVALUATE_QC_CONDITIONS and neither of the two existing held sources can see it. Without
+    // a fragment of its own it appears in neither held_samples.tsv nor the ENA summary, and
+    // the run reports success with the sample simply missing from both files a human reads.
+    ch_pre_annotation_held = ch_failed_assembly_fasta
+        .collectFile { meta, _fasta ->
+            [ "${meta.mt_assembly_prefix}.PRE_ANNOTATION.held.tsv",
+              "${meta.id}\t${meta.mt_assembly_prefix}\tPRE_ANNOTATION\tassembly_failed:empty_fasta\n" ]
+        }
 
     // Auto-curation: collapse a clean head-to-tail concatemer (an assembly ~2x
     // the true length, detected by the circularity check) to a single monomer
@@ -704,6 +1047,9 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_annotation_reference_gb = ch_mitogenome_hifi_reference_gb
         .mix(ch_mitogenome_getorg_reference_gb)
 
+    if (params.blast_precomputed_annotations && !params.skip_mitogenome_annotation) {
+        log.warn "--blast_precomputed_annotations has no effect without --skip_mitogenome_annotation"
+    }
     if (!params.skip_mitogenome_annotation) {
         MITOGENOME_ANNOTATION (
             ch_annotation_input_sanitised,
@@ -723,102 +1069,45 @@ workflow OCEANGENOMESMITOGENOMES {
         ch_assembly_summary_files = ch_assembly_summary_files.mix(
             MITOGENOME_ANNOTATION.out.reference_relevance.map { meta, f -> f })
     } else if (params.precomputed_mitogenome_annotation_results) {
-        // Use precomputed results if analysis is skipped
-        ch_mitogenome_annotation_results = Channel.fromPath(params.precomputed_mitogenome_annotation_results)
-        .map { file ->
-            def filename = file.baseName
-            def parts = filename.split('\\.')
-            def meta_id = parts[0]
-            def sequencing_type = parts.length > 1 ? parts[1] : null
-            def date = parts.length > 2 ? parts[2] : null
-            // Reconstruct the assembly prefix (id.tech.date.assembler) from the
-            // annotation filename so downstream naming (e.g. <prefix>.annotation_stats.csv)
-            // stays per-assembly. Without this, meta.mt_assembly_prefix is null
-            // on the upload-only path and CSVs collide as null.annotation_stats.csv.
-            def mt_assembly_prefix = parts.length > 3 ? parts[0..3].join('.') : filename
-            return [ mt_assembly_prefix, [meta_id, sequencing_type, date], file ]
+        // Use precomputed results if analysis is skipped. --blast_precomputed_annotations
+        // runs BLAST + LCA here on the supplied annotations; otherwise the precomputed
+        // BLAST/LCA results are reused (those globs always have defaults, so "not given"
+        // cannot be the switch).
+        ch_mitogenome_annotation_results = loadPrecomputedAnnotation(
+            params.precomputed_mitogenome_annotation_results, ch_samplesheet_meta)
+        if (!params.blast_precomputed_annotations) {
+            ch_mitogenome_blast_results = loadPrecomputedRegionResult(
+                params.precomputed_mitogenome_blast_results, ch_samplesheet_meta)
+            ch_mitogenome_lca_results = loadPrecomputedRegionResult(
+                params.precomputed_mitogenome_lca_results, ch_samplesheet_meta)
+            ch_mitogenome_lca_raw_results = params.precomputed_mitogenome_lca_raw_results
+                ? loadPrecomputedRegionResult(params.precomputed_mitogenome_lca_raw_results, ch_samplesheet_meta)
+                : Channel.empty()
+            ch_mitogenome_region_counts = precomputedRegionCounts(
+                ch_mitogenome_annotation_results, ch_mitogenome_blast_results)
+        } else {
+            // cds/, proteins/ and the BLAST regions rebuilt from each bundle's GFF + FASTA
+            // (a glob cannot carry cds/ and proteins/, and a curation may have left them
+            // stale), then the same BLAST/LCA the annotation subworkflow runs. The rebuilt
+            // bundle replaces the globbed one, so ANNOTATION_STATS gets its ORF check back.
+            REBUILD_ANNOTATION_BUNDLE ( ch_mitogenome_annotation_results )
+            ch_mitogenome_annotation_results = REBUILD_ANNOTATION_BUNDLE.out.bundle
+            MITOGENOME_BLAST_LCA (
+                REBUILD_ANNOTATION_BUNDLE.out.co1_sequences,
+                REBUILD_ANNOTATION_BUNDLE.out.s12_sequences,
+                REBUILD_ANNOTATION_BUNDLE.out.s16_sequences,
+                curated_blast_db,
+                nt_blast_db
+            )
+            ch_mitogenome_blast_results = MITOGENOME_BLAST_LCA.out.blast_filtered_results
+            ch_mitogenome_lca_results = MITOGENOME_BLAST_LCA.out.lca_results
+            ch_mitogenome_lca_raw_results = MITOGENOME_BLAST_LCA.out.lca_raw_results
+            ch_mitogenome_region_counts = REBUILD_ANNOTATION_BUNDLE.out.region_count
+                .map { meta, n -> [ meta, n.toString().trim().toInteger() ] }
+            ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_BLAST_LCA.out.multiqc_files)
+            ch_versions = ch_versions.mix(MITOGENOME_BLAST_LCA.out.versions)
+                .mix(REBUILD_ANNOTATION_BUNDLE.out.versions.first())
         }
-        // FORMAT_FILES needs the whole per-assembly annotation bundle (fasta, gff,
-        // tbl/gb) staged together -- glob matches every one of those files
-        // individually, so group them back into one list per assembly prefix,
-        // mirroring the path("annotation/*") bundle that
-        // MITOGENOME_ANNOTATION.out.annotation_results emits when annotation isn't
-        // skipped. Without this, only the last-matched file (e.g. the GFF) reaches
-        // FORMAT_FILES and it fails with "Missing in .: FASTA".
-        .groupTuple(by: 0)
-        .map { mt_assembly_prefix, sample_keys, files -> [ sample_keys[0], mt_assembly_prefix, files ] }
-        .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, mt_assembly_prefix, files, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
-            return tuple(meta_ext, files)
-        }
-        ch_mitogenome_blast_results = Channel.fromPath(params.precomputed_mitogenome_blast_results)
-        .map { file ->
-            def filename = file.baseName
-            def parts = filename.split('\\.')
-            // blast.<gene_type>.<og_id>.<tech>.<date>.<assembler>[.<annot_version>].filtered
-            def meta_id = parts[2]
-            def sequencing_type = parts.length > 1 ? parts[3] : null
-            def date = parts.length > 2 ? parts[4] : null
-            // Reconstruct the assembly prefix (id.tech.date.assembler) so downstream
-            // naming (e.g. <prefix>.lca_blast.upload.txt) stays per-assembly. Without
-            // this, meta.mt_assembly_prefix is null on the upload-only path and
-            // multiple assembly attempts for one OG collide on the same filename.
-            def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
-            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
-        }
-        .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
-            return tuple(meta_ext, file)
-        }
-        ch_mitogenome_lca_results = Channel.fromPath(params.precomputed_mitogenome_lca_results)
-        .map { file ->
-            def filename = file.baseName
-            def parts = filename.split('\\.')
-            // lca.<gene_type>.<og_id>.<tech>.<date>.<assembler>[.<annot_version>]
-            def meta_id = parts[2]
-            def sequencing_type = parts.length > 3 ? parts[3] : null
-            def date = parts.length > 4 ? parts[4] : null
-            def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
-            return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
-        }
-        .combine(ch_samplesheet_meta, by: 0)
-        .map { sample_key, mt_assembly_prefix, file, meta ->
-            def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
-            return tuple(meta_ext, file)
-        }
-        ch_mitogenome_lca_raw_results = params.precomputed_mitogenome_lca_raw_results
-            ? Channel.fromPath(params.precomputed_mitogenome_lca_raw_results)
-                .map { file ->
-                    def filename = file.baseName
-                    def parts = filename.split('\\.')
-                    // lca_raw.<region>.<og_id>.<tech>.<date>.<assembler>[.<annot_version>]
-                    def meta_id = parts[2]
-                    def sequencing_type = parts.length > 3 ? parts[3] : null
-                    def date = parts.length > 4 ? parts[4] : null
-                    def mt_assembly_prefix = parts.length > 5 ? parts[2..5].join('.') : filename
-                    return [ [meta_id, sequencing_type, date], mt_assembly_prefix, file ]
-                }
-                .combine(ch_samplesheet_meta, by: 0)
-                .map { sample_key, mt_assembly_prefix, file, meta ->
-                    def meta_ext = meta + [ mt_assembly_prefix: mt_assembly_prefix,
-                                    mt_assembly_run_prefix: mt_assembly_prefix ]
-                    return tuple(meta_ext, file)
-                }
-            : Channel.empty()
-
-        // Region count per sample for the downstream group sizing. On this path
-        // the results are already on disk, so counting the precomputed BLAST
-        // files per sample is exact and costs nothing: the fromPath channel
-        // closes at startup, long before anything it gates.
-        ch_mitogenome_region_counts = ch_mitogenome_blast_results
-            .map { meta, _file -> [ meta, 1 ] }
-            .groupTuple(by: 0)
-            .map { meta, ones -> [ meta, ones.size() ] }
     } else {
 
         ch_mitogenome_annotation_results = Channel.empty()
@@ -866,6 +1155,18 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_under_length_assembly_fasta = ch_canonical_assembly_fasta
         .filter { _meta, fasta -> fastaSequenceLength(fasta) < params.mitogenome_summary_min_length }
 
+    // Second PRE_ANNOTATION source. The drop itself is correct and documented -- an assembly
+    // below the biological floor is retained for SQL and summary reporting but does not enter
+    // EMMA/MITOS/table2asn -- but until now nothing recorded it as held, so a 454 bp assembly
+    // had a mitogenome_data row and appeared in neither held_samples.tsv nor the ENA summary.
+    // The reason carries the measurement and the threshold so the row is self-explaining.
+    ch_pre_annotation_held = ch_pre_annotation_held
+        .mix(ch_under_length_assembly_fasta.collectFile { meta, fasta ->
+            [ "${meta.mt_assembly_prefix}.PRE_ANNOTATION.held.tsv",
+              "${meta.id}\t${meta.mt_assembly_prefix}\tPRE_ANNOTATION\t" +
+              "under_min_length:${fastaSequenceLength(fasta)}<${params.mitogenome_summary_min_length}\n" ]
+        })
+
     // The canonical row IS the molecule that gets annotated, measured, QC'd and submitted --
     // i.e. the SANITISE_FASTA output, not the pre-curation assembly. Building it from the
     // pre-curation channel is what filed a curated assembly's stats under an uncurated name:
@@ -909,7 +1210,7 @@ workflow OCEANGENOMESMITOGENOMES {
     // that was actually remapped. Rows with no depth are still uploaded, just with the
     // header-only placeholder (push_mtdna_assm_results.py records them as 'not_measured').
     // See buildAssemblyUploadRows for the routing.
-    def no_depth_file = file("${projectDir}/assets/empty_mito_depth.tsv", checkIfExists: true)
+    def no_depth_file = file("${projectDir}/assets/placeholders/empty_mito_depth.tsv", checkIfExists: true)
 
     ch_mitogenome_assembly_results = buildAssemblyUploadRows(
         ch_canonical_upload_rows,
@@ -920,75 +1221,185 @@ workflow OCEANGENOMESMITOGENOMES {
     )
 
     //
+    // SUBWORKFLOW: MITOGENOME_QC
+    //
+    // The verdict: species comparison, annotation statistics, the gate that combines
+    // them, and the per-sample QC summary. Runs UNCONDITIONALLY, because none of it
+    // touches the database. It used to sit inside the upload guard below, which meant
+    // a run with --skip_upload_results (or no --sql_config at all) produced no gene
+    // counts, no completeness verdict, no held-samples accounting, and an assembly
+    // summary whose annotation columns were empty for every sample.
+    //
+    // Per-sample circularity-check evidence from both assemblers feeds the QC
+    // gate (anomaly block; the circular condition itself comes via meta.circular).
+    // Keyed by mt_assembly_prefix and total over the canonical assemblies, which is what
+    // lets the gate attach it with a plain join instead of collecting the whole channel.
+    ch_mitogenome_circularity_evidence = ch_canonical_circularity_evidence
+
+    MITOGENOME_QC (
+        ch_mitogenome_annotation_results,
+        ch_mitogenome_blast_results,
+        ch_mitogenome_lca_results,
+        ch_mitogenome_circularity_evidence,
+        ch_mitogenome_region_counts
+    )
+
+    // The annotation statistics reach MITOGENOME_ASSEMBLY_SUMMARY from here, not from
+    // the uploader. This single line is what fills num_genes / num_cds /
+    // missing_genes / frameshift_flag; when it lived inside the guard those columns
+    // were empty in every run that skipped uploads.
+    ch_assembly_summary_files = ch_assembly_summary_files.mix(MITOGENOME_QC.out.assembly_summary_files)
+
+    // Keyed on mt_assembly_prefix, not the whole meta map. Both sides descend from
+    // MITOGENOME_ANNOTATION so their metas usually agree, but each is restored from its own
+    // cache entry on a -resume, and a whole-map join that stops agreeing drops every sample
+    // SILENTLY -- the failure mode that emptied the QC gate one operator upstream (see the
+    // upload-receipt join in upload_results_mito). Hardened defensively: mt_assembly_prefix
+    // is a field of both metas, so prefix equality is implied by map equality and this can
+    // only ever match the same pairs or more, and it is 1:1 on both sides (one QC row and
+    // one annotation bundle per assembly) so there is no fan-out.
+    def ch_qc_input = MITOGENOME_QC.out.qc_ready
+        .map { meta, species_name, proceed_qc, circular ->
+            [ meta.mt_assembly_prefix, meta, species_name, proceed_qc, circular ]
+        }
+        .join(
+            ch_mitogenome_annotation_results.map { meta, files -> [ meta.mt_assembly_prefix, files ] },
+            by: 0
+        )
+        .map { _prefix, meta, species_name, proceed_qc, circular, annotation_files ->
+            [ meta.mt_assembly_prefix, meta, species_name, proceed_qc, circular, annotation_files ]
+        }
+        // Attach this run's coverage measurement, same pattern and same reasoning as the
+        // depth join in buildAssemblyUploadRows above: remainder:true so a sample that
+        // legitimately has no depth (--skip_mitogenome_depth, or a precomputed assembly
+        // with no reads channel) still reaches submission prep with the placeholder,
+        // while matched rows emit as they arrive and nothing is pinned to end of run.
+        //
+        // This is what replaced the upload-receipt gate. PREPARE_ENA_METADATA used to
+        // SELECT mean_depth back out of the mitogenome_data row this run had just
+        // written, so submission prep had to wait for that write and could not run at
+        // all with --skip_upload_results. The number was ours the whole time.
+        .join(
+            ch_mito_depth.map { meta, tsv -> [ meta.mt_assembly_prefix, tsv ] },
+            by: 0,
+            remainder: true
+        )
+        .filter { items -> items[1] != null }   // keep QC rows; drop depth-only remainder
+        .map { items ->
+            def depth = (items.size() > 6 && items[6] != null) ? items[6] : no_depth_file
+            [ items[1], items[2], items[3], items[4], items[5], depth ]
+        }
+
+    //
     // SUBWORKFLOW: UPLOAD_RESULTS
     //
-    // Conditional uploading of results to SQL and species check - only run if not skipped
-    // All these processes access the OceanOmics PostgreSQL database.
-    def ch_qc_input = Channel.empty()
-    if (!params.skip_upload_results && params.sql_config) {
-        // Per-sample circularity-check evidence from both assemblers feeds the QC
-        // gate (anomaly block; the circular condition itself comes via meta.circular).
-        // Keyed by mt_assembly_prefix and total over the canonical assemblies, which is what
-        // lets the gate attach it with a plain join instead of collecting the whole channel.
-        ch_mitogenome_circularity_evidence = ch_canonical_circularity_evidence
-
+    // The database WRITES, and only these. --skip_upload_results means "skip the
+    // PostgreSQL writes" and nothing more: the QC above and the submission prep below
+    // both still run.
+    def run_uploads = !params.skip_upload_results && params.sql_config
+    if (run_uploads) {
         UPLOAD_RESULTS (
             ch_mitogenome_assembly_results,
-            ch_mitogenome_annotation_results,
-            ch_mitogenome_blast_results,
-            ch_mitogenome_lca_results,
+            MITOGENOME_QC.out.annotation_stats,
+            MITOGENOME_QC.out.validation_records,
+            MITOGENOME_QC.out.species_validation_full,
             ch_mitogenome_lca_raw_results,
-            ch_mitogenome_circularity_evidence,
             ch_mitogenome_region_counts,
             sql_config // params.sql_config
         )
+    }
 
-        // Keyed on mt_assembly_prefix, not the whole meta map. Both sides descend from
-        // MITOGENOME_ANNOTATION so their metas usually agree, but each is restored from its own
-        // cache entry on a -resume, and a whole-map join that stops agreeing drops every sample
-        // SILENTLY -- the failure mode that emptied the QC gate one operator upstream (see the
-        // upload-receipt join in upload_results_mito). Hardened defensively: mt_assembly_prefix
-        // is a field of both metas, so prefix equality is implied by map equality and this can
-        // only ever match the same pairs or more, and it is 1:1 on both sides (one QC row and
-        // one annotation bundle per assembly) so there is no fan-out.
-        ch_qc_input = UPLOAD_RESULTS.out.qc_ready
-            .map { meta, species_name, proceed_qc, circular ->
-                [ meta.mt_assembly_prefix, meta, species_name, proceed_qc, circular ]
-            }
-            .join(
-                ch_mitogenome_annotation_results.map { meta, files -> [ meta.mt_assembly_prefix, files ] },
-                by: 0
-            )
-            .map { _prefix, meta, species_name, proceed_qc, circular, annotation_files ->
-                [ meta, species_name, proceed_qc, circular, annotation_files ]
-            }
-
-        // If the LCA validation is correct, then run the QC to prepare for submission to GenBank
-        // Need to add this into the pipeline.
-        // Now that protein lengths are being added to the database it could provide a list of 
-        // non submitted mitogenomes they can be grouped with to submit and then say when there is a 
-        // group of similar mitogenomes they can be submitted as a batch.
-        MITOGENOME_QC (
-            ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false), path(annotation/*)
+    //
+    // SUBWORKFLOW: ENA_SUBMISSION_PREP
+    //
+    // If the LCA validation is correct, then run the QC to prepare for submission to GenBank
+    // Need to add this into the pipeline.
+    // Now that protein lengths are being added to the database it could provide a list of
+    // non submitted mitogenomes they can be grouped with to submit and then say when there is a
+    // group of similar mitogenomes they can be submitted as a batch.
+    //
+    // Needs --sql_config but NOT the writes: it only READS from the database
+    // (BUILD_SOURCE_MODIFIERS wants collection date, country and coordinates, which
+    // exist nowhere else). It used to sit inside the write guard above, gated on the
+    // committed mitogenome_data receipt, because PREPARE_ENA_METADATA read mean_depth
+    // back out of the row this run had just written. That number is measured by
+    // MITOGENOME_COVERAGE and now travels down ch_qc_input as a file, so there is no
+    // longer a write to order behind and no reason for the gate. gateOnAssemblyReceipt
+    // is untouched and still guards the four pushers inside UPLOAD_RESULTS.
+    //
+    // BUILD_SOURCE_MODIFIERS still filters on the mitogenome_data row existing. For a
+    // sample with no row yet it now fails loudly rather than emitting an empty .src;
+    // see the empty-result branch in bin/build_source_modifiers.py.
+    //
+    // params.ena_study is the marker that a run does submission work at all: it has no
+    // default on purpose (nextflow.config), and ENA_SUBMISSION_PREP hard-errors without
+    // it because a candidate packaged under the wrong study namespace is worse than one
+    // not packaged. That error was unreachable while prep sat behind the upload guard.
+    // Now that prep runs on --sql_config alone, a run that never intended to submit --
+    // an upload-only production run, the invert test panel -- would abort on it. So the
+    // study gates prep rather than failing it, and prep keeps its strict PRJEB check for
+    // anyone who did set one.
+    def run_ena_prep = params.sql_config && params.ena_study && !params.skip_ena_submission_prep
+    def ch_prep_held       = Channel.empty()
+    def ch_ena_run_summary = Channel.empty()
+    if (run_ena_prep) {
+        ENA_SUBMISSION_PREP (
+            ch_qc_input // tuple val(meta), val(species_name), val(proceed_qc true/false), val(circular true/false), path(annotation/*), path(mito_depth.tsv)
         )
+        ch_prep_held       = ENA_SUBMISSION_PREP.out.held_fragments
+        ch_ena_run_summary = ENA_SUBMISSION_PREP.out.ena_run_summary
+    }
+
+    //
+    // SUBWORKFLOW: UPLOAD_ENA_RESULTS
+    //
+    // A pusher, so it needs both the writes and the prep that produces its records.
+    if (run_uploads && run_ena_prep) {
         UPLOAD_ENA_RESULTS (
-            MITOGENOME_QC.out.ena_validation_records,
+            ENA_SUBMISSION_PREP.out.ena_validation_records,
             UPLOAD_RESULTS.out.upload_status_files,
             sql_config
         )
-        ch_assembly_summary_files = ch_assembly_summary_files.mix(UPLOAD_RESULTS.out.assembly_summary_files)
-
-        // One run-level held_samples.tsv: pre-QC holds (UPLOAD_RESULTS) + table2asn
-        // quarantine (MITOGENOME_QC). Always emitted, header-only when nothing held.
-        COMPILE_HELD_SAMPLES (
-            UPLOAD_RESULTS.out.held_fragments
-                .mix(MITOGENOME_QC.out.held_fragments)
-                .collect()
-                .ifEmpty([])
-        )
-    } else if (!params.skip_upload_results && !params.sql_config) {
-        log.warn "Skipping upload/QC because --sql_config not provided"
     }
+
+    if (!params.sql_config) {
+        log.warn "No --sql_config provided: SQL uploads and ENA submission prep are off. Local QC still runs."
+    } else {
+        if (params.skip_upload_results) {
+            log.warn "--skip_upload_results is set: SQL uploads are off. Local QC and ENA submission prep still run."
+        }
+        if (params.skip_ena_submission_prep) {
+            log.warn "--skip_ena_submission_prep is set: ENA submission prep is off."
+        }
+        else if (!params.ena_study) {
+            log.warn "No --ena_study provided: ENA submission prep is off. Everything else, " +
+                     "including the SQL uploads, is unaffected."
+        }
+    }
+
+    // One run-level held_samples.tsv: pre-annotation drops (this workflow), pre-QC holds
+    // (MITOGENOME_QC) and table2asn quarantine (ENA_SUBMISSION_PREP). Always emitted,
+    // header-only when nothing held, and now also emitted when uploads are skipped --
+    // the accounting is a local report and never needed the database.
+    //
+    // The samplesheet OG list and the ENA run summary are what let the module check that
+    // held + submission-ready accounts for the whole run. Adding a third fragment source
+    // fixes the two known drops; only the completeness check fixes the CLASS of defect,
+    // which is that the accounting had no idea what a complete run looks like.
+    //
+    // ch_samplesheet_ogs is built from the samplesheet, not from the database, so the
+    // completeness check works unchanged with no --sql_config. The ENA run summary falls
+    // back to its existing placeholder when submission prep did not run.
+    COMPILE_HELD_SAMPLES (
+        ch_pre_annotation_held
+            .mix(MITOGENOME_QC.out.held_fragments)
+            .mix(ch_prep_held)
+            .collect()
+            .ifEmpty([]),
+        ch_samplesheet_ogs,
+        ch_ena_run_summary
+            .ifEmpty(file("${projectDir}/assets/placeholders/empty_ena_run_summary.tsv", checkIfExists: true))
+    )
 
     //
     // MODULE: Mitogenome assembly summary for MultiQC custom content
@@ -1005,6 +1416,16 @@ workflow OCEANGENOMESMITOGENOMES {
     ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_SUMMARY.out.table)
     ch_versions = ch_versions.mix(MITOGENOME_ASSEMBLY_SUMMARY.out.versions)
 
+    // The same verdicts, stored on each assembly's row (genomes_db_review migration 068).
+    // A database write, so it follows --skip_upload_results like the pushers above.
+    if (run_uploads) {
+        PUSH_ASSEMBLY_QC (
+            MITOGENOME_ASSEMBLY_SUMMARY.out.table,
+            params.sql_config
+        )
+        ch_versions = ch_versions.mix(PUSH_ASSEMBLY_QC.out.versions)
+    }
+
     //
     // Collect all MultiQC files from all subworkflows
     //
@@ -1012,9 +1433,14 @@ workflow OCEANGENOMESMITOGENOMES {
     if (!params.skip_mitogenome_assembly_getorg) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_GETORG.out.multiqc_files)}
     if (!params.skip_mitogenome_assembly_hifi) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ASSEMBLY_MITOHIFI.out.multiqc_files)}
     if (!params.skip_mitogenome_annotation) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_ANNOTATION.out.multiqc_files)}
-    if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS.out.multiqc_files)}
-    if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)}
-    if (!params.skip_upload_results && params.sql_config) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_ENA_RESULTS.out.multiqc_files)}
+    // Unguarded: MITOGENOME_QC always runs, so its per-sample QC summary, annotation
+    // statistics and species-validation tables reach the report with or without a database.
+    ch_multiqc_files = ch_multiqc_files.mix(MITOGENOME_QC.out.multiqc_files)
+    // Each follows the condition its own subworkflow ran under: submission prep no
+    // longer shares the uploads' guard, so it must not share their mix guard either.
+    if (run_uploads) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_RESULTS.out.multiqc_files)}
+    if (run_ena_prep) {ch_multiqc_files = ch_multiqc_files.mix(ENA_SUBMISSION_PREP.out.multiqc_files)}
+    if (run_uploads && run_ena_prep) {ch_multiqc_files = ch_multiqc_files.mix(UPLOAD_ENA_RESULTS.out.multiqc_files)}
 
     // 
     // Collect all versions from subworkflows
@@ -1033,20 +1459,20 @@ workflow OCEANGENOMESMITOGENOMES {
     if (!params.skip_mitogenome_annotation) {
         ch_versions = ch_versions.mix(MITOGENOME_ANNOTATION.out.versions)
     }
-    // Upload + QC subworkflows provide versions; guard independently
-    if (!params.skip_upload_results && params.sql_config) {
+    // QC always runs; only the upload subworkflows are guarded.
+    ch_versions = ch_versions.mix(MITOGENOME_QC.out.versions)
+    // Upload subworkflows provide versions; guard independently
+    if (run_uploads) {
         ch_versions = ch_versions.mix(UPLOAD_RESULTS.out.versions)
     }
-    // Run of MITOGENOME_QC depends on upstream evaluation; include if present
-    if (!params.skip_upload_results && params.sql_config) {
-        ch_versions = ch_versions.mix(MITOGENOME_QC.out.versions)
+    if (run_ena_prep) {
+        ch_versions = ch_versions.mix(ENA_SUBMISSION_PREP.out.versions)
     }
-    if (!params.skip_upload_results && params.sql_config) {
+    if (run_uploads && run_ena_prep) {
         ch_versions = ch_versions.mix(UPLOAD_ENA_RESULTS.out.versions)
     }
-    if (!params.skip_upload_results && params.sql_config) {
-        ch_versions = ch_versions.mix(COMPILE_HELD_SAMPLES.out.versions)
-    }
+    // COMPILE_HELD_SAMPLES always runs now, so its versions are always available.
+    ch_versions = ch_versions.mix(COMPILE_HELD_SAMPLES.out.versions)
 
 
 

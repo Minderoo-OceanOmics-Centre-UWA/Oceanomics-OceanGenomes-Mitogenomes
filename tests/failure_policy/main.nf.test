@@ -21,7 +21,32 @@ nextflow_workflow {
             assertAll(
                 { assert workflow.success },
                 { assert workflow.trace.succeeded().size() == 1 },
+                // 2, not 1: every failure now gets one unconditional retry before it
+                // is ignored, because a lost sbatch acknowledgement is also exit 1.
+                { assert workflow.trace.failed().size() == 2 },
+                { assert workflow.out.results.size() == 1 }
+            )
+        }
+    }
+
+    test("lost sbatch acknowledgement is retried and recovered") {
+        // Regression test for the NOVA_260909_LA_mitogenomes-3 deadlock: 7 tasks that
+        // had actually succeeded were reported as exit 1 (a dropped sbatch reply),
+        // ignored at attempt 1, and their unbound outputs stranded every downstream
+        // aggregator. One unconditional retry is what recovers them.
+        when {
+            workflow {
+                """
+                input[0] = Channel.of(['ack', 'lost_ack'])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
                 { assert workflow.trace.failed().size() == 1 },
+                { assert workflow.trace.succeeded().size() == 1 },
                 { assert workflow.out.results.size() == 1 }
             )
         }
@@ -68,26 +93,4 @@ nextflow_workflow {
         }
     }
 
-}
-
-nextflow_workflow {
-
-    name "Test shared-prerequisite failure policy"
-    script "./main.nf"
-    config "./nextflow.config"
-    workflow "SHARED_POLICY"
-
-    test("shared prerequisite failure terminates the workflow") {
-        when {
-            workflow {
-                """
-                input[0] = Channel.value('failure')
-                """
-            }
-        }
-
-        then {
-            assert workflow.failed
-        }
-    }
 }

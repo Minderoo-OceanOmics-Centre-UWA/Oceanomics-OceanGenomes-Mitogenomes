@@ -25,12 +25,14 @@ process ANNOTATION_QC_GATE {
     script:
     def args = task.ext.args ?: ''
     def gcode = task.ext.code ?: meta.genetic_code
+    def lineage_arg = meta.class ? "--lineage '${meta.class}'" : ''
     """
     annotation_qc_gate.py \\
         --gff ${gff} \\
         --proteins ${proteins} \\
         --cds ${cds} \\
         --genetic-code ${gcode} \\
+        ${lineage_arg} \\
         --out ${meta.mt_assembly_prefix}.coral_qc.txt \\
         ${args}
 

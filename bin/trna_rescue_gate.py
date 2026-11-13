@@ -32,49 +32,28 @@ from pathlib import Path
 
 # The standard vertebrate gene order and its PCG / rRNA / tRNA partitions, shared
 # with annotation_stats.py and the ND4L/ATP8 gate via bin/mito_gene_order.py so
-# the gates and the QC step cannot drift on what "present and in order" means.
-from mito_gene_order import REF_GENES, TRNA_GENES, RRNA_GENES, PCG_GENES
+# the gates and the QC step cannot drift on what "present and in order" means --
+# which covers HOW the GFF is read as well as what the reference order is.
+from mito_gene_order import (
+    REF_GENES,
+    TRNA_GENES,
+    RRNA_GENES,
+    PCG_GENES,
+    add_taxon_arguments,
+    genes_by_coord,
+    matching_order_for,
+    taxon_from_args,
+)
 
 
-def parse_gff_attributes(attr_str):
-    return dict(
-        item.split("=", 1)
-        for item in attr_str.strip().split(";")
-        if "=" in item
-    )
-
-
-def genes_by_coord(gff_path):
-    """Return REF gene names present in the GFF, ordered by genomic start.
-
-    A gene written as more than one `gene` line (an origin-spanning feature is
-    split into two) is kept once, at its LOWEST start. Taking the first line seen
-    instead put such a gene at whichever half the file happened to list first,
-    which could make the order check fail on an annotation that is in fact
-    correctly ordered -- and a failed order check silently suppresses the rescue.
-    """
-    starts = {}
-    with open(gff_path) as fh:
-        for line in fh:
-            if line.startswith("#"):
-                continue
-            parts = line.rstrip("\n").split("\t")
-            if len(parts) != 9 or parts[2] != "gene":
-                continue
-            attrs = parse_gff_attributes(parts[8])
-            name = attrs.get("Name")
-            if not name:
-                continue
-            gene = name.replace("MT-", "")
-            start = int(parts[3])
-            if gene not in starts or start < starts[gene]:
-                starts[gene] = start
-    return [g for g, _ in sorted(starts.items(), key=lambda kv: kv[1])]
-
-
-def decide(gff_path):
+def decide(gff_path, taxon=None):
     present = genes_by_coord(gff_path)
     present_set = set(present)
+
+    # See emma_rescue_gate.decide: the accepted order for this taxon, canonical
+    # unless a curated variant rule applies.
+    order_ref, _rule = matching_order_for(present, taxon)
+
     missing = [g for g in REF_GENES if g not in present_set]
 
     if not missing:
@@ -87,15 +66,14 @@ def decide(gff_path):
     if not RRNA_GENES.issubset(present_set) or not PCG_GENES.issubset(present_set):
         return "PASS", "-"
 
-    # The genes that ARE present must already be in REF order (equivalently:
-    # order_correct would be "yes"). Inserting each missing tRNA at its true
-    # coordinate then leaves the whole set ordered, and every missing tRNA's
-    # REF neighbours are present so its insertion gap is well defined.
-    ref_subset = [g for g in REF_GENES if g in present_set]
-    if present != ref_subset:
+    # The genes that ARE present must already be in an accepted order (equivalently:
+    # order_correct would be "yes" or "variant"). Inserting each missing tRNA at its
+    # true coordinate then leaves the whole set ordered, and every missing tRNA's
+    # neighbours in that order are present so its insertion gap is well defined.
+    if order_ref is None:
         return "PASS", "-"
 
-    targets = ",".join(g for g in REF_GENES if g in missing)
+    targets = ",".join(g for g in order_ref if g in missing)
     return "FIX", targets
 
 
@@ -104,10 +82,13 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--gff", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
+    # FUTURE: see emma_rescue_gate.main -- no LCA exists yet at this point in the
+    # pipeline, so this gate matches on meta taxonomy only.
+    add_taxon_arguments(ap)
     args = ap.parse_args()
 
     try:
-        state, targets = decide(args.gff)
+        state, targets = decide(args.gff, taxon_from_args(args))
     except Exception:  # noqa: BLE001 - never drop a sample on a parse error
         traceback.print_exc(file=sys.stderr)
         state, targets = "PASS", "-"

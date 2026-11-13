@@ -3,6 +3,7 @@
 import argparse
 import csv
 import glob
+import json
 import os
 import re
 import sys
@@ -27,9 +28,16 @@ INVERT_CLASSES = frozenset({
     'Monoplacophora', 'Caudofoveata', 'Solenogastres', 'Mollusca',
     # Annelida
     'Polychaeta', 'Clitellata', 'Annelida',
-    # Arthropoda (crustaceans + chelicerates)
-    'Malacostraca', 'Hexanauplia', 'Branchiopoda', 'Ostracoda',
-    'Cephalocarida', 'Remipedia', 'Maxillopoda', 'Pycnogonida',
+    # Arthropoda (crustaceans + chelicerates). 'Thecostraca' (barnacles) and
+    # 'Copepoda' are the current NCBI classes; 'Maxillopoda' and 'Hexanauplia'
+    # are retired names the taxdump no longer carries, kept only so a legacy
+    # species-table row still reads as invertebrate. A barnacle resolves to
+    # Thecostraca, and while that was missing from this set it took the
+    # is_invertebrate() == 'false' path: vertebrate genetic code, the fish BLAST
+    # DB and EMMA, with no error to notice.
+    'Malacostraca', 'Thecostraca', 'Copepoda', 'Ichthyostraca', 'Mystacocarida',
+    'Branchiopoda', 'Ostracoda', 'Cephalocarida', 'Remipedia', 'Pycnogonida',
+    'Hexanauplia', 'Maxillopoda',
     # Echinodermata
     'Echinoidea', 'Asteroidea', 'Ophiuroidea', 'Holothuroidea', 'Crinoidea',
     'Echinodermata',
@@ -39,7 +47,12 @@ INVERT_CLASSES = frozenset({
     'Ascidiacea', 'Thaliacea', 'Appendicularia', 'Tunicata',
     # Bryozoa
     'Gymnolaemata', 'Stenolaemata', 'Phylactolaemata', 'Bryozoa',
-    # Brachiopoda
+    # Brachiopoda. 'Craniata' is a homonym -- NCBI has it as both the brachiopod
+    # class (taxid 115366) and the vertebrate subphylum (89593) -- but only the
+    # class-rank node is indexed by taxdump_lineage (INDEXED_RANKS has no
+    # subphylum), so a resolved class of 'Craniata' can only ever mean the
+    # brachiopod. Keep it: dropping it makes craniid brachiopods silently
+    # vertebrate, which is the worse failure of the two.
     'Lingulata', 'Craniata', 'Rhynchonellata', 'Brachiopoda',
     # Ctenophora
     'Tentaculata', 'Nuda', 'Ctenophora',
@@ -246,6 +259,23 @@ def extract_ilmn_prefix(filename, sample_id, sequencing_type, date):
     return f"{sample_id}.{sequencing_type}.{date}"
 
 
+def sequencing_relation(cursor):
+    """Where to read sequencing runs from, and which column names a run's library tube.
+
+    The v2 database schema removes og_id and the per-technology tube columns
+    (hic_library_tube_id and the rest) from `sequencing`. The same runs, with og_id and
+    a single library_tube_id, are exposed by the `v_sequencing_browse` view, which
+    becomes visible on the search_path at the v2 cutover. Use the view when it is
+    visible and the old table otherwise, so this works unchanged on either side of the
+    cutover.
+    """
+    cursor.execute("SELECT to_regclass('v_sequencing_browse') IS NOT NULL")
+    row = cursor.fetchone()
+    if row and row[0]:
+        return "v_sequencing_browse", "library_tube_id"
+    return "sequencing", "hic_library_tube_id"
+
+
 def query_hifi_date(cursor, sample_id, completion_date_str):
     if cursor is None:
         return "unknown"
@@ -257,10 +287,11 @@ def query_hifi_date(cursor, sample_id, completion_date_str):
             # run sits outside the window silently takes whatever other
             # sequencing falls inside it: OG16 and OG79 were dated from HiC runs
             # and OG88 from an ONT run.
+            relation, _ = sequencing_relation(cursor)
             cursor.execute(
-                """
+                f"""
                 SELECT seq_date
-                FROM sequencing
+                FROM {relation}
                 WHERE og_id = %s
                   AND seq_type = 'PacBio'
                   AND seq_date >= %s
@@ -293,8 +324,9 @@ def query_hic_date(cursor, sample_id):
         return "unknown"
     # A hic_library_tube_id can appear on multiple sequencing runs. Order by
     # seq_date so the most recent run wins, and warn if there was a collision.
+    relation, tube_column = sequencing_relation(cursor)
     cursor.execute(
-        "SELECT seq_date FROM sequencing WHERE hic_library_tube_id = %s ORDER BY seq_date DESC",
+        f"SELECT seq_date FROM {relation} WHERE {tube_column} = %s ORDER BY seq_date DESC",
         (sample_id,)
     )
     rows = cursor.fetchall()
@@ -316,7 +348,7 @@ def clean_species_name(name):
     NCBI taxonomy query (e.g. 'Alepes vari (TBC)', 'Astronesthes spp.',
     "Nesogobius sp. `groove cheek`"). Returns the best plain query string we can
     salvage: 'Genus species' if a binomial survives, otherwise the bare genus.
-    Used only as a fallback when the species table yields no match.
+    Matched alongside the raw name in MATCH_QUERY.
     """
     if not name:
         return ""
@@ -338,14 +370,95 @@ def clean_species_name(name):
     return " ".join(tokens[:2])
 
 
+# Tiers of a master_species match, best first -- the same tiers as the draft
+# pipeline's create_samplesheet.py. Only an exact species or synonym hit names the
+# sample's own taxon; the later tiers return some row of the right genus, family
+# or order, which is why the taxdump is asked before their reference name is used.
+EXACT_SPECIES_LEVELS = ('species_exact', 'synonym_exact')
+FUZZY_LEVELS = ('family_fuzzy', 'order_fuzzy')
+
+# master_species, not species: it is the maintained table (OceanGenom_Web's), and
+# only read here. It carries no invertebrates; those resolve from the taxdump.
+# ref_name is the most specific name the tier vouches for.
+MATCH_QUERY = """
+SELECT m.class, m.family, m.ordr, m.ref_name, m.match_level
+FROM (
+    SELECT sp.class, sp.family, sp.ordr, sp.species AS ref_name, sp.species,
+           1 AS priority, 1.0 AS sim, 'species_exact' AS match_level
+    FROM master_species sp
+    WHERE lower(sp.species) IN (lower(%(raw)s), lower(%(clean)s))
+
+    UNION ALL
+
+    -- synonym is a single name, or occasionally a comma-separated list
+    SELECT sp.class, sp.family, sp.ordr, sp.species, sp.species,
+           2, 1.0, 'synonym_exact'
+    FROM master_species sp
+    WHERE EXISTS (
+        SELECT 1 FROM unnest(string_to_array(sp.synonym, ',')) AS syn(name)
+        WHERE lower(btrim(syn.name)) IN (lower(%(raw)s), lower(%(clean)s))
+    )
+
+    UNION ALL
+
+    SELECT sp.class, sp.family, sp.ordr, sp.genus, sp.species,
+           3, 1.0, 'genus_exact'
+    FROM master_species sp
+    WHERE lower(sp.genus) = lower(%(genus)s)
+
+    UNION ALL
+
+    SELECT sp.class, sp.family, sp.ordr, sp.family, sp.species,
+           4, 1.0, 'family_exact'
+    FROM master_species sp
+    WHERE lower(sp.family) IN (lower(%(raw)s), lower(%(clean)s))
+
+    UNION ALL
+
+    SELECT sp.class, sp.family, sp.ordr, sp.ordr, sp.species,
+           5, 1.0, 'order_exact'
+    FROM master_species sp
+    WHERE lower(sp.ordr) IN (lower(%(raw)s), lower(%(clean)s))
+
+    UNION ALL
+
+    SELECT sp.class, sp.family, sp.ordr, sp.family, sp.species,
+           6, similarity(sp.family, %(clean)s), 'family_fuzzy'
+    FROM master_species sp
+    WHERE sp.family %% %(clean)s
+      AND similarity(sp.family, %(clean)s) >= 0.65
+
+    UNION ALL
+
+    SELECT sp.class, sp.family, sp.ordr, sp.ordr, sp.species,
+           7, similarity(sp.ordr, %(clean)s), 'order_fuzzy'
+    FROM master_species sp
+    WHERE sp.ordr %% %(clean)s
+      AND similarity(sp.ordr, %(clean)s) >= 0.65
+) m
+ORDER BY m.priority, m.sim DESC, m.species
+LIMIT 1
+"""
+
+
+def match_params(nominal_species_id):
+    """
+    Query parameters for MATCH_QUERY. The cleaned name is matched alongside the
+    raw one so qualifier noise ('Gobiidae spp.', 'Cynoglossidae (Family)') hits
+    an exact tier instead of only the fuzzy ones.
+    """
+    raw = (nominal_species_id or "").strip()
+    clean = clean_species_name(raw) or raw
+    return {'raw': raw, 'clean': clean, 'genus': clean.split(' ')[0] if clean else ''}
+
+
 def query_species_info(cursor, sample_id):
     """
-    Resolve (nominal_species_id, tax_class, family, order, reference_species_id)
-    for a sample by
-    joining the sample table's nominal_species_id against the species table via
-    species/genus/family/order matches (exact, then trigram fuzzy). Mirrors the
-    approach used in OceanOmics-OceanGenomes-Draft-Genomes/bin/create_samplesheet.py
-    so the two pipelines stay in sync.
+    Resolve (nominal_species_id, tax_class, family, order, reference_species_id,
+    match_level) for a sample by matching the sample table's nominal_species_id
+    against master_species (see MATCH_QUERY). Mirrors
+    OceanOmics-OceanGenomes-Draft-Genomes/bin/create_samplesheet.py so the two
+    pipelines stay in sync. match_level is '' when nothing matched.
 
     reference_species_id is the most specific *NCBI-valid* taxon name found for
     the sample (the matched species binomial, else genus, else family/order). It
@@ -353,100 +466,28 @@ def query_species_info(cursor, sample_id):
     is frequently rejected by NCBI ('No such species in NCBI!') because of typos,
     'spp.'/'sp.' markers or parenthetical notes.
     """
+    unknown = ("unknown", "unknown", "", "", "", "")
     if cursor is None:
-        return "unknown", "unknown", "", "", ""
-
-    query = """
-    WITH sample_q AS (
-        SELECT
-            s.og_id,
-            s.nominal_species_id,
-            trim(s.nominal_species_id) AS nominal_name,
-            split_part(trim(s.nominal_species_id), ' ', 1) AS nominal_genus
-        FROM sample s
-        WHERE s.og_id = %s
-    )
-    SELECT
-        s.nominal_species_id,
-        m.class,
-        m.family,
-        m.ordr,
-        m.ref_name
-    FROM sample_q s
-    LEFT JOIN LATERAL (
-        SELECT *
-        FROM (
-            SELECT sp.class, sp.family, sp.ordr, sp.species AS ref_name, 1 AS priority, 1.0 AS sim
-            FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.species) = lower(s.nominal_name)
-
-            UNION ALL
-
-            SELECT sp.class, sp.family, sp.ordr, sp.genus AS ref_name, 2 AS priority, 1.0 AS sim
-            FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.genus) = lower(s.nominal_genus)
-
-            UNION ALL
-
-            SELECT sp.class, sp.family, sp.ordr, sp.family AS ref_name, 3 AS priority, 1.0 AS sim
-            FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.family) = lower(s.nominal_name)
-
-            UNION ALL
-
-            SELECT sp.class, sp.family, sp.ordr, sp.ordr AS ref_name, 4 AS priority, 1.0 AS sim
-            FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.ordr) = lower(s.nominal_name)
-
-            UNION ALL
-
-            SELECT sp.class, sp.family, sp.ordr, sp.species AS ref_name, 5 AS priority,
-                   similarity(sp.species, s.nominal_name) AS sim
-            FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND lower(sp.genus) = lower(s.nominal_genus)
-              AND sp.species %% s.nominal_name
-
-            UNION ALL
-
-            SELECT sp.class, sp.family, sp.ordr, sp.family AS ref_name, 6 AS priority,
-                   similarity(sp.family, s.nominal_name) AS sim
-            FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND sp.family %% s.nominal_name
-              AND similarity(sp.family, s.nominal_name) >= 0.65
-
-            UNION ALL
-
-            SELECT sp.class, sp.family, sp.ordr, sp.ordr AS ref_name, 7 AS priority,
-                   similarity(sp.ordr, s.nominal_name) AS sim
-            FROM species sp
-            WHERE sp.ncbi_taxon_id IS NOT NULL
-              AND sp.ordr %% s.nominal_name
-              AND similarity(sp.ordr, s.nominal_name) >= 0.65
-        ) ranked
-        ORDER BY priority, sim DESC
-        LIMIT 1
-    ) m ON TRUE;
-    """
+        return unknown
 
     try:
-        cursor.execute(query, (sample_id,))
+        cursor.execute("SELECT nominal_species_id FROM sample WHERE og_id = %s",
+                       (sample_id,))
+        sample_row = cursor.fetchone()
+        if not sample_row:
+            return unknown
+        nominal_species_id = sample_row[0]
+        result = None
+        if (nominal_species_id or "").strip():
+            cursor.execute(MATCH_QUERY, match_params(nominal_species_id))
+            result = cursor.fetchone()
     except Exception as exc:
         print(f"Error querying species info for {sample_id}: {exc}", file=sys.stderr)
-        return "unknown", "unknown", "", "", ""
+        return unknown
 
-    result = cursor.fetchone()
-    if not result:
-        return "unknown", "unknown", "", "", ""
-
-    nominal_species_id, tax_class, tax_family, tax_order, ref_name = result
-    # Fall back to a cleaned form of the nominal name when the species table has
-    # no usable match, so findMitoReference still gets a plausible query string.
+    tax_class, tax_family, tax_order, ref_name, match_level = result or (None,) * 5
+    # Fall back to a cleaned form of the nominal name when master_species has no
+    # usable match, so findMitoReference still gets a plausible query string.
     reference_species_id = ref_name or clean_species_name(nominal_species_id)
     # Normalise open nomenclature ('Chaunax sp' / 'Blachea spp.' -> 'Genus sp.')
     # only after the matching above has run, so reference_species_id resolution
@@ -458,37 +499,52 @@ def query_species_info(cursor, sample_id):
         # family / order are emitted so REFERENCE_DIVERGENCE can grade the resolved
         # reference beyond "not congeneric": without them every non-congeneric
         # reference collapses to the NON_CONGENERIC tier and the CROSS_ORDER route
-        # to reference-free assembly can never fire. Blank when the species table
+        # to reference-free assembly can never fire. Blank when master_species
         # has no match, which the divergence check degrades on gracefully.
         tax_family or "",
         tax_order or "",
         reference_species_id or "",
+        match_level or "",
     )
 
 
 def resolve_species_info(cursor, sample_id, resolver=None):
     """
-    (nominal_species_id, class, family, order, reference_species_id, source).
+    (nominal_species_id, class, family, order, reference_species_id, source,
+    lineage, match_level).
 
-    The OceanOmics species table is authoritative and tried first. It only holds
-    curated taxa, though, and a miss there is not benign: 'unknown' class makes
-    is_invertebrate() return 'false', which silently picks the vertebrate genetic
-    code, EMMA over MITOS2 and the curated (fish) BLAST DB. So anything the table
-    leaves blank is filled in from the NCBI taxdump when one is available.
+    master_species is tried first, but a hit there is only trusted as far as its
+    tier deserves (see EXACT_SPECIES_LEVELS). It does not carry invertebrates,
+    and a miss is not benign: an 'unknown' class is what is_invertebrate() reads
+    as 'false', so it would select the vertebrate genetic code, EMMA over MITOS2
+    and the curated (fish) BLAST DB. It does not reach any of that --
+    validateTaxonomy() in subworkflows/local/prepare_samplesheet aborts the run
+    first, naming every unresolved sample, unless --allow_unknown_taxonomy is set
+    -- but the cost is still a stopped run. So:
 
-    `source` is 'db', 'db+taxdump', 'taxdump' or 'unresolved', and is reported for
-    the run rather than written to the samplesheet -- see the meta-shape warning in
-    subworkflows/local/prepare_samplesheet: a new optional column changes every
-    meta map and silently breaks joins on resume.
+    - exact species/synonym: the table's answer, with blanks filled from the
+      NCBI taxdump.
+    - genus/family/order exact: the table's class/family/order are kept (a
+      congener shares them), but when the taxdump knows the sample's own species
+      its name becomes reference_species_id and its lineage decides the genetic
+      code.
+    - fuzzy family/order: a last resort, replaced wholesale by any taxdump hit.
+    - no match: everything from the taxdump.
+
+    `source` is 'db', 'db+taxdump', 'taxdump', 'taxdump-phylum' or 'unresolved',
+    and is reported for the run rather than written to the samplesheet -- see the
+    meta-shape warning in subworkflows/local/prepare_samplesheet: a new optional
+    column changes every meta map and silently breaks joins on resume.
+    match_level is the master_species tier ('' for none), reported the same way.
     """
     (nominal_species_id, tax_class, tax_family, tax_order,
-     reference_species_id) = query_species_info(cursor, sample_id)
+     reference_species_id, match_level) = query_species_info(cursor, sample_id)
 
     db_had_class = tax_class != "unknown"
     missing = (not db_had_class) or (not tax_family) or (not tax_order)
-    if not missing:
+    if not missing and match_level in EXACT_SPECIES_LEVELS:
         return (nominal_species_id, tax_class, tax_family, tax_order,
-                reference_species_id, 'db')
+                reference_species_id, 'db', {}, match_level)
 
     lineage = {}
     if resolver is not None and nominal_species_id and nominal_species_id != "unknown":
@@ -498,14 +554,44 @@ def resolve_species_info(cursor, sample_id, resolver=None):
             print(f"Warning: taxdump lookup failed for {sample_id} "
                   f"('{nominal_species_id}'): {exc}", file=sys.stderr)
 
+    if (lineage and match_level in FUZZY_LEVELS and
+            (lineage.get('class') or lineage.get('phylum'))):
+        # A real NCBI name beats a near-miss spelling of a family or order.
+        tax_class, tax_family, tax_order, reference_species_id = "unknown", "", "", ""
+        db_had_class = False
+
+    species_hit = bool(lineage) and lineage.get('matched_rank') == 'species'
+    if db_had_class and not missing and not species_hit:
+        # The table's genus/family/order row is complete and the taxdump knows
+        # nothing more specific about this sample.
+        return (nominal_species_id, tax_class, tax_family, tax_order,
+                reference_species_id, 'db', {}, match_level)
+
     if lineage:
-        if not db_had_class and lineage.get('class'):
-            tax_class = lineage['class']
+        if not db_had_class and (lineage.get('class') or lineage.get('phylum')):
+            # A sample identified no further than its phylum ('Porifera') has no
+            # class to resolve. The phylum is still enough to select the genetic
+            # code, the reduced-tRNA expectation and the cox1 rotation panel --
+            # INVERT_CLASSES and mito_genetic_codes.json carry the phylum names
+            # for exactly this case -- so use it rather than leaving 'unknown',
+            # which validateTaxonomy() (in subworkflows/local/prepare_samplesheet)
+            # aborts the run on. That abort is the safe outcome, not a wrong
+            # annotation; what the fallback buys is not having to stop the run to
+            # identify a sponge to class. It is still coarser than the rest of the
+            # sheet, so report_phylum_only() names these samples, and the row is
+            # marked 'taxdump-phylum' in taxonomy_resolution.tsv.
+            tax_class = lineage.get('class') or lineage['phylum']
         tax_family = tax_family or lineage.get('family', '')
         tax_order = tax_order or lineage.get('order', '')
-        # An NCBI scientific name is a better findMitoReference query than the raw
-        # nominal name, which is what the blank fallback would otherwise leave us.
-        reference_species_id = reference_species_id or lineage.get('matched_name', '')
+        if species_hit and match_level not in EXACT_SPECIES_LEVELS:
+            # The sample's own species beats the genus or family name a congener
+            # row vouches for, as a findMitoReference query.
+            reference_species_id = lineage['matched_name']
+        else:
+            # An NCBI scientific name is a better findMitoReference query than the
+            # raw nominal name, which is what the blank fallback would otherwise
+            # leave us.
+            reference_species_id = reference_species_id or lineage.get('matched_name', '')
 
     if tax_class == "unknown":
         source = 'unresolved'
@@ -513,15 +599,20 @@ def resolve_species_info(cursor, sample_id, resolver=None):
         source = 'db+taxdump'
     elif db_had_class:
         source = 'db'
+    elif lineage and not lineage.get('class') and lineage.get('phylum'):
+        # Flagged distinctly so the resolution report shows which samples are
+        # only identified to phylum, rather than burying it under 'taxdump'.
+        source = 'taxdump-phylum'
     else:
         source = 'taxdump'
 
     return (nominal_species_id, tax_class, tax_family, tax_order,
-            reference_species_id, source)
+            reference_species_id, source, lineage, match_level)
 
 
 RESOLUTION_COLUMNS = ('sample', 'nominal_species_id', 'class', 'family', 'order',
-                      'reference_species_id', 'source')
+                      'reference_species_id', 'source', 'match_level', 'invertebrates',
+                      'genetic_code')
 
 
 def write_resolution_report(path, rows):
@@ -539,7 +630,7 @@ def write_resolution_report(path, rows):
             writer.writerow([row.get(column, '') for column in RESOLUTION_COLUMNS])
 
 
-def report_unresolved(rows):
+def report_unresolved(rows, resolver=None):
     """Print the samples whose class never resolved. The run is aborted on these
     by prepare_samplesheet; the sheet is still written so the rows can be fixed."""
     unresolved = []
@@ -553,15 +644,155 @@ def report_unresolved(rows):
     print(f"\nWARNING: taxonomic class could not be resolved for "
           f"{len(unresolved)} sample(s):", file=sys.stderr)
     for row in unresolved:
-        print(f"  {row['sample']}\tnominal_species_id='{row['nominal_species_id']}'",
-              file=sys.stderr)
+        line = f"  {row['sample']}\tnominal_species_id='{row['nominal_species_id']}'"
+        # A one-character typo in a specimen label is silently catastrophic
+        # downstream (an unknown class reads as invertebrates=false, i.e. as a
+        # vertebrate), so offer the near miss rather than leaving the operator to
+        # find it by eye. 'Actinaria' -> 'Actiniaria' is the real example.
+        if resolver is not None:
+            try:
+                near = resolver.suggest_near_misses(row['nominal_species_id'])
+            except Exception:
+                near = []
+            if near:
+                line += "  -- did you mean: " + ", ".join(near) + "?"
+        print(line, file=sys.stderr)
     print("These rows are written to the samplesheet as 'unknown'. Fix the nominal "
-          "species name (or the species table), or edit the class/family/order "
+          "species name in the sample table, or edit the class/family/order "
           "columns by hand and re-run with --input.\n", file=sys.stderr)
 
 
-def is_invertebrate(tax_class):
-    return 'true' if tax_class in INVERT_CLASSES else 'false'
+def load_genetic_codes(path):
+    """Parse assets/taxonomy/mito_genetic_codes.json into (class -> code, class -> reason).
+
+    Shared with lib/InvertTaxonGroups.groovy, which prepare_samplesheet uses to
+    resolve the same codes: one asset rather than a Python copy and a Groovy copy
+    that drift. The contradiction checks mirror loadGeneticCodes() there, so a
+    malformed asset fails the same way whichever side reads it first.
+    """
+    if not path:
+        return {}, {}
+    with open(path) as handle:
+        payload = json.load(handle)
+
+    resolved = {}
+    for entry in payload.get('codes', []):
+        code = int(entry['code'])
+        for tax_class in entry.get('classes', []):
+            key = tax_class.strip().lower()
+            if key in resolved and resolved[key] != code:
+                raise ValueError(f"{path}: class '{key}' is mapped to both genetic "
+                                 f"code {resolved[key]} and {code}")
+            resolved[key] = code
+
+    ambiguous = {k.strip().lower(): str(v) for k, v in payload.get('ambiguous', {}).items()}
+    clash = sorted(set(resolved) & set(ambiguous))
+    if clash:
+        raise ValueError(f"{path}: class(es) {', '.join(clash)} are listed both with "
+                         f"a genetic code and as ambiguous")
+    return resolved, ambiguous
+
+
+def resolve_genetic_code(tax_class, genetic_codes, lineage=None):
+    """The samplesheet's genetic_code value, or '' if unresolved.
+
+    NCBI's own per-taxon assignment (nodes.dmp field 8, surfaced by
+    TaxdumpLineage as `mito_genetic_code`) wins when the taxdump resolved the
+    sample. It is what ENA and table2asn validate the submission against, and it
+    is finer-grained than any class-keyed table can be: Cephalodiscidae is code
+    33 while its parent class Pterobranchia is 5, so a map keyed on class cannot
+    hold both. assets/taxonomy/mito_genetic_codes.json is the fallback for a class that
+    came from master_species with no taxdump lineage behind it.
+
+    Blank means "let prepare_samplesheet decide": for a vertebrate that is the
+    --translation_table default, and for an invertebrate it is the abort that
+    stops a wrong translation table reaching annotation. Either way the row is
+    still written, so an unresolved sample can be fixed by hand in the CSV.
+    """
+    if lineage and lineage.get('mito_genetic_code'):
+        return str(lineage['mito_genetic_code'])
+    return str(genetic_codes.get((tax_class or '').strip().lower(), ''))
+
+
+def report_unresolved_genetic_code(rows, ambiguous):
+    """Print the invertebrate samples whose genetic code never resolved.
+
+    Mirrors report_unresolved() above: the run is aborted on these by
+    prepare_samplesheet, and the sheet is still written so the rows can be fixed
+    before launching rather than after a failed run.
+    """
+    unresolved = []
+    seen = set()
+    for row in rows:
+        if row['sample'] in seen:
+            continue
+        if row.get('invertebrates') != 'true' or row.get('genetic_code'):
+            continue
+        seen.add(row['sample'])
+        unresolved.append(row)
+    if not unresolved:
+        return
+    print(f"\nWARNING: mitochondrial genetic code could not be resolved for "
+          f"{len(unresolved)} invertebrate sample(s):", file=sys.stderr)
+    for row in unresolved:
+        tax_class = row.get('class') or 'unknown'
+        reason = ambiguous.get(tax_class.strip().lower())
+        detail = f" -- {reason}" if reason else ""
+        print(f"  {row['sample']}\tclass='{tax_class}'{detail}", file=sys.stderr)
+    print("The run will abort on these. Fill in the genetic_code column for each "
+          "row and re-run with --input, or add the class to "
+          "assets/taxonomy/mito_genetic_codes.json once its code is confirmed.\n",
+          file=sys.stderr)
+
+
+def report_phylum_only(rows):
+    """Print the samples whose `class` is really their phylum.
+
+    resolve_species_info() falls back to the phylum when a name pins no class
+    ('Porifera'), because a phylum still selects the genetic code, the annotation
+    route and the cox1 panel, and is better than 'unknown' -- which reads as
+    vertebrate everywhere downstream. It is still coarser than the rest of the
+    sheet, and silently putting a phylum in a column called `class` would be a
+    trap for anyone reading the samplesheet later, so say so.
+    """
+    flagged = []
+    seen = set()
+    for row in rows:
+        if row.get('source') != 'taxdump-phylum' or row['sample'] in seen:
+            continue
+        seen.add(row['sample'])
+        flagged.append(row)
+    if not flagged:
+        return
+    print(f"\nNOTE: {len(flagged)} sample(s) are identified only to phylum, so the "
+          f"`class` column holds a phylum name:", file=sys.stderr)
+    for row in flagged:
+        print(f"  {row['sample']}\tnominal_species_id='{row['nominal_species_id']}'"
+              f"\tclass='{row['class']}'\tgenetic_code={row.get('genetic_code') or '-'}",
+              file=sys.stderr)
+    print("This is enough for the genetic code and the annotation route. Identify the "
+          "sample to a class (or edit the class column) if you want family/order-level "
+          "reference selection as well.\n", file=sys.stderr)
+
+
+def is_invertebrate(tax_class, lineage=None):
+    """'true' / 'false', preferring NCBI ancestry over the INVERT_CLASSES list.
+
+    The list is a hand-maintained allow-list, and anything missing from it reads
+    as a vertebrate: the wrong genetic code, EMMA instead of MITOS2, and the
+    curated fish BLAST database, with nothing raised to notice. That is not a
+    hypothetical -- barnacles resolve to class Thecostraca, which was absent, and
+    a taxdump sweep put 41 of NCBI's 92 invertebrate classes outside the list.
+
+    So when the taxdump resolved the sample, ancestry decides: an animal that is
+    not a vertebrate is an invertebrate, whatever its class is called and whether
+    or not anyone has added that class here. INVERT_CLASSES remains the fallback
+    for a class that came from master_species with no taxdump lineage behind
+    it.
+    """
+    if lineage and lineage.get('is_animal') is not None:
+        return 'true' if (lineage['is_animal'] and not lineage['is_vertebrate']) else 'false'
+    return 'true' if tax_class in INVERT_CLASSES else 'false' 
 
 
 def parse_args():
@@ -571,7 +802,10 @@ def parse_args():
     parser.add_argument("--input-files", nargs="*", default=None, help="Optional explicit list of input files.")
     parser.add_argument("--taxdump-dir", required=False, default=None,
                         help="Optional NCBI taxdump directory (nodes.dmp/names.dmp). Used to "
-                             "resolve class/family/order when the species table has no match.")
+                             "resolve class/family/order when master_species has no exact match.")
+    parser.add_argument("--genetic-codes", required=False, default=None,
+                        help="Path to assets/taxonomy/mito_genetic_codes.json. Used to fill the "
+                             "samplesheet's genetic_code column from the resolved class.")
     parser.add_argument("--resolution-report", required=False, default=None,
                         help="Where to write the per-sample taxonomy provenance table "
                              "(default: taxonomy_resolution.tsv next to --output).")
@@ -645,6 +879,12 @@ def main():
         except Exception as exc:
             print(f"Error connecting to database: {exc}", file=sys.stderr)
 
+    genetic_codes, ambiguous_codes = load_genetic_codes(args.genetic_codes)
+    if not genetic_codes:
+        print("Warning: no --genetic-codes map given; the genetic_code column will be "
+              "left blank and every invertebrate row will abort in prepare_samplesheet",
+              file=sys.stderr)
+
     resolver = None
     if args.taxdump_dir:
         candidate = TaxdumpLineage(args.taxdump_dir)
@@ -695,9 +935,11 @@ def main():
                 assembly_prefix = f"{cleaned_id}.{sequencing_type}.{date}"
 
             (nominal_species_id, tax_class, tax_family, tax_order,
-             reference_species_id, tax_source) = resolve_species_info(
+             reference_species_id, tax_source, tax_lineage,
+             tax_match_level) = resolve_species_info(
                 cursor, cleaned_id, resolver)
-            invertebrates = is_invertebrate(tax_class)
+            invertebrates = is_invertebrate(tax_class, tax_lineage)
+            genetic_code = resolve_genetic_code(tax_class, genetic_codes, tax_lineage)
             resolution_rows.append({
                 'sample': cleaned_id,
                 'nominal_species_id': nominal_species_id,
@@ -706,6 +948,9 @@ def main():
                 'order': tax_order,
                 'reference_species_id': reference_species_id,
                 'source': tax_source,
+                'match_level': tax_match_level,
+                'invertebrates': invertebrates,
+                'genetic_code': genetic_code,
             })
 
             def write_row(r1, r2, single_end,
@@ -732,9 +977,13 @@ def main():
                     tax_family,
                     tax_order,
                     invertebrates,
-                    # Explicit genetic_code is not stored in the sample table;
-                    # leave blank so prepare_samplesheet derives it from class.
-                    '',
+                    # Resolved from the class via assets/taxonomy/mito_genetic_codes.json,
+                    # the same map prepare_samplesheet uses, so the sheet shows
+                    # which table each sample will be annotated under and can be
+                    # corrected before the run. Blank means unresolved: the
+                    # vertebrate default for a vertebrate, an abort for an
+                    # invertebrate (reported by report_unresolved_genetic_code).
+                    genetic_code,
                     r1,
                     r2
                 ])
@@ -782,7 +1031,9 @@ def main():
         conn.close()
 
     write_resolution_report(args.resolution_report, resolution_rows)
-    report_unresolved(resolution_rows)
+    report_unresolved(resolution_rows, resolver)
+    report_unresolved_genetic_code(resolution_rows, ambiguous_codes)
+    report_phylum_only(resolution_rows)
 
     return 0
 

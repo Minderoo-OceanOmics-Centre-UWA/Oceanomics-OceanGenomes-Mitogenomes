@@ -49,8 +49,8 @@ def main() -> int:
                 for og_id in og_ids:
                     numeric = int(og_id[2:])
                     if numeric > 999999:
-                        # Matches the ena_specimen_og_numeric_check constraint in
-                        # sql/004_ena_candidate_packages.sql, so an over-wide OG
+                        # Matches the ena_specimen_og_numeric_check constraint
+                        # (database migration 004), so an over-wide OG
                         # fails here with a name rather than as a check violation.
                         raise ValueError(
                             f"{og_id} exceeds the six-digit og_numeric range"

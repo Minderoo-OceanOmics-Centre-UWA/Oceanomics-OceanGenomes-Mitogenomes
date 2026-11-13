@@ -92,7 +92,7 @@
                     "@id": ".prettierignore"
                 }
             ],
-            "isBasedOn": "https://github.com/nf-core/oceangenomesmitogenomes",
+            "isBasedOn": "https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes",
             "license": "MIT",
             "mainEntity": {
                 "@id": "main.nf"
@@ -102,7 +102,7 @@
                     "@id": "#793c2ba2-16ba-4b12-a3a8-c5b1785cee22"
                 }
             ],
-            "name": "nf-core/oceangenomesmitogenomes"
+            "name": "Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes"
         },
         {
             "@id": "ro-crate-metadata.json",
@@ -137,7 +137,7 @@
                 "MIT"
             ],
             "name": [
-                "nf-core/oceangenomesmitogenomes"
+                "Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes"
             ],
             "programmingLanguage": {
                 "@id": "https://w3id.org/workflowhub/workflow-ro-crate#nextflow"
@@ -146,8 +146,8 @@
                 "@id": "https://nf-co.re/"
             },
             "url": [
-                "https://github.com/nf-core/oceangenomesmitogenomes",
-                "https://nf-co.re/oceangenomesmitogenomes/dev/"
+                "https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes",
+                "https://github.com/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes"
             ],
             "version": [
                 "2.0.0"
@@ -176,13 +176,13 @@
             "mainEntity": {
                 "@id": "main.nf"
             },
-            "name": "Test suite for nf-core/oceangenomesmitogenomes"
+            "name": "Test suite for OceanOmics OceanGenomes Mitogenomes"
         },
         {
             "@id": "#ec495012-7963-4852-802d-4f14e749e612",
             "@type": "TestInstance",
-            "name": "GitHub Actions workflow for testing nf-core/oceangenomesmitogenomes",
-            "resource": "repos/nf-core/oceangenomesmitogenomes/actions/workflows/nf-test.yml",
+            "name": "GitHub Actions workflow for testing OceanOmics OceanGenomes Mitogenomes",
+            "resource": "repos/Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes/actions/workflows/nf-test.yml",
             "runsOn": {
                 "@id": "https://w3id.org/ro/terms/test#GithubService"
             },

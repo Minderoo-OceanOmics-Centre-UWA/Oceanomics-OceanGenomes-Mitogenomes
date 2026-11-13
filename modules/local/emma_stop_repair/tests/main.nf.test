@@ -1,0 +1,62 @@
+nextflow_process {
+
+    name "Test Process EMMA_STOP_REPAIR"
+    script "../main.nf"
+    process "EMMA_STOP_REPAIR"
+
+    tag "modules"
+    tag "modules_local"
+    tag "emma_stop_repair"
+
+    // Fixture: a synthetic EMMA bundle (generated with the Bundle helper in
+    // tests/unit/test_emma_stop_repair.py). MT-CO1 ends "...GCA AAA" with an
+    // encoded TAA right after it -- the NOVA_260925_LA signature. MT-CO2 ends in
+    // a genuine poly-A T whose completing "AA" is the start of MT-TK, and must
+    // be left alone.
+    test("extends the short CO1 and leaves the genuine poly-A CO2") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', mt_assembly_prefix:'SYN.ilmn.000000.getorg1770', genetic_code: 2 ],
+                    file("${projectDir}/modules/local/emma_stop_repair/tests/data/co1_short/annotation", checkIfExists: true).listFiles().toList()
+                ])
+                """
+            }
+        }
+        then {
+            def gff = process.out.results[0][1].find { it.endsWith('.gff') }
+            def tbl = process.out.results[0][1].find { it.endsWith('.tbl') }
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.startsWith("REPAIRED\tCO1\tstop_extended(+3,TAA)") },
+                { assert path(gff).text.contains("Emma\tCDS\t3\t104\t") },
+                { assert path(gff).text.count("completed by the addition") == 1 },
+                { assert path(tbl).text.contains("3\t104\tCDS") },
+                { assert path(process.out.co1_sequences[0][1]).text.contains("GCAAAA") },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("stub") {
+        options "-stub"
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'SYN.ilmn.000000.getorg1770', genetic_code: 2 ],
+                    file("${projectDir}/modules/local/emma_stop_repair/tests/data/co1_short/annotation", checkIfExists: true).listFiles().toList()
+                ])
+                """
+            }
+        }
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.startsWith("NONE") },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+}

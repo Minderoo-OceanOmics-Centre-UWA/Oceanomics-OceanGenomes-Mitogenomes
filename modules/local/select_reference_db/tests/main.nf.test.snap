@@ -1,0 +1,103 @@
+{
+    "reference mode picks the best-matching record and rebuilds its features": {
+        "content": [
+            [
+                "versions.yml:md5,908189f2d0abbedabc93b1ba0481b725"
+            ]
+        ],
+        "timestamp": "2026-09-09T12:53:44.712613894",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    },
+    "stub": {
+        "content": [
+            {
+                "0": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference.gb:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "1": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.seed.fasta:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "2": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.genedb.fasta:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "3": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference_select.txt:md5,5b3d0851f3b6e8655463081a621644cc"
+                    ]
+                ],
+                "4": [
+                    "versions.yml:md5,244dae6acd2a481c08e303a121fc0d18"
+                ],
+                "label_fasta": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.genedb.fasta:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "reference": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference.gb:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "seed_fasta": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.seed.fasta:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "status": [
+                    [
+                        {
+                            "id": "test_stub",
+                            "mt_assembly_prefix": "test_stub"
+                        },
+                        "test_stub.reference_select.txt:md5,5b3d0851f3b6e8655463081a621644cc"
+                    ]
+                ],
+                "versions": [
+                    "versions.yml:md5,244dae6acd2a481c08e303a121fc0d18"
+                ]
+            }
+        ],
+        "timestamp": "2026-09-09T13:20:01.252557697",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

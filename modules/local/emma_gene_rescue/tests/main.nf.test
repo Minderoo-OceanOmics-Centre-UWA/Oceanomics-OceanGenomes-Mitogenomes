@@ -19,7 +19,7 @@ nextflow_process {
                     [ id:'test', mt_assembly_prefix:'synthfish.test.1.emma102', genetic_code: 2 ],
                     file("${projectDir}/modules/local/emma_gene_rescue/tests/data/nd4l_missing/annotation", checkIfExists: true).listFiles().toList(),
                     'ND4L',
-                    file("${projectDir}/assets/rescue_pcg_refs.faa", checkIfExists: true)
+                    file("${projectDir}/assets/panels/rescue_pcg_refs.faa", checkIfExists: true)
                 ])
                 """
             }
@@ -49,7 +49,7 @@ nextflow_process {
                     [ id:'test_stub', mt_assembly_prefix:'synthfish.test.1.emma102' ],
                     file("${projectDir}/modules/local/emma_gene_rescue/tests/data/nd4l_missing/annotation", checkIfExists: true).listFiles().toList(),
                     'ND4L',
-                    file("${projectDir}/assets/rescue_pcg_refs.faa", checkIfExists: true)
+                    file("${projectDir}/assets/panels/rescue_pcg_refs.faa", checkIfExists: true)
                 ])
                 """
             }

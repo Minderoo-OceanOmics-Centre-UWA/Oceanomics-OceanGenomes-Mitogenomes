@@ -1,5 +1,5 @@
 process GEN_FILES_TABLE2ASN {
-    container 'docker://staphb/ncbi-table2asn:latest'
+    container 'docker://staphb/ncbi-table2asn:1.29.324'
 
     tag "$meta.id"
     label 'process_medium'

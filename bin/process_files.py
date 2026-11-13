@@ -7,8 +7,11 @@ from pathlib import Path
 # One source of truth for the per-code mitochondrial start/stop codon sets. bin/
 # is bind-mounted onto PATH by Nextflow, so this sibling import resolves via
 # sys.path[0] (same pattern as build_source_modifiers.py -> geo_loc_name_utils).
-from orf_utils import start_codons as _orf_start_codons
+from orf_utils import ncbi_start_codons as _orf_start_codons
 from orf_utils import stop_codons as _orf_stop_codons
+from orf_utils import PLAUSIBLE_MITO_STARTS, lineage_alt_starts
+from gene_names import submission_gene_name, bare_gene_name
+from species_name_utils import to_submittable_organism
 
 def parse_args():
     p = argparse.ArgumentParser(description="Process mitogenome files for GenBank submission.")
@@ -17,6 +20,10 @@ def parse_args():
     # directory in / out
     p.add_argument("--input-dir", required=True, help="Directory containing .fa/.fasta, .gff, and .gb/.tbl files")
     p.add_argument("--outdir", default="processed", help="Output directory (default: processed)")
+    p.add_argument("--lineage", default=None,
+                   help="Taxonomic class or phylum (e.g. Malacostraca). Only widens the "
+                        "accepted initiation codons via orf_utils.LINEAGE_ALT_STARTS, so "
+                        "omitting it can make a CDS fail validation but never pass wrongly.")
     p.add_argument("--genetic-code", type=int, default=2,
                    help="NCBI mitochondrial translation table (mgcode). Per-sample value "
                         "from meta.genetic_code: 2=vertebrate, 4=coelenterate/coral, "
@@ -145,18 +152,15 @@ def mito_stop_codons(genetic_code: int):
     return _orf_stop_codons(genetic_code)
 
 def mito_start_codons(genetic_code: int):
+    # NCBI's own initiator set, not orf_utils' data-widened one: a codon outside
+    # it needs a transl_except whatever QC thinks of it (code 9 ATT/ATC).
     return _orf_start_codons(genetic_code)
 
-# Union of the initiation codons across every mitochondrial translation table,
-# read out of the EMBOSS EGC.* data files (tables 2, 3, 4, 5, 9, 13, 14, 21;
-# the later 24 and 33 add TTG/CTG/ATG/GTG, all already here).  A CDS starting on
-# one of these is initiating on a codon that is a documented start *somewhere*
-# in mitochondrial biology, so an alternative-initiation transl_except is a fair
-# reading even when the sample's own table does not list it.  A start outside
-# this set is far more likely a mis-called CDS boundary or a base-calling error
-# than a real alternative start, so those are left to fail table2asn validation
-# and get looked at by hand rather than being silently declared as Met.
-PLAUSIBLE_MITO_STARTS = ("TTA", "TTG", "CTG", "ATT", "ATC", "ATA", "ATG", "GTG")
+# PLAUSIBLE_MITO_STARTS and lineage_alt_starts() are imported from orf_utils above.
+# They used to be defined here, which let the QC layer (orf_utils.START_CODONS_BY_CODE)
+# and this submission layer disagree about what counts as a valid initiator -- and
+# they did: QC rejected code-9 ATT/ATC starts this file was already declaring
+# correctly with a transl_except. One definition now, read by both.
 # Substring of EMMA's note ("...TAA stop codon is completed by the addition of
 # 3' A residues to the mRNA") that survives the 'putative ' strip. Its presence
 # marks a CDS whose stop is completed post-transcriptionally by polyadenylation.
@@ -307,7 +311,21 @@ def sort_tbl_features(lines):
     blocks.sort(key=lambda block: min(_tbl_interval(block[0])))
     return preamble + [line for block in blocks for line in block]
 
-def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_code=2):
+
+# Stripping 'MT-' is not on its own enough to produce a submittable gene name: the
+# internal keys are uppercase so they can index features/columns/filenames, but
+# INSDC spells some non-vertebrate genes in mixed case (MTMUTS -> mtMutS). Apply
+# the strip and the case restoration together, everywhere, so the two can never
+# drift apart. See bin/gene_names.py.
+_MT_PREFIXED = re.compile(r'MT-([A-Za-z0-9_]+)')
+
+
+def strip_mt_prefix(text: str) -> str:
+    """Replace every MT-<GENE> in `text` with its INSDC /gene spelling."""
+    return _MT_PREFIXED.sub(lambda m: submission_gene_name(m.group(1)), text)
+
+def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_code=2,
+                        lineage=None):
     log(f"📝 Processing TBL/GB file: {input_file}")
     stops = mito_stop_codons(genetic_code)
     starts = mito_start_codons(genetic_code)
@@ -315,7 +333,7 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
     def clean(line: str) -> str:
         if line.startswith('>Feature'):
             return f">Feature {assembly}"
-        return line.replace('MT-', '').replace('putative ', '')
+        return strip_mt_prefix(line).replace('putative ', '')
 
     with open(input_file) as f_in:
         lines = f_in.read().splitlines()
@@ -367,7 +385,13 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
                                                         int(ic[1].lstrip('<>')), seq, starts)
                 if found:
                     pos, codon = found
-                    if codon in PLAUSIBLE_MITO_STARTS:
+                    # A documented lineage exception (decapod CO1 on CGA, say)
+                    # is as real an initiation as a table-listed one, and is
+                    # declared the same INSDC way. Without this the arthropod CO1
+                    # of half this batch's decapods fails table2asn by hand.
+                    gene_here = bare_gene_name(qual)
+                    if (codon in PLAUSIBLE_MITO_STARTS
+                            or codon in lineage_alt_starts(lineage, gene_here)):
                         out.append(f"\t\t\ttransl_except\t(pos:{pos},aa:Met)")
                         added_start += 1
                         if not has_start_note:
@@ -378,12 +402,22 @@ def process_tbl_gb_file(input_file, output_file, assembly, seq=None, genetic_cod
                         log(f"⚠️  {product_of(qual)} starts on {codon}, which no "
                             f"mitochondrial code lists as an initiator -- leaving it "
                             f"for table2asn to flag rather than declaring aa:Met")
-            if seq is not None and has_note and not has_te and not extra_intervals:
+            # Like the start, the sequence decides, not EMMA's polyA note: MITOS
+            # tables (mitos_to_emma.py) never carry that note, so gating on it left
+            # every T/TA-truncated stop on the invert path undeclared and failing
+            # table2asn with SEQ_FEAT.NoStop (NOVA_260909_LA OG3090 CO2).
+            # compute_transl_except_pos only answers when the leftover 1-2 nt are
+            # a stop prefix, so a frameshifted end is still left to fail.
+            partial_end = ic[1].startswith('>')
+            if seq is not None and not has_te and not partial_end and not extra_intervals:
                 pos = compute_transl_except_pos(int(ic[0].lstrip('<>')),
                                                 int(ic[1].lstrip('<>')), seq, stops)
                 if pos:
                     out.append(f"\t\t\ttransl_except\t(pos:{pos},aa:TERM)")
                     added += 1
+                    if not has_note:
+                        out.append(f"\t\t\tnote\tTAA stop codon is completed by the "
+                                   f"addition of {POLYA_NOTE_MARK} to the mRNA")
             for q in qual:
                 # EMMA's protein_id is an internal placeholder UUID
                 # (gnl|Emma|<uuid>), not a real INSDC accession. ENA/GenBank
@@ -465,7 +499,7 @@ def process_gff_file(input_file, output_file, assembly):
 
         processed_line = '\t'.join(fields)
         processed_line = re.sub(r'(?i)\bputative\b[\s;,:]*', '', processed_line)
-        processed_line = processed_line.replace('MT-', '')
+        processed_line = strip_mt_prefix(processed_line)
         new_lines.append(processed_line + '\n')
 
     new_lines = sort_gff_records(new_lines)
@@ -473,7 +507,7 @@ def process_gff_file(input_file, output_file, assembly):
     with open(output_file, 'w') as f:
         for line in new_lines:
             clean = re.sub(r'(?i)\bputative\b[\s;,:]*', '', line)
-            clean = clean.replace('MT-', '')
+            clean = strip_mt_prefix(clean)
             f.write(clean)
     log(f"✅ Processed GFF: {output_file}")
 
@@ -493,7 +527,12 @@ def write_meta_directives(output_gff, species, og_id):
 def main():
     args = parse_args()
     OG_ID = args.og_id
-    SPECIES = args.species
+    # ENA takes /organism= verbatim and rejects a bare rank name above genus:
+    # 'Organism is not Submittable: "Exocoetidae"'. Normalise once, here, so the FASTA
+    # defline and the GFF ##organism directive cannot disagree with each other.
+    SPECIES = to_submittable_organism(args.species)
+    if SPECIES != args.species:
+        log(f"ℹ️  organism {args.species!r} is not submittable at its rank; using {SPECIES!r}")
 
 
     outdir = Path(args.outdir)
@@ -527,7 +566,8 @@ def main():
     # qualifiers (clears table2asn SEQ_FEAT.NoStop). Header rewriting does not touch
     # the bases, so coordinates match either the input or output FASTA.
     seq = read_fasta_sequence(fasta_in)
-    process_tbl_gb_file(gb_in, gb_out, ASSEMBLY, seq=seq, genetic_code=GENETIC_CODE)
+    process_tbl_gb_file(gb_in, gb_out, ASSEMBLY, seq=seq, genetic_code=GENETIC_CODE,
+                        lineage=args.lineage)
 
     log("🏁 File processing complete.")
 

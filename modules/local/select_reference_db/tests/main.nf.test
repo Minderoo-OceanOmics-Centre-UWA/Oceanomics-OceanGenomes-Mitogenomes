@@ -1,0 +1,146 @@
+nextflow_process {
+
+    name "Test Process SELECT_REFERENCE_DB"
+    script "../main.nf"
+    process "SELECT_REFERENCE_DB"
+
+    tag "modules"
+    tag "modules_local"
+    tag "select_reference_db"
+
+    // data/minidb/ is a 3-record slice of assets/refdb/anthozoa in the tracked
+    // artifact layout (fasta + label.fasta + manifest.tsv + features.tsv), and
+    // query.fa is a re-origined 3 kb slice of NC_083272.1. So the selector must
+    // pick that record label-free. NC_083272.1 carries a 2-exon nad5, which is
+    // what makes this fixture exercise the features.tsv exon round-trip and not
+    // just the sequence match.
+
+    test("reference mode picks the best-matching record and rebuilds its features") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test', mt_assembly_prefix:'test' ],
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/query.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/minidb", checkIfExists: true),
+                    'minidb'
+                ])
+                input[1] = 'reference'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert process.out.status[0][1] ==~ ".*/test.reference_select.txt" },
+                { assert path(process.out.status[0][1]).text.startsWith("SELECTED") },
+                { assert process.out.reference[0][1] ==~ ".*/test.reference.gb" },
+                // the record the query was sliced from, rebuilt from the tracked artifacts
+                { assert path(process.out.reference[0][1]).text.contains("NC_083272") },
+                { assert path(process.out.reference[0][1]).text.contains("Acropora cervicornis") },
+                // features survived the fasta+features.tsv round trip, exons included
+                { assert path(process.out.reference[0][1]).text.contains("join(") },
+                { assert path(process.out.reference[0][1]).text =~ /\n     CDS / },
+                // seed-mode outputs are not produced in reference mode
+                { assert process.out.seed_fasta.size() == 0 },
+                { assert process.out.label_fasta.size() == 0 },
+                { assert snapshot(process.out.versions).match() }
+            )
+        }
+    }
+
+    test("seed mode emits the top-n records and only their label sequences") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_seed', mt_assembly_prefix:'test_seed' ],
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/query.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/minidb", checkIfExists: true),
+                    'minidb'
+                ])
+                input[1] = 'seed'
+                """
+            }
+        }
+
+        then {
+            def seed  = path(process.out.seed_fasta[0][1]).text
+            def genes = path(process.out.label_fasta[0][1]).text
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.startsWith("SELECTED_SEED") },
+                // Only 2 of the 3 fixture records align to the query, so the seed is
+                // those 2 even though --top-n defaults to 5. That is the point of the
+                // stage: the seed is what the sample's own reads support, not the DB.
+                { assert seed.count(">") == 2 },
+                { assert seed.contains("NC_083272") },
+                { assert !seed.contains("NC_086801") },
+                // the label subset is exactly the chosen records' genes: the record
+                // that did not align contributes nothing, which is the dilution the
+                // whole-database seed used to carry.
+                { assert genes.count(">") > 0 },
+                { assert !genes.contains("NC_086801") },
+                { assert genes.readLines().findAll { it.startsWith(">") }
+                              .every { it.contains("NC_083272") || it.contains("NC_088089") } },
+                // seed mode ALSO emits the single best record: the reseed needs the
+                // top-n as its seed and that one as the reference the QC checks grade
+                // against, and one ranking answers both.
+                { assert process.out.reference.size() == 1 },
+                { assert path(process.out.reference[0][1]).text.contains("NC_083272") }
+            )
+        }
+    }
+
+    test("an assembly nothing aligns to reports NONE and still exits 0") {
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_none', mt_assembly_prefix:'test_none' ],
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/no_match.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/minidb", checkIfExists: true),
+                    'minidb'
+                ])
+                input[1] = 'seed'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert path(process.out.status[0][1]).text.startsWith("NONE") },
+                { assert process.out.seed_fasta.size() == 0 },
+                { assert process.out.reference.size() == 0 }
+            )
+        }
+    }
+
+    test("stub") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_stub', mt_assembly_prefix:'test_stub' ],
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/query.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/minidb", checkIfExists: true),
+                    'minidb'
+                ])
+                input[1] = 'seed'
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success },
+                { assert snapshot(process.out).match() }
+            )
+        }
+    }
+}

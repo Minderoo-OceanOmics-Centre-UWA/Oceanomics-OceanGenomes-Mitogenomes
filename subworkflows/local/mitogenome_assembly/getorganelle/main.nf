@@ -18,6 +18,8 @@ include { RELABEL_REFERENCE_GB      } from '../../../../modules/local/relabel_re
 include { REFERENCE_DIVERGENCE      } from '../../../../modules/local/reference_divergence'
 include { REFERENCE_CANDIDATES      } from '../../../../modules/local/reference_candidates'
 include { REFERENCE_RANK            } from '../../../../modules/local/reference_rank'
+include { SELECT_REFERENCE_DB       } from '../../../../modules/local/select_reference_db'
+include { SELECT_FALLBACK_SEED      } from '../../../../modules/local/select_fallback_seed'
 include { GETORGANELLE_JOIN         } from '../../../../modules/local/getorganelle/join'
 include { GETORGANELLE_CHECK        } from '../../../../modules/local/getorganelle/check'
 
@@ -133,6 +135,44 @@ def genedbReady(statusFile) {
     }
 }
 
+// Did SELECT_REFERENCE_DB find records this sample's assembly actually aligns to?
+// Its status line starts SELECTED_SEED on success and NONE when nothing aligned (or
+// the first pass was empty, which needsReseed also treats as reseed-worthy). Read as
+// a per-sample value so the reseed fallback stays a plain join, like genedbReady.
+def seedSubsetSelected(statusFile) {
+    try {
+        def line = statusFile.text.readLines().find { it?.trim() }
+        return line?.split('\t', -1)?.first()?.trim()?.toUpperCase() == 'SELECTED_SEED'
+    } catch (ignored) {
+        return false
+    }
+}
+
+def logSaysCircular(logFile) {
+    try {
+        return (logFile.text =~ /Result status of .*: circular genome/) as boolean
+    } catch (ignored) {
+        return false
+    }
+}
+
+// Is the reseed actually better than the first pass it would replace?
+//
+// This used to be `rs_fasta.size() > 0` under a comment claiming it picked "the
+// better of" the two, so ANY non-empty reseed displaced the first pass -- which is
+// how INV04_BOLOCERA published a 12-scaffold reseed over a 2-scaffold first pass.
+//
+// The rules themselves now live in lib/AssemblySelection.groovy, because the
+// precomputed ("skip assembly") path has to make the same decision and a second
+// copy of them would drift. See that file for the ordered rule list. This function
+// stays as the reseed-vs-first-pass entry point: it supplies the live path's
+// circularity source (the GetOrganelle log) and the measured extents.
+def preferReseed(rs_fasta, rs_log, fp_fasta, fp_log, tolerance, minCircularBp) {
+    def candidate = AssemblySelection.measure(rs_fasta, logSaysCircular(rs_log), null, minCircularBp as int)
+    def incumbent = AssemblySelection.measure(fp_fasta, logSaysCircular(fp_log), null, minCircularBp as int)
+    return AssemblySelection.prefer(candidate, incumbent, tolerance as double)
+}
+
 // Is this divergence tier worth re-selecting a reference for? CONGENERIC already has
 // the best obtainable reference and UNKNOWN carries no evidence the reference is
 // poor. CROSS_ORDER is not special-cased here: GetOrganelle seeds from the reference
@@ -160,6 +200,25 @@ def needsReseed(fasta, logFile) {
     // A circular genome is the success case; any non-circular result reseeds.
     if (txt =~ /Result status of .*: circular genome/) return false
     return true
+}
+
+// Did the first pass produce no contig at all?
+//
+// Named and hoisted out of the branch that uses it so it can be tested directly,
+// like preferReseed() and needsReseed() above. It is not the same question as
+// needsReseed(): that one is "could a reseed help?" (true for a fragmented or
+// non-circular result too), this one is "is there anything here to select a seed
+// FROM?". Only the second decides between the top-n subset and the whole-group
+// rescue, because an empty assembly cannot be BLASTed against its group database.
+//
+// Unreadable is treated as empty: an assembly we cannot read is one we cannot
+// select a subset from either, so the coarse path is the right answer.
+def firstPassEmpty(fasta) {
+    try {
+        return (fasta == null) || fasta.size() == 0
+    } catch (ignored) {
+        return true
+    }
 }
 
 /*
@@ -200,7 +259,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     ch_reference_placeholders = Channel.empty()
     // The empty placeholder reference. Hoisted here (from the check-join site) so both
     // reseed branches AND the reseed-skipped else-branch can mix it in.
-    def no_reference_gb = file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
+    def no_reference_gb = file("${projectDir}/assets/placeholders/NO_REFERENCE.gb", checkIfExists: true)
 
      
     //
@@ -311,14 +370,49 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     //
 
     ch_db = GETORGANELLE_CONFIG.out.db.first()
-    combined_input = fastp_with_mt_assembly_prefix.combine(ch_db)
+
+    // First-pass LABELLING: hand GetOrganelle the sample's curated group gene database
+    // (--genes) alongside the stock animal_mt seed (-F). The seed is what recruits the
+    // reads and is deliberately unchanged; --genes is what labels the assembly graph
+    // during slimming, and slimming is the step that failed. INV10_CHITON and
+    // INV12_ANOMURA both recruited reads and built a graph, then logged
+    //   "Slimming ... finished with no target organelle contigs found!"
+    //   "No sequence hit our LabelDatabase!"
+    // and published a zero-byte assembly, despite the curated databases holding 20
+    // Polyplacophora (6 of them Chitonidae) and 20 Anomura across 9 families. The stock
+    // animal_mt LabelDatabase simply cannot label a divergent invertebrate contig.
+    //
+    // The group comes from InvertTaxonGroups.seedDbGroup(meta.class) ALONE, with no
+    // assembly involved, which is the whole reason it is available on the first pass at
+    // all -- unlike the reseed's seed, which is chosen by BLASTing the first-pass
+    // assembly and so cannot exist when that assembly is empty (see PHASE 3).
+    //
+    // A class with no curated database (seedDbGroup -> null) and every vertebrate pass
+    // [], the nf-core optional-path idiom: no --genes flag is emitted and the command
+    // line is byte-identical to today. Same no-catch-all rule as the reseed -- a mollusc
+    // must never be labelled from the anthozoan database.
+    combined_input = fastp_with_mt_assembly_prefix
+        .combine(ch_db)
+        .map { meta, reads, org_type, db ->
+            def group = (params.getorganelle_firstpass_group_genes && meta.invertebrates)
+                ? InvertTaxonGroups.seedDbGroup(meta.class)
+                : null
+            def genes = group
+                ? file("${projectDir}/assets/refdb/${group}/${group}_mito_refdb.label.fasta", checkIfExists: true)
+                : []
+            if (group) {
+                log.info "GETORGANELLE_FROMREADS: ${meta.id} (class ${meta.class}) labelling with assets/refdb/${group}"
+            }
+            [ meta, reads, org_type, db, genes ]
+        }
 
     //
-    // MODULE: Run assembly using GetOrganelle from reads (first pass, generic seed)
+    // MODULE: Run assembly using GetOrganelle from reads (first pass, generic seed,
+    //         group-specific gene labels for invertebrates)
     //
 
     GETORGANELLE_FROMREADS (
-        combined_input // tuple val(meta), path(fastp), val(organelle_type), path(db)
+        combined_input // tuple val(meta), path(fastp), val(organelle_type), path(db), path(genes)
     )
 
     //
@@ -340,11 +434,11 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             keep:   !needsReseed(fasta, log)
         }
 
-        // Split reseed candidates by taxon. INVERTEBRATES (corals) seed from the
-        // curated coral mitogenome DB -- a broad, label-free Anthozoa seed + label
-        // database, so a wrong/coarse species label can no longer pick a wrong seed.
-        // VERTEBRATES keep the per-sample findMitoReference download. The coral DB is
-        // NEVER used for vertebrates.
+        // Split reseed candidates by taxon. INVERTEBRATES seed from the curated
+        // per-phylum mitogenome DB for their class (assets/refdb/<group>/) -- a broad,
+        // label-free seed + label database, so a wrong/coarse species label can no
+        // longer pick a wrong seed. VERTEBRATES keep the per-sample findMitoReference
+        // download. The invert DBs are NEVER used for vertebrates.
         ch_reseed_branched = ch_assessed.reseed.branch { meta, _fasta, _log, _reads ->
             invert: meta.invertebrates
             vert:   true
@@ -431,15 +525,104 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
 
         // Relabel the reference GenBank to a per-sample name for the assembly summary.
         RELABEL_REFERENCE_GB ( ch_vert_ref_gb )
-        // Per-sample reference GenBank (vertebrates only). Coral annotation now picks
-        // its reference from the DB by sequence, so corals need none here.
+        // --- Invertebrate reseed path: the curated DB for the sample's phylum. ---
+        // InvertTaxonGroups.seedDbGroup() resolves the class to a group directory under
+        // assets/refdb/, or to null when no curated database covers that class. A null
+        // is NOT backfilled with some other phylum's database: every invertebrate used
+        // to be reseeded from the Anthozoa DB, so a mollusc or a sea star was re-run
+        // against a seed far too divergent to assemble from, failing a second time after
+        // burning the full GetOrganelle walltime. An unmapped class is simply not
+        // reseeded and keeps its first-pass assembly (via ch_reseed_readiness below).
+        ch_invert_group = ch_reseed_branched.invert
+            .map { meta, _fasta, _log, _reads ->
+                def group = InvertTaxonGroups.seedDbGroup(meta.class)
+                if (group) {
+                    log.info "GETORGANELLE_RESEED: ${meta.id} (class ${meta.class}) seeding from assets/refdb/${group}"
+                } else {
+                    log.warn "GETORGANELLE_RESEED: ${meta.id} has no curated seed database for class " +
+                             "'${meta.class}' -- keeping the first-pass assembly instead of reseeding " +
+                             "from another phylum. Add the class to InvertTaxonGroups.seedDbGroup() and " +
+                             "build its database with bin/build_invert_reference_db.py to reseed it."
+                }
+                [ meta, group ]
+            }
+
+        ch_invert_seeded = ch_invert_group.filter { _meta, group -> group != null }
+
+        // Split the seeded invertebrates on whether they have an assembly to select
+        // against at all. An empty first pass CANNOT select a subset of its group
+        // database: there is no sequence to BLAST, so select_reference_db.py bails at
+        // its first check ("empty assembly", before the temp dir or the DB is even
+        // located), reports NONE, seedSubsetSelected() returns false, and the readiness
+        // fallback below routes the sample straight back to the empty assembly it
+        // already has. That is a closed loop -- the reseed's seed is DERIVED from the
+        // first-pass assembly, so a total first-pass failure is the one case that can
+        // never be rescued, which is exactly the case that most needs rescuing.
+        ch_invert_seeded_fa = ch_invert_seeded
+            .join(ch_reseed_branched.invert.map { meta, fasta, _log, reads -> [meta, fasta, reads] }, by: 0)
+
+        ch_invert_seed_route = ch_invert_seeded_fa.branch { _meta, _group, fasta, _reads ->
+            whole_group: params.getorganelle_empty_first_pass_rescue && firstPassEmpty(fasta)
+            subset:      true
+        }
+
+        // Stage 2: narrow the group to the handful of records this sample's own
+        // first pass actually aligns to. Handing GetOrganelle the whole group is
+        // what shattered INV04_BOLOCERA's reseed (2 scaffolds -> 12): 221 anthozoan
+        // genomes across 87 families recruit reads from the entire class, and
+        // mollusca (850 genomes) and arthropoda (647) are several times worse.
+        // Top-n rather than the single best, because from a small fragmented first
+        // pass the pick is reliable at order/subclass level but not at species.
+        //
+        // Only non-empty assemblies reach here now, which also means the selector's
+        // NONE status recovers a single unambiguous meaning: nothing in the group
+        // aligned. Previously NONE conflated that with "there was nothing to align".
+        SELECT_REFERENCE_DB (
+            ch_invert_seed_route.subset
+                .map { meta, group, fasta, _reads ->
+                    [ meta, fasta, file("${projectDir}/assets/refdb/${group}", checkIfExists: true), group ] },
+            'seed'
+        )
+
+        // An empty first pass has no assembly sequence for SELECT_REFERENCE_DB. Bound
+        // the group by the sample taxonomy, then rank that shortlist with its reads.
+        // This avoids seeding an Anomura sample from all of Arthropoda while retaining
+        // a small-group fallback for genuinely reference-poor taxa such as Ctenophora.
+        SELECT_FALLBACK_SEED (
+            ch_invert_seed_route.whole_group
+                .map { meta, group, _fasta, reads ->
+                log.warn "GETORGANELLE_RESEED: ${meta.id} first pass produced no contig at all; " +
+                         "selecting a bounded ${group} seed by taxonomy and read support."
+                    [ meta, reads,
+                      file("${projectDir}/assets/refdb/${group}", checkIfExists: true),
+                      group ]
+                }
+        )
+
+        ch_invert_seed  = SELECT_REFERENCE_DB.out.seed_fasta
+            .mix(SELECT_FALLBACK_SEED.out.seed_fasta)
+        ch_invert_genes = SELECT_REFERENCE_DB.out.label_fasta
+            .mix(SELECT_FALLBACK_SEED.out.label_fasta)
+
+        // Vertebrate references (findMitoReference, relabelled) plus the invertebrate
+        // ones SELECT_REFERENCE_DB picked out of the group database. Until the latter
+        // existed, every invertebrate reached GETORGANELLE_CHECK with the empty
+        // placeholder, so its evidence row carried note=no_reference and NA for
+        // reference coverage and length ratio -- INV04_BOLOCERA's 12-scaffold reseed
+        // produced no length or coverage signal at all. This is also what lets
+        // REFERENCE_RELEVANCE reach the invertebrate branch it already has
+        // (min_pid 88 vs 82), which no sample could previously satisfy.
         ch_reference_gb = RELABEL_REFERENCE_GB.out.gb
+            .mix(SELECT_REFERENCE_DB.out.reference)
+            .mix(SELECT_FALLBACK_SEED.out.reference)
 
         // Totality for the GETORGANELLE_CHECK reference join: emit an explicit
         // NO_REFERENCE.gb placeholder (keyed by lineage like the real references) for
         // every sample that will never carry a RELABEL_REFERENCE_GB row --
         //   * kept first passes (never reseed),
-        //   * coral reseeds (seed the curated coral DB; never RELABEL),
+        //   * invertebrates whose class has no curated database (SELECT_REFERENCE_DB
+        //     never ran for them),
+        //   * invertebrates nothing in their group database aligned to,
         //   * vertebrate reseeds whose findMitoReference found nothing (no ref at all).
         // Vertebrates WITH a reference but no gene database still carry the real RELABEL
         // row (they fall back to first-pass via ch_reseed_seedless yet keep their
@@ -448,23 +631,35 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         // vert-no-ref set is the exact complement of the non-empty filter at :311.
         ch_reference_placeholders = ch_assessed.keep
             .map { meta, _fasta, _log, _reads -> [ meta, no_reference_gb ] }
-            .mix( ch_reseed_branched.invert.map { meta, _fasta, _log, _reads -> [ meta, no_reference_gb ] } )
+            // Invertebrates now resolve a real reference whenever SELECT_REFERENCE_DB
+            // picked one (mixed into ch_reference_gb below), so only the invert sets
+            // that CANNOT have one are placeheld here. There are now THREE of them:
+            // a class with no curated database (the selector never ran), an empty
+            // first pass rescued from the whole group (the selector never ran either,
+            // and picked no single record to grade against), and a sample nothing in
+            // its group aligned to. All three are disjoint and, with the selected set,
+            // total over the invert reseed candidates -- the same accounting as the
+            // readiness value, and what keeps the join below a plain per-sample join.
+            // Miss the rescue arm and those samples carry neither a real reference nor
+            // a placeholder, so the plain join at ch_ref_keyed drops them from the run
+            // silently: no error, just an absent row in the assembly summary.
+            .mix( ch_invert_group
+                    .filter { _meta, group -> group == null }
+                    .map { meta, _group -> [ meta, no_reference_gb ] } )
+            .mix( SELECT_FALLBACK_SEED.out.status
+                    .filter { _meta, st -> !seedSubsetSelected(st) }
+                    .map { meta, _st -> [ meta, no_reference_gb ] } )
+            .mix( SELECT_REFERENCE_DB.out.status
+                    .filter { _meta, st -> !seedSubsetSelected(st) }
+                    .map { meta, _st -> [ meta, no_reference_gb ] } )
             .mix( MITOHIFI_FINDMITOREFERENCE.out.reference
                     .filter { _meta, ref_fasta, ref_gb -> !(ref_fasta.size() > 0 && ref_gb.size() > 0) }
                     .map { meta, _ref_fasta, _ref_gb -> [ meta, no_reference_gb ] } )
 
-        // --- Invertebrate (coral) reseed path: broad coral DB seed + label db. ---
-        ch_coral_seed  = Channel.fromPath("${projectDir}/assets/coral_mito_refdb.fasta",       checkIfExists: true).first()
-        ch_coral_label = Channel.fromPath("${projectDir}/assets/coral_mito_refdb.label.fasta", checkIfExists: true).first()
-        ch_invert_seed  = ch_reseed_branched.invert
-            .map { meta, _fasta, _log, _reads -> meta }.combine(ch_coral_seed)
-            .map { meta, seed -> [meta, seed] }
-        ch_invert_genes = ch_reseed_branched.invert
-            .map { meta, _fasta, _log, _reads -> meta }.combine(ch_coral_label)
-            .map { meta, genes -> [meta, genes] }
 
-        // Merge the two reseed paths. Inverts always carry both seed + genes (assets);
-        // verts carry them only when findMitoReference + GENEDB succeeded.
+        // Merge the two reseed paths. Inverts carry both seed + genes (assets) whenever
+        // their class resolves to a curated database; verts carry them only when
+        // findMitoReference + GENEDB succeeded.
         ch_seed  = ch_vert_seed.mix(ch_invert_seed)
         ch_genes = GETORGANELLE_GENEDB.out.genes.mix(ch_invert_genes)
 
@@ -489,13 +684,31 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         // set and disjoint across its three sources, so the fallback is a plain join + filter
         // rather than a remainder join that could not classify a not-ready sample until the run
         // closed:
-        //   * inverts always carry seed + genes (curated coral assets)          -> ready
+        //   * inverts with no curated database for their class                   -> not ready
+        //   * inverts whose first pass was EMPTY: rescued from the whole group    -> ready
+        //     (they never reach the selector, so their readiness is a channel-local
+        //     value. This arm is load-bearing: without it they fall through to the
+        //     fallback below and are routed straight back to the empty first pass,
+        //     which is precisely the bug the rescue exists to fix.)
+        //   * inverts with a non-empty first pass: ready iff SELECT_REFERENCE_DB found
+        //     records it aligns to. A no-alignment result is the honest signal that
+        //     the group database does not represent this lineage, so they keep the
+        //     first pass rather than falling back to seeding from the whole group --
+        //     which is the exact failure stage 2 exists to remove. That reasoning does
+        //     NOT extend to an empty first pass, where "keep it" means keeping nothing.
         //   * vertebrates with a reference: ready iff GETORGANELLE_GENEDB built  -> its status
         //   * vertebrates with no findMitoReference at all                       -> not ready
         // (a vertebrate with a reference but a sparse gene database reports ready=no from GENEDB,
         // so it falls back here while still keeping its resolved reference upstream.)
-        ch_reseed_readiness = ch_reseed_branched.invert
-                .map { meta, _fasta, _log, _reads -> [ meta, true ] }
+        //
+        // Disjointness and totality still hold over the invert reseed candidates:
+        //   ch_invert_group = {group == null} + ch_invert_seeded, and
+        //   ch_invert_seeded = whole_group + subset.
+        ch_reseed_readiness = ch_invert_group
+                .filter { _meta, group -> group == null }
+                .map { meta, _group -> [ meta, false ] }
+            .mix( SELECT_FALLBACK_SEED.out.status.map { meta, s -> [ meta, seedSubsetSelected(s) ] } )
+            .mix( SELECT_REFERENCE_DB.out.status.map { meta, s -> [ meta, seedSubsetSelected(s) ] } )
             .mix( GETORGANELLE_GENEDB.out.status.map { meta, s -> [ meta, genedbReady(s) ] } )
             .mix( MITOHIFI_FINDMITOREFERENCE.out.reference
                     .filter { _meta, ref_fasta, ref_gb -> !(ref_fasta.size() > 0 && ref_gb.size() > 0) }
@@ -511,9 +724,12 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
         ch_reseed_seedless_log = ch_reseed_fallback.map { meta, _fasta, log -> [meta, log] }
 
         // Resolve each seeded reseed candidate to the better of (reseed result,
-        // first-pass result). Prefer the reseed output, but if it came back empty
-        // keep the first-pass assembly so the multi-contig concat / species-ID
-        // fallback (SANITISE_FASTA) still has something to work with.
+        // first-pass result) -- see preferReseed for the rules. A reseed that came
+        // back empty, or worse than the assembly it would replace, loses; the
+        // first-pass assembly is kept so the multi-contig concat / species-ID
+        // fallback (SANITISE_FASTA) still has something to work with. The loser is
+        // not discarded either way: selectProvenanceVariants emits it as its own
+        // mitogenome_data row.
         ch_reseed_firstpass = ch_assessed.reseed
             .map { meta, fasta, log, _reads -> [meta, fasta, log] }   // [meta, fp_fasta, fp_log]
 
@@ -521,7 +737,13 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             .join(GETORGANELLE_RESEED.out.log, by: 0)                 // [meta, rs_fasta, rs_log]
             .join(ch_reseed_firstpass, by: 0)                        // [meta, rs_fasta, rs_log, fp_fasta, fp_log]
             .map { meta, rs_fasta, rs_log, fp_fasta, fp_log ->
-                def useReseed = rs_fasta && rs_fasta.size() > 0
+                def useReseed = preferReseed(rs_fasta, rs_log, fp_fasta, fp_log,
+                                             params.reseed_length_tolerance as double,
+                                             (params.min_circular_mito_bp ?: 0) as int)
+                if (!useReseed) {
+                    log.info "GETORGANELLE_RESEED: ${meta.id} keeping the first-pass assembly; " +
+                             "the reseed did not improve on it"
+                }
                 [meta, useReseed ? rs_fasta : fp_fasta, useReseed ? rs_log : fp_log]
             }
 
@@ -556,6 +778,10 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             .mix(REFERENCE_DIVERGENCE.out.flag.map { _meta, flag -> flag })
             .mix(REFERENCE_RANK.out.ranking.map { _meta, ranking -> ranking })
             .mix(REFERENCE_CANDIDATES.out.status.map { _meta, status -> status })
+            .mix(SELECT_REFERENCE_DB.out.status.map { _meta, status -> status })
+            .mix(SELECT_FALLBACK_SEED.out.status.map { _meta, status -> status })
+            .mix(SELECT_REFERENCE_DB.out.seed_fasta.map { _meta, seed -> seed })
+            .mix(SELECT_FALLBACK_SEED.out.seed_fasta.map { _meta, seed -> seed })
         ch_versions = ch_versions
             .mix(GETORGANELLE_RESEED.out.versions.first())
             .mix(GETORGANELLE_GENEDB.out.versions.first())
@@ -563,6 +789,8 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
             .mix(REFERENCE_DIVERGENCE.out.versions.first())
             .mix(REFERENCE_CANDIDATES.out.versions.first())
             .mix(REFERENCE_RANK.out.versions.first())
+            .mix(SELECT_REFERENCE_DB.out.versions.first())
+            .mix(SELECT_FALLBACK_SEED.out.versions.first())
 
     } else {
         ch_assembly_fasta = GETORGANELLE_FROMREADS.out.fasta
@@ -664,18 +892,45 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     //   results and multi-scaffold results without a reference pass through (the
     //   latter are concatenated downstream by SANITISE_FASTA -> "<prefix>_concat").
     //
+    // params.skip_getorganelle_join (default TRUE, i.e. the join is off) sends every
+    // multi-scaffold assembly down the `direct` arm instead, where SANITISE_FASTA turns it
+    // into a plain `_concat`.
+    //
+    // Why off by default: re-running NOVA_260909_LA with every variant annotated gave 12
+    // samples where an `_rgj` and a `_concat` of the same contigs were both scored. The join
+    // won none of them: 10 ties, 2 losses. OG2998 is decisive -- same CYTB, same 189 bp, no Ns
+    // in either published CDS, but the concatenation reads ATT..TAA (a real terminator) and
+    // the join reads ACT..TCT, because the join placed that gene across its N spacer at
+    // 12044-12143. OG3058's ND2 is clean in the concatenation and no_stop in the join. Neither
+    // form is submittable anyway -- both exist only so a partial mitogenome can be annotated
+    // and get a species ID -- so an inferred scaffold ORDER buys nothing that a plain
+    // concatenation does not, while the welds cost real gene models.
+    //
+    // Left in place rather than deleted so it is one flag to re-enable, and so the four test
+    // fixtures asserting `_rgj` prefixes keep working. lib/AssemblySelection.groovy also
+    // penalises spacer Ns now, so a re-enabled join cannot win on contiguity alone.
     ch_join_branched = ch_fasta_ref.branch { _meta, fasta, ref ->
         def multi = false
         try { multi = fasta.text.readLines().count { it.startsWith('>') } > 1 } catch (ignored) { multi = false }
         // ref is now always a file (the NO_REFERENCE.gb placeholder when none resolved),
         // so "has a real reference" is ref.size() > 0, not ref != null.
-        rgj:    multi && ref.size() > 0
+        rgj:    !params.skip_getorganelle_join && multi && ref.size() > 0
         direct: true
     }
 
-    GETORGANELLE_JOIN (
-        ch_join_branched.rgj
-    )
+    // Initialised empty and populated inside the gate, the same shape the oatk fallback uses.
+    // Deliberately NOT relying on GETORGANELLE_JOIN.out.* being safely empty when the process
+    // runs zero tasks: .collect() on an empty channel would still emit an empty list into
+    // ch_multiqc_files, and .first() would be a no-op only by luck.
+    ch_joined_fasta = Channel.empty()
+    ch_joined_reference = Channel.empty()
+    if (!params.skip_getorganelle_join) {
+        GETORGANELLE_JOIN (
+            ch_join_branched.rgj
+        )
+        ch_joined_fasta = GETORGANELLE_JOIN.out.fasta
+        ch_joined_reference = GETORGANELLE_JOIN.out.reference
+    }
 
     // Re-pair the joined assembly with its (passed-through) reference, mix back the
     // pass-through samples (substituting the empty placeholder where no reference
@@ -687,8 +942,8 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // decides, downstream, which variant the corrected circular verdict belongs to and which
     // DB row the QC gate attaches the evidence to. Pass-through samples restamp to the same
     // value they already had.
-    ch_getorg_check_in = GETORGANELLE_JOIN.out.fasta
-        .join(GETORGANELLE_JOIN.out.reference, by: 0)
+    ch_getorg_check_in = ch_joined_fasta
+        .join(ch_joined_reference, by: 0)
         .map { meta, joined, ref -> [ meta, joined, ref ] }
         .mix( ch_join_branched.direct.map { meta, fasta, ref -> [ meta, fasta, ref ?: no_reference_gb ] } )
         .map { meta, fasta, ref -> [ meta + [ mt_assembly_prefix: fasta.baseName ], fasta, ref ] }
@@ -705,19 +960,23 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // the check evidence. The fasta is what gives the "_rgj" assembly its
     // final_length_bp / contig count in the assembly summary (the pre-join
     // scaffolds carry a different prefix); without it the rgj row has no length.
-    ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.fasta.map { _meta, fasta -> fasta })
-    ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.evidence.map { _meta, ev -> ev })
-    ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_JOIN.out.tool_params.collect { it[1] })
-    ch_versions = ch_versions.mix(GETORGANELLE_JOIN.out.versions.first())
+    if (!params.skip_getorganelle_join) {
+        ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.fasta.map { _meta, fasta -> fasta })
+        ch_summary_files = ch_summary_files.mix(GETORGANELLE_JOIN.out.evidence.map { _meta, ev -> ev })
+        ch_multiqc_files = ch_multiqc_files.mix(GETORGANELLE_JOIN.out.tool_params.collect { it[1] })
+        ch_versions = ch_versions.mix(GETORGANELLE_JOIN.out.versions.first())
+    }
 
     // RGJ (reference-guided-join) assembly as its own DB variant. It produces no
     // GetOrganelle log of its own, so reuse the pre-join resolved log (same reads
     // -> same coverage); ch_assembly_log here is still the pre-check version.
-    ch_db_variant_inputs = ch_db_variant_inputs.mix(
-        GETORGANELLE_JOIN.out.fasta
-            .join(ch_assembly_log, by: 0)
-            .map { meta, fasta, log -> [ fasta.baseName, meta, fasta, log ] }
-    )
+    if (!params.skip_getorganelle_join) {
+        ch_db_variant_inputs = ch_db_variant_inputs.mix(
+            GETORGANELLE_JOIN.out.fasta
+                .join(ch_assembly_log, by: 0)
+                .map { meta, fasta, log -> [ fasta.baseName, meta, fasta, log ] }
+        )
+    }
 
     // Carry the "_rgj" identity re-stamp onto the log as well, now that the DB-variant mix
     // above (which needs the PRE-stamp meta, since GETORGANELLE_JOIN.out.fasta carries it) is
@@ -814,7 +1073,7 @@ workflow MITOGENOME_ASSEMBLY_GETORG {
     // (unlike the MitoHiFi subworkflow, which has failed / no-contig branches to fill in).
     // The parent workflow and the QC gate rely on that totality to attach evidence with a
     // plain per-key join rather than collecting the whole channel; if a future change lets an
-    // assembly bypass the check, it must emit assets/empty_circularity_check.tsv for that
+    // assembly bypass the check, it must emit assets/placeholders/empty_circularity_check.tsv for that
     // sample or the sample will be dropped at the QC gate.
     circularity_evidence = GETORGANELLE_CHECK.out.evidence  // channel: [ meta, getorg_check.tsv ]
     // Reads keyed by the LINEAGE prefix, for MITOGENOME_COVERAGE in the parent workflow.

@@ -63,9 +63,10 @@ process MITOGENOME_COVERAGE {
     // the assembly summary, and now has its own mitogenome_data row, so the depth measured on
     // it belongs to it and not to the concatemer it replaced.
     //
-    // _concat is still STRIPPED: SANITISE_FASTA is publishDir[enabled: false], so there is no
-    // published _concat assembly for a _concat depth file to attach to and it would manufacture
-    // a summary row carrying a depth but no assembly. Publish that FASTA and this strip can go.
+    // _concat is still STRIPPED: SANITISE_FASTA now publishes the _concat FASTA to
+    // <prefix>_concat/mtdna for the backup, but that FASTA is not staged into the assembly
+    // summary, so a _concat depth file would manufacture a summary row carrying a depth but no
+    // assembly. Stage the concat FASTA into the summary as well and this strip can go.
     depth_prefix = fasta.baseName.replaceAll(/_concat$/, '')
     def effective_args = [
         "minimap2 -ax ${preset} --secondary=no",

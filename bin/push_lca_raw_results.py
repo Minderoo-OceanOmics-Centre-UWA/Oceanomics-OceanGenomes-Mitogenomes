@@ -13,13 +13,16 @@ that reproduces a hit exactly just refreshes that row's ``lca_run_date``, while 
 re-run that produces a different result for the same hit is inserted as a new row
 and the earlier one is kept.
 
-``--force`` additionally discards that history: after uploading, rows for the
-same sample/region that this run did not produce are deleted, leaving only the
-current result. The ``og_num`` and ``content_hash`` columns are maintained by the
-DB and are intentionally not written here.
+``--prune-history`` additionally discards that history: after uploading, rows for
+the same sample/region that this run did not produce are deleted, leaving only
+the current result. It is off by default and is deliberately separate from the
+pipeline's ``--force_db_overwrite``, because the upserts above already make a
+re-run correct without deleting anything. ``--force`` is accepted as a deprecated
+alias. The ``og_num`` and ``content_hash`` columns are maintained by the DB and
+are intentionally not written here.
 
 Usage:
-    push_lca_raw_results.py [--force] <config.cfg> <sample> <lca_raw.tsv> [<lca_raw.tsv> ...]
+    push_lca_raw_results.py [--prune-history] <config.cfg> <sample> <lca_raw.tsv> [<lca_raw.tsv> ...]
 """
 
 import argparse
@@ -79,9 +82,16 @@ NON_KEY_DB_COLS = [
 ]
 ALL_DB_COLS = KEY_COLS + NON_KEY_DB_COLS
 
-# Conflict target for the upsert. Named rather than inferred because part of
-# the constraint (content_hash) is populated by a BEFORE INSERT trigger.
-CONFLICT_CONSTRAINT = "lca_raw_results_content_unique"
+# mito_lca_raw (genomes_db_review 076, Phase R.7b) stores annotation_id in place of the five
+# key columns; mito_annotation_id() resolves it from them and refuses an unknown annotation.
+ANNOTATION_ID_SQL = "mito_annotation_id(%(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s)"
+
+# Conflict target for the upsert, by columns. It was the constraint name,
+# lca_raw_results_content_unique, but the v2 schema keys the same columns under its
+# primary key, lca_raw_results_pkey: the name differs by schema, the columns do not.
+# content_hash is populated by a BEFORE INSERT trigger, which runs before the
+# conflict check whether the target is named or inferred.
+CONFLICT_COLUMNS = ("annotation_id", "sequence_region", "accession_id", "content_hash")
 
 # The columns that constraint covers, alongside the trigger-maintained
 # content_hash. lca_run_date is deliberately NOT part of it: a re-run with an
@@ -92,7 +102,7 @@ UNIQUE_KEY = [
     "sequence_region", "accession_id",
 ]
 
-# The group --force prunes: everything this sample/region has ever recorded.
+# The group --prune-history prunes: everything this sample/region has ever recorded.
 HISTORY_KEY = [
     "og_id", "tech", "seq_date", "code", "annotation", "sequence_region",
 ]
@@ -160,8 +170,9 @@ def build_insert_query():
     def q(col):
         return f'"{col}"'
 
-    cols_sql = ", ".join(q(c) for c in ALL_DB_COLS)
-    placeholders = ", ".join(f"%({c})s" for c in ALL_DB_COLS)
+    cols_sql = ", ".join(q(c) for c in ["annotation_id"] + NON_KEY_DB_COLS)
+    placeholders = ", ".join([ANNOTATION_ID_SQL] + [f"%({c})s" for c in NON_KEY_DB_COLS])
+    conflict_sql = ", ".join(q(c) for c in CONFLICT_COLUMNS)
 
     # A conflict means this run reproduced an existing hit exactly, so the only
     # new information is that it was seen again. A hit whose values changed
@@ -169,9 +180,9 @@ def build_insert_query():
     # RETURNING (xmax = 0) distinguishes the two outcomes: xmax is 0 on a fresh
     # insert and non-zero on the DO UPDATE path.
     return f"""
-    INSERT INTO lca_raw_results ({cols_sql})
+    INSERT INTO mito_lca_raw ({cols_sql})
     VALUES ({placeholders})
-    ON CONFLICT ON CONSTRAINT {CONFLICT_CONSTRAINT}
+    ON CONFLICT ({conflict_sql})
     DO UPDATE SET "lca_run_date" = EXCLUDED."lca_run_date"
     RETURNING (xmax = 0) AS inserted
     """
@@ -184,10 +195,11 @@ def prune_superseded(cur, written):
     wrote for it. Identical-content rows have just had their date refreshed to the
     current run's, so anything left on another date is a superseded result.
     """
-    where = " AND ".join(f'"{c}" = %s' for c in HISTORY_KEY)
+    # HISTORY_KEY's first five parts resolve to mito_lca_raw's annotation_id (076).
     query = (
-        f"DELETE FROM lca_raw_results WHERE {where} "
-        f"AND \"lca_run_date\"::text <> ALL(%s)"
+        "DELETE FROM mito_lca_raw "
+        "WHERE annotation_id = mito_annotation_id(%s, %s, %s, %s, %s, false) "
+        'AND "sequence_region" = %s AND "lca_run_date"::text <> ALL(%s)'
     )
     deleted = 0
     for key, run_dates in written.items():
@@ -239,12 +251,15 @@ def process_file(cur, path, written):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--prune-history",
         "--force",
         action="store_true",
+        dest="prune_history",
         help=(
             "After uploading, delete rows for the same sample/region that this "
             "run did not produce, so only the current result is kept. Off by "
-            "default: superseded results are preserved alongside the new ones."
+            "default: superseded results are preserved alongside the new ones. "
+            "'--force' is a deprecated alias."
         ),
     )
     parser.add_argument("config_file")
@@ -271,10 +286,10 @@ def main():
             # Only prune once every file has been uploaded, and only if the
             # upload was clean: pruning around a failed row could delete the
             # older result without a replacement having landed.
-            if args.force and total_failed == 0:
+            if args.prune_history and total_failed == 0:
                 total_pruned = prune_superseded(cur, written)
-            elif args.force:
-                print("⚠️ Skipping --force prune: upload had failures.")
+            elif args.prune_history:
+                print("⚠️ Skipping --prune-history prune: upload had failures.")
         conn.commit()
     except Exception as e:
         if conn is not None:
@@ -285,9 +300,9 @@ def main():
         if conn is not None:
             conn.close()
 
-    mode = "replace-history" if args.force else "keep-history"
+    mode = "replace-history" if args.prune_history else "keep-history"
     tally = f"{total_inserted} inserted, {total_refreshed} refreshed"
-    if args.force:
+    if args.prune_history:
         tally += f", {total_pruned} superseded rows deleted"
 
     if total_failed == 0:

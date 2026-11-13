@@ -104,6 +104,43 @@ nextflow_workflow {
         }
     }
 
+    test("non-coral invertebrate classes resolve their own genetic codes") {
+        // Pins mitoGeneticCode()'s generalisation beyond Cnidaria, reading
+        // assets/taxonomy/mito_genetic_codes.json: Mollusca and Arthropoda (Crustacea +
+        // Pycnogonida) resolve to the standard Invertebrate code (5), not the
+        // Coelenterate code (4) corals use; Echinodermata keeps 9; Porifera groups
+        // with Cnidaria on 4, as does Ctenophora (NCBI's table 4 scope is
+        // "Coelenterata (Ctenophora and Cnidaria)"); tunicates are 13 despite
+        // sitting inside Chordata. A class the asset does not map aborts instead
+        // -- covered separately below.
+        when {
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/with_taxonomy_inverts.csv", checkIfExists: true)
+                def sheet = file("with_taxonomy_inverts.csv")
+                sheet.text = template.text.replace('__PROJECT_DIR__', "\${projectDir}")
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
+            assertAll(
+                { assert workflow.success },
+                { assert metas.OGMOLLUSC.genetic_code == 5 },
+                { assert metas.OGCRUST.genetic_code == 5 },
+                { assert metas.OGPYCNO.genetic_code == 5 },
+                { assert metas.OGECHINO.genetic_code == 9 },
+                { assert metas.OGSPONGE.genetic_code == 4 },
+                { assert metas.OGCTENO.genetic_code == 4 },
+                { assert metas.OGTUNIC.genetic_code == 13 },
+                { assert metas.values().every { it.invertebrates == true } }
+            )
+        }
+    }
+
     // An unresolved class is not a neutral value: is_invertebrate() reads it as
     // 'false', so the sample silently takes the vertebrate genetic code, EMMA over
     // MITOS2 and the curated fish BLAST DB. The run must stop before any of that.
@@ -141,7 +178,12 @@ nextflow_workflow {
     // and which carries no explicit genetic_code column must abort, not silently
     // fall back to code 4. Bivalvia is code 5; a wrong default mistranslates the
     // whole annotation and fails table2asn terminally.
-    test("an invertebrate with an unmapped class and no genetic_code column aborts") {
+    test("an invertebrate with an unmapped class aborts and names the sample") {
+        // There is no catch-all code-5 default: an invertebrate class that
+        // assets/taxonomy/mito_genetic_codes.json does not map must stop the run so the code
+        // is resolved before annotation, not silently guessed. Pterobranchia is the
+        // case in point -- the class spans Rhabdopleuridae (code 24) and
+        // Cephalodiscidae (33), so it cannot be resolved at class rank at all.
         when {
             workflow {
                 """
@@ -149,7 +191,7 @@ nextflow_workflow {
                 def sheet = file("unmapped_invert.csv")
                 sheet.text = template.text
                     .replace('__PROJECT_DIR__', "\${projectDir}")
-                    .replace(',Anthozoa,Acroporidae,Scleractinia,true,', ',Bivalvia,Veneridae,Venerida,true,')
+                    .replace(',Anthozoa,Acroporidae,Scleractinia,true,', ',Pterobranchia,Rhabdopleuridae,Rhabdopleurida,true,')
                 input[0] = sheet.toString()
                 input[1] = null
                 input[2] = 'samplesheet'
@@ -162,6 +204,37 @@ nextflow_workflow {
             // as the unresolved-class guard above; the run stopping is the
             // contract under test.
             assert workflow.failed
+        }
+    }
+
+    test("an explicit genetic_code column overrides the class-derived code") {
+        // The per-sample column is the escape hatch for a lineage whose code
+        // differs from its group default, so it must win over the class map even
+        // when the class is mapped (Anthozoa would otherwise resolve to 4).
+        when {
+            workflow {
+                """
+                def template = file("\${projectDir}/tests/test_data/samplesheet_meta/with_taxonomy.csv", checkIfExists: true)
+                def sheet = file("explicit_code.csv")
+                def lines = template.text.replace('__PROJECT_DIR__', "\${projectDir}").trim().split('\\n')
+                def rows = [ lines[0] + ',genetic_code' ]
+                lines.drop(1).each { line ->
+                    rows << line + (line.startsWith('OGCORAL,') ? ',13' : ',')
+                }
+                sheet.text = rows.join('\\n') + '\\n'
+                input[0] = sheet.toString()
+                input[1] = null
+                input[2] = 'samplesheet'
+                """
+            }
+        }
+        then {
+            def metas = workflow.out.mitohifi_input.collectEntries { meta, _reads -> [ (meta.id): meta ] }
+            assertAll(
+                { assert workflow.success },
+                { assert metas.OGCORAL.genetic_code == 13 },
+                { assert metas.OGFISH.genetic_code == 2 }
+            )
         }
     }
 

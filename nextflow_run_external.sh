@@ -1,4 +1,7 @@
-module load nextflow/25.04.6
+# Setonix's default environment is pawseyenv/2026.11 since November 2026; the pinned
+# nextflow and singularity versions below are in pawseyenv/2025.08 (Nextflow also needs gcc-native/13.2).
+module load pawseyenv/2025.08
+module load gcc-native/13.2 nextflow/25.04.6
 module load singularity/4.1.0-nompi
 
 nextflow \
@@ -11,7 +14,7 @@ nextflow \
     --blast_db_dir "$(realpath ../blast_dbs)" \
     --taxonkit_db_dir "$(realpath ../)" \
     --curated_blast_db /software/projects/pawsey0964/curated_db/OceanGenomes.CuratedNT.NBDLTranche1and2and3.CuratedBOLD.NoDuplicate.fasta \
-    --nt_blast_db /scratch/references/blastdb_update/blast-2026-02-01/db/mito \
+    --nt_blast_db /scratch/references/blastdb_update/blast-2026-08-01/db/core_nt \
     --organelle_type "animal_mt" \
     --kvalue "21" \
     --binddir /scratch \

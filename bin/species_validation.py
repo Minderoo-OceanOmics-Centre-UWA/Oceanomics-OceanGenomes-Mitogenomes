@@ -1,29 +1,76 @@
 #!/usr/bin/env python3
+"""Compare per-region LCA/BLAST calls against the nominal species and write the
+per-region summary TSV plus a validation record for the lca_validation upsert.
+
+This script performs NO database access. It used to both read the nominal species
+from the DB and write the lca_validation row itself, which meant the QC verdict it
+produces -- Found_in_blast_YN, which the whole QC gate turns on -- could only be
+computed when a database was reachable. The nominal species now comes from the
+samplesheet (meta.nominal_species_id, passed as --nominal-species) and the upsert
+is performed by bin/push_species_validation.py from the record written here.
+"""
 import argparse
 import csv
-import configparser
+import json
+import re
+from collections import namedtuple
 import sys
 
-try:
-    import psycopg2
-except ImportError:  # Allows unit tests to inject a connection factory.
-    psycopg2 = None
+from nominal_rank import parse_rank
+from species_name_utils import (
+    UNRESOLVED_TAXON_TOKENS,
+    genus_of,
+    normalise_open_nomenclature,
+    parse_nominal,
+)
 
-from species_name_utils import normalise_open_nomenclature
+# nominal_rank.parse_rank's vocabulary onto the one match_at_rank speaks. parse_rank
+# is the newer classifier and the only one that knows the ranks above family, which
+# is why it resolves the label here; parse_nominal is still the authority for the
+# species / genus / family claims it already handles, so those paths are untouched.
+_RANK_ALIASES = {"tentative_species": "species_uncertain", "unresolved": None}
+
+
+def resolve_nominal(raw, lineage=None):
+    """(rank, taxon) for a nominal label, including the ranks above family.
+
+    parse_nominal alone reads 'Asteroidea sp.' as ('genus', 'Asteroidea') because a
+    trailing 'sp.' looks like open nomenclature whatever precedes it. That asserts a
+    genus which does not exist, so it could never match and was reported as a failed
+    species validation rather than as a specimen identified only to class. parse_rank
+    resolves it against the sample's own lineage instead of guessing at a suffix.
+    """
+    if not raw:
+        return (None, None)
+    fallback = parse_nominal(raw)
+    if fallback[0] in ("species", "species_uncertain", "family"):
+        return fallback
+    rank, taxon = parse_rank(raw, lineage)
+    rank = _RANK_ALIASES.get(rank, rank)
+    if rank is None or not taxon:
+        return fallback
+    # The two classifiers disagree on what `taxon` means for a tentative species:
+    # parse_rank returns the whole label ('Munidopsis cf, aries'), parse_nominal the
+    # genus. match_at_rank compares this value against the LCA's GENUS, so hand it the
+    # genus or a 'cf.' sample stops matching. parse_rank is still worth reaching here:
+    # it catches 'Munidopsis cf, aries' (comma and all), which parse_nominal reads as a
+    # bare genus.
+    if rank == "species_uncertain":
+        return (rank, genus_of(taxon) or taxon)
+    return (rank, taxon)
+
+
+def parse_lineage_arg(text):
+    """'class=Asteroidea,order=Velatida' -> {'class': 'Asteroidea', ...}."""
+    lineage = {}
+    for part in str(text or "").split(","):
+        key, _, value = part.partition("=")
+        key, value = key.strip().lower(), value.strip()
+        if key and value:
+            lineage[key] = value
+    return lineage
 
 SPECIES_IN_LCA_COLUMN = "species_in_LCA"   # <--- NEW
-
-def load_db_config(config_file):
-    config = configparser.ConfigParser()
-    config.read(config_file)
-
-    return {
-        'dbname': config.get('postgres', 'dbname'),
-        'user': config.get('postgres', 'user'),
-        'password': config.get('postgres', 'password'),
-        'host': config.get('postgres', 'host'),
-        'port': config.getint('postgres', 'port')    
-    }
 
 def concatenate_files(file_list, output_file):
     with open(output_file, 'w') as outfile:
@@ -54,26 +101,215 @@ def concatenate_lca_files(file_list, output_file):
 def normalise_name(name):
     return name.strip().lower().replace('_', ' ')
 
-def get_species_for_ogid(db_params, og_id):
-    query = "SELECT nominal_species_id FROM sample WHERE og_id = %s"
-    try:
-        conn = psycopg2.connect(**db_params)
-        with conn.cursor() as cur:
-            cur.execute(query, (og_id,))
-            result = cur.fetchone()
-            return result[0] if result else None
-    except Exception as e:
-        print(f"[ERROR] Database access failed: {e}")
-        return None
-    finally:
-        if conn:
-            conn.close()
+def write_validation_record(
+    output_file, action, reason=None, key=None, validated_species_name=None,
+    validator="nf-core", validated_rank=None, lca_genus=None,
+):
+    """Write the lca_validation record for bin/push_species_validation.py.
+
+    ALWAYS written, even when nothing should be upserted, so the record channel is
+    total over the samples that reach validation: a pusher that silently receives
+    nothing for a sample is indistinguishable from one that was never run, which is
+    the failure mode the upload-receipt gating exists to make visible. ``action`` is
+    'upsert' or 'skip', and a skip carries the reason it was skipped.
+
+    The key is the assembly naming convention (og_id, tech, seq_date, code,
+    annotation), matching the lca_validation composite key.
+    """
+    record = {
+        "action": action,
+        "reason": reason,
+        "key": None if key is None else {
+            "og_id": key[0],
+            "tech": key[1],
+            "seq_date": key[2],
+            "code": key[3],
+            "annotation": key[4],
+        },
+        "validated_species_name": validated_species_name,
+        "validator": validator,
+        # The rank the evidence actually supported. A relaxed gate stays honest
+        # only if what was relaxed is recorded, and a genus-level release must be
+        # distinguishable from a species-level one after the fact.
+        "validated_rank": validated_rank,
+        # For a family-level release, the genus the LCA resolved. Submitting
+        # 'Ophidiidae sp.' when the pipeline already resolved Lamprogrammus throws
+        # away information, so record it: these surface as label-upgrade candidates
+        # for a curator, and validated_rank makes them selectable if a later policy
+        # wants to hold family matches for curation instead.
+        "lca_genus": lca_genus,
+    }
+    with open(output_file, "w") as handle:
+        json.dump(record, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    print(f"[INFO] Validation record written to: {output_file} (action={action})")
+    return True
+
+# The BLAST hits for one assembly, parsed rather than kept as a text blob.
+BlastHits = namedtuple("BlastHits", ["species", "genera"])
+
+# blast_combined.<prefix>.tsv is headerless; column 4 (index 3) is the hit's
+# scientific name, taken from the NCBI taxid.
+BLAST_SCINAME_INDEX = 3
+_BLAST_NULL_NAMES = {"n/a", "na", "", "unknown", "none", "null"}
+
+# ... but a hit against OceanOmics' OWN reference database has no NCBI taxid, so
+# columns 3-6 are all 'N/A' and the species name is only in the subject title, as
+# a structured '[organism=...]' tag. Those are real, identified hits -- often the
+# only ones a sample has -- so they must be read, not discarded.
+#
+# This is still a PARSE, not a substring search: it extracts a named field, so a
+# species name occurring incidentally in free text cannot validate a sample, which
+# is the fail-open behaviour this whole function exists to remove.
+BLAST_ORGANISM_RE = re.compile(r"\[organism=([^\]]+)\]", re.IGNORECASE)
+
+# A BOLD subject title is '<taxid> <Genus species> <BOLD-ID>|<Genus species>|<MARKER>',
+# whose second '|'-delimited field is the subject's own identification. It matters
+# because it can differ from the NCBI name for the SAME taxid, which is how a
+# synonym reaches us: taxid 334986 is 'Hydrolagus ogilbyi' to NCBI and
+# 'Chimaera ogilbyi' in BOLD, and a sample labelled with the latter is the same
+# animal. Dropping these would hold correctly-identified samples that had already
+# reached ENA.
+#
+# Also a named field rather than free text, so this stays a parse. The binomial
+# shape is required so a marker code or an accession cannot be mistaken for a name.
+BLAST_BINOMIAL_RE = re.compile(r"^[A-Z][a-z-]+ [a-z][a-z-]+$")
+
 
 def load_blast_species_set(filepath):
-    with open(filepath, 'r') as f:
-        # We keep this as a big lowercased blob and search for the
-        # normalised DB species name in it later.
-        return f.read().lower()
+    """Parse the BLAST table into a species set and the genera derived from it.
+
+    This used to return the whole file as one lowercased string, and the caller
+    asked whether the nominal name appeared ANYWHERE in it. That failed in both
+    directions. It failed OPEN, because a substring test matches inside a longer
+    name and inside unrelated description fields: a bare-genus nominal ID of
+    'Serrivomer' matched inside 'Serrivomer jesperseni', passed the QC gate, and
+    was then rejected at Webin because ENA does not recognise a bare genus. And it
+    failed CLOSED for every nominal ID that is not a binomial, since no amount of
+    BLAST evidence makes 'Diaphus sp 1' a substring of 'Diaphus watasei'.
+
+    Set membership on a parsed column fixes the first; matching at the asserted
+    rank, in compare_lca_and_blast, fixes the second.
+
+    An empty or missing file yields empty sets and no exception -- a zero-region
+    sample's blast_combined is the empty placeholder, and samples with genuinely
+    no BLAST hits exist.
+    """
+    species = set()
+    try:
+        with open(filepath, "r", newline="") as f:
+            for line in f:
+                species |= _names_from_blast_fields(line.rstrip("\n").split("\t"))
+    except FileNotFoundError:
+        return BlastHits(species=frozenset(), genera=frozenset())
+    return _hits_from_names(species)
+
+
+def _hits_from_names(species):
+    return BlastHits(
+        species=frozenset(species),
+        # genus_of is the same helper the reference-divergence and
+        # reference-relevance checks use, so "congeneric" means one thing.
+        genera=frozenset(g for g in (genus_of(s) for s in species) if g),
+    )
+
+
+def _names_from_blast_fields(fields):
+    """Every identification one BLAST row carries, normalised (possibly empty)."""
+    species = set()
+    if len(fields) <= BLAST_SCINAME_INDEX:
+        return species
+    name = normalise_name(fields[BLAST_SCINAME_INDEX])
+    have_ncbi_name = bool(name) and name not in _BLAST_NULL_NAMES
+    if have_ncbi_name:
+        species.add(name)
+
+    # The subject's own identification, which can be a SYNONYM of the
+    # NCBI name for the same taxid. Read on every row, not only on
+    # taxid-less ones, because a synonym appears precisely where an
+    # NCBI name is also present.
+    for field in fields[BLAST_SCINAME_INDEX + 1:]:
+        if "|" not in field:
+            continue
+        for part in field.split("|")[1:]:
+            part = part.strip()
+            if BLAST_BINOMIAL_RE.match(part):
+                species.add(normalise_name(part))
+                break
+        break
+
+    if have_ncbi_name:
+        return species
+    # No NCBI name: try the subject title's [organism=...] tag, which
+    # is how an in-house reference hit carries its identification.
+    for field in fields[BLAST_SCINAME_INDEX + 1:]:
+        tagged = BLAST_ORGANISM_RE.search(field)
+        if tagged:
+            name = normalise_name(tagged.group(1))
+            if name and name not in _BLAST_NULL_NAMES:
+                species.add(name)
+            break
+    return species
+
+
+# The window calculateLCA.py groups hits in: every hit within this many identity
+# points of the top hit is a candidate (its --cutoff, default 2.0). The species
+# check asks whether the label is one of THOSE taxa, not merely somewhere in the
+# filtered table.
+LCA_WINDOW = 2.0
+BLAST_PIDENT_INDEX = 6
+BlastRow = namedtuple("BlastRow", ["qseqid", "region", "pident", "names"])
+
+
+def load_blast_rows(filepath):
+    """The filtered BLAST table as (qseqid, region, pident, names) rows.
+
+    The region is the last column, which the BLAST module appends (CO1/12s/16s)
+    and which matches an LCA row's sequence_region. Rows that cannot be parsed are
+    skipped; an empty or missing file yields an empty list.
+    """
+    rows = []
+    try:
+        with open(filepath, "r", newline="") as f:
+            for line in f:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) <= BLAST_PIDENT_INDEX:
+                    continue
+                try:
+                    pident = float(fields[BLAST_PIDENT_INDEX])
+                except ValueError:
+                    continue
+                rows.append(BlastRow(fields[0], fields[-1].strip().lower(), pident,
+                                     frozenset(_names_from_blast_fields(fields))))
+    except FileNotFoundError:
+        return []
+    return rows
+
+
+def evidence_for_lca_row(row, blast_rows, window=LCA_WINDOW):
+    """The identifications that support one LCA row, as BlastHits.
+
+    That is the taxa the LCA itself grouped (species_in_LCA), plus every name the
+    BLAST rows for the same query and region carry within the LCA window of its top
+    hit. The second part keeps what only the raw table knows: a BOLD synonym of the
+    NCBI name (taxid 334986, 'Chimaera ogilbyi' vs 'Hydrolagus ogilbyi') and an
+    in-house reference's [organism=...] tag. Restricting it to the window is the
+    point: a label that is in the table but several points below the best hit was
+    not one of the candidates, and must not validate the sample.
+    """
+    names = {normalise_name(s) for s in (row.get(SPECIES_IN_LCA_COLUMN) or "").split(",")
+             if s.strip()}
+    try:
+        top = float(row.get("top_percent_match") or "")
+    except ValueError:
+        top = None
+    if top is not None:
+        qseqid = (row.get("seq_id") or "").strip()
+        region = (row.get("sequence_region") or "").strip().lower()
+        for b in blast_rows:
+            if b.qseqid == qseqid and b.region == region and b.pident >= top - window:
+                names |= b.names
+    return _hits_from_names(names)
 
 def parse_assembly_key_from_blast(blast_file):
     """
@@ -99,120 +335,133 @@ def parse_assembly_key_from_blast(blast_file):
     return None
 
 
-def upsert_lca_validation(
-    db_params, key, validated_species_name, validator="nf-core", force=False
-):
+# LCA lineage values that mean "the LCA declined to resolve this rank".
+# calculateLCA.py writes 'dropped' where it declined, and 'Unknown' where the
+# lineage lookup returned nothing. Both must count as absent, or a rank match
+# would succeed against the literal string 'Unknown'.
+_LCA_ABSENT = set(UNRESOLVED_TAXON_TOKENS) | {"dropped"}
+
+
+def _lca_value(row, column):
+    """A lineage value from an lca_combined row, or '' if the LCA declined."""
+    value = (row.get(column) or "").strip()
+    return "" if value.lower() in _LCA_ABSENT else value
+
+
+def match_at_rank(nominal, blast_hits, row):
+    """Decide whether the BLAST/LCA evidence supports the nominal ID's own claim.
+
+    Returns (found_in_blast, validated_rank). The rule is: match at the rank the
+    label ASSERTS, not at the loosest rank that happens to succeed.
+
+      species            the binomial is in the evidence set       -> 'species'
+      genus              the genus is in the evidence genera AND the
+                         LCA row agrees at genus                     -> 'genus'
+      species_uncertain  as for genus                     -> 'genus_downgraded'
+      family             the LCA row agrees at family                -> 'family'
+      order/class/phylum the LCA row agrees at that rank, but the claim is
+                         above what this gate validates  -> '<rank>_unvalidated',
+                         and found_in_blast stays 'No'
+      higher             as above, trying order then class then phylum, for a
+                         label whose own rank could not be pinned
+      None               never                                      -> 'unmatched'
+
+    Not falling back to genus for a binomial is the point of the design, not a
+    limitation of it. A nominal ID of 'Bathypterois parini' is a species-level
+    claim; if the evidence supports only the genus, the species claim is
+    UNVERIFIED, and releasing it anyway would quietly convert "we could not
+    confirm the species" into "validated" -- the opposite of what this gate is
+    for.
+
+    A 'cf.'/'?' label is different: it asserts a TENTATIVE species, so resolving
+    it at genus drops an uncertain claim rather than asserting one. That is safe
+    in the direction that matters, and the downgrade is recorded rather than
+    inferred.
+
+    Requiring BOTH the evidence genera and the LCA row to agree for a genus-rank
+    match is what keeps a swapped or contaminated sample held: when the hits and
+    the LCA agree with each other and both disagree with the label, neither side
+    can rescue it.
+
+    ``blast_hits`` is the evidence for THIS LCA row (evidence_for_lca_row): the
+    taxa inside the LCA window, not the whole filtered table. It used to be the
+    whole table, which let a binomial validate on any hit that cleared the
+    identity gate, even one several points below a different species' best hit.
     """
-    Insert/update the lca_validation row for this sample with the validated
-    species name and validator tag. The composite key matches the assembly
-    naming convention: (og_id, tech, seq_date, code, annotation).
+    rank, value = nominal
+    if rank is None or not value:
+        return "No", "unmatched"
 
-    Guard: if an existing row carries a validator tag other than "nf-core",
-    the row was probably set by a human reviewer or another pipeline and
-    must not be silently overwritten by an automated re-run. Skip the
-    upsert in that case unless ``force=True``.
+    if rank == "species":
+        return (("Yes", "species") if normalise_name(value) in blast_hits.species
+                else ("No", "unmatched"))
+
+    if rank in ("genus", "species_uncertain"):
+        genus = normalise_name(value)
+        lca_genus = normalise_name(_lca_value(row, "genus"))
+        if genus and genus in blast_hits.genera and genus == lca_genus:
+            return "Yes", ("genus" if rank == "genus" else "genus_downgraded")
+        return "No", "unmatched"
+
+    if rank == "family":
+        family = normalise_name(value)
+        if family and family == normalise_name(_lca_value(row, "family")):
+            return "Yes", "family"
+        return "No", "unmatched"
+
+    # Above family: order, class, phylum, and 'higher' when the label's own rank
+    # could not be pinned. The evidence is checked and the agreeing rank RECORDED,
+    # but Found_in_blast_YN stays "No" so nothing new passes the QC gate.
+    #
+    # That split is deliberate. bin/nominal_rank.py states the principle: knowing
+    # the rank "does not let anything new through. It lets the pipeline say 'this
+    # specimen was never identified to species' instead of 'this specimen failed
+    # species validation'". Before this branch existed these labels returned a bare
+    # 'unmatched', indistinguishable from a sample whose evidence CONTRADICTS its
+    # label -- and that covered ~37 of the 69 invertebrates in NOVA_260909_LA.
+    # Now a class-level label with agreeing class-level evidence reads
+    # 'class_unvalidated' rather than 'unmatched'.
+    #
+    # Releasing these is a policy decision about whether a class-level ID is
+    # publishable, not a parsing question, so it is not made here.
+    if rank in ("order", "class", "phylum", "higher"):
+        name = normalise_name(value)
+        if not name:
+            return "No", "unmatched"
+        candidates = ("order", "class", "phylum") if rank == "higher" else (rank,)
+        for candidate in candidates:
+            if name == normalise_name(_lca_value(row, candidate)):
+                return "No", f"{candidate}_unvalidated"
+        return "No", "unmatched"
+
+    return "No", "unmatched"
+
+
+def compare_lca_and_blast(nominal_species, og_id, lca_files, blast_files, output_file, assembly_prefix=None, record_file=None, lineage=None):
+    """Write the per-region summary TSV and the lca_validation record.
+
+    Returns True on success. This function no longer touches the database: the
+    record it writes is what bin/push_species_validation.py upserts, and that
+    pusher is the one responsible for failing loudly on a bad write (via
+    bin/pg_row_guard.py, as the sibling pushers already do). Keeping the QC
+    comparison DB-free is what lets it run when uploads are skipped.
+
+    ``nominal_species`` is the sample's nominal_species_id, supplied by the caller
+    from the samplesheet. None means the sample has no nominal ID to compare
+    against, which is a legitimate state, not an error.
     """
-    og_id, tech, seq_date, code, annotation = key
-    params = {
-        "og_id": og_id,
-        "tech": tech,
-        "seq_date": seq_date,
-        "code": code,
-        "annotation": annotation,
-        "validated_species_name": validated_species_name,
-        "validator": validator,
-    }
-    conn = None
-    try:
-        conn = psycopg2.connect(**db_params)
-        with conn.cursor() as cur:
-            if not force:
-                cur.execute(
-                    """
-                    SELECT validator, validated_species_name
-                    FROM lca_validation
-                    WHERE og_id = %(og_id)s
-                      AND tech = %(tech)s
-                      AND seq_date = %(seq_date)s
-                      AND code = %(code)s
-                      AND annotation = %(annotation)s
-                    """,
-                    params,
-                )
-                existing = cur.fetchone()
-                if existing is not None:
-                    existing_validator, existing_species = existing
-                    if (
-                        existing_validator is not None
-                        and str(existing_validator).strip().lower() != "nf-core"
-                    ):
-                        print(
-                            "⚠️ Existing values preserved for lca_validation "
-                            f"{og_id}.{tech}.{seq_date}.{code}.{annotation}: "
-                            f"validator='{existing_validator}' (not 'nf-core'); "
-                            "pass --force to overwrite."
-                        )
-                        print(
-                            "📌 Preserved stored values: "
-                            f"{{'validator': '{existing_validator}', "
-                            f"'validated_species_name': '{existing_species}'}}"
-                        )
-                        return True
-
-            upsert_query = """
-            INSERT INTO lca_validation (
-                og_id, tech, seq_date, code, annotation,
-                validated_species_name, validator
-            )
-            VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s,
-                %(validated_species_name)s, %(validator)s
-            )
-            ON CONFLICT (og_id, tech, seq_date, code, annotation)
-            DO UPDATE SET
-                validated_species_name = EXCLUDED.validated_species_name,
-                validator = EXCLUDED.validator
-            """
-            cur.execute(upsert_query, params)
-        conn.commit()
-        if force:
-            print(
-                "✅ Success: lca_validation overwritten (--force) for "
-                f"{og_id}.{tech}.{seq_date}.{code}.{annotation} "
-                f"-> validated_species_name='{validated_species_name}', validator='{validator}'"
-            )
-        else:
-            print(
-                "✅ Success: lca_validation upserted for "
-                f"{og_id}.{tech}.{seq_date}.{code}.{annotation} "
-                f"-> validated_species_name='{validated_species_name}', validator='{validator}'"
-            )
-        return True
-    except Exception as e:
-        if conn is not None:
-            conn.rollback()
-        print(f"❌ Database error while writing lca_validation: {e}")
-        return False
-    finally:
-        if conn is not None:
-            conn.close()
-
-
-def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_file, assembly_prefix=None, force=False):
-    db_params = load_db_config(config_path)
     # File-naming prefix only: an OG can have multiple assembly attempts, so
     # combined/summary filenames must be qualified with the unique per-assembly
     # prefix (meta.mt_assembly_prefix) to avoid colliding with other attempts
-    # for the same OG. The DB lookups and output row content still use the
-    # real og_id.
+    # for the same OG. The output row content still uses the real og_id.
     prefix = assembly_prefix or og_id
+    record_file = record_file or f"validation_record.{prefix}.json"
 
     # Combine files
     concatenate_lca_files(lca_files, f"lca_combined.{prefix}.tsv")
     concatenate_files(blast_files, f"blast_combined.{prefix}.tsv")
 
-    # Get nominal_species_id from DB
-    db_species = get_species_for_ogid(db_params, og_id)
+    db_species = nominal_species.strip() if nominal_species and nominal_species.strip() else None
     has_nominal_species = db_species is not None
 
     if has_nominal_species:
@@ -221,6 +470,7 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
         # and is also what gets stored in lca_validation.validated_species_name. ENA
         # rejects 'Genus sp' and 'Genus spp.' as not submittable, so normalise to the
         # 'Genus sp.' form here rather than at the point of use.
+        raw_db_species = db_species
         normalised_species = normalise_open_nomenclature(db_species)
         if normalised_species != db_species:
             print(f"[INFO] Normalised nominal species '{db_species}' -> '{normalised_species}'")
@@ -229,22 +479,37 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
         # Normalise once
         db_species_norm = normalise_name(db_species)
     else:
+        raw_db_species = None
         print(
-            f"[WARN] OG ID '{og_id}' nominal species not found in database — "
+            f"[WARN] OG ID '{og_id}' has no nominal species — "
             "species match columns will be recorded as N/A."
         )
 
-    # Load BLAST results
-    blast_blob = load_blast_species_set(f"blast_combined.{prefix}.tsv")
+    # Parsed BLAST rows; each LCA row's evidence is drawn from its own window.
+    blast_rows = load_blast_rows(f"blast_combined.{prefix}.tsv")
+
+    # What rank does the label actually claim? Classified from the RAW value, so
+    # the normalisation above cannot turn a bare genus into something that reads
+    # as an explicit 'sp.' claim and change the answer.
+    nominal = resolve_nominal(raw_db_species, lineage) if has_nominal_species else (None, None)
+    if has_nominal_species:
+        print(f"[INFO] Nominal '{raw_db_species}' asserts rank "
+              f"{nominal[0] or 'none'}: {nominal[1] or '-'}")
 
     sample_validated = False
+    validated_ranks = set()
+    family_release_genus = None
 
     # Process LCA and compare
     with open(f"lca_combined.{prefix}.tsv", newline='') as tsvfile, open(output_file, "w", newline='') as out:
         # Use DictReader so we can refer to columns by name
         reader = csv.DictReader(tsvfile, delimiter='\t')
         writer = csv.writer(out, delimiter='\t')
-        writer.writerow(["og_id", "LCA_result", "nom_species_id", "Match_YN", "Found_in_blast_YN"])
+        # validated_rank is APPENDED, never inserted. evaluate_qc_conditions.py
+        # reads Found_in_blast_YN from this file, and inserting ahead of it would
+        # silently shift what that reads.
+        writer.writerow(["og_id", "LCA_result", "nom_species_id", "Match_YN",
+                         "Found_in_blast_YN", "validated_rank"])
 
         for row in reader:
             if not row:
@@ -258,7 +523,7 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
 
             if not has_nominal_species:
                 # Nothing to compare the LCA/BLAST hits against.
-                writer.writerow([og_id, species_in_lca_raw, "N/A", "N/A", "N/A"])
+                writer.writerow([og_id, species_in_lca_raw, "N/A", "N/A", "N/A", "N/A"])
                 continue
 
             # Split on commas and normalise each species name
@@ -271,13 +536,19 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
             # Check if DB nominal species is among the LCA species list
             match = "Yes" if db_species_norm in species_list_norm else "No"
 
-            # Check if nominal species appears in BLAST output (as before)
-            in_blast = "Yes" if db_species_norm in blast_blob else "No"
+            # Does the evidence support the label's own claim, at the rank it makes?
+            in_blast, validated_rank = match_at_rank(
+                nominal, evidence_for_lca_row(row, blast_rows), row)
             if in_blast == "Yes":
                 sample_validated = True
+                validated_ranks.add(validated_rank)
+                if validated_rank == "family" and not family_release_genus:
+                    # The LCA is MORE specific than the label here. Keep it.
+                    family_release_genus = _lca_value(row, "genus") or None
 
             # LCA_result column: store the raw species_in_LCA string
-            writer.writerow([og_id, species_in_lca_raw, db_species, match, in_blast])
+            writer.writerow([og_id, species_in_lca_raw, db_species, match, in_blast,
+                             validated_rank])
 
     print(f"[INFO] Results written to: {output_file}")
 
@@ -292,31 +563,50 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
         )
         key = parse_assembly_key_from_blast(f"blast_combined.{prefix}.tsv")
         if key is None:
+            # Expected for a zero-region sample: its blast_combined is the empty
+            # placeholder, so there is no sequence id to derive a key from. Not an
+            # error, and deliberately not fatal.
             print(
-                "❌ Could not derive (og_id, tech, seq_date, code, annotation) from "
+                "⚠️ Could not derive (og_id, tech, seq_date, code, annotation) from "
                 f"blast_combined.{prefix}.tsv — skipping lca_validation upsert."
             )
-        else:
-            upsert_lca_validation(db_params, key, None, validator="nf-core", force=force)
-        return
+            return write_validation_record(
+                record_file, "skip", reason="no assembly key in blast_combined"
+            )
+        return write_validation_record(
+            record_file, "upsert", key=key, validated_species_name=None,
+            reason="no nominal_species_id",
+        )
 
-    # Push the validation result to the lca_validation table. We only write a
+    # Record the validation result for the lca_validation table. We only ask for a
     # row when the sample is validated (Found_in_blast_YN = Yes for at least
     # one region) so unvalidated samples leave the existing DB row untouched.
     if sample_validated:
         key = parse_assembly_key_from_blast(f"blast_combined.{prefix}.tsv")
         if key is None:
             print(
-                "❌ Could not derive (og_id, tech, seq_date, code, annotation) from "
+                "⚠️ Could not derive (og_id, tech, seq_date, code, annotation) from "
                 f"blast_combined.{prefix}.tsv — skipping lca_validation upsert."
             )
-        else:
-            upsert_lca_validation(db_params, key, db_species, validator="nf-core", force=force)
-    else:
-        print(
-            f"ℹ️ Sample {og_id} not validated (no Found_in_blast_YN=Yes) — "
-            "skipping lca_validation upsert."
+            return write_validation_record(
+                record_file, "skip", reason="no assembly key in blast_combined"
+            )
+        # One rank per assembly in practice, but be explicit if the regions
+        # disagree rather than silently picking one.
+        rank = ";".join(sorted(validated_ranks)) if validated_ranks else "unmatched"
+        return write_validation_record(
+            record_file, "upsert", key=key, validated_species_name=db_species,
+            validated_rank=rank,
+            lca_genus=family_release_genus if rank == "family" else None,
         )
+
+    print(
+        f"ℹ️ Sample {og_id} not validated (no Found_in_blast_YN=Yes) — "
+        "skipping lca_validation upsert."
+    )
+    return write_validation_record(
+        record_file, "skip", reason="not validated (no Found_in_blast_YN=Yes)"
+    )
 
 
 # ---------------------------
@@ -325,18 +615,33 @@ def compare_lca_and_blast(config_path, og_id, lca_files, blast_files, output_fil
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=(
-            "Compare per-region LCA / BLAST results against the nominal species "
-            "stored in the OceanOmics DB, write a summary TSV, and (when "
-            "validated) upsert the result into the lca_validation table."
+            "Compare per-region LCA / BLAST results against the sample's nominal "
+            "species, write a summary TSV, and write the validation record that "
+            "bin/push_species_validation.py upserts into lca_validation."
         )
     )
     parser.add_argument(
-        "--force",
-        action="store_true",
+        "--nominal-species",
+        default=None,
         help=(
-            "Overwrite an existing lca_validation row even when its validator "
-            "is something other than 'nf-core' (e.g. a human reviewer). Off "
-            "by default."
+            "The sample's nominal_species_id, from the samplesheet "
+            "(meta.nominal_species_id). Omit or pass an empty string for a "
+            "sample with no nominal ID: the species-match columns are then "
+            "recorded as N/A, which is a legitimate state rather than an error."
+        ),
+    )
+    parser.add_argument(
+        "--lineage",
+        default=None,
+        metavar="RANK=NAME,...",
+        help=(
+            "The sample's RESOLVED lineage from the samplesheet, e.g. "
+            "'class=Asteroidea,order=Velatida,family=Pterasteridae'. Used only to "
+            "pin the rank a higher-than-family nominal label actually claims: "
+            "'Asteroidea sp.' is a class, 'Tetractinellida' an order, and no Latin "
+            "suffix can tell those apart (Asteroidea/Scleralcyonacea are both "
+            "-acea/-oidea; Hexactinellida/Tetractinellida both -ida). Omit it and "
+            "such a label stays 'higher', which is reported but never validated."
         ),
     )
     parser.add_argument(
@@ -349,7 +654,14 @@ if __name__ == "__main__":
             "og_id when omitted."
         ),
     )
-    parser.add_argument("config_file")
+    parser.add_argument(
+        "--record-file",
+        default=None,
+        help=(
+            "Where to write the lca_validation record. Defaults to "
+            "validation_record.<prefix>.json."
+        ),
+    )
     parser.add_argument("og_id")
     parser.add_argument(
         "lca_files",
@@ -366,12 +678,14 @@ if __name__ == "__main__":
 
     prefix = args.assembly_prefix or args.og_id
     output_file = f"lca_results.{prefix}.tsv"
-    compare_lca_and_blast(
-        args.config_file,
+    ok = compare_lca_and_blast(
+        args.nominal_species,
         args.og_id,
         lca_files,
         blast_files,
         output_file,
         assembly_prefix=args.assembly_prefix,
-        force=args.force,
+        record_file=args.record_file,
+        lineage=parse_lineage_arg(args.lineage),
     )
+    sys.exit(0 if ok else 1)

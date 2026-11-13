@@ -12,6 +12,7 @@ Usage:
 
 import os
 import csv
+import re
 import sys
 import argparse
 from pathlib import Path
@@ -20,7 +21,34 @@ from pathlib import Path
 # Reference gene order (tRNA, rRNA, CDS) — the standard vertebrate set. Shared
 # with the rescue gates via bin/mito_gene_order.py so the gates and this QC step
 # cannot drift on what "present and in order" means.
-from mito_gene_order import REF_GENES, TRNA_GENES as TRNA_NAMES
+from mito_gene_order import (
+    REF_GENES,
+    TRNA_GENES as TRNA_NAMES,
+    accepted_orders_for,
+    gene_entries_by_coord,
+    lca_lineage_from_combined,
+    order_variant_taxon_check,
+    parse_gff_attributes,
+)
+from lineage_expectations import classify_missing
+from orf_utils import classify_cds
+
+# Genes outside the vertebrate set that the pipeline now carries end-to-end.
+# They are deliberately NOT appended to REF_GENES or PROT_GENES: the vertebrate
+# branch computes missing_genes and gene order against ALL of REF_GENES, so
+# adding them there would make every fish annotation incomplete and out of order.
+# They get their own additive columns instead, and are excluded from extra_genes.
+EXTRA_GENES = ["ATP9", "MTMUTS"]
+
+# Non-gene features mitos_to_emma.py now exports (replication origins, introns,
+# auxiliary ORFs). They carry no gene line, so they never reach gene_entries, but
+# they are listed here so any future consumer has one place to ask.
+NON_GENE_NAMES = {"REP_ORIGIN_H", "REP_ORIGIN_L", "INTRON_GPI", "INTRON_GPII", "LAGLI"}
+
+# A vertebrate mitogenome missing this many tRNAs or fewer, with PCG/rRNA order
+# intact, is an annotation limitation rather than a rearrangement. Matches the
+# existing trna_advisory tolerance.
+ORDER_TRNA_DISPLACEMENT_TOLERANCE = 2
 
 # Protein-coding genes to pull from .faa/.fa files
 PROT_GENES = [
@@ -29,14 +57,18 @@ PROT_GENES = [
     "ND4L", "ND5", "ND6"
 ]
 
-# Taxonomic classes whose mitogenomes follow the cnidarian pattern: 13 PCGs +
-# 2 rRNAs but only ~2 mt tRNAs (trnM/trnW) — the rest are nuclear-encoded and
-# imported. The vertebrate 22-tRNA expectation would wrongly fail these, so for
-# them completeness is judged on the conserved protein-coding + rRNA core only
-# and gene order is not evaluated.
-CNIDARIA_CLASSES = {
+# Taxonomic classes with legitimately reduced/atypical mt tRNA complements:
+# Cnidaria follows the well-known pattern of 13 PCGs + 2 rRNAs but only ~2 mt
+# tRNAs (trnM/trnW), the rest nuclear-encoded and imported. Porifera groups
+# with it here too -- sponge mt tRNA counts are highly variable across
+# lineages (2-27 genes), including documented tRNA-Phe loss in some clades --
+# so the same relaxed expectation applies. The vertebrate 22-tRNA expectation
+# would wrongly fail both groups, so for them completeness is judged on the
+# conserved protein-coding + rRNA core only and gene order is not evaluated.
+REDUCED_TRNA_CLASSES = {
     "anthozoa", "hydrozoa", "scyphozoa", "cubozoa",
     "staurozoa", "myxozoa", "polypodiozoa", "cnidaria",
+    "demospongiae", "calcarea", "hexactinellida", "homoscleromorpha", "porifera",
 }
 # The conserved protein-coding + rRNA core. Named for the lineage that motivated it,
 # but it is the completeness set for EVERY non-vertebrate translation table now (see
@@ -53,9 +85,47 @@ CNIDARIAN_CORE = PROT_GENES + ["RNR1", "RNR2"]
 VERT_CORE = set(PROT_GENES) | {"RNR1", "RNR2"}            # 13 PCG + 2 rRNA
 DEFAULT_TRNA_TOLERANCE = 2
 
+# Interior intergenic gap, in bp, at or above which annotation_gaps reports a span.
+#
+# 50 and not 100. A single missed mitochondrial tRNA leaves a 55-75 bp hole, so a
+# 100 bp threshold sits ABOVE the exact signal this diagnostic exists to catch --
+# it is what distinguishes a real transposition (a tRNA moved) from a missed call
+# (a tRNA-shaped hole left at both the origin and the destination of the apparent
+# move). The cost of reaching that low is the OriL, which runs 30-51 bp and so
+# straddles the threshold: a passing assembly reporting one ~51 bp TN->TC span is
+# expected, not a regression, and is exactly what "purely advisory" is for. Do not
+# raise the default to silence it.
+DEFAULT_GAP_THRESHOLD = 50
 
-def is_cnidarian(class_name):
-    return (class_name or "").strip().lower() in CNIDARIA_CLASSES
+# The same diagnostic on a core-profile (non-vertebrate) assembly needs a very
+# different threshold, because the two profiles are looking for different things.
+#
+# On a vertebrate the signal is a tRNA-sized hole where a tRNA should have been
+# called. That reasoning does not transfer: a cnidarian encodes only ~2 mt tRNAs,
+# so there is almost no missed-tRNA signal to find, and non-vertebrate mitogenomes
+# carry large intergenic spacers as a matter of course. Measured over batch-20's
+# 38 coral assemblies, a 50 bp threshold reports 7.3 gaps per assembly and flags
+# EVERY assembly -- a constant, not a signal. The median positive interior gap is
+# 66 bp and the 90th percentile is 1159 bp.
+#
+# 2000 bp is where it becomes informative again. Those same 38 assemblies share a
+# conserved 1725 bp CO3->CO2 intergenic region -- byte-identical across 20 of
+# them, so plainly biology rather than a defect -- and at 1500 bp that one span
+# alone flags 20 of 38. At 2000 bp exactly ONE assembly is flagged, the
+# OG2375 concatemer, whose three gaps (CO1->ND4 30832, TV->TY 3642, CO2->TG 2515)
+# name its defect precisely. That is the diagnostic doing its job.
+#
+# What it is looking for on this profile is therefore a large unannotated span --
+# a dropped gene call or an assembly artefact -- not a missing tRNA.
+DEFAULT_CORE_GAP_THRESHOLD = 2000
+
+# Adjacent pairs whose intergenic span is legitimately large and must never be
+# reported. TP->TF is the vertebrate control region, routinely ~1 kb.
+GAP_EXEMPT_PAIRS = {("TP", "TF")}
+
+
+def has_reduced_trna_expectation(class_name):
+    return (class_name or "").strip().lower() in REDUCED_TRNA_CLASSES
 
 
 # The vertebrate profile is the only one with a defined reference gene order and a
@@ -79,15 +149,8 @@ def completeness_profile(genetic_code=None, class_name=""):
     """
     if genetic_code is not None:
         return "vertebrate" if int(genetic_code) == VERTEBRATE_CODE else "core"
-    return "core" if is_cnidarian(class_name) else "vertebrate"
+    return "core" if has_reduced_trna_expectation(class_name) else "vertebrate"
 
-
-def parse_gff_attributes(attr_str):
-    return dict(
-        item.split("=", 1)
-        for item in attr_str.strip().split(";")
-        if "=" in item
-    )
 
 def extract_total_length(gff_path):
     with open(gff_path, "r") as f:
@@ -102,8 +165,372 @@ def get_annotation_name(gff_path):
     """Extracts annotation name from the GFF file basename (no extension)."""
     return Path(gff_path).stem
 
+def annotation_gaps(gene_entries, threshold=DEFAULT_GAP_THRESHOLD):
+    """Interior intergenic spans at or above `threshold`, as a formatted list.
+
+    Each is rendered 'ND4:11768-TS1:11982(213)'. The coordinate wrap (last gene
+    back to first) is skipped, because it is not an interior gap; so is any
+    consecutive pair in GAP_EXEMPT_PAIRS.
+
+    PURELY ADVISORY. This must never influence `passed`. Its job is to make a
+    held assembly explain itself -- a tRNA-sized hole sitting immediately beside
+    an apparently transposed tRNA points at the tRNA call, not at the gene order,
+    and that distinction is otherwise only visible by reading the GFF by hand.
+
+    Runs for EVERY completeness profile, not only the vertebrate one. A
+    core-profile assembly is judged on gene presence alone, so without this a
+    coral with all 15 core genes and a kilobase of unannotated sequence between
+    two of them passes with nothing recorded at all.
+    """
+    gaps = []
+    for (left_name, _ls, left_end, _lstr), (right_name, right_start, _re, _rstr) in zip(
+            gene_entries, gene_entries[1:]):
+        if (left_name, right_name) in GAP_EXEMPT_PAIRS:
+            continue
+        size = right_start - left_end - 1
+        if size >= threshold:
+            gaps.append(f"{left_name}:{left_end}-{right_name}:{right_start}({size})")
+    return gaps
+
+
+def order_deviation(found_by_coord, ref_subset):
+    """How far out of order an annotation is: genes outside the longest common
+    subsequence of the observed order against the reference order.
+
+    order_correct=no collapses "one tRNA out of place" and "half the genome is
+    inverted" into the same value, which makes a held pile impossible to triage.
+    This splits it: a low non-zero deviation says "look at this one, it is nearly
+    right", a large one says "this assembly is broken". A GROUP of samples sharing
+    a low non-zero deviation is also what a missing ORDER_VARIANTS row looks like,
+    so this is the cheapest signal for spotting the next clade variant.
+
+    PURELY ADVISORY, like annotation_gaps. difflib is stdlib, so this adds no
+    dependency to the container.
+    """
+    import difflib
+    matcher = difflib.SequenceMatcher(a=ref_subset, b=found_by_coord, autojunk=False)
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    return len(found_by_coord) - matched
+
+def grade_gene_order(found_by_coord, ref_subset):
+    """Grade a gene-order deviation instead of collapsing it to a boolean.
+
+    `order_correct` was a single yes/no over all 37 genes, so "one tRNA sits 200 bp
+    out of place" and "the ND6/CYTB block is genuinely rearranged" were
+    indistinguishable and equally fatal. NOVA_260909_LA failed three complete fish
+    mitogenomes on it: OG2647 (a single displaced tRNA, almost certainly an
+    annotation artefact), OG2965 (a real ND6/CYTB block rearrangement) and OG2972
+    (a major rearrangement).
+
+    The displaced set is everything NOT in the longest common subsequence of the
+    observed and reference orders. Comparing the two lists position-by-position
+    would be wrong: moving one gene shifts every gene after it, so a single
+    translocation would report as a dozen deviations.
+
+    Returns (status, deviations) where status is one of:
+        reference          matches the vertebrate reference order
+        trna_displacement  only tRNAs displaced, at most the tolerance
+        rearranged_block   a PCG or rRNA is displaced
+        rearranged_major   more than a quarter of the genes are displaced
+    """
+    if found_by_coord == ref_subset:
+        return "reference", []
+
+    # Weighted longest common subsequence of the two orders. Keeping a PCG or
+    # rRNA in the subsequence is worth more than keeping a tRNA, so where several
+    # minimal explanations exist the deviation is attributed to the tRNAs. That
+    # is both the conservative reading and the biologically likely one: EMMA
+    # misplacing a divergent tRNA copy is common, an rRNA genuinely relocating is
+    # not. Unweighted, OG2647's single tRNA swap could be reported as a displaced
+    # RNR2 -- a rearranged block -- purely by tie-break.
+    def weight(gene):
+        return 1 if gene in TRNA_NAMES else 2
+
+    a, b = found_by_coord, ref_subset
+    la, lb = len(a), len(b)
+    dp = [[0] * (lb + 1) for _ in range(la + 1)]
+    for i in range(la - 1, -1, -1):
+        for j in range(lb - 1, -1, -1):
+            dp[i][j] = (dp[i + 1][j + 1] + weight(a[i]) if a[i] == b[j]
+                        else max(dp[i + 1][j], dp[i][j + 1]))
+    kept, i, j = set(), 0, 0
+    while i < la and j < lb:
+        if a[i] == b[j] and dp[i][j] == dp[i + 1][j + 1] + weight(a[i]):
+            kept.add(a[i]); i += 1; j += 1
+        elif dp[i + 1][j] >= dp[i][j + 1]:
+            i += 1
+        else:
+            j += 1
+
+    deviations = sorted((set(a) | set(b)) - kept)
+    if not deviations:
+        return "reference", []
+
+    non_trna = [g for g in deviations if g not in TRNA_NAMES]
+    if not non_trna and len(deviations) <= ORDER_TRNA_DISPLACEMENT_TOLERANCE:
+        return "trna_displacement", deviations
+    if ref_subset and len(deviations) > max(1, len(ref_subset) // 4):
+        return "rearranged_major", deviations
+    return "rearranged_block", deviations
+
+
+def read_fasta_seq(path):
+    """First record's sequence from a FASTA, uppercased. Stdlib only."""
+    seq, started = [], False
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith(">"):
+                if started:
+                    break
+                started = True
+                continue
+            seq.append(line.strip())
+    return "".join(seq).upper()
+
+
+_COMPLEMENT = str.maketrans("ACGTRYKMBVDHNacgtrykmbvdhn", "TGCAYRMKVBHDNtgcayrmkvbhdn")
+
+
+def _revcomp(seq):
+    """Reverse complement, stdlib only (this module stays importable without Biopython)."""
+    return seq.translate(_COMPLEMENT)[::-1]
+
+
+def cds_from_gff(gff_path, genetic_code=None):
+    """Spliced CDS nucleotide sequences read from a GFF plus its reoriented genome FASTA.
+
+    Why this exists: an annotator may publish its per-gene CDS files with the terminator
+    removed (EMMA does), and scoring those suspends the terminator check entirely -- a false
+    negative that hides a genuinely broken CDS. The GFF span is the annotation as declared,
+    so it carries the stop, and classify_cds() already treats a span whose length is not a
+    multiple of three as a poly-A-completed truncated stop. Both EMMA conventions therefore
+    score correctly with no note parsing: of OG2647's 13 PCGs, the 7 with a real terminator
+    are multiples of 3 ending in a stop, and the 6 carrying EMMA's "putative TAA stop codon"
+    note have spans of 691/1141/785/1046/349/1381, none divisible by 3.
+
+    The FASTA must be the annotation's own `<name>.fa` sibling, NOT the pre-annotation
+    assembly: EMMA reorients the molecule, so the two are the same length and different
+    sequence, and the GFF coordinates only mean anything against the reoriented one.
+
+    A gene with MORE THAN ONE CDS row is deliberately skipped rather than assembled here.
+    Joining exons needs an order this function cannot infer safely: a gene spanning the
+    origin is written as two pieces whose correct order is high-coordinate first, which is
+    the opposite of sorting by start. Callers fall back to the per-gene file for those.
+
+    Returns {bare gene name: nt} for the genes it could resolve, or {} if the GFF or its
+    FASTA is missing or unreadable.
+    """
+    if not gff_path:
+        return {}
+    gff = Path(gff_path)
+    fasta = gff.with_suffix(".fa")
+    if not gff.is_file() or not fasta.is_file():
+        return {}
+    try:
+        genome = read_fasta_seq(fasta)
+        if not genome:
+            return {}
+        rows = {}
+        for line in gff.read_text().splitlines():
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 9 or fields[2] != "CDS":
+                continue
+            match = re.search(r"Name=([^;]+)", fields[8])
+            if not match:
+                continue
+            gene = match.group(1).strip().replace("MT-", "").upper()
+            rows.setdefault(gene, []).append((int(fields[3]), int(fields[4]), fields[6]))
+    except (OSError, ValueError):
+        return {}
+
+    spliced = {}
+    for gene, spans in rows.items():
+        if len(spans) != 1:
+            continue
+        start, end, strand = spans[0]
+        if start < 1 or end > len(genome) or end < start:
+            continue
+        seq = genome[start - 1:end]
+        spliced[gene] = _revcomp(seq) if strand == "-" else seq
+    return spliced
+
+
+def score_cds_dir(cds_dir, genetic_code, lineage=None, gff_path=None):
+    """Score every exported CDS in a directory, per gene.
+
+    Split out of check_cds_integrity so a second consumer can reuse the
+    terminator-convention detection instead of re-deriving it. Reimplementing it
+    is how bin/mito_run_snapshot.py came to report 13 false "no_stop" findings on
+    every EMMA sample: the convention is a property of the annotator's output,
+    not of the caller.
+
+    `gff_path` lets a stop-excluded annotator still be checked properly: the per-gene files
+    have no terminator to test, but the GFF span does, so the frame/terminator check is
+    re-run against the annotation as declared instead of being suspended. Omit it and the
+    old behaviour (suspend the terminator check, keep the frame check) applies unchanged.
+
+    Returns (per_gene, stop_excluded, convention_note): per_gene is a list of
+    (gene, issues, advisories) in filename order, stop_excluded says whether this annotator
+    omits terminators, and convention_note is the run-level advisory about that convention
+    (None when it does not apply). The note is NOT attached to any gene, so a per-gene
+    consumer does not report it as a defect. Callers wanting a single verdict should use
+    check_cds_integrity() rather than collapsing per_gene themselves.
+    """
+    if not cds_dir or not Path(cds_dir).is_dir() or genetic_code is None:
+        return None, False, None
+
+    # Annotators disagree about whether an exported CDS includes its terminator.
+    # mitos_to_emma.py writes the stop codon; EMMA does not (an EMMA ATP6 of 681 nt
+    # translates to exactly 227 aa). Applying the MITOS convention to EMMA output
+    # reports a missing stop on every single vertebrate CDS -- 13 false findings a
+    # sample. Detect the convention from the data rather than from the annotator's
+    # name, so a future annotator is handled without a new special case.
+    records = []
+    for fa in sorted(Path(cds_dir).glob("*.fa*")):
+        gene = fa.name.split(".")[0].replace("MT-", "")
+        if gene in NON_GENE_NAMES or gene.startswith("RNR"):
+            continue
+        if gene.startswith("T") and gene not in EXTRA_GENES:
+            continue
+        try:
+            records.append((gene, read_fasta_seq(fa)))
+        except OSError:
+            records.append((gene, None))
+    if not records:
+        return None, False, None
+
+    stops_present = 0
+    stops_checked = 0
+    for gene, nt in records:
+        if not nt:
+            continue
+        try:
+            info = classify_cds(nt, genetic_code, lineage=lineage, gene=gene)
+        except ValueError:
+            continue
+        stops_checked += 1
+        if info["stop_ok"]:
+            stops_present += 1
+    # Fewer than 40% carrying a terminator means this annotator excludes them.
+    stop_excluded = stops_checked >= 3 and stops_present <= 0.4 * stops_checked
+
+    # A stop-excluded annotator used to have its terminator check suspended outright, which
+    # meant a genuinely broken EMMA CDS could not be seen at all. Re-read those CDS from the
+    # GFF span, which does carry the terminator, and score them properly. Per gene, so a gene
+    # the GFF cannot resolve (multi-exon, out of range) still falls back to the suspension
+    # rather than going unchecked.
+    from_gff = cds_from_gff(gff_path, genetic_code) if stop_excluded else {}
+
+    per_gene = []
+    for gene, nt in records:
+        issues, advisories = [], []
+        if nt is None:
+            issues.append(f"{gene}:unreadable")
+            per_gene.append((gene, issues, advisories))
+            continue
+        if not nt:
+            issues.append(f"{gene}:empty_cds")
+            per_gene.append((gene, issues, advisories))
+            continue
+        # Prefer the GFF span for a stop-excluded annotator: it is the same CDS with its
+        # terminator still attached, so it can be checked rather than excused.
+        scored = from_gff.get(gene) or nt
+        graded_from_gff = scored is not nt
+        try:
+            info = classify_cds(scored, genetic_code, lineage=lineage, gene=gene)
+        except ValueError as exc:
+            issues.append(f"{gene}:{exc}")
+            per_gene.append((gene, issues, advisories))
+            continue
+        if info["start_class"] == "implausible":
+            issues.append(f"{gene}:implausible_start({info['start_codon']})")
+        elif info["start_class"] == "alternative_documented":
+            advisories.append(f"{gene}:alternative_start({info['start_codon']})")
+        if graded_from_gff:
+            # Fully checked, on the declared span. classify_cds already accepts a span whose
+            # length is not a multiple of 3 as a poly-A-completed truncated stop, which is
+            # the other convention EMMA uses, so no note parsing is needed.
+            if not info["stop_ok"]:
+                issues.append(f"{gene}:no_stop({scored[-3:]},rem{len(scored) % 3})")
+        elif stop_excluded:
+            # No usable GFF span for this gene: only the terminator check is suspended,
+            # never the frame check.
+            if len(nt) % 3:
+                issues.append(f"{gene}:frame_remainder({len(nt) % 3})")
+        elif not info["stop_ok"]:
+            issues.append(f"{gene}:no_stop({nt[-3:]},rem{len(nt) % 3})")
+        if info["internal_stops"]:
+            issues.append(f"{gene}:internal_stops({info['internal_stops']})")
+        per_gene.append((gene, issues, advisories))
+
+    # Returned SEPARATELY, not attached to a gene. It is a statement about the annotator, and
+    # hanging it on the first gene's advisories made a per-gene consumer report it as a CDS
+    # defect on whichever gene sorted first -- 10 phantom ATP6 findings in the run snapshot.
+    #
+    # The suffix matters to a reader: cds_convention:stop_codon_excluded on its own used to
+    # mean "the terminator was not checked at all", which is no longer true when the GFF span
+    # could be read instead.
+    convention_note = None
+    if stop_excluded:
+        graded = sum(1 for gene, _i, _a in per_gene if gene in from_gff)
+        convention_note = ("cds_convention:stop_codon_excluded(checked_from_gff)"
+                           if graded and graded == len(per_gene)
+                           else "cds_convention:stop_codon_excluded")
+
+    return per_gene, stop_excluded, convention_note
+
+
+def check_cds_integrity(cds_dir, annotation_name, genetic_code, lineage=None, gff_path=None):
+    """Classify EVERY exported CDS, not a fixed 13-gene list.
+
+    The existing annotation_qc_gate.py cannot serve as the annotation verdict: it
+    runs on raw MITOS2 output BEFORE any repair, covers only the standard PCG
+    list, and always exits 0 with exceptions degrading to PASS. It is a router.
+    This runs post-merge, on whatever was actually published.
+
+    Returns (status, issues) where status is 'ok', 'advisory' or 'broken'.
+    """
+    per_gene, _stop_excluded, convention_note = score_cds_dir(
+        cds_dir, genetic_code, lineage=lineage, gff_path=gff_path)
+    if per_gene is None:
+        return "not_evaluated", []
+
+    issues = [i for _gene, gene_issues, _adv in per_gene for i in gene_issues]
+    # The convention note comes from score_cds_dir, because only it knows whether the GFF span
+    # could be read and therefore whether the terminator was actually checked.
+    advisories = ([convention_note] if convention_note else [])
+    advisories += [a for _gene, _iss, gene_adv in per_gene for a in gene_adv]
+
+    if issues:
+        return "broken", issues + advisories
+    if advisories:
+        return "advisory", advisories
+    return "ok", []
+
+
+def read_conversion_audit(path):
+    """(unmapped, auxiliary) raw feature names from mitos_conversion_audit.tsv."""
+    unmapped, auxiliary = [], []
+    if not path or not Path(path).is_file():
+        return unmapped, auxiliary
+    with open(path) as fh:
+        for line in fh:
+            f = line.rstrip("\n").split("\t")
+            if len(f) < 5 or f[0] == "raw_name":
+                continue
+            if f[4] == "unmapped":
+                unmapped.append(f[0])
+            elif f[4] == "known_auxiliary":
+                auxiliary.append(f[0])
+    return unmapped, auxiliary
+
 def process_gff(gff_path, annotation_name, class_name="",
-                trna_tolerance=DEFAULT_TRNA_TOLERANCE, genetic_code=None):
+                trna_tolerance=DEFAULT_TRNA_TOLERANCE, genetic_code=None,
+                taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD,
+                lca_combined=None, core_gap_threshold=DEFAULT_CORE_GAP_THRESHOLD,
+                cds_dir=None, conversion_audit=None):
     parts = annotation_name.split(".")
     if len(parts) != 5:
         print(f"⚠️ Warning: Unexpected annotation_name format: {annotation_name}")
@@ -111,9 +538,22 @@ def process_gff(gff_path, annotation_name, class_name="",
     else:
         og_id, tech, seq_date, code, annotation = parts
 
-    gene_entries = []  # list of (gene_name, start, end, strand)
-    seen = set()
+    # Gene entries come from the SHARED reader, which dedups a gene written as more
+    # than one `gene` line at its lowest start. This used to be an inline first-seen
+    # dedup, which on an origin-spanning gene put it at whichever half the file
+    # listed first -- so the same GFF could be judged in-order by the rescue gates
+    # (which already deduped by lowest start) and out-of-order here.
+    gene_entries = gene_entries_by_coord(gff_path)
     gene_lengths = {gene: "" for gene in REF_GENES}
+    # ATP9/MTMUTS are measured alongside the reference genes but kept in their own
+    # map: they must not enter gene_lengths, which is keyed on REF_GENES and drives
+    # the vertebrate completeness columns.
+    extra_gene_lengths = {gene: "" for gene in EXTRA_GENES}
+    for gene_name, start, end, _strand in gene_entries:
+        if gene_name in gene_lengths:
+            gene_lengths[gene_name] = str(abs(end - start) + 1)
+        elif gene_name in extra_gene_lengths:
+            extra_gene_lengths[gene_name] = str(abs(end - start) + 1)
     total_length = extract_total_length(gff_path)
 
     # Count features by the gene they belong to, not by feature line, so an
@@ -144,35 +584,108 @@ def process_gff(gff_path, annotation_name, class_name="",
             elif feature_type == "rrna":
                 rrna_genes.add(gene_key)
 
-            if parts[2] == "gene" and "Name" in attributes:
-                gene_name = attributes["Name"].replace("MT-", "")
-                if gene_name not in seen:
-                    seen.add(gene_name)
-                    gene_entries.append((gene_name, start, end, parts[6]))  # add strand too
-                    if gene_name in gene_lengths:
-                        gene_lengths[gene_name] = str(abs(end - start) + 1)
-
-    gene_entries.sort(key=lambda x: x[1])  # sort by start
-    found_by_coord = [g[0] for g in gene_entries]
+    found_by_coord = [entry[0] for entry in gene_entries]
 
     trna_advisory = []
+    # "no" is the established nothing-to-report value in this file (missing_genes,
+    # trna_advisory, extra_genes all use it), so the new columns follow suit rather
+    # than overloading NULL or an empty string.
+    order_variant = "no"
+    deviation = "no"
+    # Advisory record of whether the BLAST-derived lineage agreed with the rank a
+    # variant rule matched on. Never blocks anything -- see order_variant_taxon_check.
+    taxon_check = (order_variant_taxon_check(taxon, lca_lineage_from_combined(lca_combined))
+                   if lca_combined else "no")
+
+    # Profile first, because the gap threshold depends on it: the two profiles are
+    # looking for different things and a single threshold cannot serve both. See
+    # DEFAULT_CORE_GAP_THRESHOLD.
     profile = completeness_profile(genetic_code, class_name)
+    gaps = annotation_gaps(
+        gene_entries,
+        core_gap_threshold if profile == "core" else gap_threshold)
     if profile == "core":
-        # Judge completeness on the conserved protein-coding + rRNA core only.
-        # Cnidarians legitimately lack most tRNAs, and no non-vertebrate lineage
-        # follows the vertebrate gene order, so order is reported as NA rather
+        # Judge completeness on the conserved protein-coding + rRNA core only;
+        # cnidarians and sponges legitimately lack most tRNAs, and no non-vertebrate
+        # lineage follows the vertebrate gene order, so order is reported as NA rather
         # than failed.
         missing = [g for g in CNIDARIAN_CORE if g not in found_by_coord]
-        extra = [g for g in found_by_coord if g not in REF_GENES]
+        extra = [g for g in found_by_coord
+                 if g not in REF_GENES and g not in EXTRA_GENES
+                 and g not in NON_GENE_NAMES]
         order_correct = "NA"
+        order_status, order_deviations = "not_evaluated", []
         passed = len(missing) == 0
     else:
-        missing = [g for g in REF_GENES if g not in found_by_coord]
-        extra = [g for g in found_by_coord if g not in REF_GENES]
-        ref_subset = [g for g in REF_GENES if g in found_by_coord]
-        order_ok = (found_by_coord == ref_subset)
-        order_correct = "yes" if order_ok else "no"
+        # Every order this taxon may legitimately show, canonical FIRST. A curated
+        # variant rule ADDS an accepted order rather than replacing the canonical
+        # one, so a canonical member of a rule-carrying taxon keeps passing and
+        # does not acquire an order_variant value merely because its family has a
+        # rule. Checking canonical first is what makes that hold.
+        candidates = accepted_orders_for(taxon)
+        order_ref, matched_rule = candidates[0]
+        exact_match = False
+        for candidate_order, rule_id in candidates:
+            candidate_subset = [g for g in candidate_order if g in found_by_coord]
+            if found_by_coord == candidate_subset:
+                order_ref, matched_rule, exact_match = candidate_order, rule_id, True
+                break
+
+        # missing is computed against the order that matched, so the reported
+        # sequence of missing genes stays consistent with the order being judged.
+        # missing and extra are set-membership tests, so a variant can only change
+        # the ORDER in which missing genes are listed, never which are missing.
+        missing = [g for g in order_ref if g not in found_by_coord]
+        # ATP9/MTMUTS and the non-gene features are real annotations, not surprises,
+        # so they are not reported as extra genes.
+        extra = [g for g in found_by_coord
+                 if g not in REF_GENES and g not in EXTRA_GENES
+                 and g not in NON_GENE_NAMES]
+        ref_subset = [g for g in order_ref if g in found_by_coord]
+
+        order_ok = exact_match
+        if order_ok and matched_rule:
+            order_correct = "variant"
+            order_variant = matched_rule
+        else:
+            order_correct = "yes" if order_ok else "no"
+
+        # Grade WHAT KIND of deviation this is. REPORTING ONLY: it does not feed
+        # order_ok or passed.
+        #
+        # order_correct=no collapsed "one tRNA sits 200 bp out of place" into the
+        # same value as "the ND6/CYTB block is genuinely rearranged", which made a
+        # held pile impossible to triage: NOVA_260909_LA held three complete fish
+        # on gene order alone, OG2647 for a single displaced tRNA, OG2965 for a real
+        # block rearrangement. order_status separates them by NAME so the next
+        # curated rule can be written from evidence.
+        #
+        # It deliberately does NOT decide the verdict. The curated ORDER_VARIANTS
+        # rules are themselves tRNA transpositions (scarine IQM->IMQ, TD/TS2), so a
+        # blanket "a tRNA displacement is advisory" would accept every one of them
+        # for every taxon and neuter the rule system: the whole point of a rule is
+        # that a documented rearrangement is accepted for the clade it was
+        # documented in and nowhere else. A tRNA displacement here therefore still
+        # fails, and the way to pass one is to add the ORDER_VARIANTS rule with its
+        # accession, exactly as before.
+        #
+        # Graded against the CLOSEST accepted order, on the same principle as the
+        # advisory `deviation` below: a taxon with a curated rule is scored against
+        # whichever ordering it is nearer to, not penalised for the rule existing.
+        order_status, order_deviations = min(
+            (grade_gene_order([g for g in found_by_coord if g in REF_GENES],
+                              [g for g in candidate_order if g in found_by_coord])
+             for candidate_order, _rule in candidates),
+            key=lambda graded: len(graded[1]))
         passed = len(missing) == 0 and order_ok
+        if not order_ok:
+            # Deviation against the CLOSEST accepted order, so a taxon with a rule
+            # is scored against whichever ordering it is nearer to rather than
+            # being penalised for the rule existing.
+            deviation = str(min(
+                order_deviation(found_by_coord,
+                                [g for g in candidate_order if g in found_by_coord])
+                for candidate_order, _rule in candidates))
 
         # Tolerate a small tRNA-only shortfall on an otherwise complete, correctly
         # ordered mitogenome. All 13 PCGs + both rRNAs must be present, gene order
@@ -186,6 +699,41 @@ def process_gff(gff_path, annotation_name, class_name="",
             trna_advisory = list(missing)  # already in REF order
             passed = True
 
+    # ---- integrity, lineage expectations and conversion audit -------------
+    #
+    # Every column below is ALWAYS written with an explicit value ('ok', 'none',
+    # 'not_evaluated'), never left blank on a clean sample. Blank has to keep
+    # meaning "not computed" so a stale value from a previous run is detectable
+    # rather than indistinguishable from a genuine pass.
+    lineage = class_name or (taxon or {}).get("phylum", "")
+    integrity_status, integrity_issues = check_cds_integrity(
+        cds_dir, annotation_name, genetic_code, lineage=lineage, gff_path=gff_path)
+
+    # classify_missing reads order/class/phylum; the same dict already carries them.
+    taxonomy = {
+        "order": (taxon or {}).get("order", ""),
+        "class": class_name or (taxon or {}).get("class", ""),
+        "phylum": (taxon or {}).get("phylum", ""),
+    }
+    present = set(found_by_coord)
+    blocking_missing, advisory_missing = classify_missing(taxonomy, present)
+
+    unmapped_feats, auxiliary_feats = read_conversion_audit(conversion_audit)
+
+    # Unconditional, and the rule that actually catches this batch's losses: if
+    # MITOS called a gene and conversion dropped it, that is an annotation error
+    # whatever the taxonomy says, and it does not depend on meta.order being
+    # populated (most invertebrates here have a blank order).
+    if unmapped_feats:
+        integrity_issues = list(integrity_issues) + [
+            f"unmapped_feature:{n}" for n in sorted(set(unmapped_feats))]
+        integrity_status = "broken"
+
+    expected_lineage = sorted(set(blocking_missing) | set(advisory_missing) | (present & set(EXTRA_GENES)))
+
+    if blocking_missing or integrity_status == "broken":
+        passed = False
+
     gff_summary = {
         "og_id": og_id,
         "tech": tech,
@@ -196,6 +744,13 @@ def process_gff(gff_path, annotation_name, class_name="",
         "trna_advisory": ";".join(trna_advisory) if trna_advisory else "no",
         "extra_genes": ";".join(extra) if extra else "no",
         "order_correct": order_correct,
+        # Which curated rule accepted a non-canonical order, so a relaxed gate stays
+        # auditable after the fact. Same precedent as trna_advisory.
+        "order_variant": order_variant,
+        # Advisory only: none of these may affect `passed`.
+        "order_variant_taxon_check": taxon_check,
+        "order_deviation": deviation,
+        "annotation_gaps": ";".join(gaps) if gaps else "no",
         "passed": "yes" if passed else "no",
         # Which profile this verdict was reached under. mitogenome_assembly_summary.py
         # reads it so the run-level report cannot judge a core-profile assembly
@@ -205,21 +760,41 @@ def process_gff(gff_path, annotation_name, class_name="",
         "total_length": total_length if total_length is not None else "NA",
         "num_cds": len(cds_genes),
         "num_trna": len(trna_genes),
-        "num_rrna": len(rrna_genes)
+        "num_rrna": len(rrna_genes),
+        # Graded gene order. order_correct stays for backward compatibility.
+        "order_status": order_status,
+        "order_deviation_detail": ";".join(order_deviations) if order_deviations else "none",
+        # Non-vertebrate gene expectations for this lineage.
+        "expected_lineage_genes": ";".join(expected_lineage) if expected_lineage else "none",
+        "missing_expected_lineage_genes": ";".join(blocking_missing) if blocking_missing else "none",
+        "lineage_gene_advisories": ";".join(advisory_missing) if advisory_missing else "none",
+        # What the MITOS -> EMMA conversion did with features it could not map.
+        "mitos_unmapped_features": ";".join(sorted(set(unmapped_feats))) if unmapped_feats else "none",
+        "mitos_known_auxiliary_features": ";".join(sorted(set(auxiliary_feats))) if auxiliary_feats else "none",
+        "duplicate_loci": ";".join(sorted(g for g in found_by_coord if "_" in g and g.rsplit("_", 1)[-1].isdigit())) or "none",
+        # Final annotation integrity, computed on what was actually published.
+        "annotation_integrity_status": integrity_status,
+        "annotation_integrity_issues": ";".join(integrity_issues) if integrity_issues else "none",
     }
     gff_summary.update(gene_lengths)
+    gff_summary.update(extra_gene_lengths)
     return gff_summary
 
 def process_protein_lengths(prot_dir, annotation_name):
     from Bio import SeqIO  # local: keeps process_gff importable without Biopython
     missing = []
-    prot_lengths = {f"{gene}_trans": "" for gene in PROT_GENES}
-    for gene in PROT_GENES:
+    # EXTRA_GENES are reported alongside, but stay OUT of PROT_GENES so the
+    # vertebrate completeness/order computation is untouched. A vertebrate simply
+    # has no ATP9/MTMUTS protein file and gets None, exactly as it does for any
+    # gene it does not carry.
+    prot_lengths = {f"{gene}_trans": "" for gene in PROT_GENES + EXTRA_GENES}
+    for gene in PROT_GENES + EXTRA_GENES:
         pattern = f"MT-{gene}.{annotation_name}.fa*"
         candidates = sorted(prot_dir.glob(pattern))
         if not candidates:
             prot_lengths[f"{gene}_trans"] = None
-            missing.append(gene)
+            if gene not in EXTRA_GENES:
+                missing.append(gene)
         else:
             faa_path = candidates[0]
             rec = next(SeqIO.parse(faa_path, "fasta"))
@@ -231,13 +806,18 @@ def process_protein_lengths(prot_dir, annotation_name):
     return prot_lengths
 
 def main(gff_path, prot_dir, class_name="", trna_tolerance=DEFAULT_TRNA_TOLERANCE,
-         genetic_code=None):
+         genetic_code=None, taxon=None, gap_threshold=DEFAULT_GAP_THRESHOLD,
+         lca_combined=None, core_gap_threshold=DEFAULT_CORE_GAP_THRESHOLD,
+         cds_dir=None, conversion_audit=None):
     if not os.path.isfile(gff_path):
         sys.exit(f"❌ GFF file not found: {gff_path}")
 
     annotation_name = get_annotation_name(gff_path)
     gff_summary = process_gff(gff_path, annotation_name, class_name, trna_tolerance,
-                              genetic_code)
+                              genetic_code, taxon=taxon, gap_threshold=gap_threshold,
+                              lca_combined=lca_combined,
+                              core_gap_threshold=core_gap_threshold,
+                              cds_dir=cds_dir, conversion_audit=conversion_audit)
     prot_lengths = process_protein_lengths(prot_dir, annotation_name)
 
     combined = {**gff_summary, **prot_lengths}
@@ -263,6 +843,17 @@ if __name__ == "__main__":
                          "judged on the PCG+rRNA core only, everything else gets the "
                          "vertebrate 22-tRNA profile. --genetic-code wins when both "
                          "are given.")
+    ap.add_argument("--phylum", dest="phylum_name", default="",
+                    help="taxonomic phylum (e.g. Porifera), for the phylum-keyed "
+                         "lineage expectations.")
+    ap.add_argument("--cds-dir", dest="cds_dir", default=None,
+                    help="path to the cds/ directory. Required for the final "
+                         "annotation-integrity check, which classifies every "
+                         "exported CDS under the sample's own genetic code. "
+                         "Omitted -> annotation_integrity_status=not_evaluated.")
+    ap.add_argument("--conversion-audit", dest="conversion_audit", default=None,
+                    help="path to mitos_conversion_audit.tsv. An unmapped coding "
+                         "feature recorded there blocks a clean verdict.")
     ap.add_argument("--genetic-code", dest="genetic_code", type=int, default=None,
                     help="NCBI mitochondrial translation table (from meta.genetic_code). "
                          "Selects the completeness profile: code 2 is judged against the "
@@ -275,7 +866,51 @@ if __name__ == "__main__":
                          "gene order is correct. Tolerated tRNAs are recorded in the "
                          "trna_advisory column; missing_genes stays truthful. "
                          "0 requires a complete 37-gene annotation. Default %(default)s.")
+    ap.add_argument("--family", default="",
+                    help="taxonomic family (meta.family). Used ONLY to look up a "
+                         "curated gene-order variant; it never affects completeness.")
+    ap.add_argument("--order", dest="taxon_order", default="",
+                    help="taxonomic order (meta.order). See --family.")
+    ap.add_argument("--genus", default="",
+                    help="genus, derived as the first whitespace token of "
+                         "meta.nominal_species_id -- there is no separate genus field, "
+                         "and this is how reference_divergence_check.py derives it too. "
+                         "See --family.")
+    ap.add_argument("--gap-threshold", dest="gap_threshold", type=int,
+                    default=DEFAULT_GAP_THRESHOLD,
+                    help="interior intergenic span, in bp, at or above which a gap is "
+                         "reported in annotation_gaps. Purely advisory: it never "
+                         "affects passed. Default %(default)s, deliberately below the "
+                         "55-75 bp hole a single missed mt-tRNA leaves.")
+    ap.add_argument("--core-gap-threshold", dest="core_gap_threshold", type=int,
+                    default=DEFAULT_CORE_GAP_THRESHOLD,
+                    help="as --gap-threshold, but for the core (non-vertebrate) "
+                         "completeness profile, which needs a far higher one: "
+                         "non-vertebrate mitogenomes carry large intergenic spacers "
+                         "routinely, so the vertebrate default flags every assembly "
+                         "and reports nothing. Default %(default)s.")
+    ap.add_argument("--lca-combined", dest="lca_combined", default="",
+                    help="path to this assembly's lca_combined.<prefix>.tsv. When "
+                         "given, records in order_variant_taxon_check whether the "
+                         "BLAST-derived lineage agreed with the rank a variant rule "
+                         "matched on. Advisory: it holds nothing and changes no "
+                         "verdict.")
     args = ap.parse_args()
 
+    # Rank -> value, in the shape ref_order_for expects. Unresolved values are
+    # normalised away inside the resolver, so passing '' here is safe.
+    taxon = {
+        "genus": args.genus,
+        "family": args.family,
+        "order": args.taxon_order,
+        "class": args.class_name,
+        # Keys the lineage gene expectations alongside order/class. Blank simply
+        # matches no rule, which is the common case.
+        "phylum": args.phylum_name,
+    }
+
     main(args.gff, Path(args.proteins), args.class_name, args.trna_tolerance,
-         args.genetic_code)
+         args.genetic_code, taxon=taxon, gap_threshold=args.gap_threshold,
+         lca_combined=args.lca_combined or None,
+         core_gap_threshold=args.core_gap_threshold,
+         cds_dir=args.cds_dir, conversion_audit=args.conversion_audit)

@@ -6,7 +6,13 @@ from __future__ import annotations
 import argparse
 import csv
 import glob
+import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from assembly_variant import is_rescue_molecule
 
 
 RECORD_COLUMNS = [
@@ -132,6 +138,19 @@ def build_record(
     # job, not something this record waits on.  Without the format check there
     # is no readiness claim to make, so --ena_webin_validate false stays false.
     ready = "true" if gates_pass and webin_status == "PASS" else "false"
+
+    # An _rgj / _concat can never be submission_ready, whatever the gates say. It is a
+    # scaffolding artefact whose junctions are inferred, not a molecule anyone sequenced,
+    # and it exists only so a partial mitogenome can be annotated and get a species ID.
+    #
+    # Nothing used to distinguish it: the QC gate is content-based and readiness is pure gate
+    # arithmetic, so OG2936's _rgj reached submission_ready=true in NOVA_260909_LA. The webin
+    # call is guarded too (see subworkflows/local/ena_submission_prep), which alone keeps
+    # webin_status off PASS; this is the second lock, so a future entry point that reaches
+    # webin another way still cannot produce a readiness claim for an artificial molecule.
+    if is_rescue_molecule(code):
+        ready = "false"
+        webin_reason = "not_submittable:rescue_variant"
 
     record = {column: "" for column in RECORD_COLUMNS}
     record.update({

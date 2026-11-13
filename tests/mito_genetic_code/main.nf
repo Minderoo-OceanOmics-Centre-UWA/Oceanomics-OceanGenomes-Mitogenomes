@@ -9,6 +9,9 @@ workflow MITO_GENETIC_CODE {
     classes   // channel of [ sample_id, tax_class ]
 
     main:
+    MitoGeneticCode.load(
+        file("${projectDir}/assets/taxonomy/mito_genetic_codes.json", checkIfExists: true))
+
     resolved = classes.map { sample_id, tax_class ->
         tuple(sample_id, tax_class, MitoGeneticCode.forClass(tax_class))
     }
@@ -18,6 +21,7 @@ workflow MITO_GENETIC_CODE {
 }
 
 workflow {
-    MITO_GENETIC_CODE(Channel.of(['OG1', 'Anthozoa'], ['OG2', 'Asteroidea'], ['OG3', 'Actinopteri']))
+    MITO_GENETIC_CODE(Channel.of(['OG1', 'Anthozoa'], ['OG2', 'Asteroidea'], ['OG3', 'Actinopteri'],
+                                 ['OG4', 'Bivalvia'], ['OG5', 'Ascidiacea'], ['OG6', 'Pterobranchia']))
     MITO_GENETIC_CODE.out.resolved.view { id, c, code -> "CODE\t${id}\t${c}\t${code}" }
 }

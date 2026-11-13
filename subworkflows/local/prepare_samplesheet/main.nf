@@ -1,5 +1,5 @@
 //
-// Subworkflow with functionality specific to the nf-core/oceangenomesmitogenomes pipeline
+// Subworkflow with functionality specific to the OceanOmics OceanGenomes Mitogenomes pipeline
 //
 
 /*
@@ -14,23 +14,28 @@ include { samplesheetToList         } from 'plugin/nf-schema'
 
 // Resolve the NCBI mitochondrial genetic code (translation table) for a sample
 // from its taxonomic class. Mitochondrial codes differ by lineage, and the wrong
-// code mistranslates CDS in MITOS2 annotation and QC protein translation:
-//   * Cnidaria (corals, anemones, jellyfish, hydroids) use the Coelenterate code (4),
-//   * echinoderms and flatworms use the Echinoderm/Flatworm code (9),
-//   * vertebrates (and anything unresolved but NOT flagged invertebrate) fall
-//     back to defaultCode (vertebrate, 2).
+// code mistranslates CDS in MITOS2 annotation and QC protein translation --
+// Cnidaria/Ctenophora/Porifera are code 4, echinoderms and most flatworms 9,
+// tunicates 13, and the bilaterian invertebrate bulk 5.
 //
-// The class -> code lookup itself lives in lib/MitoGeneticCode.groovy, shared with
-// qc_only_from_annotations.nf so that re-QCing an assembly through the standalone
+// The class -> code map lives in assets/taxonomy/mito_genetic_codes.json, not here, so
+// bin/create_samplesheet.py can resolve the same codes when it writes the
+// samplesheet's genetic_code column. See InvertTaxonGroups.loadGeneticCodes().
+//
+// The lookup is reached through MitoGeneticCode.forClass(), which is also what
+// qc_only_from_annotations.nf calls, so re-QCing an assembly through the standalone
 // entrypoint cannot resolve a different code than the run that produced it. Only the
-// unmapped-class policy differs between the two, and it stays with each caller.
+// lookup is shared; the unmapped-class policy below stays here, because the two callers
+// differ -- this one is about to bake the table into a new annotation, that one is
+// re-QCing annotations that already exist.
 //
-// An `invertebrates=true` sample whose class is not in the known map raises
-// rather than silently defaulting: as more invertebrate lineages are validated
-// (e.g. bivalves are code 5) a wrong default would mistranslate the whole
-// annotation and fail table2asn terminally. Add the class to
-// lib/MitoGeneticCode.groovy, or set the per-sample `genetic_code` samplesheet
-// column, which wins over this map.
+// Precedence: the per-sample `genetic_code` column wins over everything, then
+// the map, then defaultCode for vertebrates. There is deliberately no catch-all
+// invertebrate default: not every invertebrate is code 5, and a wrong table
+// mistranslates the whole annotation and fails table2asn terminally, long after
+// the point where it could be diagnosed cheaply. An `invertebrates=true` sample
+// whose class is unmapped raises instead, so the code is resolved before the run
+// -- add the class to the JSON once its code is confirmed, or set the column.
 def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
     if (explicitCode != null && explicitCode.toString().trim() != '') {
         def parsed = explicitCode.toString().trim()
@@ -44,20 +49,13 @@ def mitoGeneticCode(sampleId, taxClass, isInvert, explicitCode, defaultCode) {
         return mapped
     }
     if (isInvert) {
-        // Deliberately a hard stop, not a fallback. create_samplesheet.py marks far
-        // more classes invertebrates=true than MitoGeneticCode maps, so this fires
-        // for molluscs, annelids, arthropods, sponges and tunicates. Guessing a code
-        // for them would also route them down an invertebrate annotation path that is
-        // tuned for corals (cox1 origin rotation, the coral reference DB, cnidarian
-        // QC thresholds) and has not been validated for any other lineage -- a
-        // silently wrong annotation instead of a stop the operator can act on.
-        error "Sample ${sampleId}: class '${taxClass ?: 'unknown'}' has no known " +
-              "mitochondrial genetic code. Set the genetic_code column on this sample " +
-              "(commonly 5 for Mollusca/Annelida/Arthropoda/Porifera, 9 for " +
-              "Echinodermata/Platyhelminthes, 13 for Tunicata), or add the class to " +
-              "lib/MitoGeneticCode.groovy if the code is confirmed for the whole class. " +
-              "Note the invertebrate annotation path is tuned for corals (cox1 rotation, " +
-              "coral reference DB), so review the annotation for a non-cnidarian sample."
+        // A documented ambiguous class (e.g. Pterobranchia, which spans codes 24
+        // and 33) gets the reason rather than a bare "no known code", so the fix
+        // is obvious from the error alone.
+        def reason = InvertTaxonGroups.ambiguousReason(taxClass)
+        error "Sample ${sampleId}: class '${taxClass ?: 'unknown'}' has no confirmed " +
+              "mitochondrial genetic code -- " + (reason ?: "add it to " +
+              "assets/taxonomy/mito_genetic_codes.json") + " or set the genetic_code column"
     }
     return defaultCode
 }
@@ -95,6 +93,141 @@ def isUnresolvedTaxon(value) {
 // A blank family/order with a known class only degrades the reference-divergence
 // tiering (everything collapses to NON_CONGENERIC, so the CROSS_ORDER route to
 // reference-free assembly cannot fire), which warns rather than fails.
+// The route a sample takes through the pipeline is decided entirely by these five
+// values. Recorded beside the published assembly so a LATER run can tell that the
+// output it is about to reuse was produced under different assumptions.
+//
+// NOVA_260909_LA needed this. The taxonomy guard below fired correctly on the
+// first pass for OG2618 ('Actinaria sp.', a typo for Actiniaria); the samplesheet
+// was hand-corrected to Anthozoa two days later and the run resumed. But the
+// Sep-12 output -- EMMA rather than MITOS, the animal_mt seed database rather
+// than anthozoa_mito_refdb, genetic code 2, the vertebrate completeness profile
+// -- was never invalidated, so a sea anemone stayed published as a defective
+// vertebrate underneath a samplesheet that said Anthozoa. Nothing in the run
+// reported the contradiction.
+def routeKey(meta) {
+    return [
+        taxonomic_class: (meta.class ?: '').toString(),
+        invertebrates  : (meta.invertebrates ?: false).toString(),
+        genetic_code   : (meta.genetic_code ?: '').toString(),
+        annotator      : (meta.invertebrates ? 'MITOS2' : 'EMMA'),
+        seed_db        : (meta.invertebrates ? 'lineage_refdb' : 'animal_mt'),
+    ]
+}
+
+// Quarantine, never delete: moving the directory aside preserves it for
+// inspection while guaranteeing -resume cannot reuse it. Deleting published
+// results on the strength of a metadata comparison is not a decision this should
+// make on its own.
+def invalidateStaleRoutes(sample_list) {
+    if (!params.outdir) return
+
+    def moved = []
+    sample_list.each { sample_record ->
+        def meta = sample_record[0]
+        if (!(meta instanceof Map) || !meta.mt_assembly_prefix) return
+
+        def assembly_dir = file("${params.outdir}/mitogenomes/${meta.id}/${meta.mt_assembly_prefix}")
+        if (!assembly_dir.exists()) return
+
+        def route_file = file("${assembly_dir}/route.json")
+        def current = routeKey(meta)
+        def previous = null
+        if (route_file.exists()) {
+            try {
+                previous = new groovy.json.JsonSlurper().parseText(route_file.text)
+            } catch (Exception e) {
+                previous = null
+            }
+        }
+
+        // No route.json means the output predates this check. Leave it alone
+        // rather than quarantining every existing result on first upgrade; the
+        // file is written below, so the NEXT change is caught.
+        if (previous == null) {
+            route_file.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(current))
+            return
+        }
+
+        if (previous != current) {
+            def stamp = new Date().format('yyyyMMdd-HHmmss')
+            def quarantine = file("${params.outdir}/quarantine_stale_route/${meta.mt_assembly_prefix}.${stamp}")
+            quarantine.getParent().mkdirs()
+            assembly_dir.moveTo(quarantine)
+            moved << "${meta.mt_assembly_prefix}: ${previous} -> ${current}".toString()
+
+            def fresh = file("${params.outdir}/mitogenomes/${meta.id}/${meta.mt_assembly_prefix}")
+            fresh.mkdirs()
+            file("${fresh}/route.json").text =
+                groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(current))
+        }
+    }
+
+    if (moved) {
+        log.warn """${moved.size()} published assembly result(s) were produced under a DIFFERENT pipeline route than this run resolves, and have been quarantined under ${params.outdir}/quarantine_stale_route/ so they are re-run rather than reused:
+  ${moved.join('\n  ')}
+This happens when a samplesheet is corrected after a partial run: the class, genetic code, annotator or seed database changed, so the existing output answers a different question."""
+    }
+}
+
+// Rewrite taxonomy_resolution.tsv from the samplesheet ACTUALLY in use.
+//
+// It is otherwise written only by create_samplesheet.py, so the moment a
+// samplesheet is hand-corrected and the run resumed with --input, the two files
+// disagree and nothing says which is authoritative. In NOVA_260909_LA the
+// samplesheet said OG2618 was Anthozoa/invertebrate while
+// taxonomy_resolution.tsv still said class=unknown, source=unresolved -- two
+// files in the same run directory contradicting each other about the same
+// specimen, one of them silently stale.
+//
+// Rows whose values came from the samplesheet rather than from a fresh lookup
+// are marked source=manual, which is the honest label for a hand edit. Otherwise
+// source and match_level are carried over from create_samplesheet.py's own
+// report (`lookup_report`), which is the only record of whether a class came
+// from master_species, from a congener's row, from a fuzzy match or from the
+// taxdump.
+def writeTaxonomyResolution(metas, lookup_report) {
+    if (!params.outdir || !metas) return
+
+    def lookup = [:]
+    if (!params.input && lookup_report) {
+        def rows = file(lookup_report.toString()).readLines()
+        if (rows) {
+            def columns = rows[0].split('\t', -1) as List
+            rows.drop(1).each { line ->
+                def values = line.split('\t', -1) as List
+                def row = [columns, values].transpose().collectEntries { it }
+                if (row.sample && !lookup.containsKey(row.sample)) lookup[row.sample] = row
+            }
+        }
+    }
+
+    def out = file("${params.outdir}/samplesheet/taxonomy_resolution.tsv")
+    out.getParent().mkdirs()
+
+    def header = ['sample', 'nominal_species_id', 'class', 'family', 'order',
+                  'reference_species_id', 'source', 'match_level', 'invertebrates',
+                  'genetic_code']
+    def seen = [] as Set
+    def lines = [header.join('\t')]
+    metas.each { meta ->
+        if (!(meta instanceof Map) || !meta.id || !seen.add(meta.id)) return
+        lines << [
+            meta.id,
+            meta.nominal_species_id ?: '',
+            meta.class ?: '',
+            meta.family ?: '',
+            meta.order ?: '',
+            meta.reference_species_id ?: '',
+            params.input ? 'manual' : (lookup[meta.id]?.source ?: 'resolved'),
+            params.input ? '' : (lookup[meta.id]?.match_level ?: ''),
+            (meta.invertebrates ?: false).toString(),
+            meta.genetic_code ?: '',
+        ].join('\t')
+    }
+    out.text = lines.join('\n') + '\n'
+}
+
 def validateTaxonomy(sample_list) {
     def unresolved = []
     def partial = []
@@ -149,6 +282,12 @@ workflow PREPARE_SAMPLESHEET {
     
     main:
 
+    // Parse the class -> genetic code map once, before the per-sample closure
+    // below calls mitoGeneticCode(). checkIfExists so a missing or malformed
+    // asset fails here, not as a null code on every invertebrate row.
+    ch_genetic_codes = file("${projectDir}/assets/taxonomy/mito_genetic_codes.json", checkIfExists: true)
+    InvertTaxonGroups.loadGeneticCodes(ch_genetic_codes)
+
    // Handle different input types
     if (input && input_dir) {
         error "Please specify either --input (samplesheet) OR --input_dir (directory), not both"
@@ -163,8 +302,8 @@ workflow PREPARE_SAMPLESHEET {
             .collect()
 
 
-        // The NCBI taxdump backs up the species table when it has no match for a
-        // sample's nominal name. storeDir makes this a cache hit whenever the
+        // The NCBI taxdump backs up master_species when it has no exact match for
+        // a sample's nominal name. storeDir makes this a cache hit whenever the
         // annotation subworkflow has already pulled the same dump.
         def taxdump_ch = Channel.value([])
         if (params.taxonkit_db_dir) {
@@ -172,7 +311,7 @@ workflow PREPARE_SAMPLESHEET {
             taxdump_ch = DOWNLOAD_TAXONKIT_DB_SAMPLESHEET.out.db_files
         }
         else {
-            log.warn "No --taxonkit_db_dir set: class/family/order come from the species table only, so unmatched samples will fail the taxonomy check."
+            log.warn "No --taxonkit_db_dir set: class/family/order come from master_species only, which has no invertebrates, so unmatched samples will fail the taxonomy check."
         }
 
         // Create enriched samplesheet from directory
@@ -180,13 +319,18 @@ workflow PREPARE_SAMPLESHEET {
             input_files_ch,
             "samplesheet.csv",
             params.sql_config,
-            taxdump_ch
+            taxdump_ch,
+            ch_genetic_codes
         )
 
+        // Paired with the script's own resolution report so writeTaxonomyResolution
+        // can keep its per-sample source and match_level.
         samplesheet_ch = CREATE_SAMPLESHEET_ENRICHED.out.samplesheet
+            .combine(CREATE_SAMPLESHEET_ENRICHED.out.taxonomy_resolution)
     }
     else if (input) {
         samplesheet_ch = Channel.fromPath(input, checkIfExists: true)
+            .map { sheet -> [ sheet, null ] }
     }
     else {
         error "No input provided: specify --input or --input_dir or provide reads downstream"
@@ -194,10 +338,11 @@ workflow PREPARE_SAMPLESHEET {
 
     // Parse samplesheet into channel of [meta, fastq_files]
     def ch_samplesheet = samplesheet_ch
-            .map { samplesheet_file ->
-                samplesheetToList(samplesheet_file, "${projectDir}/assets/schema_input.json")
+            .map { samplesheet_file, lookup_report ->
+                [ samplesheetToList(samplesheet_file, "${projectDir}/assets/schema_input.json"),
+                  lookup_report ]
             }
-            .flatMap { sample_list ->
+            .flatMap { sample_list, lookup_report ->
                 // Stop the run before any assembly work when a sample's class did
                 // not resolve. Checked on the whole list so one message names every
                 // offending sample. The enriched samplesheet has already been
@@ -206,7 +351,7 @@ workflow PREPARE_SAMPLESHEET {
 
                 // Convert each sample record to the expected format
                 // (findResults drops any record returned as null, e.g. unassigned reads)
-                sample_list.findResults { sample_record ->
+                def resolved = sample_list.findResults { sample_record ->
                     // sample_record[0] is a meta map like [id:OG1341] so we want to destructure the map.
                     def raw_meta  = sample_record[0]
                     def sample_id = (raw_meta instanceof Map) ? raw_meta.id : raw_meta
@@ -296,6 +441,14 @@ workflow PREPARE_SAMPLESHEET {
 
                     return [ group_key, meta, [ fastq_1, fastq_2 ] ]
                 }
+                // Route invalidation runs on the RESOLVED metas (genetic_code and
+                // invertebrates are only decided above, inside this closure), and
+                // before any task is submitted, so a quarantined directory cannot
+                // be picked up by -resume.
+                def resolved_metas = resolved.findAll { it != null }.collect { it[1] }
+                invalidateStaleRoutes(resolved_metas.collect { [ it ] })
+                writeTaxonomyResolution(resolved_metas, lookup_report)
+                resolved
             }
             .groupTuple()
             .map { samplesheet ->
@@ -329,7 +482,7 @@ workflow PREPARE_SAMPLESHEET {
     ch_getorg = ch_ilmn_with_meta.mix(ch_hic_with_files)
 
     emit:
-    samplesheet = samplesheet_ch
+    samplesheet = samplesheet_ch.map { sheet, _lookup_report -> sheet }
     getorg_input = ch_getorg
     mitohifi_input = ch_hifi_with_files
 }

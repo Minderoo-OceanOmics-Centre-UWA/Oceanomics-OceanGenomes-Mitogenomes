@@ -25,7 +25,7 @@ nextflow_process {
                     [ id:'test_stub', sequencing_type:'hifi', date:'d', mt_assembly_prefix:'test_stub.hifi.d.v10oatk', assembler_fallback:'oatk', fallback_reason:'no_reference', circular:null ],
                     file("${projectDir}/modules/local/oatk/check_circularity/tests/data/oatk.fasta", checkIfExists: true),
                     file("${projectDir}/modules/local/oatk/check_circularity/tests/data/oatk.gfa", checkIfExists: true),
-                    file("${projectDir}/assets/NO_REFERENCE.gb", checkIfExists: true)
+                    file("${projectDir}/assets/placeholders/NO_REFERENCE.gb", checkIfExists: true)
                 ])
                 """
             }

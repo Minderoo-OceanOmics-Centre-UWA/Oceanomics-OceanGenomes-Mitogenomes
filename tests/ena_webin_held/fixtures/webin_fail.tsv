@@ -1,0 +1,2 @@
+sample	status	reason	webin_exit	validation_attempt	error_count	warning_count	webin_cli_version	blocking_errors
+OG2943.x	FAIL_WEBIN	validation_failed	1	initial	2	0	9.0.3	ERROR: Organism is not Submittable: "Exocoetidae".

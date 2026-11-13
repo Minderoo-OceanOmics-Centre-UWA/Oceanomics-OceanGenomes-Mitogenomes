@@ -29,8 +29,23 @@ def load(name):
     return module
 
 
-BLAST = load("push_lca_blast_results")
-RAW = load("push_lca_raw_results")
+# Unlike most of this suite these two scripts are NOT stdlib-only: both read their
+# input with pandas and both import psycopg2 at module scope, and the functions
+# under test call pd.read_csv directly, so stubbing the imports away would not let
+# them run. Guard the load instead, the same way test_mitos_to_emma.py guards
+# Biopython. Without this the module raises at import and the whole file is
+# reported as an ERROR -- which reads as a broken suite rather than as a missing
+# dependency, and masks any real failure alongside it.
+try:
+    import pandas  # noqa: F401
+    import psycopg2  # noqa: F401
+    DEPS_AVAILABLE = True
+except ImportError:
+    DEPS_AVAILABLE = False
+
+if DEPS_AVAILABLE:
+    BLAST = load("push_lca_blast_results")
+    RAW = load("push_lca_raw_results")
 
 
 class AbortedTransaction(Exception):
@@ -140,6 +155,7 @@ def write_blast_tsv(path):
             )
 
 
+@unittest.skipUnless(DEPS_AVAILABLE, "pandas/psycopg2 not installed")
 class BlastRowIsolationTests(unittest.TestCase):
     def run_push(self, reject):
         connection = FakeConnection(reject)
@@ -192,6 +208,7 @@ def write_raw_tsv(path, accessions):
             )
 
 
+@unittest.skipUnless(DEPS_AVAILABLE, "pandas/psycopg2 not installed")
 class RawRowIsolationTests(unittest.TestCase):
     def test_good_rows_commit_despite_a_rejected_row(self):
         connection = FakeConnection(lambda params: params["accession_id"] == "gb|B2|")

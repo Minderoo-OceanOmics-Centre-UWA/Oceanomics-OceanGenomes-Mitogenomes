@@ -14,7 +14,10 @@ nextflow_workflow {
                     ['OG4', 'Actinopteri'],
                     ['OG5', 'unknown'],
                     ['OG6', ''],
-                    ['OG7', null]
+                    ['OG7', null],
+                    ['OG8', 'Bivalvia'],
+                    ['OG9', 'Ascidiacea'],
+                    ['OG10', 'Pterobranchia']
                 )
                 """
             }
@@ -39,7 +42,17 @@ nextflow_workflow {
                 // unresolved taxon; it must not be looked up as if it were a class.
                 { assert code('OG5') == null },
                 { assert code('OG6') == null },
-                { assert code('OG7') == null }
+                { assert code('OG7') == null },
+                // The rest of the invertebrate map, which the JSON asset carries and
+                // the fish repo's flat lookup did not: the bilaterian bulk and the
+                // tunicates.
+                { assert code('OG8') == 5 },
+                { assert code('OG9') == 13 },
+                // A documented ambiguous class is unmapped on purpose (Pterobranchia
+                // spans codes 24 and 33), and must not resolve to the code-5 bulk.
+                // prepare_samplesheet turns this null into an abort that quotes the
+                // reason from the asset.
+                { assert code('OG10') == null }
             )
         }
     }

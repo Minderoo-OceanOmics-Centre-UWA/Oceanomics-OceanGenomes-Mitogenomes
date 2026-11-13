@@ -66,22 +66,25 @@ def process_blast(blast_file, sample, db_params):
         cursor = conn.cursor()
         for _, row in df.iterrows():
             row_dict = row.to_dict()
+            # mito_blast_hit is keyed by annotation_id (genomes_db_review 076, Phase R.7b);
+            # mito_annotation_id() resolves it from the query_id parts and refuses a hit
+            # for an annotation the database does not hold.
             upsert_query = """
-            INSERT INTO blast_filtered_lca (
-                og_id, tech, seq_date, code, annotation, match_sequence_id, taxon_id,
+            INSERT INTO mito_blast_hit (
+                annotation_id, match_sequence_id, taxon_id,
                 scientific_name, common_name, kingdoms, percent_identity, alignment_length,
                 query_length, subject_length, mismatch, gap_open, gaps, query_start,
                 query_end, subject_start, subject_end, subject_title, evalue, bit_score,
                 query_coverage, subject_coverage, region, blast_run_date
             )
             VALUES (
-                %(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s, %(match_sequence_id)s, %(taxon_id)s,
+                mito_annotation_id(%(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s), %(match_sequence_id)s, %(taxon_id)s,
                 %(scientific_name)s, %(common_name)s, %(kingdoms)s, %(percent_identity)s, %(alignment_length)s,
                 %(query_length)s, %(subject_length)s, %(mismatch)s, %(gap_open)s, %(gaps)s, %(query_start)s,
                 %(query_end)s, %(subject_start)s, %(subject_end)s, %(subject_title)s, %(evalue)s, %(bit_score)s,
                 %(query_coverage)s, %(subject_coverage)s, %(region)s, %(blast_run_date)s
             )
-            ON CONFLICT (og_id, tech, seq_date, code, annotation, match_sequence_id, region)
+            ON CONFLICT (annotation_id, match_sequence_id, region)
             DO UPDATE SET
                 blast_run_date = EXCLUDED.blast_run_date,
                 taxon_id = EXCLUDED.taxon_id,
@@ -164,7 +167,7 @@ lca_column_headers = [
     "dna_sequence", "identificationRemarks"
 ]
 
-# The group --force prunes: everything this sample/region has ever recorded.
+# The group --prune-history prunes: everything this sample/region has ever recorded.
 LCA_HISTORY_KEY = ["og_id", "tech", "seq_date", "code", "annotation", "region"]
 
 
@@ -175,10 +178,11 @@ def prune_superseded_lca(cursor, written):
     run wrote for it. A row whose content matched has just had its date refreshed
     to the current run's, so anything left on another date is a superseded result.
     """
-    where = " AND ".join(f'"{c}" = %s' for c in LCA_HISTORY_KEY)
+    # mito_lca is keyed by annotation_id (076); the history key's first five parts resolve to it.
     query = (
-        f"DELETE FROM lca WHERE {where} "
-        f'AND "lca_run_date"::text <> ALL(%s)'
+        "DELETE FROM mito_lca "
+        "WHERE annotation_id = mito_annotation_id(%s, %s, %s, %s, %s, false) "
+        'AND "region" = %s AND "lca_run_date"::text <> ALL(%s)'
     )
     deleted = 0
     for key, run_dates in written.items():
@@ -187,7 +191,7 @@ def prune_superseded_lca(cursor, written):
     return deleted
 
 
-def process_lca(lca_file, sample, db_params, force=False):
+def process_lca(lca_file, sample, db_params, prune_history=False):
     """Upload one sample's LCA assignments. Returns the number of failed rows."""
     print(f"📂 Reading LCA file: {lca_file}")
     # df = pd.read_csv(lca_file, sep='\t', header=True, names=lca_column_headers).replace({np.nan: None})
@@ -211,7 +215,7 @@ def process_lca(lca_file, sample, db_params, force=False):
 
     df[['og_id', 'tech', 'seq_date', 'code', 'annotation']] = df['seq_id'].str.split('.', expand=True)
     success, failure = 0, 0
-    # HISTORY_KEY tuple -> set of lca_run_date values written for it, used by --force.
+    # HISTORY_KEY tuple -> set of lca_run_date values written for it, used by --prune-history.
     written = {}
 
     with psycopg2.connect(**db_params) as conn:
@@ -219,12 +223,8 @@ def process_lca(lca_file, sample, db_params, force=False):
         for _, row in df.iterrows():
             row_dict = row.to_dict()
             upsert_query = """
-            INSERT INTO lca (
-                og_id,
-                tech,
-                seq_date,
-                code,
-                annotation,
+            INSERT INTO mito_lca (
+                annotation_id,
                 region,
                 lca_run_date,
                 species_in_lca,
@@ -253,11 +253,7 @@ def process_lca(lca_file, sample, db_params, force=False):
                 top_confidence_score
             )
             VALUES (
-                %(og_id)s,
-                %(tech)s,
-                %(seq_date)s,
-                %(code)s,
-                %(annotation)s,
+                mito_annotation_id(%(og_id)s, %(tech)s, %(seq_date)s, %(code)s, %(annotation)s),
                 %(region)s,
                 %(lca_run_date)s,
                 %(species_in_lca)s,
@@ -290,7 +286,10 @@ def process_lca(lca_file, sample, db_params, force=False):
             -- an existing result exactly. The only thing left to record is that
             -- it was seen again; a differing result hashes differently and is
             -- inserted as a new row rather than overwriting the old one.
-            ON CONFLICT ON CONSTRAINT lca_content_unique
+            -- mito_lca is keyed by annotation_id (genomes_db_review 076, Phase R.7b), resolved
+            -- by mito_annotation_id(). BEFORE INSERT triggers run before the conflict check,
+            -- so content_hash is set when the target is matched.
+            ON CONFLICT (annotation_id, region, content_hash)
             DO UPDATE SET
                 lca_run_date = EXCLUDED.lca_run_date;
             """
@@ -346,11 +345,11 @@ def process_lca(lca_file, sample, db_params, force=False):
 
         # Prune only after every row landed: deleting around a failure could drop
         # the older result without its replacement having been written.
-        if force and failure == 0:
+        if prune_history and failure == 0:
             pruned = prune_superseded_lca(cursor, written)
-            print(f"🧹 --force: deleted {pruned} superseded lca rows")
-        elif force:
-            print("⚠️ Skipping --force prune: upload had failures.")
+            print(f"🧹 --prune-history: deleted {pruned} superseded lca rows")
+        elif prune_history:
+            print("⚠️ Skipping --prune-history prune: upload had failures.")
 
     if failure:
         print(f"⚠️ LCA upload finished with errors: {success} rows succeeded, {failure} failed")
@@ -363,14 +362,17 @@ if __name__ == "__main__":
         description="Upload filtered BLAST hits and LCA assignments for one sample."
     )
     parser.add_argument(
+        "--prune-history",
         "--force",
         action="store_true",
+        dest="prune_history",
         help=(
             "After uploading, delete lca rows for the same sample/region that this "
             "run did not produce, so only the current result is kept. Off by "
-            "default: superseded results are preserved alongside the new ones. "
+            "default: superseded results are preserved alongside the new ones, and "
+            "the content-keyed upsert already makes a re-run correct without it. "
             "Does not affect blast_filtered_lca, which overwrites in place and "
-            "keeps no history."
+            "keeps no history. '--force' is a deprecated alias."
         ),
     )
     parser.add_argument("config_file")
@@ -385,7 +387,9 @@ if __name__ == "__main__":
     failed = process_blast(args.blast_results, args.sample, db_config)
 
     print("\n🔄 Starting LCA processing...")
-    failed += process_lca(args.lca_results, args.sample, db_config, force=args.force)
+    failed += process_lca(
+        args.lca_results, args.sample, db_config, prune_history=args.prune_history
+    )
 
     # Exit non-zero so Nextflow surfaces a partial upload instead of publishing a
     # green task whose log quietly reports missing rows.

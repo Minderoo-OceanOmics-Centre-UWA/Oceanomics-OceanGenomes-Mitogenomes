@@ -128,7 +128,9 @@ class SetQcValidatorTests(unittest.TestCase):
         # One statement only: no SELECT is needed when the UPDATE lands.
         self.assertEqual(len(connection.cursor_instance.queries), 1)
         query = connection.cursor_instance.queries[0]
-        self.assertIn("UPDATE lca_validation", query)
+        # The base table, keyed by annotation_id since genomes_db_review 076 (Phase R.7b).
+        self.assertIn("UPDATE mito_lca_validation", query)
+        self.assertIn("annotation_id = mito_annotation_id(", query)
         # The guard is the whole point: the UPDATE must be unable to overwrite.
         self.assertIn("validator_2 IS NULL OR btrim(validator_2) = ''", query)
         params = connection.cursor_instance.params[0]

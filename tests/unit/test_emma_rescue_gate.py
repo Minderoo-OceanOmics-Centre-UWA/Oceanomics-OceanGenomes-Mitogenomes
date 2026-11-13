@@ -88,3 +88,49 @@ class GateDecisionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VariantOrderTests(unittest.TestCase):
+    """The gate must judge order against the ACCEPTED order for the taxon.
+
+    Left keyed on canonical only, a clade whose real gene order is non-canonical
+    is judged out of order here and silently declined for rescue -- so an assembly
+    missing ND4L would be held for the very defect this gate could have repaired.
+    Preventing that drift between the QC step and the gates is why the order table
+    and the GFF reader both live in bin/mito_gene_order.py.
+    """
+
+    def _imq(self, drop=None):
+        genes = list(REF)
+        i = genes.index("TQ")
+        genes[i:i + 2] = ["TM", "TQ"]
+        if drop:
+            genes = [g for g in genes if g != drop]
+        return genes
+
+    def _decide(self, genes, taxon, tmp_path=None):
+        import tempfile
+        p = Path(tempfile.mkdtemp()) / "a.gff"
+        p.write_text(gff_for(genes))
+        return gate.decide(p, taxon)
+
+    def test_a_variant_taxon_missing_nd4l_is_offered_for_rescue(self):
+        state, targets = self._decide(self._imq(drop="ND4L"), {"genus": "Chlorurus"})
+        self.assertEqual(state, "FIX")
+        self.assertEqual(targets, "ND4L")
+
+    def test_the_same_assembly_without_the_taxonomy_is_declined(self):
+        # The regression: no taxon, so only the canonical order is accepted, the
+        # IMQ order reads as out-of-order, and the rescue is suppressed.
+        state, _ = self._decide(self._imq(drop="ND4L"), None)
+        self.assertEqual(state, "PASS")
+
+    def test_a_variant_taxon_with_a_canonical_assembly_still_works(self):
+        genes = [g for g in REF if g != "ND4L"]
+        state, targets = self._decide(genes, {"genus": "Chlorurus"})
+        self.assertEqual(state, "FIX")
+        self.assertEqual(targets, "ND4L")
+
+    def test_an_unkeyed_genus_with_the_variant_order_is_still_declined(self):
+        state, _ = self._decide(self._imq(drop="ND4L"), {"genus": "Epibulus"})
+        self.assertEqual(state, "PASS")

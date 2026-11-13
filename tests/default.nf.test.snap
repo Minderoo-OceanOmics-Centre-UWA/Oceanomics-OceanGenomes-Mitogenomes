@@ -1,0 +1,60 @@
+{
+    "-profile test": {
+        "content": [
+            9,
+            {
+                "ASSEMBLY_NO_RESULT": {
+                    "pipeline": "PIPELINE_VERSION"
+                },
+                "COMPILE_HELD_SAMPLES": {
+                    "coreutils": "stub",
+                    "python": "stub"
+                },
+                "GETORGANELLE_CONFIG": {
+                    "getorganelle": null
+                },
+                "MITOGENOME_ASSEMBLY_SUMMARY": {
+                    "mitogenome_assembly_summary": "stub"
+                }
+            },
+            [
+                "assembly",
+                "assembly/OGCTENO.hifi.250101.v323mitohifi.assembly_status.tsv",
+                "assembly/OGCTENO.hifi.250101.v323mitohifi.fasta",
+                "assembly/OGMOLLUSC.hifi.250101.v323mitohifi.assembly_status.tsv",
+                "assembly/OGMOLLUSC.hifi.250101.v323mitohifi.fasta",
+                "held_samples.tsv",
+                "mitogenomes",
+                "mitogenomes/STUB",
+                "mitogenomes/STUB/STUB",
+                "mitogenomes/STUB/STUB/STUB_multiqc_report.html",
+                "multiqc",
+                "multiqc/mitogenome_assembly_summary_mqc.tsv",
+                "multiqc/multiqc_data",
+                "multiqc/multiqc_plots",
+                "multiqc/multiqc_report.html",
+                "pipeline_info",
+                "pipeline_info/nf_core_oceangenomesmitogenomes_software_mqc_versions.yml",
+                "run_completeness.txt",
+                "samplesheet",
+                "samplesheet/taxonomy_resolution.tsv"
+            ],
+            [
+                "OGCTENO.hifi.250101.v323mitohifi.assembly_status.tsv:md5,ff2deff833a7c3a2bf11bac8cb63134e",
+                "OGCTENO.hifi.250101.v323mitohifi.fasta:md5,d41d8cd98f00b204e9800998ecf8427e",
+                "OGMOLLUSC.hifi.250101.v323mitohifi.assembly_status.tsv:md5,38c532da05e0977a94c59f06ba73d013",
+                "OGMOLLUSC.hifi.250101.v323mitohifi.fasta:md5,d41d8cd98f00b204e9800998ecf8427e",
+                "held_samples.tsv:md5,77751a44decf6699a53cfd4525baf37a",
+                "STUB_multiqc_report.html:md5,d41d8cd98f00b204e9800998ecf8427e",
+                "mitogenome_assembly_summary_mqc.tsv:md5,40d50f3c7bf7fca17b36ff1f610850ba",
+                "run_completeness.txt:md5,be119e344bb23b86285a3de03a2c3753",
+                "taxonomy_resolution.tsv:md5,7e1a8d8eded8cf30800ca72c2c7e8a9a"
+            ]
+        ],
+        "timestamp": "2026-10-30T15:44:45.535692634",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}

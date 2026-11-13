@@ -3,10 +3,15 @@ nextflow_pipeline {
     name "Test pipeline"
     script "../main.nf"
     tag "pipeline"
+    // The smoke-test profile, which nf-test.config no longer applies to every test.
+    profile "test"
 
     test("-profile test") {
 
         when {
+            // conf/test.config is a stub smoke test of the wiring: a real run needs
+            // reference databases this repository cannot ship.
+            options "-stub"
             params {
                 outdir = "$outputDir"
             }
@@ -17,13 +22,17 @@ nextflow_pipeline {
             def stable_name = getAllFilesFromDir(params.outdir, relative: true, includeDir: true, ignore: ['pipeline_info/*.{html,json,txt}'])
             // stable_path: All files in ${params.outdir}/ with stable content
             def stable_path = getAllFilesFromDir(params.outdir, ignoreFile: 'tests/.nftignore')
+            // The pipeline's own version is `git describe`, which changes with every commit.
+            def versions = removeNextflowVersion("$outputDir/pipeline_info/nf_core_oceangenomesmitogenomes_software_mqc_versions.yml")
+            versions.remove('Workflow')
+            versions.each { _process, tools -> if (tools instanceof Map && tools.containsKey('pipeline')) tools.pipeline = 'PIPELINE_VERSION' }
             assertAll(
                 { assert workflow.success},
                 { assert snapshot(
                     // Number of successful tasks
                     workflow.trace.succeeded().size(),
-                    // pipeline versions.yml file for multiqc from which Nextflow version is removed because we test pipelines on multiple Nextflow versions
-                    removeNextflowVersion("$outputDir/pipeline_info/nf_core_oceangenomesmitogenomes_software_mqc_versions.yml"),
+                    // pipeline versions.yml for multiqc, without the Nextflow or pipeline version
+                    versions,
                     // All stable path name, with a relative path
                     stable_name,
                     // All files with stable contents

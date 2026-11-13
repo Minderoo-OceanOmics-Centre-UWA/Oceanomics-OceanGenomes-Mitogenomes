@@ -8,6 +8,7 @@ process VALIDATED_SPECIES_QUERY {
     input:
     val(meta)
     path sql_config
+    path taxdump        // NCBI taxdump dir, or [] when --taxonkit_db_dir is unset
 
     output:
     tuple val(meta), stdout, emit: species
@@ -15,11 +16,12 @@ process VALIDATED_SPECIES_QUERY {
     path "versions.yml", emit: versions
 
     script:
+    def taxdump_dir = taxdump ? taxdump.toString() : ''
     """
     #!/usr/bin/env python3
 
     import psycopg2
-    import re
+    import os
     import sys
     import configparser
     from pathlib import Path
@@ -30,6 +32,7 @@ process VALIDATED_SPECIES_QUERY {
     seq_date = "${meta.date}"
     code = "${meta.code}"
     annotation = "${meta.annotation}"
+    taxdump_dir = "${taxdump_dir}"
 
     def load_db_config(cfg):
         if not Path(cfg).exists():
@@ -56,6 +59,7 @@ process VALIDATED_SPECIES_QUERY {
 
     species = 'unknown'
     tax_class = ''
+    candidates = []
     conn = None
     cursor = None
 
@@ -87,20 +91,22 @@ process VALIDATED_SPECIES_QUERY {
         # to it still beats no class at all -- a corrected name almost always agrees
         # with the nominal one at class rank, which is the only rank that matters here.
         #
-        # Matching mirrors bin/create_samplesheet.py: exact species, then genus. The
-        # fuzzy family/order tiers it also has are deliberately left out; they exist to
-        # salvage a reference for assembly, and a fuzzy match is far too loose a basis
-        # for choosing a translation table.
+        # Matching mirrors bin/create_samplesheet.py: exact species or synonym in
+        # master_species, then genus -- a congener's row is safe here, since only the
+        # class is taken and congeners share it. The fuzzy family/order tiers it also
+        # has are deliberately left out; a fuzzy match is far too loose a basis for
+        # choosing a translation table. master_species carries no invertebrates, so
+        # those fall through to the taxdump below.
         class_query = (
-            "SELECT sp.class FROM species sp "
-            "WHERE sp.ncbi_taxon_id IS NOT NULL "
-            "AND sp.class IS NOT NULL AND btrim(sp.class) <> '' "
-            "AND (lower(sp.species) = lower(%s) OR lower(sp.genus) = lower(%s)) "
-            "ORDER BY (lower(sp.species) = lower(%s)) DESC "
+            "SELECT sp.class FROM master_species sp "
+            "WHERE sp.class IS NOT NULL AND btrim(sp.class) <> '' "
+            "AND (lower(sp.species) = lower(%s) OR lower(sp.genus) = lower(%s) "
+            "     OR EXISTS (SELECT 1 FROM unnest(string_to_array(sp.synonym, ',')) AS syn(name) "
+            "                WHERE lower(btrim(syn.name)) = lower(%s))) "
+            "ORDER BY (lower(sp.species) = lower(%s)) DESC, sp.species "
             "LIMIT 1"
         )
 
-        candidates = []
         if species and species.lower() != 'unknown':
             candidates.append(species)
         cursor.execute("SELECT trim(nominal_species_id) FROM sample WHERE og_id = %s", (og_id,))
@@ -110,7 +116,7 @@ process VALIDATED_SPECIES_QUERY {
 
         for name in candidates:
             genus = name.split(' ')[0]
-            cursor.execute(class_query, (name, genus, name))
+            cursor.execute(class_query, (name, genus, name, name))
             hit = cursor.fetchone()
             if hit and hit[0]:
                 tax_class = str(hit[0]).strip()
@@ -123,15 +129,51 @@ process VALIDATED_SPECIES_QUERY {
         if conn is not None:
             conn.close()
 
+    # NCBI taxdump fallback, as create_samplesheet.py has. Imported from bin/ on
+    # PATH for the same reason species_name_utils is below. A phylum stands in for
+    # a missing class ('Porifera'), which mito_genetic_codes.json also carries.
+    if not tax_class and taxdump_dir and candidates:
+        for _entry in os.environ.get("PATH", "").split(os.pathsep):
+            if _entry and os.path.isfile(os.path.join(_entry, "taxdump_lineage.py")):
+                sys.path.insert(0, _entry)
+                break
+        try:
+            from taxdump_lineage import TaxdumpLineage
+            resolver = TaxdumpLineage(taxdump_dir)
+            if resolver.available:
+                for name in candidates:
+                    lineage = resolver.lineage_for_name(name)
+                    found = lineage.get('class') or lineage.get('phylum')
+                    if found:
+                        tax_class = str(found).strip()
+                        break
+        except Exception as exc:
+            print(f"[WARN] taxdump class lookup failed for {og_id}: {exc}", file=sys.stderr)
+
     # Normalise open nomenclature to the ENA-submittable 'Genus sp.' form. This
     # value becomes the /organism= in the flatfile on the qc-only path, and rows
     # stored before the normalisation existed still hold 'Genus sp' / 'Genus spp.',
-    # which webin-cli rejects. Canonical implementation is
-    # bin/species_name_utils.py -- it can't be imported here because this heredoc
-    # runs from the task work dir rather than bin/, so keep the two in step.
-    match = re.fullmatch(r"([A-Za-z][A-Za-z-]*)\\s+spp?\\.?", species.strip())
-    if match:
-        species = match.group(1) + " sp."
+    # which webin-cli rejects.
+    #
+    # IMPORT the canonical implementation rather than copying it. This heredoc runs
+    # from the task work dir, so sys.path[0] is not bin/ and a plain sibling import
+    # fails -- but Nextflow puts bin/ on PATH, so the directory can be found there.
+    # The copy this replaces had drifted in scope: it handled only 'sp'/'spp' and
+    # so left a BARE GENUS unnormalised, which ENA rejects with 'Organism is not
+    # Submittable' after the sample has cleared every gate upstream. Two
+    # implementations of one rule is how that happens.
+    for _entry in os.environ.get("PATH", "").split(os.pathsep):
+        if _entry and os.path.isfile(os.path.join(_entry, "species_name_utils.py")):
+            sys.path.insert(0, _entry)
+            break
+    try:
+        from species_name_utils import normalise_open_nomenclature
+        species = normalise_open_nomenclature(species)
+    except ImportError:
+        # Never fail the task over a cosmetic field. Falling back to the raw value
+        # reproduces the pre-normalisation behaviour rather than inventing a name.
+        print("[WARN] species_name_utils not on PATH; organism left unnormalised",
+              file=sys.stderr)
 
     print(species, end='')
 

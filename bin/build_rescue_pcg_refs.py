@@ -197,7 +197,7 @@ def genus_species(organism):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out-dir", default="assets", type=Path)
+    ap.add_argument("--out-dir", default="assets/panels", type=Path)
     ap.add_argument("--api-key", default=None, help="NCBI E-utilities API key")
     ap.add_argument("--email", default=None, help="contact email for NCBI E-utilities")
     ap.add_argument("--seed", type=int, default=1348, help="RNG seed for sub-sampling")

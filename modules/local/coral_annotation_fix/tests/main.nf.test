@@ -1,0 +1,46 @@
+nextflow_process {
+
+    name "Test Process CORAL_ANNOTATION_FIX"
+    script "../main.nf"
+    process "CORAL_ANNOTATION_FIX"
+
+    tag "modules"
+    tag "modules_local"
+    tag "coral_annotation_fix"
+
+    // Pins the 5-element input tuple, and specifically that it carries `origin_gene`.
+    //
+    // This module re-runs mitos_to_emma.py from the RAW MITOS BED in the pre-rotation
+    // frame, so it sets the published origin itself rather than inheriting MITOS2's.
+    // It must be given the same anchor MITOS2 was given for the same taxon: a FIX and
+    // a PASS Scleractinian differing only in whether the 16S transfer fired must not
+    // end up deposited on different origins.
+
+    test("stub: the fixer carries the same per-sample anchor MITOS2 gets") {
+
+        options "-stub"
+
+        when {
+            process {
+                """
+                input[0] = Channel.of([
+                    [ id:'test_scleractinia',
+                      mt_assembly_prefix:'test_scleractinia.ilmn.260101.getorg1770',
+                      genetic_code: 4,
+                      circular: true ],
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/query.fa", checkIfExists: true),
+                    file("${projectDir}/modules/local/select_reference_db/tests/data/no_match.fa", checkIfExists: true),
+                    file("${projectDir}/assets/refdb/anthozoa/anthozoa_reference.gb", checkIfExists: true),
+                    'TM'
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert process.success }
+            )
+        }
+    }
+}

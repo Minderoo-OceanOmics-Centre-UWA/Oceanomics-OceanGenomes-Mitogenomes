@@ -1,0 +1,57 @@
+{
+  "_comment": [
+    "Rank-keyed expectations for genes that exist outside the vertebrate 13+2+22 set.",
+    "One machine-readable asset rather than class checks scattered through the QC code.",
+    "",
+    "Each rule names the rank it is keyed on (phylum/class/order), the taxon value,",
+    "the gene, and whether a missing gene BLOCKS the annotation or is merely ADVISORY.",
+    "Matching is case-insensitive and the first matching rule at the most specific rank",
+    "wins. A sample whose taxonomy does not populate that rank simply matches no rule:",
+    "in NOVA_260909_LA most invertebrates have a blank order, so an order-keyed rule is",
+    "inert for them, which is exactly why nothing here is load-bearing on its own.",
+    "",
+    "The rule that actually catches the NOVA_260909_LA losses is not in this file at",
+    "all: 'MITOS called it and conversion lost it is always an error' is unconditional",
+    "and lives in annotation_stats.py. This file only says what SHOULD be there when",
+    "MITOS did not call it.",
+    "",
+    "Evidence for the counts below: the local curated reference DB, 2026-09."
+  ],
+  "rules": [
+    {
+      "rank": "order",
+      "taxon": "Malacalcyonacea",
+      "gene": "MTMUTS",
+      "severity": "blocking",
+      "evidence": "Octocorallia carry a mitochondrial mismatch-repair gene: 300/302 local Octocorallia reference records annotate it, 0/335 Hexacorallia do."
+    },
+    {
+      "rank": "order",
+      "taxon": "Scleralcyonacea",
+      "gene": "MTMUTS",
+      "severity": "blocking",
+      "evidence": "As Malacalcyonacea: mtMutS is an octocoral gene, not an anthozoan one. Deliberately NOT keyed on class Anthozoa, which would wrongly fail every hexacoral."
+    },
+    {
+      "rank": "phylum",
+      "taxon": "Porifera",
+      "gene": "ATP9",
+      "severity": "advisory",
+      "evidence": "81/87 local poriferan reference records carry ATP9 (58/64 Demospongiae). Common but not universal, so a missing ATP9 is reported, never blocking."
+    },
+    {
+      "rank": "class",
+      "taxon": "Demospongiae",
+      "gene": "ATP9",
+      "severity": "advisory",
+      "evidence": "58/64 local Demospongiae reference records carry ATP9."
+    },
+    {
+      "rank": "class",
+      "taxon": "Hexactinellida",
+      "gene": "ATP9",
+      "severity": "advisory",
+      "evidence": "Glass sponges carry ATP9 in the local reference set; treated as advisory on the same footing as Demospongiae."
+    }
+  ]
+}

@@ -29,7 +29,9 @@ process LCA {
     path "versions_LCA.yml", emit: versions
 
     script:
-    def effective_args = "--file ${blast} --output lca_short.${gene_type}.${annotation_name}.tsv --worms_file ${worms} --cache_dir ${lca_cache_dir} --raw_output lca_raw.${gene_type}.${annotation_name}.tsv --final_output lca.${gene_type}.${annotation_name}.tsv --seq_type ${gene_type}"
+    // Cover rule and identity gate per branch: see withName: LCA in conf/modules.config.
+    def args = task.ext.args ?: ''
+    def effective_args = "--file ${blast} --output lca_short.${gene_type}.${annotation_name}.tsv --worms_file ${worms} --cache_dir ${lca_cache_dir} --raw_output lca_raw.${gene_type}.${annotation_name}.tsv --final_output lca.${gene_type}.${annotation_name}.tsv --seq_type ${gene_type} ${args}".trim()
     """          
     python ${lca_script} \\
         --file $blast \\
@@ -38,7 +40,8 @@ process LCA {
         --cache_dir '${lca_cache_dir}' \\
         --raw_output lca_raw.${gene_type}.${annotation_name}.tsv \\
         --final_output lca.${gene_type}.${annotation_name}.tsv \\
-        --seq_type ${gene_type}
+        --seq_type ${gene_type} \\
+        ${args}
 
     cat <<-END_TOOL_PARAMS > 09_lca.${gene_type}.${annotation_name}.tool_params_mqcrow.html
     <tr><td>LCA</td><td><samp>${effective_args}</samp></td><td>Calculates lowest common ancestor assignments for ${gene_type} sequence ${annotation_name} from filtered BLAST results.</td></tr>
@@ -52,7 +55,8 @@ process LCA {
     """
 
     stub:
-    def effective_args = "--file ${blast} --output lca_short.${gene_type}.${annotation_name}.tsv --worms_file ${worms} --cache_dir ${lca_cache_dir} --raw_output lca_raw.${gene_type}.${annotation_name}.tsv --final_output lca.${gene_type}.${annotation_name}.tsv --seq_type ${gene_type}"
+    def args = task.ext.args ?: ''
+    def effective_args = "--file ${blast} --output lca_short.${gene_type}.${annotation_name}.tsv --worms_file ${worms} --cache_dir ${lca_cache_dir} --raw_output lca_raw.${gene_type}.${annotation_name}.tsv --final_output lca.${gene_type}.${annotation_name}.tsv --seq_type ${gene_type} ${args}".trim()
     """
     touch lca.${gene_type}.${annotation_name}.tsv
     touch lca_raw.${gene_type}.${annotation_name}.tsv

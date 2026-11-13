@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an idea for the nf-core/oceangenomesmitogenomes pipeline
+description: Suggest an idea for the OceanOmics OceanGenomes Mitogenomes pipeline
 labels: enhancement
 body:
   - type: textarea

@@ -54,13 +54,6 @@
                             "local"
                         ]
                     },
-                    "genome_qc/diagnostics": {
-                        "branch": "master",
-                        "git_sha": "",
-                        "installed_by": [
-                            "local"
-                        ]
-                    },
                     "genome_qc/extract_genes/gb": {
                         "branch": "master",
                         "git_sha": "",
@@ -83,20 +76,6 @@
                         ]
                     },
                     "genome_qc/gen_files_table2asn": {
-                        "branch": "master",
-                        "git_sha": "",
-                        "installed_by": [
-                            "local"
-                        ]
-                    },
-                    "genome_qc/grouper": {
-                        "branch": "master",
-                        "git_sha": "",
-                        "installed_by": [
-                            "local"
-                        ]
-                    },
-                    "genome_qc/submitter": {
                         "branch": "master",
                         "git_sha": "",
                         "installed_by": [
@@ -263,7 +242,7 @@
                             "local"
                         ]
                     },
-                    "mitogenome_qc": {
+                    "ena_submission_prep": {
                         "branch": "master",
                         "git_sha": "",
                         "installed_by": [

@@ -97,7 +97,7 @@ workflow ASSEMBLY_UPLOAD_STREAMING {
     ASSEMBLE_VARIANTS(variant_work)
     def variant_rows = ASSEMBLE_VARIANTS.out.map { meta, fasta, log -> [ meta.mt_assembly_prefix, meta, fasta, log ] }
 
-    def no_depth_file = file("${projectDir}/assets/empty_mito_depth.tsv", checkIfExists: true)
+    def no_depth_file = file("${projectDir}/assets/placeholders/empty_mito_depth.tsv", checkIfExists: true)
 
     rows = buildAssemblyUploadRows(
         canonical_rows,
