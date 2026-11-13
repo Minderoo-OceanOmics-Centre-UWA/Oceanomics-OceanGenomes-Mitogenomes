@@ -209,17 +209,21 @@ Columns: `assembly_prefix`, `sample_id`, `assembler`, `status`, `final_length_bp
 `numt_flag` and `manual_review_reason`.
 
 `status` is the QC verdict and means the same thing for every assembler, so the column can be sorted,
-filtered and counted across a mixed cohort. It takes exactly three values: `complete` (a final
-assembly exists and no blocking QC reason survived), `manual_review` (a final assembly exists but a
-blocking reason stands, listed in `manual_review_reason`) and `failed` (the assembler errored or
-produced no final assembly). It says nothing about topology; read `circularised` for that.
+filtered and counted across a mixed cohort. It takes four values: `complete` (a final assembly
+exists and no blocking QC reason survived), `manual_review` (a final assembly exists but a blocking
+reason stands, listed in `manual_review_reason`), `failed` (the assembler errored or produced no final
+assembly) and `superseded` (a curation step replaced this assembly with one that has its own row,
+currently only the original of a [collapsed concatemer](#concatemer-collapse-and-fasta-sanitisation);
+it is provenance, not a deliverable, so it drops out of the review queue). It says nothing about
+topology; read `circularised` for that.
 
-The verdict is uploaded per assembly by `PUSH_ASSEMBLY_QC` (`bin/push_assembly_qc.py`) onto the
-assembly's existing `mitogenome_data` row: `qc_status`, `manual_review_reason`, `numt_flag`,
-`frameshift_flag`, `reference_species`, `reference_accession` and `qc_updated_at`. It never creates a
-row; an assembly with no row is logged as `no_row`. A re-run replaces the verdict. Until
-genomes_db_review migration 068 (2026-10-28) the verdict lived only in this table, so assemblies run
-before then have no `qc_status`.
+The verdict is uploaded per assembly by `PUSH_ASSEMBLY_QC` (`bin/push_assembly_qc.py`) into the
+`mito_assembly_qc` table, keyed on the assembly's `assembly_id`, and is read back through the
+`mitogenome_data` view: `qc_status`, `manual_review_reason`, `numt_flag`, `frameshift_flag`,
+`reference_species`, `reference_accession` and `qc_updated_at`. It never creates an assembly; an
+assembly with no row is logged as `no_row`. A re-run always replaces the verdict, whatever
+`--force_db_overwrite` says. Until genomes_db_review migration 068 (2026-10-28) the verdict lived only
+in this TSV, so assemblies run before then have no `qc_status`.
 
 **Blocking and advisory reasons.** An assembly that is circular, in the expected length range and
 carries all 13 protein-coding genes and both rRNAs is treated as a finished mitogenome (the
@@ -324,12 +328,18 @@ another purpose.
     `completeness_profile` (`vertebrate` for genetic code 2, otherwise `core`) says which gene set
     completeness was judged against, and is uploaded to `mitogenome_data.completeness_profile`.
   - `<assembly_prefix>.reference_relevance.txt`: the post-assembly reference-relevance check.
-  - `mtdna_rescue/`: status of the vertebrate ND4L/ATP8 and tRNA rescue passes, when one ran.
+  - `mtdna_rescue/`: status of the vertebrate repair passes: `<assembly_prefix>.stop_repair.status.txt`
+    (every EMMA bundle) and the ND4L/ATP8 and tRNA rescue status files, when those ran.
   - MITOS2 (invertebrates) only:
     - `mitos_raw/`: MITOS2's native output (`result.bed`, `.gff`, `.faa`, `.fas`, `.geneorder`,
       `.mitos`, `.png`, `.seq`).
-    - `mitos_fix/`: the invertebrate/coral annotation fixer's status and corrected BED.
-    - `mitos_conversion_audit.tsv`: how MITOS2 output was mapped to the EMMA layout.
+    - `mitos_fix/`: written when the annotation gate marked the sample for repair:
+      `*.invert_fix.status.tsv` (the assembly-only repair, every invertebrate), `*.coral_fix.status.txt`
+      (the reference transfer, Cnidaria only) and the corrected `result.fixed.bed`.
+    - `mitos_conversion_audit.tsv`: how every raw MITOS2 feature was mapped to the EMMA layout.
+      MITOS intron calls (gpI/gpII) are kept in the `.gff` but left out of the `.tbl` and the ENA
+      package: table2asn fails an intron outside a gene, and the calls are short motif hits rather
+      than the real intron, which the split CDS already encodes.
     - `<assembly_prefix>.reference.gb`, `.seed.fasta`, `.genedb.fasta`, `.reference_select.txt`:
       the annotation reference picked label-free from the curated group database, when one was
       selected.
@@ -342,9 +352,12 @@ Vertebrate samples are annotated with EMMA; invertebrate samples (`invertebrates
 whose output is reshaped into the same layout as EMMA's. Both use the per-sample mitochondrial
 genetic code resolved from taxonomic class during samplesheet preparation (e.g. Cnidaria → 4).
 
-For vertebrates, two rescue passes patch the bundle in place when EMMA misses genes: one recovers
-ND4L/ATP8 by alignment, one recovers tRNAs with tRNAscan-SE. Each publishes its status to
-`annotation/mtdna_rescue/`.
+For vertebrates, three passes patch the bundle in place. A stop repair runs on every EMMA bundle and
+extends a protein-coding gene by at most one codon onto a TAA/TAG the assembly encodes, where EMMA
+stopped one codon short (where it does that depends on how the circle was linearised). When EMMA
+misses genes, one rescue recovers ND4L/ATP8 by alignment and another recovers tRNAs with tRNAscan-SE.
+Each publishes its status to `annotation/mtdna_rescue/`. The invertebrate steps are described in
+[How invertebrates are annotated](usage.md#how-invertebrates-are-annotated).
 
 The annotation bundle is reused by BLAST/LCA, the QC gate and GenBank packaging, so keeping the
 whole directory lets you inspect or hand-curate an annotation and rerun from it
@@ -431,7 +444,7 @@ counts, missing genes and a completeness verdict.
   - `<assembly_prefix>.species_validation.upload.txt`: `lca_validation` row.
   - `<full_seqid>.ena_validation.upload.txt`: `ena_validation_attempts` row.
   - `<full_seqid>.qc_validator.upload.txt`: the second-validator write ([below](#automatic-second-validator)).
-  - `assembly_qc.upload.txt`: the run's assembly QC verdicts written to `mitogenome_data`
+  - `assembly_qc.upload.txt`: the run's assembly QC verdicts written to `mito_assembly_qc`
     ([above](#mitogenome-assembly-summary)), with any assembly that had no row.
   - `upload_results_summary_mqc.tsv`, `upload_results_appendix.txt`: run summary across all uploads
     (`SQL Upload Summary` in MultiQC).
@@ -559,7 +572,12 @@ Custom sections, defined in `assets/multiqc_config.yml`: `Mitogenome assembly su
   - `params_<timestamp>.json`: the parameters of each launch.
   - `nf_core_oceangenomesmitogenomes_software_mqc_versions.yml`: every tool version.
   - `memory_hints.json`: the memory tier that succeeded per sample for GetOrganelle and Oatk, so a
-    `-resume` requests it directly instead of climbing from the lowest tier again.
+    `-resume` requests it directly instead of climbing from the lowest tier again. An empty or
+    unreadable file is ignored with a warning and rewritten.
+  - `cost_per_sample.csv`, `compute_usage.csv`, `compute_usage.report.txt`, `compute_cost.log` (runs
+    started by `nextflow_run.sh`): the run's compute cost in Setonix service units, per OG sample and
+    per task, written by `compute-audit/nf_workflow_cost.sh` after Nextflow exits. A failure here is
+    logged and never changes the run's exit status.
   - `pipeline_report.html`, `pipeline_report.txt`: only when `--email` / `--email_on_fail` is set.
   - `launcher/` (runs started by `nextflow_run.sh`): a snapshot of the launch script, the repo commit
     it ran from, and any `OG_*` overrides in the environment.

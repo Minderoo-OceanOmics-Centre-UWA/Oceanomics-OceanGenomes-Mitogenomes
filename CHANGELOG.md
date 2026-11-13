@@ -24,6 +24,10 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
 
 ### `Fixed`
 
+- **Merged reads were copied into `<outdir>/cat/`.** `CAT_FASTQ` had no publishing rule, so it fell through
+  to the default `publishDir` and copied every merged lane-level FASTQ into the results (690 GB in the release
+  test). Nothing read them and no document listed them. Its publishing is now off.
+
 - **The completion handler crashed on an empty `memory_hints.json`.** A 0-byte hints file (left by a write
   that failed at close()) made `JsonSlurper` throw, which aborted the rest of `workflow.onComplete`,
   including the hook notification (release test, `Failed to invoke workflow.onComplete`). An empty or
@@ -231,6 +235,15 @@ The invertebrate generalisation, on top of v2.0.0. Not released.
   Fixed and all three pass.
 
 ### `Changed`
+
+- **Documentation brought up to date with the pipeline.** usage.md gains "How invertebrates are annotated",
+  replacing the note that the invertebrate path was tuned for corals: which steps run for every phylum (cox1
+  rotation, the gate, the assembly-only repair, the per-taxon origin, the core completeness profile) and which
+  are cnidarian-only (the reference transfer). Also: Webin secrets are required by default, a missing
+  `--ena_study` skips ENA prep in the main pipeline, the quick starts include `--mitos_refdb` and
+  `--ena_study`, `status` can be `superseded`, the QC verdict lives in `mito_assembly_qc`, the EMMA stop repair
+  and the fixer status files are listed, MITOS introns are GFF-only, the cost files are listed, the reseed and
+  reference-selection params are documented, and a `-profile setonix` that never existed is gone.
 
 - **`force_db_overwrite` is documented as protecting assembly rows only.** With it false, a complete
   annotation still replaces the stored annotation of the same annotator, and the assembly QC verdict is

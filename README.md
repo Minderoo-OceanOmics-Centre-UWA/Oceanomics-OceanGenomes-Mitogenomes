@@ -65,6 +65,19 @@ See [docs/output.md](docs/output.md) for a stage-by-stage file manifest.
 3. Launch a run with an execution profile and an input definition. Add `-r <branch or tag>` to pin a revision when
    running from GitHub; production runs on Setonix instead launch from a local checkout via the generated `run_*.sh` scripts.
 
+### Before the first run: Webin credentials
+
+ENA prep format-checks every flat file with webin-cli by default (`--ena_webin_validate true`), which needs a
+Webin login even though nothing is submitted. Set it once as Nextflow secrets:
+
+```bash
+nextflow secrets set WEBIN_USERNAME 'Webin-XXXXXX'
+nextflow secrets set WEBIN_PASSWORD
+```
+
+A run with the check on and either secret missing stops with an error. Pass `--ena_webin_validate false` to run
+without them (then no assembly is marked `submission_ready`).
+
 ### Samplesheet mode (`--input`)
 
 ```bash
@@ -75,11 +88,16 @@ nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes 
   --organelle_type animal_mt \
   --curated_blast_db /path/to/OceanGenomes.CuratedNT.fasta \
   --nt_blast_db /path/to/nt/db/core_nt \
+  --mitos_refdb /path/to/mitos_refdb \
   --sql_config ~/postgresql_details/oceanomics.cfg \
   --blast_db_dir /scratch/shared/blast \
   --taxonkit_db_dir /scratch/shared/taxdump \
-  --template_sbt ~/templates/oceanomics_submission.sbt
+  --template_sbt ~/templates/oceanomics_submission.sbt \
+  --ena_study PRJEBxxxxxx
 ```
+
+`--mitos_refdb` is needed whenever the run includes invertebrates. `--ena_study` has no default: without it ENA
+submission prep is skipped with a warning and everything else still runs.
 
 ### Smoke test (`-profile test`)
 
@@ -104,10 +122,12 @@ nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes 
   --organelle_type animal_mt \
   --curated_blast_db /path/to/OceanGenomes.CuratedNT.fasta \
   --nt_blast_db /path/to/nt/db/core_nt \
+  --mitos_refdb /path/to/mitos_refdb \
   --sql_config ~/postgresql_details/oceanomics.cfg \
   --blast_db_dir /scratch/shared/blast \
   --taxonkit_db_dir /scratch/shared/taxdump \
-  --template_sbt ~/templates/oceanomics_submission.sbt
+  --template_sbt ~/templates/oceanomics_submission.sbt \
+  --ena_study PRJEBxxxxxx
 ```
 
 ### QC-only mode from annotations (`qc_only_from_annotations.nf`)
@@ -203,10 +223,12 @@ For general nf-core best practices (custom configs, resource tuning, module over
   that off separately.
   Finer toggles: `--skip_getorganelle_reseed` (disable the reseed pass) and `--skip_hic_fastp` (skip Hi-C trimming).
 - SQL upload behaviour. `--force_db_overwrite` is **true by default**: a re-run replaces the existing
-  `mitogenome_data` row rather than preserving a stale one. Set it `false` for insert-only uploads, where a row
-  that already holds a real result is kept and only NULL / `failed to assemble` rows are updated. Neither mode
-  ever replaces a successful assembly row with `failed to assemble`; that refusal is unconditional, so a re-run
-  where a sample fails cannot destroy an earlier good result.
+  assembly row rather than preserving a stale one. Set it `false` to keep an assembly row that already holds a
+  real result, so only NULL / `failed to assemble` rows are updated. Neither mode ever replaces a successful
+  assembly row with `failed to assemble`; that refusal is unconditional, so a re-run where a sample fails cannot
+  destroy an earlier good result. `false` protects **assembly rows only**: a complete annotation still replaces
+  the stored annotation from the same annotator, and the assembly QC verdict is always replaced, so a `false`
+  run can leave a kept assembly row next to this run's annotation and QC verdict.
 - `--lca_prune_history` (default `false`) is separate from `--force_db_overwrite`. The `lca` and
   `lca_raw_results` tables are content-keyed upserts, so a re-run is already correct without deleting anything
   and superseded results are kept as history. Turn it on only to reduce a sample/region to the current run's

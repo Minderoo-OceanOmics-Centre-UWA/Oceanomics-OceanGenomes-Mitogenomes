@@ -24,13 +24,17 @@ nextflow run Minderoo-OceanOmics-Centre-UWA/Oceanomics-OceanGenomes-Mitogenomes 
   --organelle_type animal_mt \
   --curated_blast_db /path/to/OceanGenomes.CuratedNT.fasta \
   --nt_blast_db /path/to/nt/db/core_nt \
+  --mitos_refdb /path/to/mitos_refdb \
   --sql_config /path/to/postgres.cfg \
   --blast_db_dir /scratch/databases/blast \
   --taxonkit_db_dir /scratch/databases/taxonkit \
-  --template_sbt /path/to/template.sbt
+  --template_sbt /path/to/template.sbt \
+  --ena_study PRJEBxxxxxx
 ```
 
-The command above runs the full assembly + annotation + validation + QC pipeline. If you already
+The command above runs the full assembly + annotation + validation + QC pipeline. ENA prep also
+needs the Webin secrets set once (see [ENA Webin validation](#ena-webin-validation)); without
+`--ena_study` it is skipped with a warning. If you already
 have annotation files and only need QC packaging, use the standalone workflow below.
 
 ## Smoke test (`-profile test`)
@@ -106,6 +110,11 @@ that matches your container/conda environment.
 | `--ena_study` | ENA validation | ENA study the run validates against, recorded in each package as `validation_study`. There is no default. It is not a submission target: the study an assembly is submitted into is the BioProject the downstream submission pipeline registers, so this value never reaches a submission manifest. |
 | `--samplesheet_prefix` | Optional | Reserved for generated samplesheet naming in wrapper scripts. |
 | `--getorganelle_genedb_min_genes` | Optional | Minimum genes a reference must yield to build the reseed custom gene database (default `10`). Below this, the sample keeps its first-pass GetOrganelle assembly instead of reseeding. |
+| `--reseed_seed_top_n` | Optional | Number of ranked reference records from the curated group database used to seed an invertebrate reseed (default `5`). A small panel is more robust than one reference without diluting read recruitment with a whole phylum. |
+| `--reseed_fallback_read_subsample`, `--reseed_fallback_max_candidates` | Optional | When an invertebrate first pass is empty, up to `--reseed_fallback_max_candidates` taxonomy-shortlisted references (default `50`) are ranked against a subsample of up to `--reseed_fallback_read_subsample` reads (default `50000`) to choose the seed. |
+| `--reseed_length_tolerance` | Optional | Minimum fold difference in total length before length overrides contiguity when choosing between the first-pass and reseed assemblies (default `1.5`). |
+| `--min_circular_mito_bp` | Optional | An assembly reported circular but shorter than this (default `10000` bp) is treated as not circular when choosing which assembly goes forward, so a small side graph cannot displace a real mitogenome. |
+| `--enable_reference_reselection` | Optional | Vertebrate reference choice: when `findMitoReference`'s first hit is not congeneric, fetch `--n_reference_candidates` candidates (default `5`) and keep the one the sample's own reads map to best, scored on `--reference_rank_read_subsample` reads (default `50000`). On by default; congeneric samples are skipped. |
 | `--getorganelle_fromreads_args` | Optional | Override the default GetOrganelle from-reads arguments (default `-R 20 -w 95 --continue`). |
 | `--enable_oatk_fallback` | Optional | Enable the reference-free Oatk HiFi fallback (default `false`). See [Reference-free Oatk fallback](#reference-free-oatk-fallback). |
 | `--oatk_mito_db` | With Oatk fallback | Path to the OatkDB `<clade>_mito.fam` profile-HMM (index files staged beside it). Required when `--enable_oatk_fallback true`. |
@@ -115,7 +124,7 @@ that matches your container/conda environment.
 | `--getorganelle_empty_first_pass_rescue` | Optional | Reseed a first pass that produced no contig at all from the sample's whole curated group database (default `true`). Without it an empty first pass cannot select a seed subset and can never be reseeded. |
 | `--hinted_memory_base_gb` | Optional | Attempt-1 memory (GB) for `GETORGANELLE_FROMREADS`, `GETORGANELLE_RESEED` and `OATK` when no per-sample hint exists (default `64`). On Setonix the memory request is what is billed, so this dominates SU. |
 | `--skip_hic_fastp` | Optional | Skip fastp trimming of raw Hi-C reads before GetOrganelle (default `false`). Override the fastp arguments with `--hic_fastp_args`. |
-| `--force_db_overwrite` | Optional | Replace an existing `mitogenome_data` row on upload (default `true`). Set `false` for insert-only uploads, which keep a row that already holds a real result. Neither mode replaces a successful assembly row with `failed to assemble`. |
+| `--force_db_overwrite` | Optional | Replace an existing assembly row on upload (default `true`). Set `false` to keep an assembly row that already holds a real result. Neither mode replaces a successful assembly row with `failed to assemble`. `false` protects assembly rows only: a complete annotation still replaces the stored annotation from the same annotator (only an incomplete one is held back), and the assembly QC verdict (`mito_assembly_qc`) is always replaced, so a `false` run can leave a kept assembly row next to this run's annotation and QC verdict. |
 | `--lca_prune_history` | Optional | Delete `lca` / `lca_raw_results` rows this run did not reproduce (default `false`). Those tables are content-keyed upserts, so a rerun is correct without it and superseded results are kept as history. |
 | `--translation_table` | Optional | Mitochondrial genetic code for vertebrate/unresolved samples (default `2`). Invertebrate codes are derived per sample from the taxonomic `class` via `assets/taxonomy/mito_genetic_codes.json` (Cnidaria, Ctenophora, Porifera → 4; Mollusca, Arthropoda, Annelida and most other protostomes → 5; Echinodermata, Platyhelminthes → 9; Tunicata → 13), so this does not force a single code across the run. |
 | `--allow_unknown_taxonomy` | Optional | Continue with a warning when a sample's taxonomic `class` is `unknown` (default `false`, i.e. the run aborts). An unknown class is treated as vertebrate by every downstream chooser, so this is for deliberate one-offs only. |
@@ -131,9 +140,9 @@ The resolved per-sample code reaches every artefact that states one: the genome 
 each extracted gene, CDS and protein header. A sample whose `class` is marked
 `invertebrates=true` but has no confirmed code aborts the run rather than falling back --
 set the `genetic_code` column for it (commonly 5 for Mollusca/Annelida/Arthropoda/Porifera,
-9 for Echinodermata/Platyhelminthes, 13 for Tunicata). Note that the invertebrate annotation
-path is tuned for corals (cox1 origin rotation, coral reference DB), so review the annotation
-of any non-cnidarian sample you push through it.
+9 for Echinodermata/Platyhelminthes, 13 for Tunicata). How the invertebrate annotation path
+works, and which parts are specific to one lineage, is described in
+[How invertebrates are annotated](#how-invertebrates-are-annotated).
 
 > **Assemblies published before this became per-sample.** Gene extraction used to hardcode
 > `[mgcode=2]`, so any non-code-2 assembly QC'd before that fix has extracted genes, CDS and
@@ -154,7 +163,7 @@ of any non-cnidarian sample you push through it.
 > nextflow run qc_only_from_annotations.nf \
 >   --annotation_files '<outdir>/mitogenomes/OG####/*/annotation/*.{fa,fasta,gff,tbl,gb}' \
 >   --sql_config <cfg> --template_sbt <sbt> --outdir <outdir> \
->   --skip_upload_results true -profile setonix
+>   --skip_upload_results true -profile singularity -c pawsey_profile.config
 > ```
 >
 > Run the first batch with `--skip_upload_results true`, confirm the headers agree, then
@@ -167,6 +176,63 @@ OceanOmics metadata. Pass `--taxonkit_db_dir` as well: the generator falls back 
 taxdump for samples the `species` table cannot resolve, and without it those samples fail the
 taxonomy check. When running with `--input`, you can omit `--sql_config`: SQL uploads and ENA
 submission prep are then skipped with a warning, and local QC still runs.
+
+### How invertebrates are annotated
+
+Invertebrate samples (`invertebrates=true`) are annotated with MITOS2, using the per-sample genetic
+code. Most steps apply to every phylum; two are specific to one lineage. In order:
+
+1. **Rotation before annotation (all invertebrates).** `ROTATE_ORIGIN` finds cox1 with tblastn
+   against a curated anchor panel for the sample's group (`assets/panels/cox1/`: mollusca,
+   arthropoda, echinodermata, and the cnidarian panel, which also serves Porifera and any class
+   without a panel of its own). It then rotates the molecule to start there, so a gene that spans
+   the linearisation point (for example the intron-split coral nad5) is not cut in two before
+   MITOS2 sees it. A weak or missing hit leaves the assembly unrotated, and a molecule known to be
+   linear is never rotated, because that would join its two assembly breaks into a junction that
+   does not exist.
+2. **MITOS2** annotates the rotated molecule with the RefSeq reference data in `--mitos_refdb`.
+3. **Gate (all invertebrates).** `ANNOTATION_QC_GATE` checks the raw MITOS2 call for broken
+   protein-coding genes (a missing start, stop or clean reading frame under the sample's code) and,
+   for cnidarians only, a missing core gene (MITOS often drops the 16S on divergent corals) or a
+   truncated nad5 or cox1. It marks each sample FIX or PASS. PASS samples go straight to step 6 untouched.
+4. **Assembly-only repair (all invertebrates marked FIX).** `INVERT_ANNOTATION_FIX` moves a gene
+   boundary onto a real start or stop codon in the sample's own sequence. It consults no
+   reference, so it can never add a gene the assembly does not carry. Glass sponges
+   (Hexactinellida) get an extra repair for three systematic MITOS calls (nad2, atp9, atp8). A
+   sample it cannot repair keeps the MITOS2 call and is held by the annotation QC downstream.
+   Status: `annotation/mitos_fix/*.invert_fix.status.tsv`.
+5. **Coral repair (Cnidaria marked FIX only).** `SELECT_REFERENCE_DB` picks the closest record
+   in the curated anthozoan database (`assets/refdb/anthozoa/`) by sequence similarity to the
+   assembly, not by the species label, and `CORAL_ANNOTATION_FIX` transfers the 16S rRNA, the
+   intron-split nad5, split cox1 exons and mtMutS from it. Every edit is checked by BLAST coverage
+   and identity and by a clean ORF, and the step runs only when the selector actually matched a
+   record, so a sample with no evidence of being a cnidarian never receives transferred genes.
+   Status: `annotation/mitos_fix/*.coral_fix.status.txt`; the chosen record is
+   `annotation/<prefix>.reference.gb` with `<prefix>.reference_select.txt`. (The per-phylum
+   databases under `assets/refdb/` are used for every invertebrate earlier, by the GetOrganelle
+   reseed: see [`assets/refdb/README.md`](../assets/refdb/README.md).)
+6. **Conversion to the shared layout (all invertebrates).** `bin/mitos_to_emma.py` reshapes the
+   result into the same files EMMA produces and re-origins the published genome to the gene the
+   sample's taxon conventionally starts on. That gene is measured from the curated databases in
+   `assets/taxonomy/mito_origin_anchors.json`, looked up by order, then class, then group, with
+   cox1 as the default; tRNA-Met is used only where it really is the convention, as in
+   Scleractinia. ATP9 and mtMutS are kept as genes; replication origins, MITOS intron calls and
+   the LAGLIDADG ORF are kept as non-gene features. Intron calls stay in the GFF but are left out
+   of the `.tbl` and the ENA package, because table2asn fails an intron outside a gene and MITOS's
+   gpI/gpII hits are short motifs, not the real intron (the split CDS already encodes that). Every
+   raw MITOS feature is accounted for in `annotation/mitos_conversion_audit.tsv`.
+7. **Completeness (all invertebrates).** Any genetic code other than 2 is judged against the
+   conserved core of 13 protein-coding genes and 2 rRNAs (`completeness_profile = core`), not
+   the vertebrate 37-gene set: tRNA counts and gene order are reported but do not decide the
+   verdict. That is why a coral with only a couple of tRNAs (normal for Anthozoa) can still pass.
+   Every protein-coding gene must still have a valid start, a valid stop and no internal stop
+   under the sample's code; documented lineage-specific starts, such as the `CGA` that opens CO1
+   in many decapods, are accepted.
+
+Cnidaria, and corals in particular, have had the most validation across production batches.
+The other phyla run every step except the coral repair, with targeted handling where systematic
+errors were found (the glass-sponge repair, the decapod CO1 start), but have been through fewer
+runs, so check their annotations before submission.
 
 ### Reference-free Oatk fallback
 
@@ -223,20 +289,23 @@ record. Genome-context validation needs a registered BioSample, so it belongs to
 the downstream submission pipeline along with choosing and submitting a package.
 
 ENA conversion runs automatically for samples with no table2asn `ERROR`/`REJECT` or discrepancy-report `FATAL`.
-Warnings remain visible in MultiQC but do not block conversion. To add the credentialed production Webin check:
+Warnings remain visible in MultiQC but do not block conversion.
+
+**Webin credentials are required by default.** `--ena_webin_validate` is `true` out of the box, and
+webin-cli logs in even to format-check, so set the two Nextflow secrets once before the first run
+that does ENA prep. A run with the check on and either secret missing stops with an error naming them:
 
 ```bash
 nextflow secrets set WEBIN_USERNAME 'Webin-XXXXXX'
 nextflow secrets set WEBIN_PASSWORD
-
-nextflow run main.nf \
-  ... \
-  --ena_webin_validate true
 ```
 
-Every candidate in a run validates against one study, passed as `--ena_study`.
-It has no default, so a run without it stops rather than validating against
-whatever it fell back to.
+Pass `--ena_webin_validate false` to run without credentials. The flat files are still built, but
+nothing is format-checked, so `submission_ready` stays `false` for every assembly.
+
+Every candidate in a run validates against one study, passed as `--ena_study`. It has no default.
+In the main pipeline, a run without it skips ENA submission prep with a warning (everything else
+runs); `ena.nf` refuses to start without it.
 
 The password is stored in Nextflow's secret store rather than a parameter or params file. The pipeline invokes
 Webin with `-validate` only and never submits records. Individual Webin failures are written to the assembly's
