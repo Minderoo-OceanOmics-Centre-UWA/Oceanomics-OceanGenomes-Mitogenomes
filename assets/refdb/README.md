@@ -219,11 +219,12 @@ Regenerate any untracked file by rerunning the builder.
 
 ## Rebuilding
 
-Needs biopython (and `makeblastdb` on PATH for the BLAST db). On Setonix there is a venv at
-`/software/projects/pawsey1348/tpeirce/refdb_venv`:
+Needs biopython (and `makeblastdb` on PATH for the BLAST db). On Setonix, make a venv once
+(for example `python3 -m venv /software/projects/pawsey1348/$USER/refdb_venv` then
+`/software/projects/pawsey1348/$USER/refdb_venv/bin/pip install biopython pytest`) and point `PY` at it:
 
 ```bash
-PY=/software/projects/pawsey1348/tpeirce/refdb_venv/bin/python
+PY=/software/projects/pawsey1348/$USER/refdb_venv/bin/python
 $PY bin/build_invert_reference_db.py --group mollusca --email you@uwa.edu.au   # one group
 $PY bin/build_invert_reference_db.py --all --email you@uwa.edu.au              # all of them
 ```

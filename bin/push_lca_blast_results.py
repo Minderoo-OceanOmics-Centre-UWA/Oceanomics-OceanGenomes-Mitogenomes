@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#singularity run $SING/psycopg2:0.1.sif python push_lca_blast_results.py /home/tpeirce/postgresql_details/oceanomics.cfg OGtest lca_combined.tsv blast_combined.tsv
+#singularity run $SING/psycopg2:0.1.sif python push_lca_blast_results.py $HOME/postgresql_details/oceanomics.cfg OGtest lca_combined.tsv blast_combined.tsv
 import psycopg2
 import pandas as pd
 import numpy as np

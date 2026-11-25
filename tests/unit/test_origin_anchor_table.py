@@ -11,6 +11,7 @@ rebuild" enforceable rather than aspirational.
 """
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -24,7 +25,8 @@ from mito_gene_order import is_valid_anchor, load_origin_anchors, resolve_origin
 
 ASSET = ROOT / "assets" / "taxonomy" / "mito_origin_anchors.json"
 GROOVY = ROOT / "lib" / "InvertTaxonGroups.groovy"
-TAXDUMP = Path("/scratch/pawsey1348/tpeirce/lca_cache/taxdump")
+# An NCBI taxdump dir (nodes.dmp, names.dmp); the check is skipped when unset.
+TAXDUMP = Path(os.environ.get("TAXDUMP_DIR", "/nonexistent"))
 
 
 @unittest.skipUnless(ASSET.exists(), "anchor table not generated")
@@ -173,7 +175,7 @@ class GroovyAgreementTests(unittest.TestCase):
             "RNR2")
 
 
-@unittest.skipUnless(ASSET.exists() and TAXDUMP.is_dir(), "taxdump not available")
+@unittest.skipUnless(ASSET.exists() and TAXDUMP.is_dir(), "set TAXDUMP_DIR to an NCBI taxdump to run this")
 class AssetIsUpToDateTests(unittest.TestCase):
     def test_regenerating_reproduces_the_tracked_file(self):
         """--check is what makes 'regenerate on rebuild' enforceable."""

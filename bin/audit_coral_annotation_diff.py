@@ -54,7 +54,7 @@ WHERE IT RUNS
 coral_fix_bed.py and rotate_to_cox1.py need blastn/tblastn and biopython, which are not on
 a Setonix login node. Run inside the MITOS container, the same one the module uses:
 
-    singularity exec -B /scratch/pawsey1348/tpeirce -B /software/projects/pawsey1348/tpeirce \\
+    singularity exec -B /scratch/pawsey1348/$USER -B /software/projects/pawsey1348/$USER \\
         $SING/depot.galaxyproject.org-singularity-mitos-2.1.10--pyhdfd78af_0.img \\
         python3 bin/audit_coral_annotation_diff.py ...
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# singularity run $SING/psycopg2:0.1.sif python3 create_samplesheet.py --output samplesheet.csv --sql-config "/home/tpeirce/postgresql_details/oceanomics.cfg" --input-files /scratch/pawsey0964/tpeirce/BIGRUN/mitogenomes/NOVA_251215_AD/fastp/*/fastp/*.fastq.gz
+# singularity run $SING/psycopg2:0.1.sif python3 create_samplesheet.py --output samplesheet.csv --sql-config "$HOME/postgresql_details/oceanomics.cfg" --input-files /scratch/pawsey1348/$USER/BIGRUN/mitogenomes/NOVA_251215_AD/fastp/*/fastp/*.fastq.gz
 import argparse
 import csv
 import glob

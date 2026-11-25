@@ -33,4 +33,4 @@ nextflow \
     # nextflow -log test_nextflow.log  ### replace the top line with this if you want to define the log file, if youre running multiple runs of the nf-core
     # -work-dir /scratch/pawsey0964/$USER/directory \. ### include work dir if you want to run this nf-core on multiple occasions and keep the work files separate.
     # --input assets/samplesheet.csv \  # include a samplesheet if you are not downloading sample.
-    # --input_dir "/scratch/pawsey0964/tpeirce/_NFCORE/OG1288/*.fastq.gz" \ # include the input dir if you are working with OceanGenomes files directly rather than a samplesheet. The create samplesheet script uses the OceanGenomes database to create the samplesheet from the fastq files.
+    # --input_dir "/scratch/pawsey1348/$USER/_NFCORE/OG1288/*.fastq.gz" \ # include the input dir if you are working with OceanGenomes files directly rather than a samplesheet. The create samplesheet script uses the OceanGenomes database to create the samplesheet from the fastq files.

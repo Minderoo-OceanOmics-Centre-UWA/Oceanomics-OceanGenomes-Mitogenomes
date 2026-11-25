@@ -22,7 +22,7 @@ future code-5 or code-9 sample cannot be silently relabelled 4.
 
 Usage:
     # inventory only (default; writes nothing but the manifest)
-    fix_published_mgcode.py --root /scratch/pawsey1348/tpeirce/batch-20 \
+    fix_published_mgcode.py --root /scratch/pawsey1348/$USER/<batch> \
         --manifest /tmp/mgcode_manifest.tsv
 
     # apply, after taking a backup of exactly the manifest's files

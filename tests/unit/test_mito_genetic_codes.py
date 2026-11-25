@@ -12,6 +12,7 @@ coming from the sheet.
 
 import importlib.util
 import json
+import os
 import re
 import sys
 import tempfile
@@ -143,9 +144,9 @@ class InvertClassCoverageTests(unittest.TestCase):
         for everything else. This test is what caught Appendicularia and Tunicata
         being listed as code 13 when NCBI assigns both 5.
         """
-        taxdump = Path("/scratch/pawsey1348/tpeirce/taxonkit_dbs")
+        taxdump = Path(os.environ.get("TAXDUMP_DIR", "/nonexistent"))
         if not (taxdump / "nodes.dmp").is_file():
-            self.skipTest("no taxdump available")
+            self.skipTest("set TAXDUMP_DIR to an NCBI taxdump to run this")
         sys.path.insert(0, str(ROOT / "bin"))
         try:
             from taxdump_lineage import TaxdumpLineage
